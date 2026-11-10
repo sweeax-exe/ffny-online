@@ -7,7 +7,8 @@ record handed to the relay is the picked one; RECOMP_CP_RECORD lists several tes
 given. Needs MSVC (`cl` on PATH, e.g. after scripts/env.ps1); skips without it.
 
 The game files the record check reads (djv2.sod, fighter.xml) are absent here, so the check keeps
-every record whose shape is right and resets the move keys and recipe parts it cannot look up."""
+every record whose shape is right and resets the recipe parts it cannot look up; the move keys need no
+game file (Blazin table rows, build 72)."""
 import os
 import shutil
 import subprocess
@@ -97,6 +98,24 @@ int main(int argc, char **argv)
         if (!cp_record_sanitize(rec, ok)) { printf("sanitize|0\n"); return 0; }
         cp_record_name(ok, name, sizeof(name));
         printf("sanitize|1|[%s]|%d\n", name, (int)strlen((const char *)ok + 1));
+        return 0;
+    }
+    if (argc > 5 && !strcmp(argv[1], "moves")) {    /* move keys argv[2..5] (hex) at profile +0x12C, checked */
+        static uint8_t p[0x5950];
+        uint8_t rec[CP_REC_LEN], ok[CP_REC_LEN];
+        int i;
+        memcpy(p + 0xC, "MOVES", 5);
+        p[0x143] = 98; p[0x140] = 1; p[0x141] = p[0x142] = 0xFF; p[0x13C] = 3; p[0x4D8A] = 1;
+        memset(p + 0x5564, 0xFF, 0x98);
+        for (i = 0; i < 4; i++) {
+            unsigned v = (unsigned)strtoul(argv[2 + i], NULL, 16);
+            memcpy(p + 0x12C + 4 * i, &v, 4);
+        }
+        cp_record_from_profile(p, rec);
+        if (!cp_record_sanitize(rec, ok)) { printf("moves|0\n"); return 0; }
+        printf("moves|1");
+        for (i = 0; i < 4; i++) { unsigned v; memcpy(&v, ok + 1 + 0x50 + 4 * i, 4); printf("|%08X", v); }
+        printf("|%d\n", cp_record_sealed(ok));
         return 0;
     }
     if (argc > 13 && !strcmp(argv[1], "stats")) {   /* base[0..5] bonus[0..5] (argv[2..13]), checked */
@@ -398,3 +417,22 @@ def test_profiles_put_aside_are_listed_under_their_game_folder(exe, save_area):
     rows = run(exe, save_area, env)
     assert rows['pick'] == [['5']] and rows['record'] == [['SECONDOF', '1']]
 
+
+# ---- move keys (build 72): Blazin table rows only (table 6, rows 0..81, colour 0) ----
+
+def moves(exe, tmp_path, *keys):
+    row = run(exe, tmp_path, {}, 'moves', *keys)['moves'][0]
+    assert row[0] == '1' and row[-1] == '1'          # kept and resealed
+    return row[1:5]
+
+
+def test_blazin_move_keys_kept(exe, tmp_path):
+    keys = ['06000033', '06000000', '06000051', '0600002A']
+    assert moves(exe, tmp_path, *keys) == keys
+
+
+def test_move_keys_outside_the_blazin_table_become_the_default(exe, tmp_path):
+    # row 82 (one past the last), the Character table (7), the Song table (0), a colour byte, garbage
+    assert moves(exe, tmp_path, '06000052', '07000005', '00000003', '06010033') == ['06000033'] * 4
+    got = moves(exe, tmp_path, 'FFFFFFFF', '0600FFFF', '0F000033', '06000010')
+    assert got == ['06000033', '06000033', '06000033', '06000010']

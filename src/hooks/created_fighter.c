@@ -65,6 +65,12 @@ int automatch_queue_fe(const char *command);     /* automatch.c: a front-end cal
 #define MAX_BONUS_CHARM 5       /* bonus[5]: the five milestones' +1 */
 #define MAX_BONUS_TOTAL 24      /* three styles' 3 points each, 2 x 5 and 5 from the milestones */
 #define DEFAULT_MOVE    0x06000033u     /* a fresh fighter's four move keys */
+/* The four move keys are the fighter's Blazins: rows of djv2.sod's Blazin table (table 6, one class,
+ * colour 0, 82 rows, the 164 A/B entries of motion/blazin.viv; studio-next-formats.md section 1). A key of
+ * another table, colour or row is replaced by the default, whatever this PC's database holds, so every PC
+ * makes the same record of it. */
+#define BLAZIN_TABLE    6u
+#define BLAZIN_ROWS     82u
 
 /* ---- CRC-32 (IEEE) ---- */
 
@@ -241,6 +247,11 @@ const char *cp_record_style(const uint8_t rec[CP_REC_LEN])
 
 /* ---- the check every PC makes ---- */
 
+int cp_move_key_ok(uint32_t key)
+{
+    return (key >> 16) == (BLAZIN_TABLE << 8) && (key & 0xFFFFu) < BLAZIN_ROWS;
+}
+
 static int32_t clamp32(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 int cp_record_sanitize(const uint8_t in[CP_REC_LEN], uint8_t out[CP_REC_LEN])
@@ -280,7 +291,7 @@ int cp_record_sanitize(const uint8_t in[CP_REC_LEN], uint8_t out[CP_REC_LEN])
         for (i = 0; i < 6; i++) wr32(p + R_BONUS + 4 * i, (uint32_t)bonus[i]);
     }
     for (i = 0; i < 4; i++)
-        if (!key_ok(rd32(p + R_MOVES + 4 * i))) wr32(p + R_MOVES + 4 * i, DEFAULT_MOVE);
+        if (!cp_move_key_ok(rd32(p + R_MOVES + 4 * i))) wr32(p + R_MOVES + 4 * i, DEFAULT_MOVE);
     for (i = 0; i < 38; i++) {
         uint32_t v = rd32(p + R_RECIPE + 4 * i);
         if (i < 12) { if (v > 0xFF) wr32(p + R_RECIPE + 4 * i, 0); }      /* body and face values */

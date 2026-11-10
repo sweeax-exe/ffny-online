@@ -30,6 +30,8 @@ uint32_t cp_record_crc(const uint8_t rec[CP_REC_LEN]);
  * the name cut to printable ASCII, voice, styles, stats, move keys and recipe kept to what the
  * game has (unknown database keys become the defaults), resealed. Deterministic. */
 int cp_record_sanitize(const uint8_t in[CP_REC_LEN], uint8_t out[CP_REC_LEN]);
+/* A move key the record may hold: a row of the Blazin table (table 6, rows 0..81, colour 0). */
+int cp_move_key_ok(uint32_t key);
 /* The record's name (NUL-terminated, at most CP_NAME_MAX characters). */
 void cp_record_name(const uint8_t rec[CP_REC_LEN], char *out, int size);
 /* The record's fighting styles in words ("KICKBOXING / STREETFIGHTING"), from its archetype's

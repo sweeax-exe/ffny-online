@@ -182,10 +182,12 @@ PC, the sender included): sealed (version, CRC); name 1..16 characters (8 before
 rest of the field zero, non-printable ones become `?`; archetype 86..141, created flag 1, first style 0..4 (else the record is refused: Doc); other
 styles 0..4 or 0xFF; voice 1..6 (else 1); **base stats at most 50** [V: the gym's cost table at
 0x2DBB70 has ten tiers of five, `sub_0004EB60`], **bonus stats 0..38** [I: with base 50 that is
-the Battle attribute screen's 100 %, which shows `stat * 3.333`, `sub_0004A3D0`]; move keys and
-recipe parts must be keys the game's database has (`(table<<24)|(colour<<16)|row`: a table of
-djv2.sod, a row below its record count, colour below 16 [I]), else the fresh-fighter move
-0x06000033 / the default part (-1); the twelve body/face values at most 0xFF. The relay checks only
+the Battle attribute screen's 100 %, which shows `stat * 3.333`, `sub_0004A3D0`]; the four move
+keys are Blazins and must be rows of the Blazin table (table 6, colour 0, rows 0..81, whatever this
+PC's djv2.sod holds; build 72, before which a key of any table passed), else the fresh-fighter move
+0x06000033; recipe parts must be keys the game's database has (`(table<<24)|(colour<<16)|row`: a
+table of djv2.sod, a row below its record count, colour below 16 [I]), else the default part (-1);
+the twelve body/face values at most 0xFF. The relay checks only
 the shape (size, version, CRC, name, archetype, first style, flag).
 
 **The player's own records** (`cp_local_list`, `cp_local_record`): every user ID save in
