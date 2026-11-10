@@ -30,6 +30,17 @@ def exe_path(preset="win-x64-release"):
     return os.path.join(REPO, "build", preset, GAME_IMAGE)
 
 
+def game_cwd(exe=None):
+    """Where a copy starts (the game opens game/default.xbe from there): the checkout its build belongs to
+    (<checkout>/build/<preset>/defjam_recomp.exe, e.g. another checkout's through DJ_COPY_EXE, which a
+    worktree without a build or a game junction uses), else this checkout."""
+    if exe:
+        checkout = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(exe))))
+        if os.path.isdir(os.path.join(checkout, "game")):
+            return checkout
+    return REPO
+
+
 def relay_src():
     """The relay's Go module: the private server repository (sweeax-exe/ffny-server) cloned as
     <checkout>/server, or the folder FFNY_SERVER_DIR names. A worktree uses the main checkout's."""
@@ -408,9 +419,10 @@ def safe_env(core, data_root, extra=None):
     return e
 
 
-def preflight(exe, data_root, cwd=REPO):
+def preflight(exe, data_root, cwd=None):
     """What would stop a copy from starting cleanly -- checked before it starts, so the game's own
     'game files were not found' dialog never appears. Returns a list of problems."""
+    cwd = cwd or game_cwd(exe)
     bad = []
     if not os.path.isfile(exe):
         bad.append("not built: %s (scripts/build.ps1 -Preset win-x64-release)" % exe)

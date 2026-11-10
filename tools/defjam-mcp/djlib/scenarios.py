@@ -1442,7 +1442,8 @@ def turf(timeout=None, relay_port=27900, off=False, lock_timeout=None, log=None,
 # ---- offline --------------------------------------------------------------------------------------
 
 def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turbo=False, timeout=420,
-            extra_env=None, lock_timeout=None, log=None, fixture=None, keep_roots=False, summary=True):
+            extra_env=None, lock_timeout=None, log=None, fixture=None, keep_roots=False, summary=True,
+            shots_every=0):
     """One match from the main menu by automatch: type (0 One on One, 1 Tag, 2/3 FFA), venue (feID),
     fighters f0/f1 (fighter.xml IDs), the second one a CPU unless cpu=False (then the bot or a second
     virtual pad plays it). fast_ko: the knockout step (0: fight it out). Ends after the summary."""
@@ -1486,6 +1487,11 @@ def offline(type=0, venue=1, f0=55, f1=22, cpu=True, bot=None, fast_ko=600, turb
                 shot_at = time.time() + 6
             if shot_at and time.time() >= shot_at and not shots:
                 _png(s, 0, "fight", shots)
+                if shots_every:
+                    shot_at = time.time() + shots_every
+            elif shots_every and shot_at and time.time() >= shot_at and done_at is None:
+                _png(s, 0, "fight-%02d" % len(shots), shots)     # FFNY Studio: a series through the fight
+                shot_at = time.time() + shots_every
             if done_at is None and (w.count("[FUNCCALL] Game.UpdateMatchRewardsPoints()") or
                                     (not summary and w.count('"event":"match_over"'))):
                 done_at = time.time() + 2

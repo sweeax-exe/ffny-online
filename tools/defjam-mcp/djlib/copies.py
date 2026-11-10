@@ -289,7 +289,7 @@ class Session:
             json.dump({k: v for k, v in e.items() if k.startswith("RECOMP_") or k == "DEFJAM_DATA"}, f, indent=1)
         if exe != self.exe:
             self.log("copy %d runs %s (DJ_COPY_EXE)" % (i, exe))
-        p = subprocess.Popen([exe], cwd=machine.REPO, env=e,
+        p = subprocess.Popen([exe], cwd=machine.game_cwd(exe), env=e,
                              stdout=open(os.path.join(self.dir, "copy%d.log" % i), "wb"), stderr=open(log, "wb"))
         if self.job:
             self.job.add(p)
