@@ -129,8 +129,8 @@ void cp_record_from_profile(const uint8_t *profile, uint8_t rec[CP_REC_LEN])
 static int g_sod_loaded, g_sod_tables;
 static uint32_t g_sod_count[SOD_TABLES];
 
-/* The copy the game reads and the game-file print hashes (netplay.c: a language mod's rebuilt copy, the
- * override folder's, the dump's): two PCs whose prints agree read the same bytes here, so they clamp a
+/* The copy the game reads and the game-file print hashes (netplay.c: the toolkit redirect -- a language mod's
+ * rebuilt copy or the launcher's composed community files --, the override folder's, the dump's): two PCs whose prints agree read the same bytes here, so they clamp a
  * record alike. Before build 74 this skipped the language redirect the print takes first. */
 static FILE *open_game_file(const char *name)
 {

@@ -734,6 +734,9 @@ static int same_file_name(const char *a, const char *b)
     return *a == *b;
 }
 
+/* The redirect before this one (pc_content.c's composed files): asked for what the pack does not serve. */
+static BOOL (*g_lang_previous)(const char *relative, xbox_host_char *host_path, DWORD size);
+
 static BOOL lang_redirect(const char *relative, xbox_host_char *host_path, DWORD size)
 {
     for (int i = 0; i < g_served_count; i++) {
@@ -745,7 +748,7 @@ static BOOL lang_redirect(const char *relative, xbox_host_char *host_path, DWORD
 #endif
         return TRUE;
     }
-    return FALSE;
+    return g_lang_previous ? g_lang_previous(relative, host_path, size) : FALSE;
 }
 
 static void hex(const uint8_t *h, char *out)
@@ -911,6 +914,7 @@ void pc_language_start(const char *data_root, const char *game_dir)
     g_pack_subtitles = g_pack.all_subtitles;
     g_active = 1;
     snprintf(g_pack_dir, sizeof g_pack_dir, "%s", dir);
+    if (g_xbox_game_file_redirect != lang_redirect) g_lang_previous = g_xbox_game_file_redirect;
     g_xbox_game_file_redirect = lang_redirect;
     netplay_data_print_reset();     /* a print made before this (the launcher's online) missed the rebuilt files */
     fprintf(stderr, "[LANG] %s (%s, %s): %d file(s) served from %s%s\n", g_pack.name, g_pack.language, folder,

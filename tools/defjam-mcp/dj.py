@@ -63,6 +63,8 @@ def cmd_scenario(a):
     common = {"lock_timeout": a.lock_timeout, "log": say, "keep_roots": a.keep_roots}
     if getattr(a, "override", None):    # FFNY Studio: rebuilt archives on top of <data>/override in each root
         os.environ["DJ_OVERRIDE"] = os.path.abspath(a.override)
+    if getattr(a, "content_root", None):    # community packs (setup/mods.py sync) in each disposable root
+        os.environ["DJ_CONTENT"] = a.content_root
     env = dict(e.split("=", 1) for e in a.env)
     if getattr(a, "pick_random", False):    # build 67: every copy picks RANDOM (the hub's RANDOM card)
         env.setdefault("RECOMP_NETPLAY_FIGHTER", "random")
@@ -274,6 +276,9 @@ def main(argv=None):
     sc.add_argument("--fixtures", help="online: per copy a save fixture folder, comma-separated ('' none)")
     sc.add_argument("--lock-timeout", type=float, help="give up waiting for the machine after this many s")
     sc.add_argument("--keep-roots", action="store_true", help="leave the data roots for a look (dj roots clean)")
+    sc.add_argument("--content-root", help="a data folder filled by setup/mods.py sync (mods/, mod-manager/): its "
+                    "community packs in each disposable root (DJ_CONTENT); online: one per copy, comma-separated, "
+                    "'' for none (docs/content-packs.md)")
     sc.add_argument("--override", help="a folder of rebuilt game files (FFNY Studio, e.g. assets/v2ip.viv) laid over "
                     "<data>/override in each disposable root (DJ_OVERRIDE); <data> itself is not touched")
     sc.set_defaults(fn=cmd_scenario)

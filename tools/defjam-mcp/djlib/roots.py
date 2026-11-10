@@ -70,8 +70,36 @@ def _copy_save(src, dst, partitions):
     shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True)
 
 
-def create(name, fixture=None, partitions=False, data=None):
-    """Make (or remake) the managed root `name`. Returns its path."""
+def content_for(i):
+    """The community-content root of test copy i from DJ_CONTENT (dj.py --content-root): one folder for every
+    copy, or one per copy comma-separated ('' = none). A content root is a data folder that `setup/mods.py
+    sync` / `compose` filled (mods/, mod-manager/)."""
+    items = os.environ.get("DJ_CONTENT", "").split(",")
+    if not any(x.strip() for x in items):
+        return None
+    pick = items[0] if len(items) == 1 else (items[i] if i < len(items) else "")
+    return os.path.abspath(pick.strip()) if pick.strip() else None
+
+
+def _content(root, content):
+    """A content root's packs in the copy's root: mods/ and mod-manager/ copied (small: manifests, PNGs,
+    deltas, content.ini), the composed files (mod-manager/content-files, hundreds of MB) as a junction."""
+    for n in ("mods", "mod-manager"):
+        if not os.path.isdir(os.path.join(content, n)):
+            raise FileNotFoundError("no %s in the content root %s (run setup/mods.py sync)" % (n, content))
+    shutil.copytree(os.path.join(content, "mods"), os.path.join(root, "mods"))
+    skip = ("content-files", "content-files.new", "downloads", "staging", "rollback", "runtime.lock", "writer.lock")
+    shutil.copytree(os.path.join(content, "mod-manager"), os.path.join(root, "mod-manager"),
+                    ignore=lambda d, names: [n for n in names if n in skip] if os.path.samefile(
+                        d, os.path.join(content, "mod-manager")) else [])
+    files = os.path.join(content, "mod-manager", "content-files")
+    if os.path.isdir(files):
+        make_junction(os.path.join(root, "mod-manager", "content-files"), files)
+
+
+def create(name, fixture=None, partitions=False, data=None, content=None):
+    """Make (or remake) the managed root `name`. Returns its path. `content`: a content root whose
+    community packs the copy gets (_content)."""
     data = data or machine.DATA
     root = root_path(name)
     if os.path.exists(root):
@@ -98,6 +126,8 @@ def create(name, fixture=None, partitions=False, data=None):
         if not os.path.isdir(src):
             raise FileNotFoundError("save fixture not found: " + fixture)
         shutil.copytree(src, save, dirs_exist_ok=True)
+    if content:
+        _content(root, content)
     return root
 
 
