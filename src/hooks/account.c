@@ -636,6 +636,73 @@ int account_fetch(const char *path, void *buf, int size, int *len)
     return status;
 }
 
+int account_test_server_local(void)
+{
+    const char *srv = getenv("RECOMP_ACCOUNT_SERVER");
+    return srv && (!strncmp(srv, "127.0.0.1:", 10) || !strncmp(srv, "localhost:", 10));
+}
+
+int account_download(const char *path, unsigned long long from, int (*sink)(void *ctx, const char *data, unsigned n),
+                     void *ctx, int *partial)
+{
+    HINTERNET session = NULL, connect = NULL, req = NULL;
+    DWORD status = 0, ssize = sizeof(status);
+    const char *test = getenv("RECOMP_ACCOUNT_SERVER");
+    wchar_t host[64] = ACCOUNT_HOST, wpath[512], headers[300];
+    INTERNET_PORT port = INTERNET_DEFAULT_HTTPS_PORT;
+    DWORD secure = WINHTTP_FLAG_SECURE;
+    char token[65];
+    char *buf;
+    if (partial) *partial = 0;
+    if (g_state != ACCOUNT_IN && g_state != ACCOUNT_CHECKING) return -1;
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 512)) return -1;
+    if (test && *test) {
+        const char *colon = strchr(test, ':');
+        int len = colon ? (int)(colon - test) : (int)strlen(test);
+        swprintf(host, 64, L"%.*hs", len, test);
+        port = (INTERNET_PORT)(colon ? atoi(colon + 1) : 80);
+        secure = 0;
+    }
+    buf = (char *)malloc(256 * 1024);
+    if (!buf) return 0;
+    AcquireSRWLockShared(&g_lock);
+    memcpy(token, g_token, sizeof(token));
+    ReleaseSRWLockShared(&g_lock);
+    swprintf(headers, 300, L"Authorization: Bearer %hs\r\n", token);
+    SecureZeroMemory(token, sizeof(token));
+    if (from) swprintf(headers + wcslen(headers), 300 - wcslen(headers), L"Range: bytes=%llu-\r\n", from);
+    session = WinHttpOpen(L"FFNY-Online-Launcher/1", test && *test ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (session) WinHttpSetTimeouts(session, 5000, 5000, 15000, 30000);
+    if (session) connect = WinHttpConnect(session, host, port, 0);
+    if (connect) req = WinHttpOpenRequest(connect, L"GET", wpath, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, secure);
+    if (req && WinHttpSendRequest(req, headers, (DWORD)-1L, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+        WinHttpReceiveResponse(req, NULL) &&
+        WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &ssize, NULL)) {
+        if (status == 200 || status == 206) {
+            if (partial) *partial = status == 206;
+            for (;;) {
+                DWORD avail = 0, got = 0;
+                if (!WinHttpQueryDataAvailable(req, &avail)) { status = 0; break; }
+                if (!avail) break;
+                if (avail > 256 * 1024) avail = 256 * 1024;
+                if (!WinHttpReadData(req, buf, avail, &got)) { status = 0; break; }
+                if (!got) break;
+                if (!sink(ctx, buf, got)) { status = 0; break; }
+            }
+        }
+    } else {
+        status = 0;
+    }
+    SecureZeroMemory(headers, sizeof(headers));
+    free(buf);
+    if (req) WinHttpCloseHandle(req);
+    if (connect) WinHttpCloseHandle(connect);
+    if (session) WinHttpCloseHandle(session);
+    if (status == 401) { forget(); set_reason("Your sign-in ran out; sign in again."); set_state(ACCOUNT_OUT); }
+    return (int)status;
+}
+
 void account_cancel_call(void *volatile *live)
 {
     AcquireSRWLockExclusive(&g_live_lock);
@@ -739,6 +806,10 @@ int account_call(const char *method, const char *path, const char *json, char *b
                  void *volatile *live)
 { (void)method; (void)path; (void)json; (void)receive_ms; (void)live; if (size > 0) buf[0] = 0; return -1; }
 void account_cancel_call(void *volatile *live) { (void)live; }
+int account_download(const char *path, unsigned long long from, int (*sink)(void *ctx, const char *data, unsigned n),
+                     void *ctx, int *partial)
+{ (void)path; (void)from; (void)sink; (void)ctx; if (partial) *partial = 0; return -1; }
+int account_test_server_local(void) { return 0; }
 int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
 { (void)ctype; (void)body; (void)len; if (size > 0) out[0] = 0; return 0; }
 int account_send_report_note(const char *ctype, const void *body, int len, char *out, int size)
