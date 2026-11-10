@@ -328,6 +328,21 @@ typedef struct {
     int leaving;                                /* the watched fight is being left for the hill screen */
 } NetHillWatch;
 int netplay_hill_watch(NetHillWatch *out);
+/* Build 73: the room menu between hill fights (King of the Hill and FFA rotation, not crew battles). On this
+ * PC's own fight's results START goes to the room screen and START held leaves the room; START from a watched
+ * fight goes to the room screen too (held: leaves). netplay_hill_menu fills what the screens show of it and
+ * returns 1 while the results strip is up (this PC's game on its own hill fight's results). */
+typedef struct {
+    int results;                /* on its own hill fight's results, from the summary on: the strip shows */
+    int next_set;               /* its next fight is set already (its START came): the room menu comes after it */
+    int room_req;               /* START asked for the room screen (on the way, or there until its next fight) */
+    int room_next;              /* ... asked for while the next fight was set: after that one */
+    int auto_ms;                /* called on its results: it readies itself in this many ms (-1: not) */
+    int hold_ms, hold_total_ms; /* START held this long towards leaving the room, of the hold that leaves */
+    unsigned stopped_seed;      /* the watched fight START left for the room screen (0: none) */
+    int pick;                   /* this PC's pick the room does not have yet (-1: none) */
+} NetHillMenu;
+int netplay_hill_menu(NetHillMenu *out);
 /* Tests and pad scripts: 1 while the game runs a fight this PC only watches in a hill room; the front
  * end's calls then are not anchors for a pad script (a copy's presses count its own fights). */
 int netplay_hill_watch_quiet(void);

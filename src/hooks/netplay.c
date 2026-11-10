@@ -92,6 +92,7 @@ void netplay_lobby_spectate(const char *c) { (void)c; }
 int netplay_spectating(void) { return 0; }
 int netplay_listen_only(void) { return 0; }
 int netplay_hill_watch(NetHillWatch *o) { memset(o, 0, sizeof(*o)); return 0; }
+int netplay_hill_menu(NetHillMenu *o) { memset(o, 0, sizeof(*o)); o->auto_ms = o->pick = -1; return 0; }
 int netplay_hill_watch_quiet(void) { return 0; }
 int netplay_last_match_key(char *out, int size) { if (size > 0) out[0] = 0; return 0; }
 void netplay_lobby_settings(const NetRoomSettings *s) { (void)s; }
@@ -288,6 +289,9 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                  * last one leave by themselves this long after it was decided (hill_results_tick) */
 #define HILL_SUMMARY_MS 20000u  /* ... or this long while the summary and the rewards (not saved yet) still show */
 #define HILL_CAP_MS() (N.hill_menu ? HILL_RESULTS_MS : HILL_SUMMARY_MS)
+#define HILL_AUTOREADY_MS 8000u /* build 73: called on its results, a fighter readies itself this long after the call */
+#define HILL_AUTOREADY_MARGIN_MS 4000u  /* ... and at the latest this long before the ready time runs out */
+#define HILL_HOLD_LEAVE_MS 1200u        /* START held this long on the results or a watched fight: leave the room */
 #define LEFT_ROOM_MS  3000u     /* after LEAVE: a ROOM of the room left is a stale one this long (on_room) */
 #define RESULT_TRIES  75        /* RESULT every RETRY_MS until a HILL shows the fight over (30 s) */
 
@@ -456,6 +460,20 @@ static struct {
     int koth_fought, koth_done;     /* the fight was seen fighting; its RESULT was made */
     int koth_ready_for;             /* HILL `fights` + 1 of the call this PC readied for by itself */
     int koth_own_fighter;           /* the fighter of this PC's last own hill fight (-1 none): a watch may follow it */
+    /* build 73 (an FFA rotation player could not leave or change fighter between fights): the call that came on
+     * this PC's results readies it by itself at koth_auto_at (0: none), not at once, so the room screen can come
+     * first; that call's HILL `fights` and the end of its ready time */
+    ULONGLONG koth_auto_at, koth_call_end;
+    int koth_auto_fights;
+    int koth_pick;                  /* the fighter this PC picked in a hill room (-1 none) until the room has it */
+    ULONGLONG koth_pick_sent;
+    int koth_pick_tries;
+    /* START on this PC's own hill results: to the room screen (hill_room_req, since hill_room_at), or, with its
+     * next fight set already, the room screen after that one (hill_room_next); held: leave the room. While
+     * watching, START (the watched fight's seed in hill_start_seed) held as long leaves the room too. */
+    int hill_room_req, hill_room_next, hill_start_long, hill_start_was;
+    ULONGLONG hill_room_at, hill_start_since;
+    uint32_t hill_start_seed;
     volatile LONG start_deferred;   /* a START taken while the last fight's results still show */
     AutoMatch deferred_m;
     int koth_results;               /* this game still shows the results of a hill fight it fought (until the menu) */
@@ -682,6 +700,10 @@ static struct {
 #define SPECTATOR_HERE() (N.roomv.in_room && N.roomv.you == SLOT_SPECTATOR)
 /* Build 70: a hill room's waiting player watching a fight live, the game in it or on its way there or back. */
 #define HILL_WATCHING() (N.lobby && N.watching && N.hill_watch && N.match_live)
+/* a crew battle's room (a hill by crews): its own rules, none of the room menu below (build 73) */
+#define CREW_HERE() (N.crew.battle && !memcmp(N.crew_room, N.roomv.code, 7))
+/* King of the Hill or FFA rotation (not a crew battle): the room menu from the results and the watched fight */
+#define HILL_MENU_ROOM() (N.lobby && N.roomv.in_room && NETPLAY_IS_HILL(N.roomv.settings.mode) && !CREW_HERE())
 
 /* Rollback (rollback.h) is on with RECOMP_ROLLBACK=on (off by default since build 21); off, every step waits for every entry. */
 static int rollback_wanted(void) { return rollback_enabled(); }
@@ -754,6 +776,7 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     N.relay_caps = -1;
     N.chat_ident = -1;
     N.koth_winner = -1;
+    N.koth_pick = -1;
     return TRUE;
 }
 
@@ -1032,6 +1055,9 @@ static void hill_results_tick(void)
 /* Once per game update, on the game thread, between two updates: a held Rematch that every player
  * has now chosen runs here, as the menu's own call would (the same hooks, so created fighters are
  * linked again). Not while a screen loads. */
+static void hill_room_tick(void);    /* build 73: START on the results and from a watched fight */
+static int hill_on_own_results(void);
+
 static void netplay_rematch_tick(void)
 {
     uint32_t sm;
@@ -1041,6 +1067,7 @@ static void netplay_rematch_tick(void)
         netplay_lobby_leave();
     }
     hill_results_tick();
+    hill_room_tick();
     if (N.set_leave) {  /* a ranked set's game on its way to the room: it must not be able to stay there */
         if (!N.lobby || !N.match_live || N.watching) {
             N.set_leave = 0;
@@ -2979,6 +3006,41 @@ static void on_room(const uint8_t *b, int len)
     }
 }
 
+static ULONGLONG g_hill_room_quit_at;   /* the last try to take the game off its results for the room screen */
+static int g_hill_left_deferred;        /* left the room with a next fight set: it is ended back in the menus */
+
+/* Build 73: the fighter this PC readies with in a hill room by itself: its pick there (until the room has it,
+ * hill_pick_tick), else the fighter of its last own fight. */
+static int koth_ready_fighter(void)
+{
+    if (N.koth_pick >= 0) return N.koth_pick;
+    if (N.koth_own_fighter >= 0) return N.koth_own_fighter;
+    return N.report_m.fighter[N.pos >= 0 && N.pos < MAXP ? N.pos : 0];
+}
+
+/* This PC's state in the room's line (NETLINE_*, -1 not in it), and its fighter and ready flag as the room
+ * has them (-1: not in the room). With g_cs held. */
+static int hill_my_state(void)
+{
+    int i;
+    if (!N.roomv.in_room || !N.roomv.hill.valid) return -1;
+    for (i = 0; i < N.roomv.hill.count; i++)
+        if (N.roomv.hill.line[i].slot == N.roomv.you) return N.roomv.hill.line[i].state;
+    return -1;
+}
+
+static int room_my_fighter(int *ready)
+{
+    int i;
+    if (ready) *ready = 0;
+    for (i = 0; N.roomv.in_room && i < N.roomv.player_count; i++)
+        if (N.roomv.players[i].slot == N.roomv.you) {
+            if (ready) *ready = N.roomv.players[i].ready;
+            return N.roomv.players[i].fighter;
+        }
+    return -1;
+}
+
 /* King of the Hill: the room's line (docs/research/king-of-the-hill.md 8.4), after every ROOM of
  * such a room and once a second while a pair is called or votes. */
 static void on_hill(const uint8_t *b, int len)
@@ -3045,12 +3107,28 @@ static void on_hill(const uint8_t *b, int len)
      * on; with two in the room, both): the results and the summary take longer than the ready time,
      * so the king was skipped and lost the crown before its game was back on the hill (three-copy
      * test, 2026-10-25). Whoever has just fought is there: ready at once, with the same fighter.
-     * koth_results: also after a deferred fight was called off (below), while the results still show. */
+     * koth_results: also after a deferred fight was called off (below), while the results still show.
+     * Build 73: not at once but HILL_AUTOREADY_MS later (hill_autoready_tick), still well inside the ready time:
+     * readied at once, the next fight started a second after the decision and this PC's game went from its
+     * results straight into it, so a player in an FFA rotation room of four never saw the room screen, its
+     * CHOOSE FIGHTER and LEAVE ROOM (a player report, builds 71/72). A crew battle keeps the old way. */
     if (h.phase == NETHILL_CALLING && N.koth_results && N.koth_ready_for != h.fights + 1) {
         for (i = 0; i < h.count; i++)
             if (h.line[i].slot == N.roomv.you && h.line[i].state == NETLINE_CALLED) {
-                auto_ready = N.koth_own_fighter >= 0 ? N.koth_own_fighter : N.report_m.fighter[N.pos];
+                ULONGLONG now = GetTickCount64();
+                int wait = h.ms_left - (int)HILL_AUTOREADY_MARGIN_MS;
                 N.koth_ready_for = h.fights + 1;
+                if (CREW_HERE()) {
+                    auto_ready = koth_ready_fighter();
+                    continue;
+                }
+                N.koth_call_end = now + (ULONGLONG)(h.ms_left > 0 ? h.ms_left : 0);
+                N.koth_auto_fights = h.fights;
+                /* to the room screen asked for (START on the results): it readies itself only at the end */
+                if (!N.hill_room_req && !N.hill_room_next && wait > (int)HILL_AUTOREADY_MS) wait = (int)HILL_AUTOREADY_MS;
+                N.koth_auto_at = now + (ULONGLONG)(wait > 0 ? wait : 0);
+                fprintf(stderr, "[NETPLAY] hill: called for the next fight on this fight's results; ready by itself in "
+                        "%.1f s unless the room screen readies it first\n", (wait > 0 ? wait : 0) / 1000.0);
             }
     }
     /* The next fight was agreed while this game still showed the last one's results (a deferred
@@ -3097,10 +3175,58 @@ static void on_hill(const uint8_t *b, int len)
             toast(8000, "YOU'RE UP: back to the hill to get ready.");
         }
     }
-    if (auto_ready >= 0) {
+    if (auto_ready >= 0) {      /* a crew battle's fighter: at once, as before */
         fprintf(stderr, "[NETPLAY] hill: called again straight after the fight; ready with fighter %d\n", auto_ready);
         netplay_lobby_ready(1, auto_ready);
     }
+}
+
+/* Build 73, on the network thread: the call that came on this PC's results readies it now (koth_auto_at), on
+ * the results or on the room screen, unless it is ready already (A there) or no longer called. A player who
+ * went to the room screen meanwhile (START on the results) gets the whole ready time but the margin; the
+ * others never wait longer than the ready time (as for any called player), and with nobody pressing anything
+ * the fight starts HILL_AUTOREADY_MS after the call, inside the 15-20 s results cap (hill_results_tick). */
+static void hill_autoready_tick(ULONGLONG now)
+{
+    int state, fighter;
+    if (!N.koth_auto_at || now < N.koth_auto_at) return;
+    N.koth_auto_at = 0;
+    EnterCriticalSection(&g_cs);
+    state = HILL_MENU_ROOM() && N.roomv.hill.phase == NETHILL_CALLING && N.roomv.hill.fights == N.koth_auto_fights
+            ? hill_my_state() : -1;
+    fighter = koth_ready_fighter();
+    LeaveCriticalSection(&g_cs);
+    if (state != NETLINE_CALLED) return;
+    fprintf(stderr, "[NETPLAY] hill: called again straight after the fight; ready with fighter %d (%s)\n", fighter,
+            N.koth_results ? "still on its results" : N.hill_room_req ? "on the room screen it asked for" : "on the room screen");
+    netplay_lobby_ready(1, fighter);
+}
+
+/* Build 73, on the network thread: a fighter picked in a hill room while the room could not take it (this PC
+ * voted or fought: the relay keeps a fighter's fighter then) goes to the room again once it can, so the pick
+ * counts from the next fight; three tries (a room's FIGHTER RULES may swap it for another). */
+static void hill_pick_tick(ULONGLONG now)
+{
+    int have, ready, pick, state, locked, phase;
+    if (N.koth_pick < 0) return;
+    EnterCriticalSection(&g_cs);
+    if (!N.lobby || !N.roomv.in_room || !NETPLAY_IS_HILL(N.roomv.settings.mode)) {
+        N.koth_pick = -1;
+        LeaveCriticalSection(&g_cs);
+        return;
+    }
+    have = room_my_fighter(&ready);
+    pick = N.koth_pick;
+    state = hill_my_state();
+    phase = N.roomv.hill.valid ? N.roomv.hill.phase : NETHILL_WAITING;
+    locked = (phase == NETHILL_VOTING || phase == NETHILL_FIGHTING) && state == NETLINE_FIGHTING;
+    if (have == pick || N.koth_pick_tries >= 3) N.koth_pick = -1;
+    LeaveCriticalSection(&g_cs);
+    if (have == pick || N.koth_pick < 0 || locked || now - N.koth_pick_sent < 1500) return;
+    N.koth_pick_tries++;
+    fprintf(stderr, "[NETPLAY] hill: this PC's pick, fighter %d, to the room again (it has %d): from the next fight\n",
+            pick, have);
+    netplay_lobby_ready(ready, pick);
 }
 
 /* Build 70: whether this PC runs the hill fight of this WATCH (docs/research/king-of-the-hill.md 9.2): the
@@ -3117,8 +3243,9 @@ static int hill_watch_wanted(void)
 static int hill_watch_runs(uint32_t seed, const int *slots, int count)
 {
     int i;
+    /* build 73: not after START on this PC's results asked for the room screen, until its own next fight */
     if (!relay_has(CAPS_HILL_WATCH) || !hill_watch_wanted() || seed == N.hill_skip_seed || !N.roomv.in_room ||
-        SPECTATOR_HERE())
+        SPECTATOR_HERE() || N.hill_room_req)
         return 0;
     for (i = 0; i < count; i++) if (slots[i] == N.roomv.you) return 0;     /* a fighter gets START */
     /* Build 71: not a fight of four (an FFA rotation room of five or more). This PC's pad has to sit on a
@@ -3417,6 +3544,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.watching = watching;
     N.hill_watch = hill_watch;
     N.hill_called = 0;
+    if (!watching) N.hill_room_req = 0;     /* build 73: its own next fight: the room screen asked for is behind */
     if (leaving && !N.hill_leave) {
         N.hill_leave = 1;
         N.hill_leave_at = GetTickCount64();
@@ -4036,6 +4164,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
             N.load_hinted = 1;
             toast(12000, "Loading the match... The first one after the game starts can take up to half a minute.");
         }
+        hill_autoready_tick(now);   /* build 73: the call on this PC's results; its pick in a hill room */
+        hill_pick_tick(now);
         /* King of the Hill: the next opponent waits, loaded, while this player stays on the last
          * fight's results (13, 14 and 61 s in build 33, pressing Rematch): say so until they leave */
         if (N.start_deferred && !N.watching && !N.hill_leave && now - N.deferred_toast >= 6000) {   /* not after a watched fight */
@@ -4414,6 +4544,9 @@ static int start(const char *server, const char *name, int creating, const char 
     N.koth_own_fighter = -1;
     N.start_deferred = 0;
     N.koth_results = 0;
+    N.koth_pick = -1;
+    N.koth_auto_at = 0;
+    N.hill_room_req = N.hill_room_next = 0;
     memset(&N.rank, 0, sizeof(N.rank));
     memset(&N.tset, 0, sizeof(N.tset));
     reset_remote_pads();
@@ -4987,6 +5120,27 @@ int netplay_hill_watch(NetHillWatch *out)
     return on;
 }
 
+int netplay_hill_menu(NetHillMenu *out)
+{
+    ULONGLONG now;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    memset(out, 0, sizeof(*out));
+    now = GetTickCount64();
+    EnterCriticalSection(&g_cs);
+    out->results = hill_on_own_results();
+    out->next_set = N.start_deferred && !N.watching;
+    out->room_req = N.hill_room_req;
+    out->room_next = N.hill_room_next;
+    out->auto_ms = N.koth_auto_at && HILL_MENU_ROOM() && hill_my_state() == NETLINE_CALLED
+                   ? (N.koth_auto_at > now ? (int)(N.koth_auto_at - now) : 0) : -1;
+    out->hold_ms = N.hill_start_since && !N.hill_start_long ? (int)(now - N.hill_start_since) : 0;
+    out->hold_total_ms = (int)HILL_HOLD_LEAVE_MS;
+    out->stopped_seed = N.hill_start_seed;
+    out->pick = N.koth_pick;
+    LeaveCriticalSection(&g_cs);
+    return out->results;
+}
+
 int netplay_spectating(void)
 {
     int on;
@@ -5225,6 +5379,15 @@ void netplay_lobby_settings(const NetRoomSettings *settings)
 void netplay_lobby_ready(int ready, int fighter)
 {
     uint8_t b[2] = { (uint8_t)(ready ? 1 : 0), (uint8_t)fighter };
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    if (N.roomv.in_room && NETPLAY_IS_HILL(N.roomv.settings.mode) && fighter >= 0 && fighter < 0xFF) {
+        /* build 73: kept until the room has it (hill_pick_tick), and the fighter of this PC's next ready */
+        if (N.koth_pick != fighter) N.koth_pick_tries = 0;
+        N.koth_pick = fighter;
+        N.koth_pick_sent = GetTickCount64();
+    }
+    LeaveCriticalSection(&g_cs);
     request(T_READY, b, 2);
 }
 
@@ -5669,6 +5832,29 @@ void xbox_NoteAnchorEvent(const char *text);     /* kernel.h: an event a pad scr
 
 void netplay_on_main_menu(void)
 {
+    if (g_hill_left_deferred) {     /* build 73: left the room with a next fight set while a watched one was left */
+        g_hill_left_deferred = 0;
+        if (N.match_live) end_hub_match("You left the room.");
+    }
+    if (N.lobby && N.hill_room_req && N.start_deferred && N.watching && InterlockedExchange(&N.start_deferred, 0)) {
+        /* build 73: START on the results asked for the room screen; the next fight's WATCH that came meanwhile
+         * is not run (the room screen shows the names, and LEAVE ROOM) */
+        fprintf(stderr, "[NETPLAY] hill: the watched fight is not set up: this PC asked for the room screen\n");
+        N.hill_skip_seed = N.start_seed;
+        end_hub_match("Back in the room.");
+    }
+    if (N.lobby && N.hill_room_req && N.koth_results) {
+        const char *t = getenv("RECOMP_TEST_HILL_ROOM"), *pick = t ? strchr(t, ':') : NULL;
+        fprintf(stderr, "[NETPLAY] hill: on the room screen (asked for on the results)\n");
+        if (pick && atoi(pick + 1) > 0) {   /* tests: "K:F" picks fighter F there, as CHOOSE FIGHTER does */
+            int ready = 0;
+            EnterCriticalSection(&g_cs);
+            room_my_fighter(&ready);
+            LeaveCriticalSection(&g_cs);
+            fprintf(stderr, "[NETPLAY] tests: fighter %d picked on the room screen (RECOMP_TEST_HILL_ROOM)\n", atoi(pick + 1));
+            netplay_lobby_ready(ready, atoi(pick + 1));
+        }
+    }
     if (N.lobby && InterlockedExchange(&N.start_deferred, 0)) {
         /* King of the Hill: back from the last fight's results; the next one, agreed meanwhile. Build 70:
          * or back from a watched fight that was left for this one (its own, or the next one watched) */
@@ -6142,8 +6328,9 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 }
                 if (r.hill.valid && r.hill.phase == NETHILL_CALLING && state == NETLINE_CALLED && !N.match_live &&
                     GetTickCount64() - called_at >= (ULONGLONG)ready_delay && GetTickCount64() - koth_readied > 1000) {
-                    fprintf(stderr, "[NETPLAY] tests: called on the hill; ready with fighter %d\n", fighter);
-                    netplay_lobby_ready(1, fighter);
+                    int f = N.koth_pick >= 0 ? N.koth_pick : fighter;  /* build 73: a pick in the room, as A does */
+                    fprintf(stderr, "[NETPLAY] tests: called on the hill; ready with fighter %d\n", f);
+                    netplay_lobby_ready(1, f);
                     koth_readied = GetTickCount64();
                 }
                 if (r.phase == 1 && state == NETLINE_FIGHTING && voted_in != r.version) {
@@ -8539,6 +8726,14 @@ static void spec_tick(void)
 static void hill_stop_watching(const char *why)
 {
     N.hill_skip_seed = N.start_seed;    /* a WATCH again (a VOTE's answer) does not bring it back */
+    if (!strcmp(why, "START")) {
+        /* build 73: the room screen (its line, LEAVE ROOM) for the rest of this fight, not the watching
+         * screen; START held on from this press leaves the room (hill_room_tick) */
+        N.hill_start_seed = N.start_seed;
+        N.hill_start_since = GetTickCount64();
+        N.hill_start_long = 0;
+        N.hill_start_was = 1;
+    }
     if (!N.hill_leave) {
         N.hill_leave = 1;
         N.hill_leave_at = GetTickCount64();
@@ -8595,6 +8790,170 @@ static void hill_leave_tick(void)
     if (wait && wait != told)
         fprintf(stderr, "[NETPLAY] watching: leaving the hill fight (%s): %s\n", N.hill_leave_why ? N.hill_leave_why : "?", wait);
     told = wait ? wait : told;
+}
+
+/* ---- build 73: the room menu between hill fights (a player report: "ffa rotation bugged we cant backout to
+ * choose characters it keeps continuing without the button to leave", builds 71/72) ----
+ *
+ * In an FFA rotation room of up to four every player fights every fight, and each was called for the next one on
+ * the last one's results, readied there at once, and taken from them (by a press, or the 15-20 s cap) straight
+ * into the next fight: the room screen, with CHOOSE FIGHTER and LEAVE ROOM, never came. Now the call on the
+ * results readies the player only HILL_AUTOREADY_MS later (hill_autoready_tick), so a player who leaves the
+ * results first reaches the room screen ("YOU'RE UP": A ready, X CHOOSE FIGHTER, B LEAVE ROOM), and on the
+ * results themselves (online_screen.cpp hill_results_strip, drawn from netplay_hill_menu) START goes there at
+ * once and START held leaves the room; on a watched fight START goes to the room screen (as before) and held
+ * leaves the room. A pick the room could not take (this PC fought) counts from its next fight (hill_pick_tick). */
+
+int pc_ui_button_icons(void);       /* pc_ui.h: 2, PlayStation button names */
+
+/* START on this PC's own controller, now. */
+static int hill_start_down(void)
+{
+    XBOX_INPUT_STATE st;
+    memset(&st, 0, sizeof(st));
+    return xbox_HostInputGetLocalState(&st) == ERROR_SUCCESS && (st.Gamepad.wButtons & 0x0010) != 0;
+}
+
+/* This PC's game on its own hill fight's results (not a crew battle), from the summary on. */
+static int hill_on_own_results(void)
+{
+    return HILL_MENU_ROOM() && N.koth_results && (!N.watching || N.start_deferred) && N.hill_summary;
+}
+
+/* Takes this PC's game off its own hill fight's results as the results cap does (hill_results_tick): on the
+ * Rematch menu as Rematch does there (the hill's No path), elsewhere Game.Quit(). 0: a screen loads, later. */
+static int hill_results_off(const char *why)
+{
+    uint32_t sm = MEM32(0x002FB148u + 0x17u * 4u);
+    if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return 0;
+    if (N.hill_menu == 1 && !N.koth_quit) {
+        fprintf(stderr, "[NETPLAY] hill: off the results' Rematch menu (%s)\n", why);
+        defjam_menu_call("Game.Rematch()");
+    } else {
+        fprintf(stderr, "[NETPLAY] hill: off the results (%s): Game.Quit()\n", why);
+        rollback_off_leaving(why);
+        defjam_menu_call("Game.Quit()");
+    }
+    return 1;
+}
+
+/* START on this PC's results: the room screen now, or (its next fight set already) after that fight. */
+static void hill_room_request(const char *why)
+{
+    ULONGLONG now = GetTickCount64();
+    int state, fighter, own_set;
+    EnterCriticalSection(&g_cs);
+    state = hill_my_state();
+    fighter = koth_ready_fighter();
+    own_set = N.start_deferred && !N.watching;
+    if (own_set) {
+        N.hill_room_next = 1;
+    } else {
+        N.hill_room_req = 1;
+        N.hill_room_at = now;
+        /* the ready time's end but the margin (the room screen's A, or this, readies it) */
+        if (N.koth_call_end > now + HILL_AUTOREADY_MARGIN_MS && (N.koth_auto_at || state == NETLINE_READY))
+            N.koth_auto_at = N.koth_call_end - HILL_AUTOREADY_MARGIN_MS;
+    }
+    LeaveCriticalSection(&g_cs);
+    if (own_set) {
+        fprintf(stderr, "[NETPLAY] hill: %s, but this PC's next fight is set already: the room screen after it\n", why);
+        toast(8000, "Your next fight is already set: the room menu comes after it. Hold %s to leave the room.",
+              pc_ui_button_icons() == 2 ? "OPTIONS" : "START");
+        return;
+    }
+    if (state == NETLINE_READY) {   /* readied by itself already, no START yet: the room screen readies it */
+        fprintf(stderr, "[NETPLAY] hill: not ready any more (the room screen readies it, or the ready time's end)\n");
+        netplay_lobby_ready(0, fighter);
+    }
+    fprintf(stderr, "[NETPLAY] hill: %s: to the room screen (line state %d%s)\n", why, state,
+            N.watching ? "; the next fight's WATCH is not run" : "");
+    toast(8000, "To the room: CHOOSE FIGHTER or LEAVE ROOM there.");
+    g_hill_room_quit_at = hill_results_off("the room screen asked for") ? now : 0;
+}
+
+/* START held: this PC leaves the room, from its results or a watched fight. */
+static void hill_leave_room(const char *why)
+{
+    int deferred = (int)InterlockedExchange(&N.start_deferred, 0), results = N.koth_results;
+    fprintf(stderr, "[NETPLAY] hill: leaving the room (%s)%s\n", why, deferred ? "; the next fight set meanwhile is not set up" : "");
+    N.koth_auto_at = 0;
+    N.hill_room_req = N.hill_room_next = 0;
+    N.hill_start_since = 0;
+    if (results && (deferred || N.match_live)) end_hub_match("You left the room.");     /* its OVER still in the room */
+    else if (deferred) g_hill_left_deferred = 1;    /* a watched fight still being left: ended in the menus */
+    netplay_lobby_leave();
+    toast(6000, "You left the room.");
+    if (results && !N.hill_leave && hill_results_off("the room left")) g_hill_room_quit_at = GetTickCount64();
+}
+
+/* Tests: RECOMP_TEST_HILL_ROOM=<k> taps START on the results of this PC's k-th own hill fight, and
+ * RECOMP_TEST_HILL_LEAVE=<k> holds it there (leaves the room), 1.5 s after the summary came (the test copies'
+ * pads cannot press START at a given moment). */
+static int hill_test_due(const char *name, int fights, ULONGLONG summary_at)
+{
+    const char *e = getenv(name);
+    return e && *e && atoi(e) == fights && summary_at && GetTickCount64() - summary_at >= 1500;
+}
+
+/* Once per game update (netplay_rematch_tick). */
+static void hill_room_tick(void)
+{
+    static int own_fights, done_room, done_leave, active_before;
+    static ULONGLONG counted_at, summary_at;
+    ULONGLONG now = GetTickCount64();
+    int results = hill_on_own_results(), down, watch_hold;
+    if (results && N.hill_decided_at != counted_at) { counted_at = N.hill_decided_at; own_fights++; }
+    if (!results) summary_at = 0;
+    else if (!summary_at) summary_at = now;
+    /* START: a tap on the results asks for the room screen; held there, or on from the press that left a watched
+     * fight, it leaves the room */
+    watch_hold = !results && N.hill_start_seed && N.hill_start_since && N.lobby && N.roomv.in_room;
+    if (!results && !watch_hold) {
+        active_before = 0;
+        N.hill_start_since = 0;
+        if (!N.hill_room_req) return;
+        down = 0;
+    } else {
+        down = hill_start_down();
+        if (!active_before && results) N.hill_start_was = down;    /* a START held from before is no press */
+        active_before = 1;
+    }
+    if (results || watch_hold) {
+        if (down && !N.hill_start_was) { N.hill_start_since = now; N.hill_start_long = 0; }
+        if (!down && N.hill_start_was && N.hill_start_since && !N.hill_start_long && results && !N.hill_room_req)
+            hill_room_request("START on the results");
+        if (down && N.hill_start_since && !N.hill_start_long && now - N.hill_start_since >= HILL_HOLD_LEAVE_MS) {
+            N.hill_start_long = 1;
+            N.hill_start_was = down;
+            hill_leave_room(results ? "START held on the results" : "START held from the watched fight");
+            return;
+        }
+        if (!down) N.hill_start_since = 0;
+    } else if (!down) {
+        N.hill_start_since = 0;
+    }
+    N.hill_start_was = down;
+    if (results && !done_leave && hill_test_due("RECOMP_TEST_HILL_LEAVE", own_fights, summary_at)) {
+        done_leave = 1;
+        fprintf(stderr, "[NETPLAY] tests: START held on the results of this PC's fight %d (RECOMP_TEST_HILL_LEAVE)\n", own_fights);
+        hill_leave_room("START held on the results");
+        return;
+    }
+    if (results && !done_room && !N.hill_room_req && hill_test_due("RECOMP_TEST_HILL_ROOM", own_fights, summary_at)) {
+        done_room = 1;
+        fprintf(stderr, "[NETPLAY] tests: START on the results of this PC's fight %d (RECOMP_TEST_HILL_ROOM)\n", own_fights);
+        hill_room_request("START on the results");
+    }
+    /* asked for after the fight that was set: now, on that fight's results, once the next one is not set too */
+    if (results && N.hill_room_next && !N.start_deferred && N.roomv.hill.fights != N.koth_fights) {
+        N.hill_room_next = 0;
+        hill_room_request("the room screen asked for during the last results");
+    }
+    /* the way off the results for the room screen, again every 5 s while the game is not back */
+    if (N.hill_room_req && N.koth_results && N.hill_summary && now - g_hill_room_quit_at >= 5000 &&
+        hill_results_off("the room screen asked for"))
+        g_hill_room_quit_at = now;
 }
 
 /* A player's fight that went out of sync and that the other players left (the wait in netplay_on_step):

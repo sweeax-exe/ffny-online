@@ -936,6 +936,7 @@ struct Gallery {
     NetCrew crew = {};              // crew battles (stage 3): the crew-battle pages' sample (battle 0: none)
 } G;
 NetHillWatch G_hill_hud;            // build 70: the spectator HUD pages' sample (count 0: none)
+NetHillMenu G_hill_menu;            // build 73: the room menu pages' sample (results 0: not the results strip)
 
 bool gallery_on()
 {
@@ -3146,6 +3147,22 @@ void choose_fighter(int fighter)
 // [online] hill_watch (build 70): the next fight is watched live on this PC (netplay_hill_watch).
 bool hill_watch_setting() { return recomp_settings_get("online", "hill_watch", 1) != 0; }
 
+// Build 73: the room menu between hill fights (netplay_hill_menu; the gallery's sample). This PC's fighter for
+// its next ready is its pick the room has not taken yet (it fought meanwhile), else the room's.
+NetHillMenu hill_menu()
+{
+    NetHillMenu m;
+    if (gallery_on()) return G_hill_menu;
+    netplay_hill_menu(&m);
+    return m;
+}
+
+int my_hill_fighter(const NetRoom &r)
+{
+    NetHillMenu m = hill_menu();
+    return m.pick >= 0 ? m.pick : slot_fighter(r, r.you);
+}
+
 // The watching screen: the fight this PC does not play in. Phase 1 shows who fights, the king's
 // crown and streak, and the line; the fight itself runs on the fighters' PCs only.
 void draw_watch_rot(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const HillView &v);
@@ -3209,9 +3226,11 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     hx += hint(dl, f, hx, 414, "x", "CHOOSE FIGHTER");
     hx += give_up(dl, f, pad, hx, 414, &left);
     hx += hint(dl, f, hx, 414, "b", "BACK TO THE HILL");
+    hx += hint(dl, f, hx, 414, "y", "LEAVE ROOM");     // build 73: a way out from every hill screen
     (void)hx;
     if (left) return;
-    if (pad.x) choose_fighter(slot_fighter(r, r.you));
+    if (pad.x) choose_fighter(my_hill_fighter(r));
+    else if (pad.y) leave_hill("You left the room.");
     else if (pad.b) S.watch_hidden = h.seed ? h.seed : 1;
 }
 
@@ -3271,16 +3290,18 @@ void draw_watch_rot(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoo
     hx += hint(dl, f, hx, 414, "x", "CHOOSE FIGHTER");
     hx += give_up(dl, f, pad, hx, 414, &left, true);
     hx += hint(dl, f, hx, 414, "b", "BACK TO THE ROOM");
+    hx += hint(dl, f, hx, 414, "y", "LEAVE ROOM");     // build 73: a way out from every rotation screen
     (void)hx;
     if (left) return;
-    if (pad.x) choose_fighter(slot_fighter(r, r.you));
+    if (pad.x) choose_fighter(my_hill_fighter(r));
+    else if (pad.y) leave_hill("You left the room.");
     else if (pad.b) S.watch_hidden = h.seed ? h.seed : 1;
 }
 
 // "YOU'RE UP": this PC is called; one press readies it with its fighter.
 void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const HillView &v)
 {
-    int fighter = slot_fighter(r, r.you);     // the fighter the room knows (the last READY), else this PC's pick
+    int fighter = my_hill_fighter(r);     // this PC's pick, else the fighter the room knows (the last READY)
     bool ready = v.my_state == NETLINE_READY;
     int other = v.pair[0] == r.you ? v.pair[1] : v.pair[0];
     float pulse = 0.65f + 0.35f * sinf((float)(GetTickCount64() % 1000) / 1000.0f * 6.2832f);
@@ -3307,6 +3328,15 @@ void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, c
     rect(dl, f, 242, 290, 352 * std::min(1.0f, v.ms_left / 20000.0f), 6, v.ms_left < 6000 ? RED : ORANGE, 3);
     std::string say_line = pad_text(ready ? (v.rot ? "Waiting for the others to press {a}..." : "Waiting for your opponent to press {a}...")
                                           : "Press {a} now: not ready in time sends you to the back of the line.");
+    {   // build 73: called on the last fight's results: it readies by itself (the others never wait long)
+        NetHillMenu m = hill_menu();
+        if (!ready && m.auto_ms >= 0) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "Ready by itself in %d s with this fighter: {x} picks another first, {b} leaves.",
+                     (m.auto_ms + 999) / 1000);
+            say_line = pad_text(buf);
+        }
+    }
     text(dl, f, g_hand, 16, 242, 304, ORANGE, say_line.c_str(), LEFT, 0.8f, 360);
     float hx = 242;
     if (!ready) hx += hint(dl, f, hx, 352, "a", "READY");
@@ -3336,10 +3366,18 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     const NetHill &h = r.hill;
     HillView v = hill_view(r);
     bool host = r.you == r.host;
-    int fighter = slot_fighter(r, r.you);     // the fighter the room knows (the last READY), else this PC's pick
+    int fighter = my_hill_fighter(r);     // this PC's pick, else the fighter the room knows (the last READY)
     bool fighting_me = v.my_state == NETLINE_FIGHTING;
     // the fighters vote on the venue as in other rooms; everyone else stays on the hill
     if (r.phase == 1 && fighting_me) { draw_vote(dl, f, pad, r); return; }
+    // build 73: START left the watched fight for this screen (its line, LEAVE ROOM), not the watching screen
+    {
+        static uint32_t applied;    // once per fight: Y WATCH brings the watching screen back
+        if (h.valid && h.phase == NETHILL_FIGHTING && h.seed && hill_menu().stopped_seed == h.seed && applied != h.seed) {
+            applied = h.seed;
+            S.watch_hidden = h.seed;
+        }
+    }
     if (h.valid && h.phase == NETHILL_FIGHTING && !fighting_me && S.watch_hidden != (h.seed ? h.seed : 1)) {
         draw_watch(dl, f, pad, r, v);
         return;
@@ -4390,6 +4428,9 @@ void gallery_step()
                                          // build 70: the spectator HUD over a watched fight (the line, up next,
                                          // called; an FFA rotation's four)
                                          "hill-hud", "hill-hud-next", "hill-hud-up", "rot-hud",
+                                         // build 73: the room menu between fights (the results' strip, its next
+                                         // fight set and START held; called on the results, readying by itself)
+                                         "rot-results", "rot-results-set", "rot-up-auto",
                                          // build 30: the server choice
                                          "connecting-auto", "hub-server", "servers", "servers-offline", "hub-ranked-na",
                                          "room-ping", "offline-server",
@@ -4533,6 +4574,8 @@ void gallery_step()
     G.account = ACCOUNT_IN;
     S.watch_hidden = 0;
     G_hill_hud = NetHillWatch();
+    G_hill_menu = NetHillMenu();
+    G_hill_menu.auto_ms = G_hill_menu.pick = -1;
     S.note_until = 0;
     S.settings_edit = false;
     {   // the relays as a player in Europe sees them, the hub on Europe
@@ -4850,7 +4893,14 @@ void gallery_step()
             h.watch_slots[0] = 1; h.watch_slots[1] = 2;
             h.watch_fighters[0] = r.players[1].fighter; h.watch_fighters[1] = r.players[2].fighter;
         }
-    } else if (p == "rot" || p == "rot-up" || p == "rot-watch" || p == "rot-fight") {
+    } else if (p == "rot-results" || p == "rot-results-set") {
+        // build 73: Ann's FFA rotation fight is over; the results' strip over a stand-in for them
+        G.room = sample_room(NETPLAY_MODE_FFAROT, NETPLAY_FFAROT_SLOTS, 4);
+        G.room.hill.valid = 1;
+        G_hill_menu.results = 1;
+        if (p == "rot-results") G_hill_menu.auto_ms = 6200;
+        else { G_hill_menu.next_set = 1; G_hill_menu.hold_ms = 700; G_hill_menu.hold_total_ms = 1200; }
+    } else if (p == "rot" || p == "rot-up" || p == "rot-up-auto" || p == "rot-watch" || p == "rot-fight") {
         // FFA rotation: eight in the room; Cal won the last FFA and stays on, Ben, Dee and Ann (this PC)
         // are called with him; the others wait
         S.page = HUB;
@@ -4871,6 +4921,7 @@ void gallery_step()
         h.phase = NETHILL_CALLING;
         if (p == "rot") { h.line[0].state = h.line[1].state = NETLINE_READY; std::swap(h.line[3], h.line[4]); h.line[3].state = NETLINE_CALLED; h.line[4].state = NETLINE_WAITING; }
         else if (p == "rot-up") { h.line[0].state = h.line[2].state = NETLINE_READY; }
+        else if (p == "rot-up-auto") { h.line[0].state = h.line[2].state = NETLINE_READY; G_hill_menu.auto_ms = 5400; }
         else {
             // rot-watch: Ann waits while four fight; rot-fight: the room page during it (B on the watch screen)
             std::swap(h.line[3], h.line[4]);
@@ -5218,7 +5269,8 @@ void hill_hud(ImDrawList *dl, const Frame &f, const NetHillWatch &w, const NetRo
             text(dl, f, g_title, 10, nx, y + 24, GOLD, st, LEFT, 0.9f);
         }
     }
-    const char *stop = ps_icons() ? "OPTIONS: HILL SCREEN" : "START: HILL SCREEN";
+    // build 73: START goes to the room screen (CHOOSE FIGHTER, LEAVE ROOM there); held, it leaves the room
+    const char *stop = ps_icons() ? "OPTIONS: ROOM MENU   HOLD: LEAVE ROOM" : "START: ROOM MENU   HOLD: LEAVE ROOM";
     text(dl, f, g_title, 10, 604, y + 13, GREY, stop, RIGHT, 0.8f);
 
     // above it on the right: the line behind the fight, the next three
@@ -5259,6 +5311,64 @@ void draw_hill_hud(ImDrawList *dl, ImVec2 display)
     NetRoom room;
     lobby_room(&room);
     hill_hud(dl, menu_frame(display), g_hill_watch, room);
+}
+
+// ---- build 73: the room menu from this PC's own hill fight's results ---------------------------------
+//
+// Over the game's results of a King of the Hill or FFA rotation fight (netplay_hill_menu): START goes to the room
+// screen, where CHOOSE FIGHTER and LEAVE ROOM are; START held leaves the room (the bar fills); and when this PC,
+// called again, readies itself. Drawing only: netplay reads START on the game thread.
+NetHillMenu g_hill_menu_now;
+bool g_hill_results_up = false;
+
+bool hill_results_wanted()
+{
+    g_hill_results_up = !gallery_on() && netplay_hill_menu(&g_hill_menu_now) != 0;
+    return g_hill_results_up;
+}
+
+void hill_results_strip(ImDrawList *dl, const Frame &f, const NetHillMenu &m, const NetRoom &r)
+{
+    bool rot = NETPLAY_IS_FFAROT(r.settings.mode);
+    const char *st = ps_icons() ? "OPTIONS" : "START";
+    const float y = 12, ph = 40;
+    char head[96], sub[128] = "";
+    glass(dl, f, 28, y, 584, ph, 8, IM_COL32(8, 8, 11, 255), 0.8f);
+    rect(dl, f, 36, y + 8, 4, ph - 16, rot ? ORANGE : GOLD, 2);
+    text(dl, f, g_title, 11, 48, y + 5, rot ? ORANGE : GOLD, rot ? "FFA ROTATION" : "KING OF THE HILL", LEFT, 0.9f);
+    if (m.room_req) {
+        snprintf(head, sizeof(head), "TO THE ROOM...");
+    } else if (m.next_set || m.room_next) {
+        snprintf(head, sizeof(head), "YOUR NEXT FIGHT IS SET");
+        snprintf(sub, sizeof(sub), "The room menu (choose fighter, leave) comes after it.");
+    } else {
+        snprintf(head, sizeof(head), "%s: ROOM MENU", st);
+        snprintf(sub, sizeof(sub), "Choose another fighter or leave the room there.");
+    }
+    if (m.auto_ms >= 0 && !m.room_req && !m.next_set && !m.room_next)
+        snprintf(sub, sizeof(sub), "You're up again: ready by itself in %d s. Choose another fighter there first.",
+                 (m.auto_ms + 999) / 1000);
+    // the line under the mode's name; the note right of both (it may wrap to two lines there)
+    float lw = std::max(text_width(f, g_title, 11, rot ? "FFA ROTATION" : "KING OF THE HILL"), text_width(f, g_title, 15, head)) + 18;
+    text(dl, f, g_title, 15, 48, y + 18, WHITE, head, LEFT, 1.0f, 300);
+    if (sub[0]) text(dl, f, g_title, 10, 48 + lw, y + 8, GREY, sub, LEFT, 0.8f, 410 - lw);
+    // right: the hold that leaves the room, with its bar while START is held
+    char leave[48];
+    snprintf(leave, sizeof(leave), "HOLD %s: LEAVE ROOM", st);
+    text(dl, f, g_title, 13, 604, y + 8, m.hold_ms > 0 ? RED : CREAM, leave, RIGHT, 1.0f);
+    if (m.hold_ms > 0 && m.hold_total_ms > 0) {
+        float k = std::min(1.0f, (float)m.hold_ms / (float)m.hold_total_ms);
+        rect(dl, f, 454, y + 28, 150, 5, IM_COL32(255, 255, 255, 40), 2);
+        rect(dl, f, 454, y + 28, 150 * k, 5, RED, 2);
+    }
+}
+
+void draw_hill_results(ImDrawList *dl, ImVec2 display)
+{
+    if (!g_hill_results_up) return;
+    NetRoom room;
+    lobby_room(&room);
+    hill_results_strip(dl, menu_frame(display), g_hill_menu_now, room);
 }
 
 // Room chat over a match (social_ui.inc): read once a frame, drawn by draw_fight_chat.
@@ -5412,6 +5522,11 @@ bool draw_pages(ImVec2 display)
     if (gallery_on() && G_hill_hud.count) {     // the spectator HUD's pages: over a stand-in for the fight
         backdrop(dl, f, display, true, LOOK_MATCH);
         hill_hud(dl, f, G_hill_hud, room);
+        return true;
+    }
+    if (gallery_on() && G_hill_menu.results) {  // build 73: the results' strip, over a stand-in for them
+        backdrop(dl, f, display, true, LOOK_MATCH);
+        hill_results_strip(dl, f, G_hill_menu, room);
         return true;
     }
     // Over any screen but the main menu (after a match: the battle menu) every page is full-screen.
@@ -5699,6 +5814,8 @@ void draw_versus(ImDrawList *, ImVec2) {}
 const char *shot_label() { return nullptr; }
 bool hill_hud_wanted() { return false; }
 void draw_hill_hud(ImDrawList *, ImVec2) {}
+bool hill_results_wanted() { return false; }
+void draw_hill_results(ImDrawList *, ImVec2) {}
 bool fight_chat_wanted() { return false; }
 bool draw_fight_chat(ImDrawList *, ImVec2) { return false; }
 bool fight_chat_typing() { return false; }

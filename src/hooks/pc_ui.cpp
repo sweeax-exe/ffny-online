@@ -4426,6 +4426,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     bool fightchat = !g_open.load() && !versus && !decor && online_screen::fight_chat_wanted();
     // A hill fight watched live (build 70): the spectator HUD over it, drawing only.
     bool hillhud = !g_open.load() && !versus && !decor && online_screen::hill_hud_wanted();
+    // ... and over this PC's own hill fight's results, the room menu's strip (build 73), drawing only
+    bool hillres = !g_open.load() && !versus && !decor && !hillhud && online_screen::hill_results_wanted();
     static bool fc_held;
     auto fight_chat_hold = [&](bool typing) {
         if (typing && !fc_held) {
@@ -4458,7 +4460,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (g_note.open) toast = false;     // F9's "taking a picture" would sit over the box
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
-    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !offer) { ui_unlock(); return; }
+    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !offer) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -4538,6 +4540,14 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         } catch (...) {
             static int logged;
             if (logged++ < 20) fprintf(stderr, "[SOCIAL] caught: an exception (hill HUD)\n");
+        }
+    }
+    if (hillres) {
+        try {
+            online_screen::draw_hill_results(ImGui::GetForegroundDrawList(), io.DisplaySize);
+        } catch (...) {
+            static int logged;
+            if (logged++ < 20) fprintf(stderr, "[SOCIAL] caught: an exception (hill results strip)\n");
         }
     }
     if (fightchat) fight_chat_hold(online_screen::draw_fight_chat(ImGui::GetForegroundDrawList(), io.DisplaySize));
