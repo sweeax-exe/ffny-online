@@ -1584,7 +1584,17 @@ static void spec_play_summary(void);
 /* A fighter's lockstep waits mid-fight (build 70, for the hill watchers' tests: a watcher must never hold
  * the fighters up): waits of 100 ms or more for another player's entries once the fight is under way, and
  * the longest, logged when the match ends for this PC. */
-static struct { unsigned n; ULONGLONG longest; } g_fight_waits;
+static struct { unsigned n; ULONGLONG longest; int told; } g_fight_waits;
+
+/* Once per fight of this PC's own, at its decision or its end: a hill fighter's game is often taken
+ * straight to its next fight (the deferred START) without end_hub_match. */
+static void fight_waits_log(void)
+{
+    if (g_fight_waits.told || N.watching || !N.fighting_seen) return;
+    g_fight_waits.told = 1;
+    fprintf(stderr, "[NETPLAY] fight waits: %u of 100 ms or more mid-fight, the longest %llu ms\n", g_fight_waits.n,
+            (unsigned long long)g_fight_waits.longest);
+}
 
 static void end_hub_match(const char *why)
 {
@@ -1594,9 +1604,7 @@ static void end_hub_match(const char *why)
     assign_input(0);
     SetEvent(N.arrived);
     disarm_crash_report();
-    if (!N.watching && N.match_seen)
-        fprintf(stderr, "[NETPLAY] fight waits: %u of 100 ms or more mid-fight, the longest %llu ms\n", g_fight_waits.n,
-                (unsigned long long)g_fight_waits.longest);
+    if (N.match_seen) fight_waits_log();
     memset(&g_fight_waits, 0, sizeof(g_fight_waits));
     N.match_live = N.match_seen = 0;
     N.over_pending = 1;
@@ -3312,6 +3320,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.players = count;
     N.fighters = m.count;
     N.start_cpu = m.count > count ? cpu : NETPLAY_CPU_HARD;
+    memset(&g_fight_waits, 0, sizeof(g_fight_waits));    /* a new fight's own waits */
     N.pos = pos;
     N.watching = watching;
     N.hill_watch = hill_watch;
@@ -7043,6 +7052,7 @@ static void koth_check_result(int final)
     N.koth_sent = 0;
     N.koth_winner = winner;
     LeaveCriticalSection(&g_cs);
+    fight_waits_log();
     fprintf(stderr, "[NETPLAY] %s: the fight is decided (%s; code %04X, phase %u), winner %s %d; sending RESULT\n",
             N.rot_match ? "FFA rotation" : N.koth_match ? "King of the Hill" : "ranked set", how, (unsigned)code, (unsigned)phase, winner == (int)WINNER_DRAW ? "none, slot" : "room slot", winner);
 }
@@ -8446,39 +8456,49 @@ static void hill_stop_watching(const char *why)
 static void hill_leave_tick(void)
 {
     static unsigned tries;
+    static const char *told;
+    const char *wait = NULL;
     ULONGLONG now;
     uint32_t sm;
-    if (!N.hill_leave || !N.lobby) { tries = 0; return; }
+    if (!N.hill_leave || !N.lobby) { tries = 0; told = NULL; return; }
     now = GetTickCount64();
     if (N.spec_quit) {                  /* spec_tick leaves the fight first; with the next fight's START set up */
         if (N.watching) return;         /* (no longer watching) this tick does it */
         N.spec_quit = 0;
     }
-    /* still loading the watched fight: it first (with a deferred START the session is the next fight's) */
-    if (!N.start_deferred && N.watching && N.match_live && !N.match_seen) return;
     sm = MEM32(0x002FB148u + 0x17u * 4u);
-    if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;     /* a screen loads: later */
-    if (memcard_save_busy()) return;
     if (!N.spec_results) {
-        /* in the fight, or its knockout's scene: the pause menu's Quit once it can, else the summary */
+        /* in the fight, or its knockout's scene: the pause menu's Quit once it can (spec_quit_fight checks the
+         * screen itself), else the summary. Still loading the watched fight: it first (with a deferred START
+         * the session is the next fight's already) */
         int r;
         if (N.lockstep) {
             InterlockedExchange(&N.lockstep, 0);
             SetEvent(N.arrived);
         }
-        if (tries > 600 || N.hill_quit_at) return;     /* given up, or quit already: the menus come */
-        r = spec_quit_fight("watching the hill");
-        if (r > 0) { tries = 601; N.hill_quit_at = now; }
-        else if (r < 0 && ++tries == 600)
-            fprintf(stderr, "[NETPLAY] watching: the fight screen does not take the Quit; leaving at the summary\n");
-        return;
+        if (!N.start_deferred && N.watching && N.match_live && !N.match_seen) wait = "the fight still loads";
+        else if (tries > 600 || N.hill_quit_at) wait = "the fight is quit; the menus come";
+        else {
+            r = spec_quit_fight("watching the hill");
+            if (r > 0) { tries = 601; N.hill_quit_at = now; }
+            else if (r < 0 && ++tries == 600)
+                fprintf(stderr, "[NETPLAY] watching: the fight screen does not take the Quit; leaving at the summary\n");
+            else if (r == 0) wait = "a screen loads";
+        }
+    } else if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) {
+        wait = "a screen loads";
+    } else if (memcard_save_busy()) {
+        wait = "the memory card saves";
+    } else if (now - N.spec_results >= 1000 && !(N.hill_quit_at && now - N.hill_quit_at < 5000)) {
+        tries = 0;
+        N.hill_quit_at = now;
+        fprintf(stderr, "[NETPLAY] watching: leaving the hill fight's summary (%s, %.1f s after the leave began): Game.Quit()\n",
+                N.hill_leave_why ? N.hill_leave_why : "?", (now - N.hill_leave_at) / 1000.0);
+        defjam_menu_call("Game.Quit()");
     }
-    if (now - N.spec_results < 1000 || (N.hill_quit_at && now - N.hill_quit_at < 5000)) return;
-    tries = 0;
-    N.hill_quit_at = now;
-    fprintf(stderr, "[NETPLAY] watching: leaving the hill fight's summary (%s, %.1f s after the leave began): Game.Quit()\n",
-            N.hill_leave_why ? N.hill_leave_why : "?", (now - N.hill_leave_at) / 1000.0);
-    defjam_menu_call("Game.Quit()");
+    if (wait && wait != told)
+        fprintf(stderr, "[NETPLAY] watching: leaving the hill fight (%s): %s\n", N.hill_leave_why ? N.hill_leave_why : "?", wait);
+    told = wait ? wait : told;
 }
 
 /* A player's fight that went out of sync and that the other players left (the wait in netplay_on_step):

@@ -110,7 +110,7 @@ def _rb_relay_extra(rollback, modes=None):
     return ["-rollback-modes", modes or "all"] if rollback == "mandatory" else []
 
 
-HILL_LIVE = "this PC watches (a hill fight, live)"   # netplay.c on_start_as, build 70
+HILL_LIVE_UP = "since the START (watching)"   # netplay.c: a watched fight under way (in hill rooms, build 70)
 NOTE_SENT = "[REPORT] note after the match for report "     # ... sent: HTTP <status> (bug_report.c, the note after the match)
 
 
@@ -1731,7 +1731,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         if reports:
             watch = watch + [NOTE_SENT]
         if mode in ("koth", "ffarot"):
-            watch = watch + [HILL_LIVE]     # build 70: a waiting copy runs the fight it watches
+            watch = watch + [HILL_LIVE_UP]  # build 70: a waiting copy runs the fight it watches
         for i in range(players):
             # which way the copy's fighter approaches: Team puts room slots 0 and 1 on the left and 2 and
             # 3 on the right; on the hill (the KO winner is slot 0) copy 0 stays king on the left and
@@ -1900,13 +1900,13 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                         for k in range(len(cs)):
                             _png(s, k, "%s-copy%d" % (name, k), shots)
             if mode in ("koth", "ffarot"):
-                # build 70: each copy's first two watched fights, 30 s after their START (loaded, mid-fight;
-                # with the test knockout at step 600 the fight lasts about 10 s more)
+                # build 70: each copy's first two watched fights, 6 s after they are under way on it (mid-fight:
+                # the test knockout comes at step 600, 10 s in)
                 for c in cs:
                     for n in (1, 2):
                         key = ("watch", c.index, n)
-                        if c.watch.count(HILL_LIVE) >= n and key not in more_done:
-                            more_done[key] = time.time() + 30
+                        if c.watch.count(HILL_LIVE_UP) >= n and key not in more_done:
+                            more_done[key] = time.time() + 6
                         due = more_done.get(key)
                         if isinstance(due, float) and time.time() >= due:
                             more_done[key] = True
