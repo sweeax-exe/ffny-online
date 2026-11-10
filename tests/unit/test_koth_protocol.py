@@ -192,7 +192,20 @@ def test_random_venue_matches_the_relay():
     assert m and c_define(NETPLAY_C, 'CAPS_RANDOM_VENUE') == 1 << int(m.group(1)) == c_define(NETPLAY_H, 'NETPLAY_CAP_RANDOM_VENUE')
     m = re.search(r'^\s*VoteRandom\s+uint8\s+=\s+(0x[0-9A-Fa-f]+)', go, re.M)
     assert m and c_define(NETPLAY_H, 'NETPLAY_VOTE_RANDOM') == int(m.group(1), 0)
-    assert 'CAPS_FFAROT | CAPS_RANDOM_VENUE); n += 4;' in NETPLAY_C      # announced in CAPS
+    assert re.search(r'CAPS_FFAROT \| CAPS_RANDOM_VENUE[ |A-Z_]*\); n \+= 4;', NETPLAY_C)      # announced in CAPS
     # every other CAPS bit the client knows is a different one
     bits = [c_define(NETPLAY_C, n) for n in re.findall(r'^#define\s+(CAPS_[A-Z_]+)\s+\d+u', NETPLAY_C, re.M)]
     assert len(bits) == len(set(bits))
+
+
+def test_hill_watch_matches_the_relay():
+    # build 70: live watching in hill rooms (CAPS bit 17, both ways)
+    koth = RELAY_SRC / 'protocol_koth.go'
+    go = koth.read_text(encoding='utf-8')
+    m = re.search(r'^\s*CapHillWatch\s+uint32\s+=\s+1\s*<<\s*(\d+)', go, re.M)
+    if not m:
+        pytest.skip('the relay source checked out has no live hill watching yet (server branch feat/hill-live-watch)')
+    assert c_define(NETPLAY_C, 'CAPS_HILL_WATCH') == 1 << int(m.group(1)) == c_define(NETPLAY_H, 'NETPLAY_CAP_HILL_WATCH')
+    assert re.search(r'CAPS_RANDOM_VENUE \| CAPS_HILL_WATCH\); n \+= 4;', NETPLAY_C)     # announced in CAPS
+    relay = (RELAY_SRC / 'relay.go').read_text(encoding='utf-8')
+    assert 'cl.caps&CapHillWatch != 0' in relay          # answered only to a client that has it

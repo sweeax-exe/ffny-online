@@ -1373,6 +1373,21 @@ static void intro_update(void)
     uint32_t st;
     if (!intro_window()) { g_intro_state = 0xFFFFFFFFu; return; }
     st = MEM32(G_LOGIC_STATE);
+    if (N.watching && N.players >= 4) {
+        /* a watcher of a fight of four: its own pad reads on the fourth fighter's port until the first step
+         * (assign_input), so a face button pressed now can cut that fighter's intro short on this PC alone */
+        static uint32_t told;
+        XBOX_INPUT_STATE ls;
+        int k, down = 0;
+        memset(&ls, 0, sizeof(ls));
+        if (xbox_HostInputGetLocalState(&ls) == ERROR_SUCCESS)
+            for (k = 0; k < 8; k++) if (ls.Gamepad.bAnalogButtons[k] > 30) down = 1;
+        if (down && told != N.match) {
+            told = N.match;
+            fprintf(stderr, "[NETPLAY] watching: this PC's pad pressed during the intros (pre-fight state %d), on the fourth "
+                    "fighter's port\n", (int)st);
+        }
+    }
     if (st != g_intro_state) {
         fprintf(stderr, "[NETPLAY] pre-fight state %d after %u updates of state %d\n", (int)st, g_intro_updates,
                 (int)g_intro_state);
@@ -1641,6 +1656,7 @@ typedef struct { uint32_t match[SPEC_CHUNK]; uint8_t e[SPEC_CHUNK][ENTRY]; } Spe
 static SpecChunk *g_spec[MAXP][SPEC_CHUNKS];
 static NetCheck g_spec_rh[MAXP][SPEC_HASHES], g_spec_lh[SPEC_HASHES];
 static unsigned g_hash_matches;     /* checksums compared and equal, this session */
+static void hill_stop_watching(const char *why);
 static void desync_detail(const NetCheck *mine, const NetCheck *theirs);
 
 /* The spectator's playback buffer. The players' entries reach a spectator unevenly (each player's
@@ -1724,6 +1740,11 @@ static void spec_compare(unsigned k)
                 fprintf(stderr, "[NETPLAY] desync in match %08X at step %u (local %08X, remote %08X; this PC watches, "
                         "player %d)\n", l->match, l->step, l->hash, r->hash, i + 1);
                 if (r->has_parts) desync_detail(l, r);
+                if (N.hill_watch) {     /* build 70: a wrong picture is not worth watching; back to the hill */
+                    InterlockedExchange(&N.lockstep, 0);
+                    hill_stop_watching("out of sync");
+                    toast(8000, "This picture went out of sync with the fighters' (their fight is not affected): back to the hill screen.");
+                } else
                 toast(8000, "This picture went out of sync with the players' (their match is not affected).");
             }
         } else if (++g_hash_matches % 10 == 0) {
