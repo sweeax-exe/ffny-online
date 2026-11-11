@@ -2739,6 +2739,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
 // the same rules (created fighters only where the grid offers them). The pick is made here and sent
 // like any other (READY with the fighter), so both copies of a match get the same fighter.
 const int FIGHTER_RANDOM = -2;
+bool crew_room(const NetRoom &r, NetCrew *out);    // crew_ui.inc: a crew battle's room
 std::vector<int> g_grid_cp;
 const std::vector<OnlineFighter> &grid_fighters()
 {
@@ -2748,7 +2749,14 @@ const std::vector<OnlineFighter> &grid_fighters()
     g_grid_cp.assign(list.size(), -1);
     NetRoom r;
     lobby_room(&r);
-    if (cp_available() && ranked_created_ok(r) && tset_created_ok(r) && !(r.in_room && NETPLAY_IS_HILL(r.settings.mode)) &&
+    // build 76: in King of the Hill and FFA rotation rooms too where the relay plays them (not crew battles)
+    bool hill_cp = false;
+    if (r.in_room && NETPLAY_IS_HILL(r.settings.mode)) {
+        NetCrew cb;
+        int caps = netplay_lobby_caps();
+        hill_cp = caps > 0 && (caps & NETPLAY_CAP_HILL_CREATED) && !crew_room(r, &cb);
+    }
+    if (cp_available() && ranked_created_ok(r) && tset_created_ok(r) && (!(r.in_room && NETPLAY_IS_HILL(r.settings.mode)) || hill_cp) &&
         !fighter_blocked(r, NETPLAY_CREATED_FIGHTER)) {     // build 68: FIGHTER RULES without created fighters
         const std::vector<CpCard> cards = cp_cards();
         styles.assign(cards.size(), std::string());
@@ -3338,12 +3346,33 @@ void draw_up(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, c
     char secs[16];
     snprintf(secs, sizeof(secs), "%d", (v.ms_left + 999) / 1000);
     text(dl, f, g_title, 64, 594, 206, v.ms_left < 6000 ? RED : CREAM, secs, RIGHT, 2.0f);
-    rect(dl, f, 242, 290, 352, 6, IM_COL32(255, 255, 255, 30), 3);
-    rect(dl, f, 242, 290, 352 * std::min(1.0f, v.ms_left / 20000.0f), 6, v.ms_left < 6000 ? RED : ORANGE, 3);
+    {   // the bar: of the call's whole time (build 76: up to 50 s after a fight; before it, 20 s)
+        static uint32_t call_key;
+        static int call_ms = 20000;
+        uint32_t key = (uint32_t)r.hill.fights * 64u + (uint32_t)r.you + 1u;
+        if (key != call_key || v.ms_left > call_ms) { call_key = key; call_ms = std::max(20000, v.ms_left); }
+        rect(dl, f, 242, 290, 352, 6, IM_COL32(255, 255, 255, 30), 3);
+        rect(dl, f, 242, 290, 352 * std::min(1.0f, v.ms_left / (float)call_ms), 6, v.ms_left < 6000 ? RED : ORANGE, 3);
+    }
+    NetHillMenu m = hill_menu();
     std::string say_line = pad_text(ready ? (v.rot ? "Waiting for the others to press {a}..." : "Waiting for your opponent to press {a}...")
                                           : "Press {a} now: not ready in time sends you to the back of the line.");
+    if (m.readyup) {
+        // build 76: the fight waits for every called player's READY here; who it still waits for
+        std::string wait;
+        for (int i = 0; i < r.hill.count; i++) {
+            const NetHillEntry &e = r.hill.line[i];
+            if (e.slot != r.you && e.state == NETLINE_CALLED) wait += (wait.empty() ? "" : ", ") + upper(slot_name(r, e.slot));
+        }
+        text(dl, f, g_hand, 18, 242, v.rot ? 212 : 202, ready ? GREEN : ORANGE,
+             ready ? (wait.empty() ? "EVERYONE'S READY: HERE WE GO" : ("WAITING FOR " + wait).c_str())
+                   : "THE FIGHT WAITS FOR YOU", LEFT, 1.0f, 250);
+        if (!ready)
+            say_line = pad_text("{x} CHOOSE FIGHTER first if you want, then {a} READY. Not ready in time: back of the line.");
+        else if (!wait.empty())
+            say_line = pad_text(v.rot ? "The fight starts when everyone pressed {a}." : "The fight starts when your opponent presses {a}.");
+    }
     {   // build 73: called on the last fight's results: it readies by itself (the others never wait long)
-        NetHillMenu m = hill_menu();
         if (!ready && m.auto_ms >= 0) {
             char buf[128];
             snprintf(buf, sizeof(buf), "Ready by itself in %d s with this fighter: {x} picks another first, {b} leaves.",
@@ -4445,6 +4474,9 @@ void gallery_step()
                                          // build 73: the room menu between fights (the results' strip, its next
                                          // fight set and START held; called on the results, readying by itself)
                                          "rot-results", "rot-results-set", "rot-up-auto",
+                                         // build 76: the fight waits for READY on the room screen (the king after
+                                         // a win, waiting; FFA rotation, readied, waiting for two; the strip)
+                                         "up-wait", "rot-up-wait", "rot-results-room",
                                          // build 30: the server choice
                                          "connecting-auto", "hub-server", "servers", "servers-offline", "hub-ranked-na",
                                          "room-ping", "offline-server",
@@ -4589,7 +4621,7 @@ void gallery_step()
     S.watch_hidden = 0;
     G_hill_hud = NetHillWatch();
     G_hill_menu = NetHillMenu();
-    G_hill_menu.auto_ms = G_hill_menu.pick = -1;
+    G_hill_menu.auto_ms = G_hill_menu.pick = G_hill_menu.room_ms = -1;
     S.note_until = 0;
     S.settings_edit = false;
     {   // the relays as a player in Europe sees them, the hub on Europe
@@ -4879,7 +4911,7 @@ void gallery_step()
         w.king = 0;
         w.streak = 3;
         w.called = p == "hill-hud-up";
-    } else if (p == "hill" || p == "up" || p == "watch") {
+    } else if (p == "hill" || p == "up" || p == "up-wait" || p == "watch") {
         S.page = HUB;
         NetRoom &r = G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 9);
         NetHill &h = r.hill;
@@ -4899,6 +4931,17 @@ void gallery_step()
             h.line[0].state = NETLINE_READY;
             std::swap(h.line[1], h.line[2]);    // this PC (slot 0) is called against the king
             h.line[1].state = NETLINE_CALLED;
+        } else if (p == "up-wait") {
+            // build 76: this PC (slot 0) won the last fight and is king; its challenger is ready, the fight waits
+            h.phase = NETHILL_CALLING;
+            h.king = 0;
+            h.streak = 1;
+            h.ms_left = 31000;
+            h.last_winner = 0; h.last_loser = 2;
+            std::swap(h.line[0], h.line[2]);
+            h.line[0].state = NETLINE_CALLED;
+            h.line[1].state = NETLINE_READY;
+            G_hill_menu.readyup = 1;
         } else {
             h.phase = NETHILL_FIGHTING;
             h.line[0].state = h.line[1].state = NETLINE_FIGHTING;
@@ -4907,14 +4950,15 @@ void gallery_step()
             h.watch_slots[0] = 1; h.watch_slots[1] = 2;
             h.watch_fighters[0] = r.players[1].fighter; h.watch_fighters[1] = r.players[2].fighter;
         }
-    } else if (p == "rot-results" || p == "rot-results-set") {
+    } else if (p == "rot-results" || p == "rot-results-set" || p == "rot-results-room") {
         // build 73: Ann's FFA rotation fight is over; the results' strip over a stand-in for them
         G.room = sample_room(NETPLAY_MODE_FFAROT, NETPLAY_FFAROT_SLOTS, 4);
         G.room.hill.valid = 1;
         G_hill_menu.results = 1;
         if (p == "rot-results") G_hill_menu.auto_ms = 6200;
+        else if (p == "rot-results-room") { G_hill_menu.readyup = 1; G_hill_menu.room_ms = 7400; }
         else { G_hill_menu.next_set = 1; G_hill_menu.hold_ms = 700; G_hill_menu.hold_total_ms = 1200; }
-    } else if (p == "rot" || p == "rot-up" || p == "rot-up-auto" || p == "rot-watch" || p == "rot-fight") {
+    } else if (p == "rot" || p == "rot-up" || p == "rot-up-auto" || p == "rot-up-wait" || p == "rot-watch" || p == "rot-fight") {
         // FFA rotation: eight in the room; Cal won the last FFA and stays on, Ben, Dee and Ann (this PC)
         // are called with him; the others wait
         S.page = HUB;
@@ -4936,6 +4980,7 @@ void gallery_step()
         if (p == "rot") { h.line[0].state = h.line[1].state = NETLINE_READY; std::swap(h.line[3], h.line[4]); h.line[3].state = NETLINE_CALLED; h.line[4].state = NETLINE_WAITING; }
         else if (p == "rot-up") { h.line[0].state = h.line[2].state = NETLINE_READY; }
         else if (p == "rot-up-auto") { h.line[0].state = h.line[2].state = NETLINE_READY; G_hill_menu.auto_ms = 5400; }
+        else if (p == "rot-up-wait") { h.line[3].state = NETLINE_READY; h.ms_left = 27000; G_hill_menu.readyup = 1; }
         else {
             // rot-watch: Ann waits while four fight; rot-fight: the room page during it (B on the watch screen)
             std::swap(h.line[3], h.line[4]);
@@ -5362,6 +5407,11 @@ void hill_results_strip(ImDrawList *dl, const Frame &f, const NetHillMenu &m, co
     }
     if (m.auto_ms >= 0 && !m.room_req && !m.next_set && !m.room_next)
         snprintf(note, sizeof(note), "You're up again: ready by itself in %d s.", (m.auto_ms + 999) / 1000);
+    if (m.readyup && m.room_ms >= 0 && !m.room_req && !m.next_set && !m.room_next) {
+        // build 76: every fight ends on the room screen; the next one waits for READY there
+        snprintf(head, sizeof(head), "%s: ROOM MENU NOW", st);
+        snprintf(note, sizeof(note), "To the room in %d s: pick a fighter, then READY.", (m.room_ms + 999) / 1000);
+    }
     // line 1: the mode, the note; line 2: what START does, and holding it
     text(dl, f, g_title, 11, x + 20, y + 5, rot ? ORANGE : GOLD, mode, LEFT, 0.9f);
     float tw = text_width(f, g_title, 11, mode) + 12;

@@ -156,6 +156,7 @@ typedef struct NetRoom {
 #define NETPLAY_CAP_YIELD 4
 #define NETPLAY_CAP_SPECTATE 16    /* spectator mode: rooms can be watched (netplay_lobby_spectate) */
 #define NETPLAY_CAP_FFAROT 8192    /* FFA rotation rooms (NETPLAY_MODE_FFAROT, build 66) */
+#define NETPLAY_CAP_HILL_CREATED 524288 /* build 76: created fighters in King of the Hill and FFA rotation rooms */
 #define NETPLAY_CAP_RANDOM_VENUE 16384  /* RANDOM in the venue vote (build 67): netplay_lobby_vote(NETPLAY_VOTE_RANDOM) */
 /* NetRoomPlayer.voted and netplay_lobby_vote(): RANDOM, the relay draws the venue from the room's pool when
  * it wins. Only with relays answering NETPLAY_CAP_RANDOM_VENUE. */
@@ -343,6 +344,8 @@ typedef struct {
     int hold_ms, hold_total_ms; /* START held this long towards leaving the room, of the hold that leaves */
     unsigned stopped_seed;      /* the watched fight START left for the room screen (0: none) */
     int pick;                   /* this PC's pick the room does not have yet (-1: none) */
+    int readyup;                /* build 76: the relay waits for READY on the room screen (no auto-ready) */
+    int room_ms;                /* build 76: its results leave for the room screen in this many ms (-1: not) */
 } NetHillMenu;
 int netplay_hill_menu(NetHillMenu *out);
 /* Tests and pad scripts: 1 while the game runs a fight this PC only watches in a hill room; the front

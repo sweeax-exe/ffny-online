@@ -1616,7 +1616,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
            rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None,
            linger=None, reports=False, fighter_rules=None, max_ping=None, banned_tier=None, room_menu=None,
-           results_leave=None):
+           results_leave=None, hill_pick=None, hill_idle=None):
     """room_menu (build 73, King of the Hill or FFA rotation): "COPY@K:F", copy COPY presses START on the results of
     its K-th fight (RECOMP_TEST_HILL_ROOM) and so goes to the room screen, where it picks fighter F (default 7);
     results_leave: "COPY@K", copy COPY holds START on the results of its K-th fight and leaves the room
@@ -1624,6 +1624,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     copy's next fight and in the others' STARTs, no START for the leaver after it left, the others fighting on, and
     the gaps from a fight's decision to the next fight (no longer than HILL_GAP_LIMIT: the room keeps rotating).
     The copy's results strip and its room screen are captured (results-strip-copyN, room-menu-copyN).
+    hill_pick (build 76): "COPY@K:F", copy COPY picks fighter F on the room screen it comes back to after its K-th
+    fight (RECOMP_TEST_HILL_PICK; with linger the results leave by themselves); hill_idle: "COPY@K", copy COPY never
+    readies from its K-th call on (RECOMP_TEST_HILL_IDLE). The result's `ready_up` (hill_ready_check) says per copy
+    how often it came back to the room screen, whether anything readied it by itself, the relay's ready times
+    after fights, the pick in the next START and the idle copy's skips.
     reports (build 68): a local account service with test accounts (not ranked) keeps the copies' F9 reports in
     <session>/reports; the result's `bug_reports` lists them (files, note.txt). With RECOMP_TEST_REPORT_NOTE in a
     copy's environment the run waits, after the matches, up to 45 s for that copy's note after the match to be sent.
@@ -1702,6 +1707,16 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                          "spectate_after": spectate_after, "spectate_delay": spectate_delay}}
     if room_menu or results_leave:
         result["params"].update({"room_menu": room_menu, "results_leave": results_leave})
+    pick_copy = idle_copy = None
+    if hill_pick:
+        who, _, rest = str(hill_pick).partition("@")
+        k, _, f = rest.partition(":")
+        pick_copy = (int(who), int(k or 1), int(f or 7))
+    if hill_idle:
+        who, _, k = str(hill_idle).partition("@")
+        idle_copy = (int(who), int(k or 1))
+    if hill_pick or hill_idle:
+        result["params"].update({"hill_pick": hill_pick, "hill_idle": hill_idle})
     shots, problems = [], []
     stop_reason = None
     logs = {}
@@ -1756,7 +1771,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             watch = watch + [NOTE_SENT]
         if mode in ("koth", "ffarot"):
             # build 70: a waiting copy runs the fight it watches; build 73: the room menu's marks
-            watch = watch + [HILL_LIVE_UP, HILL_ROOM_UP, HILL_ROOM_LEFT]
+            watch = watch + [HILL_LIVE_UP, HILL_ROOM_UP, HILL_ROOM_LEFT, HILL_READYUP_BACK]
         for i in range(players):
             # which way the copy's fighter approaches: Team puts room slots 0 and 1 on the left and 2 and
             # 3 on the right; on the hill (the KO winner is slot 0) copy 0 stays king on the left and
@@ -1837,6 +1852,12 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 env.setdefault("RECOMP_NETPLAY_READY_DELAY_MS", "4000")
             if results_leaver and i == results_leaver[0]:
                 env["RECOMP_TEST_HILL_LEAVE"] = str(results_leaver[1])
+            if pick_copy and i == pick_copy[0]:
+                env["RECOMP_TEST_HILL_PICK"] = "%d:%d" % (pick_copy[1], pick_copy[2])
+                # its "YOU'RE UP" screen stays up a while before it readies (the capture; the pick goes first)
+                env.setdefault("RECOMP_NETPLAY_READY_DELAY_MS", "6000")
+            if idle_copy and i == idle_copy[0]:
+                env["RECOMP_TEST_HILL_IDLE"] = str(idle_copy[1])
             fx = fixtures[i] if fixtures and i < len(fixtures) and fixtures[i] else None
             root = s.make_root(i, fixture=os.path.abspath(fx) if fx else None)
             before[i] = _save_files(root)
@@ -1877,11 +1898,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             s.poll()
             cs = list(s.copies.values())
             rewards = [c.watch.count("[FUNCCALL] Game.UpdateMatchRewardsPoints()") for c in cs]
-            if linger is not None or menu_copy or results_leaver:
+            if linger is not None or menu_copy or results_leaver or pick_copy or idle_copy:
                 # a copy taken off its results by the game may skip the rewards (and the lingering one always
                 # does; so does one that went to the room screen or left from them): each fight's summary counts
                 rewards = [c.watch.count("[FUNCCALL] Game.GetMatchSummary(0)") for c in cs]
-            gone = set([leaver[0]] if leaver else []) | set([results_leaver[0]] if results_leaver else [])
+            gone = set([leaver[0]] if leaver else []) | set([results_leaver[0]] if results_leaver else []) | set([idle_copy[0]] if idle_copy else [])
             if spectate_after and len(cs) == players and rewards[0] >= spectate_after and not spectate_due:
                 spectate_due = time.time() + float(spectate_delay or 0)
             if spectate_due and len(cs) == players and time.time() >= spectate_due:
@@ -1943,6 +1964,15 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                         if isinstance(due, float) and time.time() >= due:
                             more_done[key] = True
                             _png(s, c.index, "watch-w%d-copy%d" % (n, c.index), shots)
+            if pick_copy and pick_copy[0] < len(cs):
+                # build 76: the picking copy's room screen while the fight waits for its READY
+                c = cs[pick_copy[0]]
+                if c.watch.count(HILL_READYUP_BACK) and "readyup" not in more_done:
+                    more_done["readyup"] = time.time() + 3.0
+                due = more_done.get("readyup")
+                if isinstance(due, float) and time.time() >= due:
+                    more_done["readyup"] = True
+                    _png(s, c.index, "room-wait-copy%d" % c.index, shots)
             if menu_copy and menu_copy[0] < len(cs):
                 # build 73: the room-menu copy's results strip (just into its K-th fight's summary, before the
                 # test's START), then its room screen
@@ -2043,13 +2073,22 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         ok = ok and not any(p.startswith("cpu:") for p in problems)
     if mode in ("koth", "ffarot"):
         result["hill_gaps"], result["hill_forced"], result["hill_gaps_watched"] = hill_gap_check(logs, linger, problems)
+        if idle_copy:   # build 76: a fight that waited for the idle copy's ready time (50 s after a fight) is longer
+            problems[:] = [p for p in problems if "between a fight's decision and the next fight" not in p]
         result["hill_watch"] = hill_watch_check(analyses, logs, problems)
         if linger is not None or menu_copy:     # taken off the summary by the game: no rewards step (expected)
             problems[:] = [p for p in problems if not re.match(r"m\d+ copy \d+: summary not accepted", p)]
             ok = not problems       # online_rows failed on those alone otherwise
+    if pick_copy or idle_copy:
+        result["ready_up"] = hill_ready_check(logs, rot_relay_log, pick_copy, idle_copy, problems)
+        if idle_copy:   # it fights no more after it went idle: not a match row
+            analyses.pop(idle_copy[0], None)
+            problems[:] = [p for p in problems if not p.startswith("m") or " copy %d" % idle_copy[0] not in p]
+            ok = not problems   # online_rows failed on the idle copy's rows alone otherwise
     if mode == "ffarot":
         result["rotation"] = rotation_check(logs, rot_relay_log, matches, players, problems,
-                                            leaver or ((results_leaver[0], None) if results_leaver else None))
+                                            leaver or ((results_leaver[0], None) if results_leaver else None) or
+                                            ((idle_copy[0], idle_copy[1], "idle") if idle_copy else None))
     if maintenance:
         told = [i for i, p in logs.items() if "the relay restarts in" in logparse.read_text(p)]
         result["maintenance_told"] = told
@@ -2093,6 +2132,82 @@ def cpu_check(logs, level, humans_out, leaver, problems, players=2):
     return out
 
 
+HILL_READYUP_BACK = "[NETPLAY] hill: on the room screen after this PC's fight"
+
+
+def hill_ready_check(logs, relay_log, pick_copy, idle_copy, problems):
+    """Build 76, the room screen between hill fights: every copy hears that the relay waits for READY there, and
+    nothing readies a copy by itself (build 73's auto-ready); every copy comes back to the room screen after its
+    fights (never from its results straight into the next one); the relay's calls after a fight get the longer
+    ready time; pick_copy (COPY, K, F): the copy picked F on the room screen after its K-th fight, the next START
+    names F for it (on every copy), and that START came only after the copy readied; idle_copy (COPY, K): the copy
+    stayed idle from its K-th call and the relay skipped it."""
+    out = {"copies": {}}
+    for i, p in sorted(logs.items()):
+        text = logparse.read_text(p)
+        c = {"relay_waits": "the relay waits for READY on the room screen" in text,
+             "backs": text.count(HILL_READYUP_BACK),
+             "decided": len(re.findall(r"\[NETPLAY\] \S.*?: the fight is decided", text)),
+             "auto_ready": text.count("hill: called again straight after the fight"),
+             "straight_in": text.count("back from the last fight's results: setting up"),
+             "left_by_itself": text.count("the results' time is up")}
+        out["copies"][str(i)] = c
+        if not c["relay_waits"]:
+            problems.append("ready-up: copy %d never heard that the relay waits for READY on the room screen" % i)
+        if c["auto_ready"]:
+            problems.append("ready-up: copy %d readied itself %d times" % (i, c["auto_ready"]))
+        if c["straight_in"]:
+            problems.append("ready-up: copy %d went from its results straight into the next fight %d times" % (i, c["straight_in"]))
+        if c["decided"] and c["backs"] < c["decided"] - 1:   # the last fight's way back may be cut by the stop
+            problems.append("ready-up: copy %d back on the room screen %d times after %d fights" % (i, c["backs"], c["decided"]))
+    rtext = logparse.read_text(relay_log) if relay_log and os.path.isfile(relay_log) else ""
+    times = [float(t) for t in re.findall(r"koth: calling (?:c=\S+(?: and )?)+ \(ready time ([\d.]+) s\)", rtext)]
+    out["relay_ready_times"] = times
+    if not any(t > 30 for t in times):
+        problems.append("ready-up: the relay never gave a call after a fight the longer ready time: %s" % times)
+    if pick_copy:
+        i, k, f = pick_copy
+        text = logparse.read_text(logs[i]) if i in logs else ""
+        at = text.find("tests: fighter %d picked on the room screen (RECOMP_TEST_HILL_PICK)" % f)
+        after = text[at:] if at >= 0 else ""
+        ready_at = after.find("tests: called on the hill; ready with fighter")
+        start_at = after.find("[NETPLAY] START: seed")
+        m = re.search(r"\[NETPLAY\] START: seed \w+, .* this PC is player (\d+)[^\n]*\n(?:.*\n){0,6}?.*START: fighters ([\d ]+)", after)
+        mine = None
+        if m:
+            fs = [int(x) for x in m.group(2).split()]
+            pos = int(m.group(1)) - 1
+            mine = fs[pos] if 0 <= pos < len(fs) else None
+        others = sorted(j for j, p in logs.items() if j != i and str(f) in
+                        [x for st in re.findall(r"START: fighters ([\d ]+)", logparse.read_text(p)) for x in st.split()])
+        c = {"picked": at >= 0, "readied_before_start": 0 <= ready_at < start_at if start_at >= 0 else False,
+             "next_fighter": mine, "others_saw_pick": others}
+        out["pick"] = c
+        if not c["picked"]:
+            problems.append("ready-up: copy %d never picked fighter %d on the room screen" % (i, f))
+        elif start_at < 0:
+            problems.append("ready-up: copy %d fought no fight after its pick" % i)
+        else:
+            if not c["readied_before_start"]:
+                problems.append("ready-up: copy %d's next fight started before it pressed READY" % i)
+            if mine != f:
+                problems.append("ready-up: copy %d fought its next fight with %s, not the pick %d" % (i, mine, f))
+            if not others:
+                problems.append("ready-up: no other copy's START named the pick %d" % f)
+    if idle_copy:
+        i, k = idle_copy
+        text = logparse.read_text(logs[i]) if i in logs else ""
+        skips = re.findall(r"koth: c=\S+ skipped \(not ready, (\d+) in a row, away=(\w+)\)", rtext)
+        c = {"idle": "staying idle on the room screen (RECOMP_TEST_HILL_IDLE)" in text, "relay_skips": len(skips),
+             "away": any(a == "true" for _, a in skips)}
+        out["idle"] = c
+        if not c["idle"]:
+            problems.append("ready-up: copy %d never stayed idle when called" % i)
+        elif not skips:
+            problems.append("ready-up: the relay never skipped the idle copy %d" % i)
+    return out
+
+
 HILL_GAP_LIMIT = 35.0     # s from a fight's decision to the next one under way, with one copy idle on its results
 
 
@@ -2118,7 +2233,8 @@ def hill_gap_check(logs, linger, problems):
                 saw_watch = True
             else:
                 (watched if saw_watch else gaps)[i].append(float(m.group(1)))
-        forced[i] = len(re.findall(r"hill: still on the results", text))
+        # build 76: with the room screen between fights the results leave for it by themselves (hill_readyup_tick)
+        forced[i] = len(re.findall(r"hill: still on the results|the results' time is up", text))
     if linger is not None:
         worst = max(gaps.get(int(linger)) or [0.0])
         if worst > HILL_GAP_LIMIT:
@@ -2265,6 +2381,9 @@ def rotation_check(logs, relay_log, matches, players, problems, leaver=None):
     out = {"copies": {}, "relay": {}}
     fighting = min(players, 4)
     left = leaver[0] if leaver else None
+    # the first fight with one fighter fewer: the second (a leaver in the first), or with an idle copy (build 76,
+    # leaver (COPY, K, 'idle'): idle from its K-th call) the K-th
+    short_from = (leaver[1] - 1) if leaver and len(leaver) > 2 else 1
     for i, p in logs.items():
         text = logparse.read_text(p)
         c = {"rot_starts": text.count("(an FFA rotation fight)"),
@@ -2290,7 +2409,7 @@ def rotation_check(logs, relay_log, matches, players, problems, leaver=None):
     if len(fights) < matches:
         problems.append("relay: %d FFA rotation fights started, want %d" % (len(fights), matches))
     for k, (mode, slots) in enumerate(fights[:matches]):
-        n = fighting if k == 0 or left is None else min(players - 1, 4)
+        n = fighting if k < short_from or left is None else min(players - 1, 4)
         wm = want_mode if n == fighting else ("3" if n == 4 else "2" if n == 3 else "0")
         if mode != wm or len(slots.split()) != n:
             problems.append("relay: fight %d mode %s slots [%s], want mode %s with %d" % (k + 1, mode, slots, wm, n))

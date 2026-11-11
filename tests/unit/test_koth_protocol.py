@@ -235,6 +235,34 @@ def test_hill_watch_matches_the_relay():
     if not m:
         pytest.skip('the relay source checked out has no live hill watching yet (server branch feat/hill-live-watch)')
     assert c_define(NETPLAY_C, 'CAPS_HILL_WATCH') == 1 << int(m.group(1)) == c_define(NETPLAY_H, 'NETPLAY_CAP_HILL_WATCH')
-    assert re.search(r'CAPS_RANDOM_VENUE \| CAPS_HILL_WATCH\); n \+= 4;', NETPLAY_C)     # announced in CAPS
+    assert re.search(r'CAPS_RANDOM_VENUE \| CAPS_HILL_WATCH[ |A-Z_]*\); n \+= 4;', NETPLAY_C)     # announced in CAPS
     relay = (RELAY_SRC / 'relay.go').read_text(encoding='utf-8')
     assert 'cl.caps&CapHillWatch != 0' in relay          # answered only to a client that has it
+
+
+def _relay_bit(name):
+    m = re.search(r'^\s*%s\s+uint32\s+=\s+1\s*<<\s*(\d+)' % name, GO, re.M)
+    if not m:
+        pytest.skip('the relay source checked out has no %s yet (server branch feat/hill-ready-up)' % name)
+    return 1 << int(m.group(1))
+
+
+def test_hill_ready_up_matches_the_relay():
+    # build 76: the room screen between hill fights (CAPS bit 18, both ways): announced, answered only to a client
+    # that has it, and the relay's call after a fight lasts KothAfterFight
+    bit = _relay_bit('CapHillReadyUp')
+    assert c_define(NETPLAY_C, 'CAPS_HILL_READYUP') == bit
+    assert re.search(r'\| CAPS_HILL_READYUP[ |A-Z_]*\); n \+= 4;', NETPLAY_C)
+    relay = (RELAY_SRC / 'relay.go').read_text(encoding='utf-8')
+    assert 'cl.caps&CapHillReadyUp != 0' in relay and 'c.KothAfterFight = 50 * time.Second' in relay
+    # the client's room screen gets at least HILL_ROOM_PICK_MS after its results left by themselves
+    assert c_define(NETPLAY_C, 'HILL_ROOM_PICK_MS') <= 50000 - c_define(NETPLAY_C, 'HILL_SUMMARY_MS')
+
+
+def test_hill_created_matches_the_relay():
+    # build 76: created fighters in King of the Hill and FFA rotation rooms (CAPS bit 19, both ways)
+    bit = _relay_bit('CapHillCreated')
+    assert c_define(NETPLAY_C, 'CAPS_HILL_CREATED') == bit == c_define(NETPLAY_H, 'NETPLAY_CAP_HILL_CREATED')
+    assert re.search(r'\| CAPS_HILL_CREATED\); n \+= 4;', NETPLAY_C)
+    relay = (RELAY_SRC / 'relay.go').read_text(encoding='utf-8')
+    assert 'cl.caps&CapHillCreated != 0' in relay

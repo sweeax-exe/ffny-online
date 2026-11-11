@@ -424,6 +424,31 @@ screen with CHOOSE FIGHTER and LEAVE ROOM never came, and the results have no ov
   --results-leave COPY@K` checks them (`room_menu` in the result) and captures the strip and the room screen. The
   gallery has `rot-results`, `rot-results-set` and `rot-up-auto`.
 
+### 9.7 Every fight ends on the room screen (build 76)
+
+Player reports, 2026-11-11: both players should be able to change their fighter between fights, and the next
+fight should start only once everyone readied; a king could change fighter after a win only when its challenger
+was slow to press READY (the 9.6 auto-ready took it into the next fight with the same fighter).
+
+- **No auto-ready** with a relay that answers `CAPS` bit 18 (`CAPS_HILL_READYUP`), in King of the Hill and FFA
+  rotation rooms (crew battles keep readying at once): the call on the results waits for READY on the room screen
+  ("YOU'RE UP", "THE FIGHT WAITS FOR YOU", the countdown, X CHOOSE FIGHTER, A READY; once ready, "WAITING FOR"
+  and the called players who have not pressed it). The next fight starts only when every called player did.
+- **The results leave by themselves** for the room screen (`hill_readyup_tick`, the same way as the 9.6 cap)
+  `HILL_CAP_MS` (15-20 s) after this PC's fight was decided, sooner when it is called and the call would leave it
+  less than `HILL_ROOM_PICK_MS` (25 s) on the room screen. The strip says "To the room in n s". START still goes
+  there at once.
+- **The relay** (`callDeadline`): a call made after a fight that names such a client lasts at least
+  `KothAfterFight` (50 s) from the fight's end, so the king keeps the crown while its results are up; it is
+  skipped (to the back, crown lost; two skips: away) only when it does not READY on the room screen in time.
+  Calls before the first fight and calls naming only older clients keep 20 s; an older client in the room
+  readies itself as in 9.6, and the fight then waits for the others.
+- Tests: `RECOMP_TEST_HILL_PICK=K:F` picks F on the room screen reached after this PC's K-th fight,
+  `RECOMP_TEST_HILL_IDLE=K` never readies from the K-th call on; `dj.py scenario online --mode koth --players 3
+  --matches 4 --linger 0 --hill-pick 0@1:7 --hill-idle 2@2` checks them (`ready_up` in the result) and captures the
+  king's room screen while the fight waits (`room-wait-copy0`). The gallery has `up-wait`, `rot-up-wait` and
+  `rot-results-room`.
+
 ## 10. What is hard, honestly
 
 1. **Spectators running the simulation.** The whole design rests on a third PC reproducing the
