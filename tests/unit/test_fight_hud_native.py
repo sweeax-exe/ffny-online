@@ -295,6 +295,6 @@ def test_wiring():
         assert re.search(r'\{ "online", "%s", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "%s", 0,' % (key, env), settings)
         assert ('`%s`' % key) in (ROOT / 'docs/settings-reference.md').read_text(encoding='utf-8')
     ui = (ROOT / 'src/hooks/pc_ui.cpp').read_text(encoding='utf-8', errors='replace')
-    assert ui.count('settings_group("online", { "hill_watch", "name_tags", "perfect_banner" });') == 2
+    assert ui.count('settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });') == 2
     assert '!fighthud' in ui and 'online_screen::draw_fight_hud(' in ui
     assert 'fight_hud_report_perfect(winners)' in netplay and '\\"perfect\\":[' in netplay
