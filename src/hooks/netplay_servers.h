@@ -124,6 +124,9 @@ typedef struct NetServerPlayer {
  * session) when the last answer is older than 5 s. Cheap to call every frame; does nothing with any
  * other choice. */
 void netservers_fetch_players(void);
+/* The same whatever the choice (build 76: the chat window's ONLINE tab when the account service has no
+ * list of its own); the same 5 s floor per relay. */
+void netservers_fetch_players_all(void);
 /* Who is online on every relay that answered: the hub's relay's WHO list first, then the others'
  * PLAYERLIST lists (answers up to 15 s old) by ping, each in the relay's order (hub, room, fighting;
  * by name), each tagged with its relay. Returns the count, -1 while no relay has answered yet;

@@ -18,6 +18,8 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario social [--off] [--out logs/social-2a]   (the chat window: two copies,
            a local account service with -social; --off: its switch off, one copy, nothing new may show;
            the quick-chat wheel in a room and on GLOBAL, a room report with the room's code)
+    python tools/defjam-mcp/dj.py scenario socialonline [--out DIR]   (build 76: the chat window's ONLINE tab in a
+           room and on the hub, the LEAVE CREW warning, the crew wait refusals with the time left; two copies)
     python tools/defjam-mcp/dj.py scenario roomchat [--out logs/social-2b]   (room chat through the relay: two
            copies and a spectator talk in the room; the spectator's line during the fight shows on the fighters;
            the spectator's quick-chat wheel in the fight reaches them, a fighter's stays shut)
@@ -106,6 +108,8 @@ def cmd_scenario(a):
     elif a.kind == "tset":
         r = scenarios.tset(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out, fast_ko=a.fast_ko,
                            rollback=a.rollback, rollback_modes=a.rollback_modes, **common)
+    elif a.kind == "socialonline":
+        r = scenarios.social_online(timeout=a.timeout or 200, relay_port=a.relay_port, extra_env=env, out_dir=a.out, **common)
     elif a.kind == "social":
         r = scenarios.social(timeout=a.timeout or 300, relay_port=a.relay_port, off=a.off, extra_env=env,
                              out_dir=a.out, stress=a.stress, **common)
@@ -199,7 +203,7 @@ def main(argv=None):
 
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
-                                              "crewbattle", "turf", "tset"])
+                                              "crewbattle", "turf", "tset", "socialonline"])
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")
     sc.add_argument("--stress", action="store_true", help="social: more accounts with emoji, Arabic, combining-mark "
                     "and very long names and lines in every tab")

@@ -628,6 +628,49 @@ void load_ladder()
     changed();
 }
 
+// ---- the ONLINE tab (build 76) ---------------------------------------------------------------------------
+
+std::atomic<bool> g_want_online{false};
+std::atomic<unsigned long long> g_online_asked{0};
+
+void load_online()
+{
+    std::string out;
+    int status = http("GET", "/api/social/online?format=text", nullptr, out, 0, &g_work_live);
+    if (status == 404) {        // a service before build 76: the window lists the relays' players instead
+        std::lock_guard<std::mutex> lk(g_mu);
+        if (!g_v.online_missing) fprintf(stderr, "[SOCIAL] online list: the service has none (older); the relays' lists\n");
+        g_v.online_missing = true;
+        changed();
+        return;
+    }
+    if (status != 200) return;
+    std::vector<OnlinePlayer> list;
+    int total = 0;
+    for (auto &line : split(out, '\n')) {
+        if (!line.compare(0, 6, "total=")) { total = atoi(line.c_str() + 6); continue; }
+        auto f = split(line, '\t');
+        if (f.size() >= 6 && f[0] == "online") {
+            OnlinePlayer p;
+            p.id = atoll(f[1].c_str()); p.name = f[2]; p.tag = f[3]; p.state = f[4]; p.is_friend = f[5] == "1";
+            if (p.id > 0 && !p.name.empty()) list.push_back(p);
+        }
+    }
+    std::lock_guard<std::mutex> lk(g_mu);
+    bool first = !g_v.online_loaded;
+    size_t before = g_v.online_list.size();
+    g_v.online_list = list;
+    g_v.online_total = total;
+    g_v.online_loaded = true;
+    g_v.online_missing = false;
+    changed();
+    if (first || before != list.size()) {
+        std::string names;
+        for (auto &p : list) names += " " + p.name + "=" + p.state + (p.is_friend ? "(friend)" : "");
+        fprintf(stderr, "[SOCIAL] online list: %d of %d:%s\n", (int)list.size(), total, names.c_str());
+    }
+}
+
 void load_all()
 {
     load_friends();
@@ -1069,6 +1112,7 @@ DWORD WINAPI work_thread(LPVOID)
             if (g_dirty_crew.exchange(false)) load_crew();
             if (g_dirty_battle.exchange(false)) load_battle();
             if (g_want_ladder.exchange(false)) load_ladder();
+            if (g_want_online.exchange(false)) load_online();
             if (now - last_global > 60000) {        // the online count beside GLOBAL
                 last_global = now;
                 std::string out;
@@ -1516,6 +1560,18 @@ void battle_answer(const char *answer)
 }
 
 void ladder() { g_want_ladder = true; g_cv.notify_all(); }
+
+// At most every 10 s (the tab calls it every frame it shows); a service without the list: every 2 min.
+void online_want()
+{
+    unsigned long long now = GetTickCount64(), last = g_online_asked;
+    bool missing;
+    { std::lock_guard<std::mutex> lk(g_mu); missing = g_v.online_missing; }
+    if (last && now - last < (missing ? 120000ull : 10000ull)) return;
+    g_online_asked = now;
+    g_want_online = true;
+    g_cv.notify_all();
+}
 
 std::string test_ui_take()
 {

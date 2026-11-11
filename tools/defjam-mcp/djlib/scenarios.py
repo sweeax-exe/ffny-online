@@ -445,6 +445,116 @@ def _stress_social(port, tokens, copy_names, rnd):
     return sent
 
 
+# Build 76: the chat window's ONLINE tab and the crew wait times. Copy 0 opens a room, then its ONLINE tab
+# (copy 1, a friend, on the hub) and the player menu on copy 1 (INVITE TO MY ROOM); it makes a crew, presses
+# LEAVE once (the warning), leaves, then accepts copy 1's crew invite too soon and makes a crew again too
+# soon (both refusals with the time). Copy 1 opens its ONLINE tab (copy 0 in a room).
+SOCIAL_ONLINE_NET = [
+    "wait:3;friend:Copy 1;wait:4;crew:Bronx Kings:BXK;wait:20;crewleave;wait:4;crewjoin;wait:5;crew:Again Crew:AGN;"
+    "wait:4;log",
+    "wait:5;accept;wait:30;crew:Queens Crew:QNS;wait:3;crewinvite:Copy 0;wait:30;log",
+]
+SOCIAL_ONLINE_UI = [
+    "6:room=create;12:chat=online;18:onlinemenu=Copy 1;21:close;22:crewleave1;27:chat=online;31:chat=crew;75:close",
+    "14:chat=online;30:close",
+]
+
+
+def social_online(timeout=200, relay_port=27900, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
+                  out_dir=None):
+    """Two copies at the online hub with a local account service (-social) and relay: the ONLINE tab, the
+    LEAVE CREW warning and the crew wait refusals (build 76). out_dir: copy 0's and copy 1's chat captures
+    as PNG (every one: pick the shots by eye)."""
+    t0 = time.time()
+    s = copies.Session("social-online", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "socialonline", "ok": False}
+    try:
+        h = harness()
+        acc_port = relay_port + 100
+        names = ["Copy 0", "Copy 1"]
+        tokens = s.accounts(acc_port, names, extra=["-social"])
+        s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
+        watch = WATCH + ["[SOCIAL-TEST] state:", "[SOCIAL] ready", "[SOCIAL-UI] close"]
+        shots = {}
+        for i in range(2):
+            shots[i] = os.path.join(s.dir, "shots%d" % i)
+            os.makedirs(shots[i], exist_ok=True)
+            env = dict(VIRTUAL_PAD_ENV)
+            env.update({
+                "RECOMP_INPUT_VIRTUAL_PADS": "1",
+                "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"]),
+                "RECOMP_TEST_OPEN_ONLINE": "1",
+                "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port, "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_NAME": names[i],
+                "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
+                "RECOMP_ACCOUNT_TEST_TOKEN": tokens[names[i]],
+                "RECOMP_OVERLAY_SHOT_DIR": shots[i], "RECOMP_OVERLAY_SHOT_MS": "1000",
+                "RECOMP_SOCIAL": "on",
+                "RECOMP_TEST_SOCIAL": SOCIAL_ONLINE_NET[i],
+                "RECOMP_TEST_SOCIAL_UI": SOCIAL_ONLINE_UI[i],
+            })
+            env.update(extra_env or {})
+            s.launch(i, env=env, core=2 + 2 * i, watch=watch)
+            time.sleep(3)
+        deadline = time.time() + timeout
+        stop = None
+        while time.time() < deadline:
+            s.poll()
+            cs = list(s.copies.values())
+            if any(c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") for c in cs) or any(not c.alive() for c in cs):
+                stop = "a copy crashed or exited"
+                break
+            if cs[0].watch.count("[SOCIAL-TEST] state:") >= 1 and cs[1].watch.count("[SOCIAL-TEST] state:") >= 1 \
+                    and cs[0].watch.count("[SOCIAL-UI] close") >= 2:
+                stop = "done"
+                break
+            time.sleep(1)
+        s.poll()
+        time.sleep(2)
+        texts = {i: logparse.read_text(c.log) for i, c in s.copies.items()}
+        lines = {i: [l for l in t.splitlines() if "[SOCIAL" in l] for i, t in texts.items()}
+
+        def has(i, text):
+            return any(text in l for l in lines[i])
+
+        def online_has(i, text):
+            return any("[SOCIAL-UI] online tab:" in l and text in l for l in lines[i])
+        checks = {
+            "ready": has(0, "[SOCIAL] ready") and has(1, "[SOCIAL] ready"),
+            "online_list_from_service": has(0, "[SOCIAL] online list:") and has(1, "[SOCIAL] online list:"),
+            "copy0_sees_copy1_hub_friend": online_has(0, "Copy 1=menu(friend)"),
+            "copy1_sees_copy0_in_room": online_has(1, "Copy 0=room"),
+            "online_menu": has(0, "onlinemenu=Copy 1 (tab ONLINE"),
+            "leave_warning": has(0, "crew: leave pressed once (asks to be sure)"),
+            "join_too_early": has(0, "HTTP 429 You left a crew") and has(0, "You can join another one in 24 h."),
+            "create_too_early": has(0, "HTTP 429 You made a crew") and has(0, "You can make a new one in 7 days."),
+        }
+        result["checks"] = checks
+        result["refusals"] = [l.split("HTTP 429 ", 1)[1] for l in lines[0] if "HTTP 429 " in l]
+        result["online_lines"] = {i: [l.split("] ", 1)[-1] for l in lines[i] if "online tab:" in l][-2:] for i in lines}
+        picked = []
+        try:
+            from PIL import Image
+        except ImportError:
+            Image = None
+        if out_dir and Image:
+            os.makedirs(out_dir, exist_ok=True)
+            for i, d in shots.items():
+                for p in sorted(glob.glob(os.path.join(d, "*-social-*.bmp"))):
+                    name = "copy%d-%s.png" % (i, os.path.splitext(os.path.basename(p))[0])
+                    Image.open(p).convert("RGB").save(os.path.join(out_dir, name))
+                    picked.append(name)
+        result["captures"] = len(picked)
+        result["stop"] = stop
+        result["faults"] = {i: _faults(t) for i, t in texts.items() if _faults(t)}
+        result["logs"] = [_relpath(c.log) for c in s.copies.values()]
+        result["ok"] = stop == "done" and all(checks.values()) and not result["faults"]
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
 def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
            out_dir=None, stress=False):
     """Two copies at the online hub, signed in to a local account service with the social features
