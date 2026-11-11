@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 sweeax-exe (FFNY Online)
 // The chat window of the online screens (the Social Update, stage 2a; docs in the private server
-// repository, the owner's approved design of 2026-11-03): tabs ROOM / GLOBAL / FRIENDS / MESSAGES /
-// CREW, a PlayStation-style on-screen keyboard for the pad, the friends list with online status, and
+// repository, the owner's approved design of 2026-11-03): tabs ROOM / GLOBAL / FRIENDS / ONLINE (build 76) /
+// MESSAGES / CREW, a PlayStation-style on-screen keyboard for the pad, the friends list with online status, and
 // toasts for new private messages and friend requests. The network side is social.cpp.
 //
 // Included by online_screen.cpp inside its anonymous namespace (its helpers, fonts and the 640x480
@@ -13,9 +13,11 @@
 // B or ESC closes it. T is push-to-talk and is never bound here; while the text box has the keyboard,
 // voice.c leaves a letter key bound to push-to-talk alone (social_typing).
 
-enum ChatTab { TAB_ROOM, TAB_GLOBAL, TAB_FRIENDS, TAB_MESSAGES, TAB_CREW, TAB_COUNT };
-const char *const k_tab_names[TAB_COUNT] = { "ROOM", "GLOBAL", "FRIENDS", "MESSAGES", "CREW" };
-const char *const k_tab_shots[TAB_COUNT] = { "social-room", "social-global", "social-friends", "social-messages", "social-crew" };
+// ONLINE (build 76): everyone online on every server, with what they are doing (draw_online)
+enum ChatTab { TAB_ROOM, TAB_GLOBAL, TAB_FRIENDS, TAB_ONLINE, TAB_MESSAGES, TAB_CREW, TAB_COUNT };
+const char *const k_tab_names[TAB_COUNT] = { "ROOM", "GLOBAL", "FRIENDS", "ONLINE", "MESSAGES", "CREW" };
+const char *const k_tab_shots[TAB_COUNT] = { "social-room", "social-global", "social-friends", "social-online", "social-messages",
+                                             "social-crew" };
 const char *const k_region_ids[4] = { "", "eu", "us-east", "us-west" };
 const char *const k_region_names[4] = { "ALL SERVERS", "EUROPE", "US EAST", "US WEST" };
 
@@ -33,7 +35,7 @@ struct Chat {
     bool have = false;
     std::string draft[TAB_COUNT];
     int cursor[TAB_COUNT] = {};
-    int sel[TAB_COUNT] = { -1, -1, 0, 0, -1 };
+    int sel[TAB_COUNT] = { -1, -1, 0, 0, 0, -1 };
     int region = 0;                 // GLOBAL: 0 every server, 1..3 one region
     int btn = 0;                    // FRIENDS: the button of the selected row
     float scroll_y = 0;             // FRIENDS: how far the list is scrolled (menu units)
@@ -72,6 +74,12 @@ struct Chat {
     // CREW (stage 2c): the page or its chat, LEAVE pressed once, the menu on a crew mate, a new crew's name
     int crew_view = 0;              // 0 the page, 1 its chat, 2 the crew ladder (stage 3)
     bool confirm_leave = false;
+    bool test_leave_sel = false;    // tests (ui:crewleave1): the LEAVE button chosen and pressed once
+    // ONLINE (build 76): its list's scroll, the player menu opened from it (INVITE TO MY ROOM) and that
+    // player's state, the list last logged
+    float online_scroll = 0;
+    bool menu_online = false;
+    std::string menu_state, online_logged;
     // crew battles (stage 3): the format picker for a challenge (by crew id, else tag), its choice; the
     // ladder's selected row; DECLINE pressed once
     bool picker = false;
@@ -842,6 +850,8 @@ void open_player_menu(long long id, const std::string &name)
     C.menu_context.clear();
     C.menu_crew = false;
     C.menu_role.clear();
+    C.menu_online = false;
+    C.menu_state.clear();
 }
 
 // What REPORT sends for the line at index i (oldest first) of a chat: its id where the service has the
@@ -1317,6 +1327,7 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     int total = (int)rows.size() + (int)buttons.size();
     int &sel = C.sel[TAB_CREW];
     if (sel < 0 || sel >= total) sel = (int)rows.size() + 1;      // CREW CHAT
+    if (C.test_leave_sel) { sel = total - 1; C.test_leave_sel = false; }    // LEAVE CREW is the last button
     int before = sel;
     if (k.up) sel = std::max(0, sel - 1);
     if (k.down) sel = std::min(total - 1, sel + 1);
@@ -1397,6 +1408,12 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             else if (!bt.turf_name.empty()) line += " - FOR " + upper(bt.turf_name.c_str());
         }
         if (bt.state == "proposed" || bt.state == "accepted" || bt.state == "live") lc = ORANGE;
+        // build 76: LEAVE pressed once says what leaving costs (the service's CrewHopCooldown, 24 h; a Boss alone
+        // ends the crew; a Boss with members is never asked: they hand over first, below)
+        if (C.confirm_leave) {
+            line = v.crew_role == "boss" ? "THE CREW ENDS - JOIN ANOTHER IN 24 H" : "YOU CAN JOIN ANOTHER CREW IN 24 H";
+            lc = ORANGE;
+        }
         if (!line.empty()) text(dl, f, g_title, 9, rx - 2 + rw / 2, by - 15, lc, line.c_str(), CENTER, 0, rw + 6);
     }
     for (size_t b = 0; b < buttons.size(); b++) {
@@ -1433,7 +1450,9 @@ void draw_crew(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             case B_CHAT: C.crew_view = 1; C.sel[TAB_CREW] = -1; C.line_skip = 0; break;
             case B_INVITE: open_keyboard(KB_CREW_INVITE); break;
             case B_LEAVE:
-                if (!C.confirm_leave) C.confirm_leave = true;
+                if (v.crew_role == "boss" && v.crew_roster.size() > 1)      // the service's rule: hand over first
+                    say("The Boss leaves last: make another member the Boss first (pick them, MAKE BOSS).", 5000);
+                else if (!C.confirm_leave) C.confirm_leave = true;
                 else { social::crew_leave(); C.confirm_leave = false; fprintf(stderr, "[SOCIAL-UI] crew: leave\n"); }
                 break;
             }
@@ -1694,6 +1713,163 @@ void draw_friends(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetRo
              CENTER, 0, 380);
     if (cur && k.a && !cur->acts.empty()) do_friend_act(*cur, cur->acts[(size_t)C.btn], r);
     if (cur && k.x && cur->kind == 3) open_dm(cur->ref.id);
+}
+
+// ---- ONLINE (build 76): everyone online on every server ----
+//
+// A player's wish: who is on, from a room, while waiting or between fights, not only on the hub's
+// PLAYERS ONLINE page. The list is the account service's (GET /api/social/online, the presence every
+// signed-in game reports, the FRIENDS tab's source): it covers every server, carries the account (so
+// MESSAGE, ADD FRIEND, INVITE TO MY CREW and the rest of the player menu work), and it is asked on the
+// social thread over HTTP, at most every 10 s and only while this tab shows, so nothing goes over the
+// relay's session or near a fight's traffic. Names and states only. A service before build 76 has no such
+// list: then the relays' WHO / PLAYERLIST lists stand in (names only: the menu offers ADD FRIEND by name).
+// Like every tab, the window is drawn only over the online screens, never over a fight.
+
+struct OnlineRow { long long id = 0; std::string name, tag, state; bool is_friend = false; };
+
+int online_state_order(const std::string &s) { return s == "menu" ? 0 : s == "room" ? 1 : s == "fighting" ? 2 : 3; }
+
+const char *online_state_label(const std::string &s, ImU32 *col)
+{
+    *col = s == "fighting" || s == "watching" ? ORANGE : LIVE;
+    return s == "menu" ? "HUB" : s == "room" ? "IN A ROOM" : s == "fighting" ? "FIGHTING" : s == "watching" ? "WATCHING" : "ONLINE";
+}
+
+// The rows: friends first, then everyone else; in each the hub before rooms before fights, then by name.
+std::vector<OnlineRow> online_rows(int *total)
+{
+    std::vector<OnlineRow> rows;
+    const social::View &v = C.v;
+    *total = -1;
+    if (!v.online_missing) {
+        if (v.online_loaded) *total = v.online_total;
+        for (auto &p : v.online_list) {
+            OnlineRow r;
+            r.id = p.id; r.name = p.name; r.tag = p.tag; r.state = p.state;
+            r.is_friend = p.is_friend || friend_of(p.id);
+            rows.push_back(r);
+        }
+    } else if (!gallery_on()) {       // the relays' lists (names only)
+        static NetServerPlayer list[NETSERVER_COUNT * 40];
+        netservers_fetch_players_all();
+        int online = -1, n = netservers_players(list, NETSERVER_COUNT * 40, &online);
+        *total = n < 0 ? -1 : online;
+        std::string me = hub_name();
+        static const char *const states[] = { "menu", "room", "fighting" };
+        for (int i = 0; i < n; i++) {
+            const NetPlayer &p = list[i].player;
+            if (me == p.name) continue;
+            bool blocked = false;
+            for (auto &b : v.blocked) blocked |= b.name == p.name;
+            if (blocked) continue;
+            OnlineRow r;
+            r.name = p.name;
+            r.state = states[p.state >= 0 && p.state <= 2 ? p.state : 0];
+            for (auto &fr : v.friends) if (fr.name == r.name) { r.id = fr.id; r.tag = fr.tag; r.is_friend = true; }
+            rows.push_back(r);
+        }
+    }
+    std::stable_sort(rows.begin(), rows.end(), [](const OnlineRow &a, const OnlineRow &b) {
+        if (a.is_friend != b.is_friend) return a.is_friend;
+        int sa = online_state_order(a.state), sb = online_state_order(b.state);
+        if (sa != sb) return sa < sb;
+        return _stricmp(a.name.c_str(), b.name.c_str()) < 0;
+    });
+    return rows;
+}
+
+void open_online_menu(const OnlineRow &w)
+{
+    open_player_menu(w.id, w.name);
+    C.menu_online = true;
+    C.menu_state = w.state;
+}
+
+void draw_online(ImDrawList *dl, const Frame &f, const ChatKeys &k)
+{
+    social::online_want();          // at most every 10 s (social.cpp)
+    int total = -1;
+    std::vector<OnlineRow> rows = online_rows(&total);
+    int nf = 0;
+    for (auto &w : rows) nf += w.is_friend;
+    // the log names the list when it changes (tests)
+    std::string logged;
+    for (auto &w : rows) logged += " " + w.name + "=" + w.state + (w.is_friend ? "(friend)" : "");
+    if (logged != C.online_logged) {
+        C.online_logged = logged;
+        fprintf(stderr, "[SOCIAL-UI] online tab: %d players%s%s\n", (int)rows.size(), C.v.online_missing ? " (relays)" : "",
+                logged.c_str());
+    }
+    int &sel = C.sel[TAB_ONLINE];
+    if (k.up) sel--;
+    if (k.down) sel++;
+    sel = rows.empty() ? 0 : std::max(0, std::min(sel, (int)rows.size() - 1));
+    // the head: how many, on every server
+    char head[64];
+    if (total >= 0) snprintf(head, sizeof(head), "%d ONLINE ON ALL SERVERS", std::max(total, (int)rows.size() + 1));
+    else snprintf(head, sizeof(head), "ALL SERVERS");
+    text(dl, f, g_title, 9, PX + PW - 22, TABS_B + 9, DIM, head, RIGHT, 0);
+    // the list: section titles, then rows, scrolled so the chosen row stays in view
+    const float top = TABS_B + 6, bottom = PY + PH - 8, RH = 24, SH = 20;
+    float total_h = 0, sel_y = 0;
+    for (int i = 0; i < (int)rows.size(); i++) {
+        if (i == 0 || rows[(size_t)i].is_friend != rows[(size_t)i - 1].is_friend) total_h += SH;
+        if (i == sel) sel_y = total_h;
+        total_h += RH + 2;
+    }
+    float view = bottom - top;
+    if (sel_y - C.online_scroll < SH) C.online_scroll = sel_y - SH;
+    if (sel_y + RH - C.online_scroll > view) C.online_scroll = sel_y + RH - view;
+    if (mouse_in(f, PX, top, PW, view)) C.online_scroll -= ImGui::GetIO().MouseWheel * 24;
+    C.online_scroll = std::max(0.0f, std::min(C.online_scroll, std::max(0.0f, total_h - view)));
+    dl->PushClipRect(f.p(PX, top), f.p(PX + PW, bottom), true);
+    float y = top - C.online_scroll;
+    for (int i = 0; i < (int)rows.size(); i++) {
+        const OnlineRow &w = rows[(size_t)i];
+        if (i == 0 || w.is_friend != rows[(size_t)i - 1].is_friend) {
+            char t[48];
+            snprintf(t, sizeof(t), w.is_friend ? "FRIENDS - %d" : "PLAYERS - %d", w.is_friend ? nf : (int)rows.size() - nf);
+            text(dl, f, g_title, 9, PX + 22, y + 6, DIM, t, LEFT, 0);
+            y += SH;
+        }
+        bool on = i == sel;
+        float x0 = PX + 13, x1 = PX + PW - 13;
+        if (on) {
+            rect(dl, f, x0, y, x1 - x0, RH, IM_COL32(200, 16, 46, 26), 6);
+            dl->AddRect(f.p(x0, y), f.p(x1, y + RH), with_alpha(RED, 0.75f), 6 * f.s(), 0, 1.0f * f.s());
+        }
+        float x = x0 + 9;
+        ImU32 scol;
+        const char *st = online_state_label(w.state, &scol);
+        draw_avatar(dl, f, x + 8, y + RH / 2, 8, w.id, w.name);
+        dl->AddCircleFilled(f.p(x + 14, y + RH / 2 + 5.5f), 3.2f * f.s(), IM_COL32(18, 12, 14, 255));
+        dl->AddCircleFilled(f.p(x + 14, y + RH / 2 + 5.5f), 2.3f * f.s(), scol);
+        x += 22;
+        text(dl, f, g_hand, 14, x, y + 3, w.id && w.id == C.v.me ? GOLD_TEXT : CREAM, w.name.c_str(), LEFT, 0.6f);
+        x += text_width(f, g_hand, 14, w.name.c_str()) + 8;
+        if (!w.tag.empty()) {
+            float tw = text_width(f, g_body, 7.5f, w.tag.c_str()) + 6;
+            dl->AddRect(f.p(x, y + 6.5f), f.p(x + tw, y + 17.5f), IM_COL32(255, 205, 60, 150), 3 * f.s(), 0, 0.8f * f.s());
+            text(dl, f, g_body, 7.5f, x + tw / 2, y + 7.5f, GOLD_TEXT, w.tag.c_str(), CENTER, 0);
+            x += tw + 6;
+        }
+        if (w.is_friend) {
+            float fw = text_width(f, g_title, 7.5f, "FRIEND") + 8;
+            rect(dl, f, x, y + 6.5f, fw, 11, IM_COL32(255, 205, 60, 210), 3);
+            text(dl, f, g_title, 7.5f, x + fw / 2, y + 8, IM_COL32(26, 18, 8, 255), "FRIEND", CENTER, 0);
+        }
+        text(dl, f, g_title, 9, x1 - 9, y + 7, scol, st, RIGHT, 0);
+        bool click = mouse_click(f, x0, y, x1 - x0, RH) && mouse_in(f, PX, top, PW, view);
+        if (click) sel = i;
+        if ((on && k.a) || click) open_online_menu(w);
+        y += RH + 2;
+    }
+    dl->PopClipRect();
+    if (rows.empty())
+        text(dl, f, g_body, 11, PX + PW / 2, PY + 150, DIM, total < 0 ? "Asking who is online..." : "Nobody else is online right now.",
+             CENTER, 0, 380);
+    if (!rows.empty() && k.x && rows[(size_t)sel].id && !C.menu) open_dm(rows[(size_t)sel].id);
 }
 
 // ---- MESSAGES ----
@@ -1998,6 +2174,11 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     if (!room_only() && !self) {
         if (!is_friend && !asked && !blocked) items.push_back({ "ADD FRIEND", 0 });
         if (C.menu_id && !blocked && C.tab != TAB_MESSAGES) items.push_back({ "MESSAGE", 1 });
+        // build 76, the ONLINE tab: a player on the hub, invited to my room as the FRIENDS tab does it (a message with
+        // the room's code: their message settings decide whether it arrives)
+        NetRoom mr;
+        lobby_room(&mr);
+        if (C.menu_online && C.menu_id && !blocked && mr.in_room && C.menu_state == "menu") items.push_back({ "INVITE TO MY ROOM", 16 });
         if (C.menu_id && !C.menu_room && !blocked && C.tab != TAB_MESSAGES) items.push_back({ muted ? "UNMUTE" : "MUTE", muted ? 3 : 2 });
         bool officer = C.v.crew_role == "boss" || C.v.crew_role == "lieutenant";
         bool in_mine = false;
@@ -2059,6 +2240,14 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             } else if (what == 15) {
                 open_report_form(C.menu_id, C.menu_name);
                 return;     // the form keeps the menu open
+            } else if (what == 16) {
+                NetRoom ir;
+                lobby_room(&ir);
+                if (ir.in_room) {
+                    social::send_dm(C.menu_id, std::string("Join my room: code ") + ir.code);
+                    say("Invite sent to " + C.menu_name + ".");
+                    fprintf(stderr, "[SOCIAL-UI] online: invited %s to room %s\n", C.menu_name.c_str(), ir.code);
+                }
             }
             C.menu = false;
         }
@@ -2663,6 +2852,20 @@ void chat_test_step()
         C.tab = TAB_CREW;
         open_picker(0, arg, "");
         for (auto &row : C.v.ladder) if (row.tag == arg) { C.picker_crew = row.id; C.picker_name = row.name; }
+    } else if (what == "crewleave1") {              // build 76: LEAVE CREW chosen and pressed once (its warning shows)
+        C.open = true;
+        C.kb = C.menu = C.picker = false;
+        C.tab = TAB_CREW;
+        C.crew_view = 0;
+        C.test_leave_sel = true;
+        C.confirm_leave = !(C.v.crew_role == "boss" && C.v.crew_roster.size() > 1);
+        fprintf(stderr, "[SOCIAL-UI] crew: leave pressed once (%s)\n", C.confirm_leave ? "asks to be sure" : "Boss: hand over first");
+    } else if (what == "onlinemenu") {              // build 76: the ONLINE tab's player menu on NAME
+        int total;
+        C.open = true;
+        C.kb = false;
+        C.tab = TAB_ONLINE;
+        for (auto &w : online_rows(&total)) if (w.name == arg) open_online_menu(w);
     } else if (what == "crewpage") {                // stage 3: the crew's page (its battle line and buttons)
         C.open = true;
         C.kb = C.menu = C.picker = false;
@@ -3236,6 +3439,7 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
         case TAB_ROOM: draw_room_tab(dl, f, k, r); break;
         case TAB_GLOBAL: draw_global(dl, f, k); break;
         case TAB_FRIENDS: draw_friends(dl, f, k, r); break;
+        case TAB_ONLINE: draw_online(dl, f, k); break;
         case TAB_MESSAGES: draw_messages(dl, f, k, r); break;
         default: draw_crew(dl, f, k); break;
         }
@@ -3259,6 +3463,12 @@ void chat_draw(ImDrawList *dl, const Frame &f, ImVec2 display)
         hx += hint(dl, f, hx, hy, "x", "MESSAGE");
         hx += hint(dl, f, hx, hy, "y", "ADD FRIEND");
         hint(dl, f, hx, hy, "b", "CLOSE");
+    } else if (C.tab == TAB_ONLINE) {
+        hx += hint(dl, f, hx, hy, "a", "PLAYER");
+        if (!C.v.online_missing) hx += hint(dl, f, hx, hy, "x", "MESSAGE");
+        hint(dl, f, hx, hy, "b", "CLOSE");
+        text(dl, f, g_body, 9, 592, hy + 3, IM_COL32(242, 230, 200, 128), "Everyone online on every server - names and states only",
+             RIGHT, 0);
     } else if (C.tab == TAB_MESSAGES) {
         hx += hint(dl, f, hx, hy, "a", "OPEN");
         hx += hint(dl, f, hx, hy, "y", "KEYBOARD");

@@ -830,6 +830,12 @@ void netservers_fetch_players(void)
     fetch_players(((1u << NETSERVER_COUNT) - 1) & ~(cur >= 0 ? 1u << cur : 0u));    /* the hub's own: WHO */
 }
 
+void netservers_fetch_players_all(void)
+{
+    int cur = netservers_connected();
+    fetch_players(((1u << NETSERVER_COUNT) - 1) & ~(cur >= 0 ? 1u << cur : 0u));
+}
+
 int netservers_players(NetServerPlayer *out, int max, int *online)
 {
     NetServerInfo sv[NETSERVER_COUNT];

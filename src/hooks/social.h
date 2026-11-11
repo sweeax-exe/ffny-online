@@ -128,6 +128,10 @@ struct Locker {
     std::vector<SeasonFinish> finishes;         /* newest season first */
 };
 
+/* The chat window's ONLINE tab (build 76; GET /api/social/online): one player online on any server, name and
+ * state only (menu room fighting watching), and whether they are this account's friend. */
+struct OnlinePlayer { long long id = 0; std::string name, tag, state; bool is_friend = false; };
+
 struct Toast { int kind = 0; std::string title, text; long long dm_from = 0; unsigned long long at = 0; };
 enum { TOAST_DM = 1, TOAST_REQUEST, TOAST_FRIEND, TOAST_CREW, TOAST_NOTICE };
 
@@ -165,6 +169,11 @@ struct View {
     std::vector<std::string> gold_tags;     /* crews whose tag shows gold (level 5, the first reward) */
     std::map<long long, Look> looks;            /* build 52: the looks asked for (look_want) */
     Locker locker;                              /* build 52: this account's rewards (locker_load) */
+    /* build 76: the ONLINE tab's list (online_want), friends first then by name; not this account */
+    std::vector<OnlinePlayer> online_list;
+    int online_total = 0;                       /* everyone online, this account included */
+    bool online_loaded = false;                 /* an answer came */
+    bool online_missing = false;                /* the service has no such list (older): the relays' lists instead */
     std::string note;              /* the last refusal from the service ("slow mode: ...") */
     unsigned long long note_at = 0;
     /* REPORT PLAYER: the service's answer to the last report_player ("Report sent...", or why not) */
@@ -220,6 +229,8 @@ void crew_accept(long long id);                             /* an application */
 void crew_challenge(long long crew, const std::string &tag, int format);
 void battle_answer(const char *answer);
 void ladder();
+/* build 76: ask for the ONLINE tab's list (at most every 10 s; the window calls it while the tab shows) */
+void online_want();
 bool gold_tag(const View &v, const std::string &tag);
 /* Tests: RECOMP_TEST_SOCIAL's ui:ACTION step hands ACTION (a RECOMP_TEST_SOCIAL_UI action) to the chat
  * window, which takes it once; "" none. */
