@@ -466,7 +466,12 @@ int netplay_in_fight(void);
 /* 1 while this PC (a fighter of a hub room's match) is on the match's summary and results: its own menu
  * there, the fight over (the quick-chat wheel may open; never in the fight). */
 int netplay_on_results(void);
-int netplay_rerunning(void);    /* 1 while rollback runs steps again */
+int netplay_rerunning(void);
+/* Build 76: the input delay line ([online] delay_display). in_fight: an online fight's own numbers;
+ * otherwise (estimate = 1) a room's guess before the START from the members' pings. Returns 0 when there
+ * is nothing to show. netplay_delay_rules.h words it (netdelay_line). */
+typedef struct NetDelayInfo { int in_fight, estimate, rollback, frames, path_ms; } NetDelayInfo;
+int netplay_delay_info(NetDelayInfo *o);    /* 1 while rollback runs steps again */
 /* For diagnostics: one line on the online fight's step, rollback state and counters. */
 int netplay_rollback_brief(char *out, int size);
 int netplay_local_slot(void);   /* tests: this PC's fighter slot in a lockstep fight, -1 otherwise */

@@ -261,6 +261,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "voice_auto_level", "Level my microphone"},
         {"online", "discord_status", "Discord status"},
         {"online", "hill_watch", "Watch fights while waiting"},
+        {"online", "delay_display", "Show the input delay"},
         {"debug", "record", "Record play-tests"},
         {"debug", "mark_key", "Mark key"},
         {"debug", "mark_pad", "Mark pad buttons"},
@@ -1867,7 +1868,7 @@ static void page_online(UiMode mode)
             ImGui::TextDisabled("Online you appear as %s, from your Discord account.", shown);
     }
     discord_status_setting();
-    settings_group("online", { "hill_watch" });
+    settings_group("online", { "hill_watch", "delay_display" });
     ImGui::Spacing();
     ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.1f);
     ImGui::TextColored(k_gold, "Online play is in the game: choose ONLINE in the main menu.");
@@ -2769,7 +2770,7 @@ static void page_basics()
     server_widget();
     settings_group("ui", { "button_icons" });
     discord_status_setting();
-    settings_group("online", { "hill_watch" });
+    settings_group("online", { "hill_watch", "delay_display" });
     // build 52: while the server makes rollback mandatory (its last answer, kept) there is no choice to offer
     if (recomp_settings_get("online", "rollback_server", 0) && recomp_settings_get("online", "rollback_modes", 0)) {
         ImGui::TextUnformatted("Rollback netcode: on in online matches");
@@ -4479,6 +4480,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     bool hillhud = !g_open.load() && !versus && !decor && online_screen::hill_hud_wanted();
     // ... and over this PC's own hill fight's results, the room menu's strip (build 73), drawing only
     bool hillres = !g_open.load() && !versus && !decor && !hillhud && online_screen::hill_results_wanted();
+    // Build 76: the input delay line over an online fight (delay_hud_ui.inc), drawing only
+    bool delayhud = !g_open.load() && !versus && !decor && !hillhud && online_screen::delay_hud_wanted();
     static bool fc_held;
     auto fight_chat_hold = [&](bool typing) {
         if (typing && !fc_held) {
@@ -4511,7 +4514,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (g_note.open) toast = false;     // F9's "taking a picture" would sit over the box
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
-    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !offer) { ui_unlock(); return; }
+    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !delayhud && !offer) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -4584,6 +4587,14 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (!ui_capturing() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
         (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
         close_request = true;
+    }
+    if (delayhud) {
+        try {
+            online_screen::draw_delay_hud(ImGui::GetForegroundDrawList(), io.DisplaySize);
+        } catch (...) {
+            static int logged;
+            if (logged++ < 20) fprintf(stderr, "[UI] caught: an exception (delay line)\n");
+        }
     }
     if (hillhud) {
         try {

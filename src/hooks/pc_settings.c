@@ -114,6 +114,10 @@ static RecompSetting g_display_settings[] = {
       "Watch fights while waiting: in King of the Hill and FFA rotation rooms the current fight runs live on your "
       "screen while you wait for your turn (START goes back to the hill screen for that fight). Off: the hill screen "
       "shows who fights and the result." },
+    { "online", "delay_display", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_DELAY_DISPLAY", 0,
+      "Show the input delay of an online fight in a small line at the bottom of the screen: \"Rollback - 3 frames\" "
+      "or, when the match plays without rollback, the path's ping and the frames. Before READY a room shows its "
+      "estimate. A picture over the game only." },
     { "online", "rollback", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Beta: rollback netcode in online fights, used only when every player in the match has it on. Your presses "
       "count at once and the game corrects itself when the other player's arrive late. It can still crash." },

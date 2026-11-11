@@ -38,6 +38,7 @@
 #include <time.h>
 #include "recomp/gen/recomp_types.h"
 #include "netplay.h"
+#include "netplay_delay_rules.h"
 #include "recomp_settings.h"
 #include "updater.h"
 #include "automatch.h"
@@ -151,6 +152,7 @@ void netplay_sound_command(void) { sub_00137010(); }
 void *netplay_sound_handler(uint32_t va) { (void)va; return NULL; }
 void netplay_on_pad_read(uint32_t a) { (void)a; }
 int netplay_local_slot(void) { return -1; }
+int netplay_delay_info(NetDelayInfo *o) { if (o) memset(o, 0, sizeof(*o)); return 0; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
 void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
 void netplay_on_crash(void) {}
@@ -509,6 +511,7 @@ static struct {
     volatile LONG lockstep;         /* connected and not abandoned */
     uint32_t match, match_count, step;
     uint8_t latest_local[ENTRY];
+    uint32_t local_last;            /* build 76: the last step this PC's own entry is committed for (0: none yet) */
     uint8_t in[MAXP][RING][ENTRY];
     uint32_t in_tag[MAXP][RING];    /* step + 1 (0 = empty) */
     uint32_t in_match[MAXP][RING];
@@ -765,6 +768,53 @@ static int this_pc_rolls_back(void)
     return rb_server_decides() ? rb_mandatory_here() : rollback_opted_in();
 }
 int netplay_rerunning(void) { return N.resim; }
+
+/* Build 76: the input delay line's numbers. In an online fight (lockstep or rollback): what the match plays
+ * with. In a room before the START: what agreed_delay would make of the members' reported pings and
+ * rollback bytes (an estimate: the START's own pings decide). 0: nothing to say (offline, watching, a
+ * room with a ping not reported yet). Reads only; no game memory. */
+static int own_rb_limit(void);
+static int room_rollback_flags(void);
+int netplay_delay_info(NetDelayInfo *o)
+{
+    int ok = 0;
+    if (!o) return 0;
+    memset(o, 0, sizeof(*o));
+    EnterCriticalSection(&g_cs);
+    if (N.lockstep && !N.watching && N.pos >= 0 && N.step > 0 && N.delay > 0) {
+        int a, b;
+        netdelay_top2(N.peer_rtt, N.players < MAXP ? N.players : MAXP, &a, &b);
+        o->in_fight = 1;
+        o->rollback = N.rb_on && !N.rb_slow_off && !N.desync;
+        o->frames = N.delay;
+        o->path_ms = netdelay_path_ms(a, b);
+        ok = 1;
+    } else if (N.lobby && N.roomv.in_room && !N.match_live && N.roomv.you != SLOT_SPECTATOR &&
+               N.roomv.player_count >= 2) {
+        int pings[NETPLAY_ROOM_SLOTS], n = 0, i, rb = 1, a, b, known = 1;
+        for (i = 0; i < N.roomv.player_count && i < NETPLAY_ROOM_SLOTS; i++) {
+            int slot = N.roomv.players[i].slot, flags, ping;
+            if (slot < 0 || slot >= ROOMSLOTS) continue;
+            ping = slot == N.roomv.you ? N.rtt_ms : N.slot_rtt[slot];
+            flags = slot == N.roomv.you ? room_rollback_flags() : N.slot_rb[slot];
+            if (ping < 0) known = 0;
+            if (flags < 0 || !(flags & 1)) rb = 0;
+            pings[n++] = ping;
+        }
+        if (known && n >= 2) {
+            netdelay_top2(pings, n, &a, &b);
+            o->path_ms = netdelay_path_ms(a, b);
+            if (o->path_ms > own_rb_limit()) rb = 0;
+            if (NETPLAY_IS_HILL(N.roomv.settings.mode) && !rb_mandatory_here()) rb = 0;   /* as every_player_rolls_back */
+            o->rollback = rb;
+            o->frames = netdelay_steps(a, b, rb, !rb && n >= 3 ? MULTI_MARGIN : 0);
+            o->estimate = 1;
+            ok = 1;
+        }
+    }
+    LeaveCriticalSection(&g_cs);
+    return ok;
+}
 int netplay_local_slot(void) { return N.lockstep && !N.watching ? N.pos : -1; }
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
@@ -2370,19 +2420,15 @@ static int every_player_rolls_back(void)
 
 static int agreed_delay(void)
 {
-    int a = 0, b = 0, i, d, rb = every_player_rolls_back();
-    for (i = 0; i < N.players; i++) {
-        int r = N.peer_rtt[i] < 0 ? 0 : N.peer_rtt[i];
-        if (r > a) { b = a; a = r; } else if (r > b) b = r;
-    }
-    d = ((a + b) / 2 * 3 + 49) / 50 + 1;      /* ms to 1/60 s steps, rounded up, + 1 */
-    if (rb) d -= RB_LESS;                       /* what the delay does not cover, a rollback does */
-    /* Lockstep with three or four players: every step waits for every player, so a packet gap of any
-     * one of them stalls all, and with two or three others the gaps add up (a 3-way of good pings at
-     * delay 3 froze for every ~100 ms gap of any player, 2026-11-02). One step more of margin there.
-     * From N.players and the P_RTT flags alone, which every PC of the match has the same. */
-    if (!rb && N.players >= 3) d += MULTI_MARGIN;
-    return d < DELAY_MIN ? DELAY_MIN : d > DELAY_MAX ? DELAY_MAX : d;
+    int a, b, rb = every_player_rolls_back();
+    netdelay_top2(N.peer_rtt, N.players < MAXP ? N.players : MAXP, &a, &b);
+    /* ms to 1/60 s steps, rounded up, + 1; less RB_LESS when every PC rolls back. Lockstep with three or
+     * four players: every step waits for every player, so a packet gap of any one of them stalls all, and
+     * with two or three others the gaps add up (a 3-way of good pings at delay 3 froze for every ~100 ms
+     * gap of any player, 2026-11-02). One step more of margin there. From N.players and the P_RTT flags
+     * alone, which every PC of the match has the same. (netplay_delay_rules.c since build 76, the same
+     * numbers, so the fight's delay line says exactly this.) */
+    return netdelay_steps(a, b, rb, !rb && N.players >= 3 ? MULTI_MARGIN : 0);
 }
 
 static void on_data(int from, const uint8_t *p, int len)
@@ -6898,6 +6944,7 @@ void netplay_on_match_start(void)
     InterlockedExchange(&N.on_results, 0);      /* a rematch's fight: the results are behind */
     disarm_crash_report();
     memset(N.latest_local, 0, sizeof(N.latest_local));
+    N.local_last = 0;
     N.desync = 0;
     if (N.match_live) N.match_seen = 1;
     N.final_step = N.hash_sent = N.updates = 0;
@@ -7653,9 +7700,30 @@ static void spec_step(uint32_t s)
     }
 }
 
+/* This PC's own entry for `target` (build 76): the latest poll, once per step, never changed once sent
+ * (the others store what arrives). Steps in between that no read committed (none known) get the same poll,
+ * so the entries this PC sends stay contiguous. Not in re-runs: their steps are committed already. */
+static void commit_local(uint32_t target)
+{
+    uint32_t t;
+    if (N.resim || N.watching || N.pos < 0 || target <= N.local_last) return;
+    EnterCriticalSection(&g_cs);
+    for (t = N.local_last ? N.local_last + 1 : target; t <= target; t++) {
+        uint32_t k = t % RING;
+        memcpy(N.in[N.pos][k], N.latest_local, ENTRY);
+        N.in_tag[N.pos][k] = t + 1;
+        N.in_match[N.pos][k] = N.match;
+    }
+    N.local_last = target;
+    gone_fill(target);                  /* a gone player's rest entries, once its step is agreed */
+    LeaveCriticalSection(&g_cs);
+    send_steps(target);
+    gone_send();
+}
+
 void netplay_on_step(void)
 {
-    uint32_t s, target, k, need;
+    uint32_t s, k, need;
     ULONGLONG waited_since, last_send, last_note;
     if (N.lockstep) versus_hold();
     created_fighter_on_step();  /* created fighters: unlinked once their looks are built */
@@ -7849,16 +7917,12 @@ void netplay_on_step(void)
     }
     if (N.resim) return;                /* a re-run: the entries are all known or predicted */
     if (N.watching) { spec_step(s); return; }
-    target = s + (uint32_t)N.delay;
-    k = target % RING;
-    EnterCriticalSection(&g_cs);
-    memcpy(N.in[N.pos][k], N.latest_local, ENTRY);
-    N.in_tag[N.pos][k] = target + 1;
-    N.in_match[N.pos][k] = N.match;
-    gone_fill(target);                  /* a gone player's rest entries, once its step is agreed */
-    LeaveCriticalSection(&g_cs);
-    send_steps(target);
-    gone_send();
+    /* Build 76: this PC's entry for step s + delay is committed by this step's own pad read
+     * (netplay_on_pad_read), from the poll of this update. Before, it was committed here, before the
+     * read, from the poll of the update before: every press counted one step later than the delay
+     * (input study 2026-11-11: a grab at step 401 offline came at 404 online at delay 2). A step whose
+     * read did not happen (none is known) still gets its entry here, from the last poll, as before. */
+    if (s > 1) commit_local(s - 1 + (uint32_t)N.delay);
     {   /* tests: RECOMP_TEST_LEAVE_STEP=<n> leaves the room at fight step n of the START's first match (a
          * player who quits mid-fight through the room), then plays that fight on offline */
         static int leave_at = -1;
@@ -7945,7 +8009,7 @@ void netplay_on_step(void)
              * reports, 2026-10-23). The game draws nothing while it waits here, so this is noted and
              * said once the fight moves (above). */
             if (late >= 0 && g_steps_match[late] != N.match && now - waited_since >= 1500) last_note = now;
-            if (now - last_send >= 50) { send_steps(target); last_send = now; }   /* the others may be waiting for ours */
+            if (now - last_send >= 50) { if (N.local_last) send_steps(N.local_last); last_send = now; }   /* the others may be waiting for ours */
             gone_send();
             /* The fight decided (KO, time): what follows is the winner's scene and the results, the same
              * on every PC however they part, and a PC that skips ahead stops sending steps. Waiting the
@@ -8139,6 +8203,7 @@ void netplay_on_pad_read(uint32_t actor)
         for (i = 0; i < ENTRY; i++) N.latest_local[i] = MEM8(base + (uint32_t)i);
         N.latest_local[28] = N.latest_local[29] = N.latest_local[30] = N.latest_local[31] = 0;
         LeaveCriticalSection(&g_cs);
+        commit_local(N.step + (uint32_t)N.delay);      /* this step's poll: delay steps on, not one more */
     }
     s = N.step;
     memset(entry, 0, sizeof(entry));
