@@ -564,8 +564,8 @@ void saves_unlock_confirm()
                         "progress stay as they are. Online play is not affected.");
     ImGui::Spacing();
     ImGui::Checkbox("and $999,999 and development points for Story", &g_sp.unlock_cash);
-    ImGui::TextDisabled("Enough development points to train every stat to its maximum in the gym (up to 272,625). "
-                        "Cash and points are only raised, never lowered.");
+    ImGui::TextDisabled("Enough development points to train every stat to its maximum, learn every Blazin move and "
+                        "two more fighting styles in the gym. Cash and points are only raised, never lowered.");
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_Button, k_red);

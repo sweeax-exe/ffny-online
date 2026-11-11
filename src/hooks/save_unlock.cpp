@@ -23,6 +23,7 @@ constexpr uint32_t kHairStyle = 0x7450591Au, kTattoo = 0x30948EA0u, kJewelry = 0
                    kBlazin = 0x47D305FDu, kFightingStyle = 0x906455C6u, kCharacter = 0x4CE5B1B2u, kVenue = 0xD7DCA628u;
 constexpr uint32_t kClothingColours = 0xAC3E66A4u;  // a clothing row: one item per colour (sub_000151C0)
 constexpr uint32_t kJewelryVariants = 0xC2E12E98u;  // a jewellery row: one per entry, or one when empty (sub_000153D0)
+constexpr uint32_t kBlazinCost = 0x0CFA401Eu;       // "Cost": a Blazin row's price in development points (sub_0004EB60)
 constexpr uint32_t kClothingType = 0x0E334DC7u;     // "Type": a clothing row's shop section, 0..15
 
 // ---- the profile file (a user ID): profile offset p is at file 0x80 + p ----
@@ -31,6 +32,7 @@ constexpr size_t kItemStates = 0x4DC4;      // sub_000148B0: the six state array
 constexpr size_t kCash = 0x20;              // GetPlayerCash (sub_0004CA30)
 constexpr size_t kDevPoints = 0x28;         // GetPlayerDevPts (sub_0004CA70); the gym spends them (sub_0004EB60)
 constexpr size_t kBaseStats = 0xFC;         // six dwords; the gym trains the first five
+constexpr size_t kStyles = 0x140;           // three bytes: the first style, then the two the gym teaches (0xFF none)
 // Unlocked-row counters (sub_00015B80 raises them per delivered item): word per kind, in profile
 // order of kinds hair, tattoo, jewellery, clothing, Blazin (styles have none); dwords per clothing type.
 constexpr size_t kRowCounter[6] = {0xA8, 0xAA, 0xAE, 0xAC, 0xB0, 0};
@@ -206,6 +208,13 @@ bool unlock_layout(const Bytes &sod, UnlockLayout &out, std::string *error)
             }
         }
         out.items[k] = n;
+        if (order[k] == kBlazin) {      // the moves' prices; a database without the field has none
+            uint32_t word, cost;
+            out.blazin_cost.assign(rows.size(), 0);
+            if (s.field(kBlazin, kBlazinCost, word))
+                for (size_t i = 0; i < rows.size(); i++)
+                    if (s.u(rows[i] + 4 * word, cost) && cost <= 1000000) out.blazin_cost[i] = cost;
+        }
     }
     if (!s.rows(kCharacter, out.character_table, rows)) return fail("the game's database has no fighters");
     out.characters = (uint32_t)rows.size();
@@ -232,12 +241,14 @@ bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, Unloc
         return false;
     }
     size_t at = kProfileAt + kItemStates;
+    uint32_t moves_cost = 0;            // the Blazin moves it does not own (state below 2), at the gym's prices
     for (int k = 0; k < 6; k++) {
         uint32_t n = layout.items[k];
         counts.items[k] = 0;
         for (uint32_t i = 0; i < n; i++) {
             uint8_t &byte = b[at + i / 4];
             int shift = (int)(i % 4) * 2;
+            if (k == 4 && ((byte >> shift) & 3) < 2 && i < layout.blazin_cost.size()) moves_cost += layout.blazin_cost[i];
             if (!((byte >> shift) & 3)) counts.items[k]++;
             byte |= (uint8_t)(1u << shift);        // locked -> unlocked; an owned item stays owned
         }
@@ -259,12 +270,15 @@ bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, Unloc
         wr(b, kProfileAt + kCash, kUnlockCash);
         counts.cash = true;
     }
-    // Development points: enough to train the five stats from where they are to the gym's cap, no more.
+    // Development points: enough to train the five stats from where they are to the gym's cap, to learn
+    // every Blazin move it does not own and to fill its empty style slots; no more.
     counts.dev_points = 0;
     if (cash) {
         uint32_t stats[5];
         for (int i = 0; i < 5; i++) stats[i] = rd(b, kProfileAt + kBaseStats + 4 * i);
-        uint32_t want = training_cost(stats);
+        uint32_t want = training_cost(stats) + moves_cost;
+        for (int i = 1; i < 3; i++)
+            if (b[kProfileAt + kStyles + i] == 0xFF) want += kStylePrice;
         if (rd(b, kProfileAt + kDevPoints) < want) {
             wr(b, kProfileAt + kDevPoints, want);
             counts.dev_points = want;

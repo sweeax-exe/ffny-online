@@ -53,7 +53,7 @@ and the backups in `<data folder>/save-backups/`:
 - **Unlock all** (on a profile) sets that profile to 100%: every fighter and venue (and with the venues every
   match type) and every song, and in the Story shops every piece of clothing, jewellery, tattoo and hair style,
   every Blazin move and fighting style to buy or learn. It asks first ("This changes <profile>. A backup is
-  kept. Undo with Restore."), with a box for *and $999,999 and development points* (the points to train every stat to its maximum in the gym, at most 272,625; both only raised), then makes a backup
+  kept. Undo with Restore."), with a box for *and $999,999 and development points* (the points to train every stat to its maximum, learn every Blazin move and two more fighting styles in the gym; both only raised), then makes a backup
   (*Before Unlock everything*), edits the profile file and the Options file and signs both again. Items you own
   stay owned; stats, level, the created fighter and story progress are not touched.
   Fighters, venues and songs are kept once for the whole save area by the game, so they are unlocked for every

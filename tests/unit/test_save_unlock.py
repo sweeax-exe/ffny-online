@@ -143,8 +143,8 @@ def make_sod(tables):
         out.extend(struct.pack('<%dI' % len(words), *words))
         return o
     # schema: the two list fields at word 3
-    keys = [CLOTH ^ COLOURS, JEWEL ^ VARIANTS, CLOTH ^ TYPE, 0x1234]
-    schema = put([0x414D4B53, len(keys), 2] + keys + [3, 0x3000000, 3, 0x3000000, 4, 0, 1, 0])
+    keys = [CLOTH ^ COLOURS, JEWEL ^ VARIANTS, CLOTH ^ TYPE, 0x1234, BLAZIN ^ BLAZIN_COST]
+    schema = put([0x414D4B53, len(keys), 2] + keys + [3, 0x3000000, 3, 0x3000000, 4, 0, 1, 0, 4, 0])
     offs = []
     for index, (th, rows) in enumerate(tables):
         ptrs = []
@@ -297,13 +297,22 @@ GYM_COST = (5, 25, 50, 100, 225, 500, 1000, 1500, 2500, 5000)      # the game's 
 GYM_CAP = 50
 
 
+BLAZIN_COST = 0x0CFA401E        # "Cost": in the sample database a Blazin row costs row % 3 (its word 4)
+STYLE_PRICE = 2500
+ALL_MOVES = sum(r % 3 for r in range(82))       # the sample profile owns no Blazin move
+
+
 def training_cost(stats):
     return sum(GYM_COST[v // 5] for s in stats for v in range(s, GYM_CAP))
 
 
-def stats_blob(stats, dev, cash=500):
+def stats_blob(stats, dev, cash=500, styles=(1, 2, 3), owned_moves=()):
     blob = bytearray(profile_blob(cash=cash))
     struct.pack_into('<5I', blob, 0x80 + 0xFC, *stats)
+    blob[0x80 + 0x140:0x80 + 0x143] = bytes(styles)
+    blazin = 0x80 + 0x4DC4 + sum(n // 4 + 1 for n in (9, 30, 8, 10))
+    for i, state in owned_moves:
+        blob[blazin + i // 4] |= state << (i % 4 * 2)
     struct.pack_into('<I', blob, 0x80 + 0x28, dev)
     return bytes(blob)      # unsigned is fine: the 'profile' command edits the bytes only
 
@@ -317,11 +326,11 @@ def test_development_points_cover_training_to_the_cap_and_no_more(tool, sod, tmp
         src.write_bytes(before)
         out = parse(run(tool, 'profile', sod, src, dst, 1))
         after = dst.read_bytes()
-        want = training_cost(stats)
+        want = training_cost(stats) + ALL_MOVES
         assert out['dev'] == str(want) and struct.unpack_from('<I', after, 0x80 + 0x28)[0] == want
         assert after[0x80 + 0xFC:0x80 + 0x144] == before[0x80 + 0xFC:0x80 + 0x144]     # stats, bonus, moves, styles
         # spending them the gym's way reaches the cap exactly: nothing is left to go past it
-        left, trained = want, list(stats)
+        left, trained = want - ALL_MOVES, list(stats)
         for i in range(5):
             while trained[i] < GYM_CAP:
                 left -= GYM_COST[trained[i] // 5]
@@ -333,16 +342,37 @@ def test_development_points_cover_training_to_the_cap_and_no_more(tool, sod, tmp
         assert dst.read_bytes() == after
 
 
+def test_development_points_also_cover_the_moves_and_styles_not_owned(tool, sod, tmp_path):
+    """The gym sells Blazin moves (the row's Cost) and two more styles (2,500 each) for the same points."""
+    src, dst = tmp_path / 'p', tmp_path / 'q'
+    full = (50, 50, 50, 50, 50)
+    cases = [
+        (dict(), ALL_MOVES),                                                    # no move owned, three styles
+        (dict(owned_moves=[(1, 2), (2, 3), (4, 1)]), ALL_MOVES - 1 - 2),        # owned (2, 3) are not paid again; unlocked (1) is
+        (dict(styles=(0, 0xFF, 0xFF)), ALL_MOVES + 2 * STYLE_PRICE),            # two empty style slots
+        (dict(styles=(4, 2, 0xFF), owned_moves=[(80, 2)]), ALL_MOVES - 2 + STYLE_PRICE),
+    ]
+    for kw, want in cases:
+        before = stats_blob(full, 0, **kw)
+        src.write_bytes(before)
+        assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == str(want), kw
+        after = dst.read_bytes()
+        assert struct.unpack_from('<I', after, 0x80 + 0x28)[0] == want
+        assert after[0x80 + 0xFC:0x80 + 0x144] == before[0x80 + 0xFC:0x80 + 0x144]     # stats and styles untouched
+    src.write_bytes(stats_blob((0, 0, 0, 0, 0), 0, styles=(0, 0xFF, 0xFF)))    # everything at once
+    assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == str(272625 + ALL_MOVES + 2 * STYLE_PRICE)
+
+
 def test_development_points_are_never_lowered_or_given_without_the_box(tool, sod, tmp_path):
     src, dst = tmp_path / 'p', tmp_path / 'q'
     src.write_bytes(stats_blob((0, 0, 0, 0, 0), 300000))               # more than the training costs: kept
     assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == '0'
     assert struct.unpack_from('<I', dst.read_bytes(), 0x80 + 0x28)[0] == 300000
-    src.write_bytes(stats_blob((50, 50, 50, 50, 50), 7))               # fully trained: nothing to give
+    src.write_bytes(stats_blob((50, 50, 50, 50, 50), ALL_MOVES + 7))   # fully trained, the moves covered: nothing to give
     assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == '0'
-    assert struct.unpack_from('<I', dst.read_bytes(), 0x80 + 0x28)[0] == 7
-    src.write_bytes(stats_blob((60, 0xFFFFFFFF, 50, 50, 50), 7))       # an edited save above the cap: no cost
-    assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == '0'
+    assert struct.unpack_from('<I', dst.read_bytes(), 0x80 + 0x28)[0] == ALL_MOVES + 7
+    src.write_bytes(stats_blob((60, 0xFFFFFFFF, 50, 50, 50), 7))       # an edited save above the cap: no training cost
+    assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == str(ALL_MOVES)
     src.write_bytes(stats_blob((0, 5, 5, 0, 0), 400))                  # box not ticked: untouched
     assert parse(run(tool, 'profile', sod, src, dst, 0))['dev'] == '0'
     assert struct.unpack_from('<I', dst.read_bytes(), 0x80 + 0x28)[0] == 400
