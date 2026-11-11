@@ -2259,7 +2259,10 @@ def hill_ready_check(logs, relay_log, pick_copy, idle_copy, problems):
              "backs": text.count(HILL_READYUP_BACK),
              "decided": len(re.findall(r"\[NETPLAY\] \S.*?: the fight is decided", text)),
              "auto_ready": text.count("hill: called again straight after the fight"),
-             "straight_in": text.count("back from the last fight's results: setting up"),
+             # build 70's live watch: a fight that starts while this copy (not called) is on its results takes
+             # it from them into watching that fight; only a fight of its own straight from its results counts
+             "watched_in": len(re.findall(r"back from the last fight's results: setting up .*\(watched\)", text)),
+             "straight_in": len(re.findall(r"back from the last fight's results: setting up (?!.*\(watched\))", text)),
              "left_by_itself": text.count("the results' time is up")}
         out["copies"][str(i)] = c
         if not c["relay_waits"]:
@@ -2268,7 +2271,7 @@ def hill_ready_check(logs, relay_log, pick_copy, idle_copy, problems):
             problems.append("ready-up: copy %d readied itself %d times" % (i, c["auto_ready"]))
         if c["straight_in"]:
             problems.append("ready-up: copy %d went from its results straight into the next fight %d times" % (i, c["straight_in"]))
-        if c["decided"] and c["backs"] < c["decided"] - 1:   # the last fight's way back may be cut by the stop
+        if c["decided"] and c["backs"] + c["watched_in"] < c["decided"] - 1:   # the last way back may be cut by the stop
             problems.append("ready-up: copy %d back on the room screen %d times after %d fights" % (i, c["backs"], c["decided"]))
     rtext = logparse.read_text(relay_log) if relay_log and os.path.isfile(relay_log) else ""
     times = [float(t) for t in re.findall(r"koth: calling (?:c=\S+(?: and )?)+ \(ready time ([\d.]+) s\)", rtext)]
