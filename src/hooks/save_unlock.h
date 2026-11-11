@@ -35,6 +35,8 @@ struct UnlockLayout
     uint32_t clothing_type_rows[16] = {};
     uint32_t character_table = 0, characters = 0;   // table index (an id is table << 24 | row) and rows
     uint32_t venue_table = 0, venues = 0;
+    // What each Blazin move costs to learn in the gym, in development points (the row's "Cost"), by item.
+    std::vector<uint32_t> blazin_cost;
 };
 extern const char *const kUnlockItemNames[6];       // "hair styles", "tattoos", ...
 bool unlock_layout(const Bytes &sod, UnlockLayout &out, std::string *error);
@@ -44,10 +46,25 @@ struct UnlockCounts
     int items[6] = {};          // items that were locked and are now unlocked, per kind
     int fighters = 0, venues = 0, songs = 0;
     bool cash = false;          // the cash was raised to $999,999
+    uint32_t dev_points = 0;    // the development points it now has, when they were raised (else 0)
 };
 constexpr uint32_t kUnlockCash = 999999;
+// Development points (profile +0x28) pay for the gym's training: a point of one of the five trained stats
+// (profile +0xFC.., Upper, Lower, Speed, Toughness, Health) costs kGymCost[stat / 5] (the game's table at
+// 0x002DBB70, read by the gym purchase sub_0004EB60), and the gym stops at kGymStatCap. So 0 -> 50 is
+// 54,525 points a stat and 272,625 for all five; a Story run's bounties hold 313,700.
+constexpr uint32_t kGymCost[10] = {5, 25, 50, 100, 225, 500, 1000, 1500, 2500, 5000};
+constexpr uint32_t kGymStatCap = 50;
+// What it costs to train the five stats from where they are to the cap. A fighter trained that far has
+// no stat above what Story mode gives, and the online stat check (50 a stat) passes.
+uint32_t training_cost(const uint32_t stats[5]);
+// The gym sells two more things for development points (sub_0004EB60): a Blazin move for its row's
+// "Cost", and a fighting style for kStylePrice, into one of the two style slots after the first
+// (profile +0x141, +0x142; 0xFF is empty). Unlock all (with the cash box) tops the profile's points
+// up to training_cost + the moves it does not own + kStylePrice per empty style slot; never lowered.
+constexpr uint32_t kStylePrice = 2500;
 // The edits on the file bytes, unsigned (resign() after). False with *error when the file is not one
-// they know (nothing is changed then).
+// they know (nothing is changed then). `cash` also tops up the development points (training_cost).
 bool unlock_profile_bytes(Bytes &profile, const UnlockLayout &layout, bool cash, UnlockCounts &counts,
                           std::string *error);
 bool unlock_options_bytes(Bytes &options, const UnlockLayout &layout, UnlockCounts &counts, std::string *error);

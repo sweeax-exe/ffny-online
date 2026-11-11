@@ -12,7 +12,7 @@
 // (as if that folder or zip was picked), replace:<profile name> (ticks Replace), import-ok,
 // restore:<row>, restore-ok, folder (Open folder), bring:<row> (Bring back a profile the game deleted),
 // aside:<profile name> (Put aside), back:<profile name> (Bring back a profile put aside),
-// unlock:<profile name> (Unlock all: opens its confirmation), unlock-cash (ticks "and $999,999"),
+// unlock:<profile name> (Unlock all: opens its confirmation), unlock-cash (ticks "and $999,999 and development points"),
 // unlock-ok, undo (Undo after an unlock).
 //
 // Put aside (save_manager.h): the game loads at most 16 user IDs, so a profile can be moved out of the
@@ -560,10 +560,12 @@ void saves_unlock_confirm()
                        "clothing, jewellery, tattoos and hair styles, and every Blazin move and fighting style to buy "
                        "or learn. What you own stays owned.");
     ImGui::Spacing();
-    ImGui::TextDisabled("Fighters, venues and songs are shared by every profile on this PC. Stats, level, development "
-                        "points and story progress stay as they are. Online play is not affected.");
+    ImGui::TextDisabled("Fighters, venues and songs are shared by every profile on this PC. Stats, level and story "
+                        "progress stay as they are. Online play is not affected.");
     ImGui::Spacing();
-    ImGui::Checkbox("and $999,999 to spend in Story", &g_sp.unlock_cash);
+    ImGui::Checkbox("and $999,999 and development points for Story", &g_sp.unlock_cash);
+    ImGui::TextDisabled("Enough development points to train every stat to its maximum, learn every Blazin move and "
+                        "two more fighting styles in the gym. Cash and points are only raised, never lowered.");
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_Button, k_red);
