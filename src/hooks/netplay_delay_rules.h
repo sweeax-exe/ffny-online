@@ -13,6 +13,7 @@ extern "C" {
 #define NETDELAY_MIN     2
 #define NETDELAY_MAX     10
 #define NETDELAY_RB_LESS 4      /* every PC rolls back: the delay is this much shorter */
+#define NETDELAY_LOCKSTEP_MARGIN 1   /* build 76.1: lockstep's extra step (build 75's slack); so up to 11 */
 
 /* The delay in 1/60 s steps for a match: `a_ms` and `b_ms` the two highest of the players' pings to the
  * relay (negative: none, read as 0), `rollback` 1 when every PC rolls back, `multi_margin` the extra step

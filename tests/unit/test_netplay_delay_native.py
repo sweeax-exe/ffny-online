@@ -56,6 +56,11 @@ def old_delay(a, b, rb, players_3plus):
     return 2 if d < 2 else 10 if d > 10 else d
 
 
+def delay_761(a, b, rb, players_3plus):
+    """Build 76.1: lockstep adds one step after the clamp (build 75's slack), rollback unchanged."""
+    return old_delay(a, b, rb, players_3plus) + (0 if rb else 1)
+
+
 @pytest.fixture(scope='module')
 def rows(tmp_path_factory):
     compiler = shutil.which('cl')
@@ -81,15 +86,15 @@ def test_same_delay_as_before(rows):
     assert len(steps) > 1000
     for a, b, rb, mm, got in steps:
         a, b, rb, mm, got = int(a), int(b), int(rb), int(mm), int(got)
-        assert got == old_delay(a, b, rb, mm), (a, b, rb, mm)
+        assert got == delay_761(a, b, rb, mm), (a, b, rb, mm)
 
 
 def test_known_values(rows):
     table = {(int(a), int(b), int(rb), int(mm)): int(d) for a, b, rb, mm, d in by(rows, 'steps')}
-    assert table[(-1, -1, 0, 0)] == 2           # local test copies: the minimum
-    assert table[(110, 110, 0, 0)] == 8         # two players at 110 ms, lockstep
+    assert table[(-1, -1, 0, 0)] == 3           # local test copies: the minimum (+1 lockstep, 76.1)
+    assert table[(110, 110, 0, 0)] == 9         # two players at 110 ms, lockstep (+1, 76.1)
     assert table[(110, 110, 1, 0)] == 4         # the same with rollback
-    assert table[(398, 397, 0, 0)] == 10        # the maximum
+    assert table[(398, 397, 0, 0)] == 11        # the maximum (10 + 1 in lockstep, 76.1)
 
 
 def test_top_two_and_path(rows):

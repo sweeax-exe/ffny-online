@@ -26,7 +26,14 @@ int netdelay_steps(int a_ms, int b_ms, int rollback, int multi_margin)
     int d = (netdelay_path_ms(a_ms, b_ms) * 3 + 49) / 50 + 1;
     if (rollback) d -= NETDELAY_RB_LESS;         /* what the delay does not cover, a rollback does */
     else if (multi_margin > 0) d += multi_margin;
-    return d < NETDELAY_MIN ? NETDELAY_MIN : d > NETDELAY_MAX ? NETDELAY_MAX : d;
+    d = d < NETDELAY_MIN ? NETDELAY_MIN : d > NETDELAY_MAX ? NETDELAY_MAX : d;
+    /* Build 76.1: lockstep gets back the step build 76 took away. Up to build 75 this PC's entry for step
+     * s + d went out before it waited for step s, so the network had d + 1 steps; build 76 commits it at
+     * step s's pad read, after that wait, so a stall delays the next send and the slack was one step less
+     * at the same ping (players at higher pings saw the game hitch). Lockstep now plays exactly as build 75
+     * did; rollback keeps build 76's shorter delay (it does not wait per step). */
+    if (!rollback) d += NETDELAY_LOCKSTEP_MARGIN;
+    return d;
 }
 
 int netdelay_line(char *out, int size, int rollback, int frames, int path_ms, int estimate)
