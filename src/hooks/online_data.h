@@ -40,6 +40,9 @@ int online_fighters(const OnlineFighter **out);
 int online_venues(const OnlineVenue **out);
 int online_modes(const OnlineMode **out);
 
+/* The new fighters (front-end IDs 100..254, content packs; new_fighters.h): offered in the hub's fighter
+ * list, never as CPU places, random picks or in drafts. */
+int online_new_fighters(const OnlineFighter **out);
 const char *online_fighter_name(int id);    /* "Fighter 12" if unknown */
 /* A fighter ID as saved by builds that offered Teck, Santos, O.E and Eric Sermon under their
  * fighter.xml IDs (13 and 14), as the Battle-mode ID; any other ID unchanged. */

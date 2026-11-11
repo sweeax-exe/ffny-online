@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h>
 #include "online_data.h"
+#include "new_fighters.h"
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -210,6 +211,34 @@ static void load(void)
 #endif
 
 int online_fighters(const OnlineFighter **out) { load(); *out = g_fighters; return g_fighter_count; }
+
+/* The new fighters of the database the game reads (new_fighters.c: Character rows with a front-end ID of
+ * 100..254, a content pack's), named by their row and styled as their template. Kept apart from
+ * online_fighters(): the CPU places, the random pick and the draft stay stock, as the relay's list is. */
+static OnlineFighter g_new_fighters[NEW_FIGHTER_MAX];
+static int g_new_fighter_count = -1;
+
+int online_new_fighters(const OnlineFighter **out)
+{
+    if (g_new_fighter_count < 0) {
+        const NewFighter *nf;
+        int n = new_fighters_list(&nf), k, i;
+        load();
+        g_new_fighter_count = 0;
+        for (k = 0; k < n && g_new_fighter_count < NEW_FIGHTER_MAX; k++) {
+            OnlineFighter *f = &g_new_fighters[g_new_fighter_count];
+            if (nf[k].template_fe_id < 0) continue;
+            f->id = nf[k].fe_id;
+            snprintf(f->name, sizeof(f->name), "%s", nf[k].name);
+            f->style = "";
+            for (i = 0; i < g_fighter_count; i++)
+                if (g_fighters[i].id == nf[k].template_fe_id) f->style = g_fighters[i].style;
+            g_new_fighter_count++;
+        }
+    }
+    *out = g_new_fighters;
+    return g_new_fighter_count;
+}
 int online_venues(const OnlineVenue **out) { load(); *out = g_venues; return g_venue_count; }
 int online_modes(const OnlineMode **out) { *out = k_modes; return (int)(sizeof(k_modes) / sizeof(k_modes[0])); }
 
@@ -261,6 +290,11 @@ const char *online_fighter_name(int id)
     int i;
     load();
     for (i = 0; i < g_fighter_count; i++) if (g_fighters[i].id == id) return g_fighters[i].name;
+    if (id >= NEW_FIGHTER_FIRST && id <= NEW_FIGHTER_LAST) {
+        const OnlineFighter *nf;
+        int n = online_new_fighters(&nf);
+        for (i = 0; i < n; i++) if (nf[i].id == id) return nf[i].name;
+    }
     /* 99 is a created fighter (NETPLAY_CREATED_FIGHTER): My Stats' last fights said "Fighter 99" (Discord, 2026-11-03) */
     if (id == 99) return "Created Fighter";
     next = (next + 1) % 4;
