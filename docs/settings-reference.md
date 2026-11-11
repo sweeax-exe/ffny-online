@@ -135,6 +135,12 @@ Tests only: `RECOMP_TEST_PERFECT=1` makes every round with a winner a perfect, a
 | `hide_cursor` | `true` | Hide the mouse pointer over the game after two seconds without movement (always in full screen). |
 | `confine_cursor` | `true` | In full screen, keep the pointer inside the window so a click cannot land on another monitor. |
 
+## [online] input delay line
+
+| Key | Default | Meaning |
+|---|---|---|
+| `delay_display` | `true` | In an online fight, a small line at the bottom of the screen says how the match plays: `Rollback · 3 frames`, or `No rollback (path 140 ms) · 10 frames` when it plays in lockstep (a path over the rollback limit, a player without rollback, King of the Hill). A frame is 1/60 s: your presses count that many frames after you make them. In a room the same line shows before READY as an estimate (`about N frames`) from the players' pings; the START's own pings decide. A picture over the game only. Env `RECOMP_DELAY_DISPLAY`. |
+
 ## [gamepad]
 
 Applies to every pad. Which physical control acts as which Xbox control, and the dead zones.

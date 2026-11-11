@@ -41,6 +41,7 @@
 #include "online_screen.h"
 #include "netplay.h"
 #include "netplay_servers.h"
+#include "netplay_delay_rules.h"
 #include "created_fighter.h"
 #include "voice.h"
 #include "account.h"
@@ -3571,6 +3572,8 @@ void draw_tset(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r,
 void draw_tset_intro(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const NetTSet &t);
 void tset_banner(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetTSet &t, float y);
 
+void delay_room_line(ImDrawList *dl, const Frame &f);     // delay_hud_ui.inc (build 76)
+
 void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 {
     if (NETPLAY_IS_HILL(r.settings.mode)) { draw_hill(dl, f, pad, r); return; }
@@ -3927,6 +3930,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     if (host && !ready) hx += hint(dl, f, hx, hy, "y", "ROOM SETTINGS");
     hx += hint(dl, f, hx, hy, "rb", "VOICE");
     hint(dl, f, hx, hy, "b", ranked ? ranked_leave_hint(ri) : "LEAVE ROOM");
+    if (!ready) delay_room_line(dl, f);      // build 76: the input delay this room would play with
 
     if (pad.a && !ready && fighter_blocked(r, fighter)) {
         // build 68: this player's fighter is left out by the room's FIGHTER RULES: choose another first
@@ -4442,6 +4446,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "locker_ui.inc"
 #include "turf_ui.inc"
 #include "tset_ui.inc"
+#include "delay_hud_ui.inc"
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -5290,6 +5295,9 @@ void draw_versus(ImDrawList *dl, ImVec2 display)
 NetHillWatch g_hill_watch;
 bool g_hill_hud_up = false;
 
+bool delay_hud_wanted() { return dh_wanted(); }
+void draw_delay_hud(ImDrawList *dl, ImVec2 display) { dh_draw(dl, display); }
+
 bool hill_hud_wanted()
 {
     g_hill_hud_up = !gallery_on() && netplay_hill_watch(&g_hill_watch) != 0;
@@ -5878,6 +5886,8 @@ bool versus_wanted() { return false; }
 void draw_versus(ImDrawList *, ImVec2) {}
 const char *shot_label() { return nullptr; }
 bool hill_hud_wanted() { return false; }
+bool delay_hud_wanted() { return false; }
+void draw_delay_hud(ImDrawList *, ImVec2) {}
 void draw_hill_hud(ImDrawList *, ImVec2) {}
 bool hill_results_wanted() { return false; }
 void draw_hill_results(ImDrawList *, ImVec2) {}

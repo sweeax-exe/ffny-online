@@ -62,6 +62,10 @@ const char *shot_label();
  * (then the game gets no input on this PC: a spectator's only). */
 /* Build 70: the spectator HUD over a hill fight this PC watches live (netplay_hill_watch): call
  * hill_hud_wanted() once a frame; draw_hill_hud draws it (no input). */
+/* Build 76: the input delay line over an online fight ([online] delay_display, delay_hud_ui.inc):
+ * delay_hud_wanted() once a frame; draw_delay_hud draws it (no input). */
+bool delay_hud_wanted();
+void draw_delay_hud(ImDrawList *dl, ImVec2 display);
 bool hill_hud_wanted();
 void draw_hill_hud(ImDrawList *dl, ImVec2 display);
 /* Build 73: over this PC's own hill fight's results, what START does there (the room menu; held, leave the
