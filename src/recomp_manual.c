@@ -1683,12 +1683,20 @@ void sub_00044FC0(void)
  * fighter's (sub_000BE3D0). The pads were unlinked from the created records when a step saw phase 3,
  * but Enoc's lockstep rematch (F9 59f513, build 45) ended without such a step and crashed here. The
  * pads are now unlinked on entry, whatever the phase did (created_fighter.c). */
+/* The same pass holds the retail bug that keeps the first Toughness milestone out of reach: it
+ * stores 0 or 1 into the profile's count of wins with more than two fighters (+0x74, at 0x00064F78)
+ * where it adds to every other counter. [gameplay] toughness_fix makes it an add
+ * (src/patches/toughness_fix.c). */
 extern void sub_00064ED0_gen(void);
 void created_fighter_before_rewards(void);
+void toughness_fix_before_rewards(int slot);
+void toughness_fix_after_rewards(void);
 void sub_00064ED0(void)
 {
     created_fighter_before_rewards();
+    toughness_fix_before_rewards((int)MEM32(g_esp + 4));    /* thiscall, one argument: the slot */
     sub_00064ED0_gen();
+    toughness_fix_after_rewards();
 }
 
 /* A summary thumb control's update (thiscall, one argument, ret 4), from Battle.SetThumbCtrlID(n)

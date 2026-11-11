@@ -28,6 +28,10 @@ or `src/recomp_manual.c`.
   `vignette_strength` (the venue post effect's darkened edges: removed, or blended towards the
   undarkened picture). Defaults leave the picture exactly as before; all three apply as they change.
   [The investigation](../../docs/research/picture-options.md).
+- `toughness_fix.c`: `[gameplay] toughness_fix` (on by default; `RECOMP_TOUGHNESS_FIX=0` is the retail
+  behavior). Retail bug: the post-match reward pass stores 0 or 1 into the profile's count of wins with more
+  than two fighters (`+0x74`, guest `0x00064F78`, a `mov` where every other counter gets an `add`), so the first
+  Toughness milestone (10 such wins, +1 bonus Toughness) is unreachable. The wrapper makes it an add.
 - `cheats.c`: the `[cheats]` settings and the Story one-shots of the launcher's and overlay's Cheats page
   (issue #71): infinite health, max Blazin', no health regeneration, giant/tiny fighters, the Story fighter
   swap, and cash, development points and fighting styles for the loaded Story profile. All off by default;

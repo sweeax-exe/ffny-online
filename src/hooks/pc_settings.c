@@ -207,6 +207,10 @@ static RecompSetting g_display_settings[] = {
     { "display", "crowd_near", RECOMP_SETTING_ENUM, 0, 0, 0, k_crowd_near, "RECOMP_CROWD_NEAR", 0,
       "Spectators close to the camera: fade (the game's own, they stay faintly see-through) or hide (not drawn "
       "until the camera moves away). Only the picture changes; online matches are unaffected." },
+    { "gameplay", "toughness_fix", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_TOUGHNESS_FIX", 0,
+      "Fix of a bug in the original game: a fighter's first Toughness milestone (10 wins of matches with more "
+      "than two fighters, +1 Toughness) could never be reached, because the count was reset after every "
+      "match. On, the wins count. Off is the original game." },
     { "music", "mode", RECOMP_SETTING_ENUM, 0, 0, 0, k_music_mode, "RECOMP_MUSIC_MODE", 0,
       "Your own songs (the music folder in the data folder, or add them in the launcher's Music): mine (only "
       "yours), mix (yours between the game's own tracks), original (the game's soundtrack only) or auto (mix "
