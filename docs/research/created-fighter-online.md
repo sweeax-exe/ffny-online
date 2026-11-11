@@ -171,7 +171,13 @@ room members as `RECORD` (0x27) on upload, on joining and right before `START`; 
 asks again. `START` gets a trailer naming, per created fighter, the slot and the CRC of the
 record, so every PC injects the same bytes. `READY` 99 plays the record only with the switch on
 and a kept record (otherwise Doc, as for any fighter without a database record); King of the Hill
-and ranked stay roster-only.
+and ranked stay roster-only. (Build 76: King of the Hill and FFA rotation rooms play records too for
+clients with `CAPS` bit 19; the hill's START and WATCH carry the trailer, the records go to the
+watchers as well, and every PC that runs the fight, the live watchers included, injects them as
+here. Crew battles and ranked stay roster-only. FFA rotation fights have no CPU fill, so a record
+always sits on a pad port. Tests: `dj.py scenario online --mode koth --players 3 --matches 3 --created
+--fighters 99,22,9 --cp-records <dump>,,` and the same with `--mode ffarot --matches 2`: the created
+fighter in every fight, the live watchers running it, checksums equal.)
 
 **Server switch**: `CAPS` bit 2. The relay answers it while the file `created-fighters-allowed`
 exists in its updates folder (read at every request; `-created` forces it on for tests), like

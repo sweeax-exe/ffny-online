@@ -286,7 +286,7 @@ by older relays.
 
 | Type | Name | Direction | Body after the header |
 |---|---|---|---|
-| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill; bit 13: FFA rotation; bit 14: RANDOM in the venue vote, build 67; bit 15: CPU level, build 67; bit 16: room rules, build 68) |
+| 0x20 | `CAPS` | client -> server | `token` 8, `caps` u32 (bit 0: King of the Hill; bit 13: FFA rotation; bit 14: RANDOM in the venue vote, build 67; bit 15: CPU level, build 67; bit 16: room rules, build 68; bit 17: live watching, build 70; bit 18: the room screen between hill fights, build 76; bit 19: created fighters in hill rooms, build 76) |
 | 0x20 | `CAPS` | server -> client | `caps` u32 (what the relay supports: bit 0 King of the Hill, bit 1 rollback allowed, bit 2 `YIELD`, since build 36) |
 | 0x21 | `HILL` | server -> client | `room` 6, `phase` u8 (0 waiting, 1 calling, 2 voting, 3 fighting), `king` u8 (slot, 0xFF none), `streak` u16, `ms_left` u16, `seed` u32, `fights` u16, `last_winner` u8, `last_loser` u8, `last_how` u8 (0 none, 1 won, 2 draw, 3 loser left, 4 void), `count` u8, per player in line order: `slot` u8, `state` u8 (0 waiting, 1 called, 2 ready, 3 fighting, 4 away), `wins` u16 |
 | 0x22 | `RESULT` | client -> server | `token` 8, `seed` u32, `winner` u8 (slot, 0xFF draw); from the two fighters, repeated until `HILL.fights` changes; in a ranked set's room until `RANKINFO` counts the game (see "Ranked queue") |
@@ -300,6 +300,17 @@ by older relays.
 - Such a room takes joiners in every phase. Each ROOM is followed by a HILL. The two called
   players must `READY` within 20 s or are moved to the back (two skips in a row: away until
   their next `READY 1`). Only they get `START`; everyone else present gets `WATCH`.
+- The room screen between fights (build 76, `CAPS` bit 18, `262144`, answered only to a client that
+  sent it): such a client never readies itself on a fight's results (build 73 readied it 8 s after
+  the call). Its results go to the room screen by themselves 15-20 s after its fight was decided
+  (sooner when it is called and the call would leave it less than 25 s there), and the next fight
+  starts only when every called player pressed `READY` there; each can pick another fighter first
+  (`READY` with that fighter; it counts for that fight). So a call made after a fight (King of the
+  Hill and FFA rotation, not crew battles) that names such a client lasts at least 50 s from the
+  fight's end (`HILL.ms_left` says so; relay `KothAfterFight`); a king that is not ready by then is
+  skipped and loses the crown as before. Calls before the first fight, and calls naming only older
+  clients (which ready themselves on their results), keep 20 s. A relay without the bit: build 73's
+  way (ready by itself on the results 8 s after the call).
 - During the fight a fighter's `DATA` goes to the other fighter and the `WATCH` receivers; a
   spectator's `DATA` goes to the other spectators only. Between fights it goes to everyone.
 - Two agreeing `RESULT`s decide the fight, two disagreeing ones void it (both to the back), a
@@ -550,7 +561,10 @@ types from 0x27, dropped silently by older relays.
   Clearing a record while ready with it in a lobby-phase room makes the fighter Doc (55).
 - `READY` with fighter **99** plays the record when the relay keeps one and the switch is on;
   otherwise 99 is replaced like any fighter without a database record (Doc). King of the Hill
-  rooms never play records (99 becomes Doc there).
+  and FFA rotation rooms play records only for a client that announced `CAPS` bit 19 (`524288`,
+  build 76; answered only to such a client): the hill's `START` and `WATCH` then carry the trailer
+  below and the records go to every member first, the watchers included. For older clients, and in
+  crew battles, 99 still becomes Doc there.
 - `START` gains a trailer when a player plays a record: after the players, `count` u8, then per
   such player `slot` u8, `crc` u32 (the record the relay sent). Without created fighters `START`
   is unchanged. The relay sends the named records (`RECORD`) to every other member right before

@@ -277,6 +277,12 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                  * Settings, after ROOM's spectators, after START's created fighters */
 #define CAPS_HILL_WATCH 131072u /* live watching in hill rooms (build 70), both ways: a waiting player runs the
                                  * fight from the fighters' DATA (docs/research/king-of-the-hill.md 9.2) */
+#define CAPS_HILL_READYUP 262144u /* the room screen between hill fights (build 76), both ways: this client never
+                                 * readies itself on its results, they go to the room screen; the relay's call
+                                 * after a fight lasts KothAfterFight (50 s) from its end (hill_readyup_left) */
+#define CAPS_HILL_CREATED 524288u /* created fighters in King of the Hill and FFA rotation rooms (build 76), both
+                                 * ways: the relay plays READY 99 there (not in crew battles) and names the
+                                 * records in START and WATCH as in other rooms; the grid offers them there */
 #define CAPS_ROOMRULES 65536u   /* room rules (build 68), both ways: FIGHTER RULES and MAX PING after CREATE's /
                                  * SETTINGS' CPU level, this PC's ping after JOIN / QUICK, the rules and the
                                  * blocked fighters after ROOM's CPU level; ERROR 13: the ping is over MAX PING */
@@ -296,6 +302,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define HILL_CAP_MS() (N.hill_menu ? HILL_RESULTS_MS : HILL_SUMMARY_MS)
 #define HILL_AUTOREADY_MS 8000u /* build 73: called on its results, a fighter readies itself this long after the call */
 #define HILL_AUTOREADY_MARGIN_MS 4000u  /* ... and at the latest this long before the ready time runs out */
+#define HILL_ROOM_PICK_MS 25000u /* build 76: called on its results, a player gets at least this long on the room
+                                  * screen to pick a fighter and READY (the results leave for it in time) */
 #define HILL_HOLD_LEAVE_MS 1200u        /* START held this long on the results or a watched fight: leave the room */
 #define LEFT_ROOM_MS  3000u     /* after LEAVE: a ROOM of the room left is a stale one this long (on_room) */
 #define RESULT_TRIES  75        /* RESULT every RETRY_MS until a HILL shows the fight over (30 s) */
@@ -709,6 +717,8 @@ static struct {
 #define CREW_HERE() (N.crew.battle && !memcmp(N.crew_room, N.roomv.code, 7))
 /* King of the Hill or FFA rotation (not a crew battle): the room menu from the results and the watched fight */
 #define HILL_MENU_ROOM() (N.lobby && N.roomv.in_room && NETPLAY_IS_HILL(N.roomv.settings.mode) && !CREW_HERE())
+/* Build 76: ... with a relay that has the room screen between fights (CAPS_HILL_READYUP): no auto-ready */
+#define READYUP_HERE() (HILL_MENU_ROOM() && N.relay_caps > 0 && ((unsigned)N.relay_caps & CAPS_HILL_READYUP) != 0)
 
 /* Rollback (rollback.h) is on with RECOMP_ROLLBACK=on (off by default since build 21); off, every step waits for every entry. */
 static int rollback_wanted(void) { return rollback_enabled(); }
@@ -1062,6 +1072,8 @@ static void hill_results_tick(void)
  * linked again). Not while a screen loads. */
 static void hill_room_tick(void);    /* build 73: START on the results and from a watched fight */
 static int hill_on_own_results(void);
+static int hill_readyup_left(ULONGLONG now);     /* build 76: the ms until the results leave for the room screen */
+static void hill_readyup_tick(ULONGLONG now);
 
 static void netplay_rematch_tick(void)
 {
@@ -3040,6 +3052,7 @@ static void on_room(const uint8_t *b, int len)
     }
 }
 
+static int g_test_hill_pick;   /* tests: the fighter picked on the room screen (RECOMP_TEST_HILL_ROOM / _PICK) */
 static ULONGLONG g_hill_room_quit_at;   /* the last try to take the game off its results for the room screen */
 static int g_hill_left_deferred;        /* left the room with a next fight set: it is ended back in the menus */
 
@@ -3158,6 +3171,12 @@ static void on_hill(const uint8_t *b, int len)
                 }
                 N.koth_call_end = now + (ULONGLONG)(h.ms_left > 0 ? h.ms_left : 0);
                 N.koth_auto_fights = h.fights;
+                if (READYUP_HERE()) {   /* build 76: the room screen readies it, and only there (hill_readyup_tick) */
+                    N.koth_auto_at = 0;
+                    fprintf(stderr, "[NETPLAY] hill: called for the next fight on this fight's results; the fight waits "
+                            "for READY on the room screen (%.1f s left)\n", (h.ms_left > 0 ? h.ms_left : 0) / 1000.0);
+                    continue;
+                }
                 /* to the room screen asked for (START on the results): it readies itself only at the end */
                 if (!N.hill_room_req && !N.hill_room_next && wait > (int)HILL_AUTOREADY_MS) wait = (int)HILL_AUTOREADY_MS;
                 N.koth_auto_at = now + (ULONGLONG)(wait > 0 ? wait : 0);
@@ -3913,6 +3932,8 @@ static void on_packet(const uint8_t *b, int len)
                         N.relay_caps & CAPS_SPECTATE ? " (spectators)" : "",
                         N.relay_caps & CAPS_CHAT ? " (room chat)" : "", N.relay_caps & CAPS_CREW ? " (crew battles)" : "");
             if (N.relay_caps & CAPS_TSET) fprintf(stderr, "[NETPLAY] the relay offers tournament sets\n");
+            if (N.relay_caps & CAPS_HILL_READYUP)
+                fprintf(stderr, "[NETPLAY] the relay waits for READY on the room screen between hill fights\n");
             rollback_server_allows((N.relay_caps & CAPS_ROLLBACK) != 0);    /* for the next start's audio arena */
             {   /* rollback everywhere (build 52): the mode mask after the caps word; the relay sends the answer
                  * again before every START, so a change of its switch counts from the next match */
@@ -4268,7 +4289,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
-                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH); n += 4;
+                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -5185,6 +5206,8 @@ int netplay_hill_menu(NetHillMenu *out)
     out->hold_total_ms = (int)HILL_HOLD_LEAVE_MS;
     out->stopped_seed = N.hill_start_seed;
     out->pick = N.koth_pick;
+    out->readyup = READYUP_HERE();
+    out->room_ms = hill_readyup_left(now);
     LeaveCriticalSection(&g_cs);
     return out->results;
 }
@@ -5900,6 +5923,23 @@ void netplay_on_main_menu(void)
             room_my_fighter(&ready);
             LeaveCriticalSection(&g_cs);
             fprintf(stderr, "[NETPLAY] tests: fighter %d picked on the room screen (RECOMP_TEST_HILL_ROOM)\n", atoi(pick + 1));
+            g_test_hill_pick = atoi(pick + 1);  /* the test's later READYs keep it, as a player's A does */
+            netplay_lobby_ready(ready, atoi(pick + 1));
+        }
+    }
+    if (N.lobby && !N.hill_room_req && N.koth_results && !N.start_deferred && READYUP_HERE()) {
+        /* build 76: back on the room screen from this PC's own results (pressed through, or left by themselves) */
+        static int backs;
+        const char *t = getenv("RECOMP_TEST_HILL_PICK"), *pick = t ? strchr(t, ':') : NULL;
+        backs++;
+        fprintf(stderr, "[NETPLAY] hill: on the room screen after this PC's fight (%d); the next fight waits for READY here\n", backs);
+        if (pick && atoi(t) == backs && atoi(pick + 1) > 0) {   /* tests: "K:F" picks fighter F after fight K */
+            int ready = 0;
+            EnterCriticalSection(&g_cs);
+            room_my_fighter(&ready);
+            LeaveCriticalSection(&g_cs);
+            fprintf(stderr, "[NETPLAY] tests: fighter %d picked on the room screen (RECOMP_TEST_HILL_PICK)\n", atoi(pick + 1));
+            g_test_hill_pick = atoi(pick + 1);  /* the test's later READYs keep it, as a player's A does */
             netplay_lobby_ready(ready, atoi(pick + 1));
         }
     }
@@ -6119,6 +6159,10 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         int ready_spectators = rs && *rs ? atoi(rs) : 0, told_spec = 0;
         unsigned voted_in = 0;
         ULONGLONG called_at = 0;
+        /* tests (build 76): RECOMP_TEST_HILL_IDLE=<k>: from this copy's k-th call on it never readies (an idle
+         * player on the room screen: the relay must skip it after the ready time) */
+        const char *idle_env = getenv("RECOMP_TEST_HILL_IDLE");
+        int idle_from = idle_env && *idle_env ? atoi(idle_env) : 0, call_no = 0, idle_told = 0;
         netplay_lobby(server, name && *name ? name : "Test player");
         for (i = 0; i < 600 && N.state == NETPLAY_CONNECTING; i++) Sleep(100);
         {   /* RECOMP_TEST_SERVER_SWITCH="<ms>,<eu|na|west|auto>": after that long in the lobby, switch the
@@ -6358,7 +6402,17 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 for (me = 0; me < r.hill.count; me++)
                     if (r.hill.line[me].slot == r.you) state = r.hill.line[me].state;
                 if (state != NETLINE_CALLED || N.match_live) called_at = 0;
-                else if (!called_at) called_at = GetTickCount64();
+                else if (!called_at) {
+                    called_at = GetTickCount64();
+                    call_no++;
+                }
+                if (idle_from > 0 && call_no >= idle_from && called_at) {
+                    if (idle_told != call_no) {
+                        idle_told = call_no;
+                        fprintf(stderr, "[NETPLAY] tests: called (call %d), staying idle on the room screen "
+                                "(RECOMP_TEST_HILL_IDLE)\n", call_no);
+                    }
+                }
                 if (kscript && *kscript && r.hill.valid && r.hill.phase == NETHILL_FIGHTING && state >= 0 &&
                     state != NETLINE_FIGHTING && r.hill.seed && r.hill.seed != watched_seed) {
                     watched_seed = r.hill.seed;
@@ -6375,8 +6429,9 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     in_call = now_called;
                 }
                 if (r.hill.valid && r.hill.phase == NETHILL_CALLING && state == NETLINE_CALLED && !N.match_live &&
+                    !(idle_from > 0 && call_no >= idle_from) &&
                     GetTickCount64() - called_at >= (ULONGLONG)ready_delay && GetTickCount64() - koth_readied > 1000) {
-                    int f = N.koth_pick >= 0 ? N.koth_pick : fighter;  /* build 73: a pick in the room, as A does */
+                    int f = N.koth_pick >= 0 ? N.koth_pick : g_test_hill_pick > 0 ? g_test_hill_pick : fighter;  /* build 73: a pick in the room, as A does */
                     fprintf(stderr, "[NETPLAY] tests: called on the hill; ready with fighter %d\n", f);
                     netplay_lobby_ready(1, f);
                     koth_readied = GetTickCount64();
@@ -8935,6 +8990,63 @@ static void hill_leave_room(const char *why)
     if (results && !N.hill_leave && hill_results_off("the room left")) g_hill_room_quit_at = GetTickCount64();
 }
 
+/* ---- build 76: every hill fight ends on the room screen (player reports, 2026-11-11: "both people can change
+ * their character and the match dont start till u all ready up"; a king could change fighter after a win only
+ * when its challenger was slow to ready) ----
+ *
+ * With a relay that answers CAPS_HILL_READYUP, in King of the Hill and FFA rotation rooms (not crew battles) this
+ * PC never readies itself: the call on its results (build 73 readied it HILL_AUTOREADY_MS later) waits for READY
+ * on the room screen ("YOU'RE UP": A ready, X CHOOSE FIGHTER), and the next fight starts only when every called
+ * player pressed it there. Its results leave by themselves for the room screen HILL_CAP_MS (15-20 s, as the cap
+ * did for a set next fight) after its fight was decided, sooner when it is called and the call would leave less
+ * than HILL_ROOM_PICK_MS on the room screen. The relay's call after a fight lasts at least KothAfterFight (50 s)
+ * from the fight's end, so the king keeps the crown while its results are up; not ready on the room screen in
+ * time, it is skipped as any called player (to the back; two skips: away). An older relay (no bit): build 73's
+ * way, unchanged. A WATCH that came while on the results (start_deferred) keeps the results cap's way
+ * (hill_results_tick), as does START on the results (hill_room_req). Nothing here touches a fight. */
+
+/* With g_cs held: the ms until this PC's results leave by themselves for the room screen (0: due), -1: not. */
+static int hill_readyup_left(ULONGLONG now)
+{
+    ULONGLONG due;
+    if (!READYUP_HERE() || !hill_on_own_results() || N.start_deferred || N.hill_room_req || N.hill_room_next ||
+        !N.hill_decided_at)
+        return -1;
+    due = N.hill_decided_at + HILL_CAP_MS();
+    if (N.koth_call_end && N.roomv.hill.valid && N.roomv.hill.phase == NETHILL_CALLING &&
+        N.roomv.hill.fights == N.koth_auto_fights && hill_my_state() == NETLINE_CALLED) {
+        ULONGLONG pick = N.koth_call_end > HILL_ROOM_PICK_MS ? N.koth_call_end - HILL_ROOM_PICK_MS : 0;
+        if (pick < due) due = pick;
+    }
+    return due > now ? (int)(due - now) : 0;
+}
+
+/* Once per game update (hill_room_tick): takes this PC's game off its results for the room screen when due,
+ * again every 5 s while it is not back (never while a screen loads: hill_results_off). */
+static void hill_readyup_tick(ULONGLONG now)
+{
+    static ULONGLONG tried;
+    static int told_for;
+    int left, called;
+    EnterCriticalSection(&g_cs);
+    left = hill_readyup_left(now);
+    called = left >= 0 && hill_my_state() == NETLINE_CALLED;
+    LeaveCriticalSection(&g_cs);
+    if (left != 0 || (tried && now - tried < 5000)) return;
+    if (!hill_results_off(called ? "the results' time is up: called, to the room screen to get ready"
+                                 : "the results' time is up: to the room screen"))
+        return;
+    tried = now;
+    if (told_for != (int)N.koth_fights + 1) {
+        told_for = (int)N.koth_fights + 1;
+        if (called)
+            toast(8000, "YOU'RE UP: the next fight waits for you. CHOOSE FIGHTER or press %s to ready.",
+                  pc_ui_button_icons() == 2 ? "CROSS" : "A");
+        else
+            toast(6000, "Back to the room: CHOOSE FIGHTER or LEAVE ROOM there.");
+    }
+}
+
 /* Tests: RECOMP_TEST_HILL_ROOM=<k> taps START on the results of this PC's k-th own hill fight, and
  * RECOMP_TEST_HILL_LEAVE=<k> holds it there (leaves the room), 1.5 s after the summary came (the test copies'
  * pads cannot press START at a given moment). */
@@ -9002,6 +9114,7 @@ static void hill_room_tick(void)
     if (N.hill_room_req && N.koth_results && N.hill_summary && now - g_hill_room_quit_at >= 5000 &&
         hill_results_off("the room screen asked for"))
         g_hill_room_quit_at = now;
+    hill_readyup_tick(now);
 }
 
 /* A player's fight that went out of sync and that the other players left (the wait in netplay_on_step):
