@@ -53,6 +53,8 @@
 #include "rollback.h"
 #include "updater.h"
 #include "social.h"
+#include "fight_hud.h"
+#include "fight_hud_rules.h"
 #include <time.h>
 
 namespace {
@@ -5382,6 +5384,8 @@ void draw_hill_results(ImDrawList *dl, ImVec2 display)
     hill_results_strip(dl, menu_frame(display), g_hill_menu_now, room);
 }
 
+#include "fight_hud_ui.inc"
+
 // Room chat over a match (social_ui.inc): read once a frame, drawn by draw_fight_chat.
 bool g_fight_chat_up = false;
 
@@ -5827,6 +5831,8 @@ bool hill_hud_wanted() { return false; }
 void draw_hill_hud(ImDrawList *, ImVec2) {}
 bool hill_results_wanted() { return false; }
 void draw_hill_results(ImDrawList *, ImVec2) {}
+bool fight_hud_wanted() { return false; }
+void draw_fight_hud(ImDrawList *, ImVec2) {}
 bool fight_chat_wanted() { return false; }
 bool draw_fight_chat(ImDrawList *, ImVec2) { return false; }
 bool fight_chat_typing() { return false; }

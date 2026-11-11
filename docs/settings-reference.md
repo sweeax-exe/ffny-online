@@ -102,6 +102,19 @@ line turns it on for one run. Every key here is read at start-up.
 
 See [HD textures](hd-textures.md) for the pack format and local workflow.
 
+## [online]
+
+The online settings (server, name, voice chat, rollback and the rest) are listed with their comments in
+`settings.ini` itself and in the overlay's Online page. The two fight overlays:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `perfect_banner` | `true` | Show **PERFECT** on the screen for a few seconds when a round is won without losing any health, against the CPU and online (in a Team match: neither fighter of the winning side lost any). It is a picture over the game; the fight is not changed. Env `RECOMP_PERFECT_BANNER`. |
+| `name_tags` | `true` | In an online fight, show each player's online name on the line over the fighter's name on the HUD (your own in orange), in every mode with 2 to 4 fighters. CPU fighters get no tag, and offline nothing is shown. Env `RECOMP_NAME_TAGS`. |
+
+Tests only: `RECOMP_TEST_PERFECT=1` makes every round with a winner a perfect, and
+`RECOMP_TEST_NAME_TAGS=A,B,C,D` puts those names on the fighters of any fight, offline too.
+
 ## [input]
 
 | Key | Default | Meaning |

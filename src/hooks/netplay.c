@@ -52,6 +52,7 @@
 #include "created_fighter.h"
 #include "pc_input.h"
 #include "pc_content.h"
+#include "fight_hud.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -73,6 +74,7 @@ void netplay_room(char *c, int size) { if (size > 0) c[0] = 0; }
 void netplay_autostart(void) {}
 int netplay_active(void) { return 0; }
 int netplay_in_fight(void) { return 0; }
+int netplay_fight_step(uint32_t *s) { (void)s; return 0; }
 unsigned netplay_test_step(void) { return 0; }
 int netplay_on_results(void) { return 0; }
 int netplay_match_locked(void) { return 0; }
@@ -142,9 +144,9 @@ int netplay_room_chat_send(const char *t) { (void)t; return 0; }
 void netplay_sync_point(void) {}
 void netplay_on_main_menu(void) {}
 int netplay_match_abandoned(void) { return 0; }
-void netplay_on_match_start(void) {}
+void netplay_on_match_start(void) { fight_hud_match_start(); }
 void netplay_on_pad_pass(void) {}
-void netplay_on_step(void) {}
+void netplay_on_step(void) { fight_hud_step(); }
 void netplay_on_update(void) {}
 extern void sub_00137010(void);
 void netplay_sound_command(void) { sub_00137010(); }
@@ -5631,7 +5633,20 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
             int pct = top > 0.0f && h == h ? (int)(100.0f * h / top + 0.5f) : -1;
             n += snprintf(json + n, (size_t)(size - n), "%s%d", i ? "," : "", pct < -1 ? -1 : pct > 100 ? 100 : pct);
         }
-        n += snprintf(json + n, (size_t)(size - n), "]}");
+        n += snprintf(json + n, (size_t)(size - n), "]");
+        /* build 76: a perfect round (the winners never under the health they began with; fight_hud.c), by
+         * slot. TODO(server): the account service does not read it yet (a perfects count in the stats). */
+        if (!strcmp(event, "result") && !draw) {
+            uint32_t perfect = fight_hud_report_perfect(winners);
+            if (perfect) {
+                first = 1;
+                n += snprintf(json + n, (size_t)(size - n), ",\"perfect\":[");
+                for (i = 0; i < m.count && i < MAXP; i++)
+                    if (perfect & (1u << i)) { n += snprintf(json + n, (size_t)(size - n), "%s%d", first ? "" : ",", i); first = 0; }
+                n += snprintf(json + n, (size_t)(size - n), "]");
+            }
+        }
+        n += snprintf(json + n, (size_t)(size - n), "}");
         /* build 37: the fingerprint of the fight files and the ones read from the override folder */
         n += snprintf(json + n, (size_t)(size - n), ",\"files\":{\"print\":\"%08X\",\"override\":", (unsigned)g_data_print);
         n = json_put(json, size, n, g_data_over);
@@ -6568,6 +6583,14 @@ void netplay_autostart(void)
 
 int netplay_active(void) { return N.lockstep != 0; }
 int netplay_in_fight(void) { return MEM32(G_MATCH_PHASE) == 1u; }
+/* fight_hud.c: the number of the fight step that runs now, when this PC counts them (a lockstep or
+ * rollback fight, the rollback soak): rollback's second runs carry the numbers of the first. */
+int netplay_fight_step(uint32_t *step)
+{
+    if (!N.lockstep && !N.rb_on) return 0;
+    *step = N.step;
+    return 1;
+}
 /* tests (RECOMP_TEST_PICTURE_REPORT_STEP): the step of the first match in lockstep, else 0 */
 unsigned netplay_test_step(void) { return N.lockstep && N.match_count == 1 ? N.step : 0; }
 int netplay_on_results(void) { return N.lobby && N.match_live && !N.watching && N.on_results; }
@@ -6874,7 +6897,18 @@ static void cpus_only_end(uint32_t s, int offline)
     }
 }
 
+/* Build 76: the fight overlays (fight_hud.c: the PERFECT banner, the name tags) see every match and every
+ * step through these two hooks, offline too, after this file's own work: a rollback done in the step is
+ * then already in the state they read. They only read. (Called from here and not from recomp_manual.c,
+ * whose every change makes the generated code stale.) */
+static void match_start_body(void);
 void netplay_on_match_start(void)
+{
+    match_start_body();
+    fight_hud_match_start();
+}
+
+static void match_start_body(void)
 {
     if (!N.lockstep) { if (soak_depth()) soak_match_start(); return; }
     cpu_level_apply();          /* the room's CPU level, before the brains load */
@@ -7653,7 +7687,14 @@ static void spec_step(uint32_t s)
     }
 }
 
+static void step_body(void);
 void netplay_on_step(void)
+{
+    step_body();
+    fight_hud_step();
+}
+
+static void step_body(void)
 {
     uint32_t s, target, k, need;
     ULONGLONG waited_since, last_send, last_note;

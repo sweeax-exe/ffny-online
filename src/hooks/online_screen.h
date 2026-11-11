@@ -68,6 +68,11 @@ void draw_hill_hud(ImDrawList *dl, ImVec2 display);
  * room): hill_results_wanted() once a frame; draw_hill_results draws it (no input). */
 bool hill_results_wanted();
 void draw_hill_results(ImDrawList *dl, ImVec2 display);
+/* Build 76: the PERFECT banner (a round won without losing health, offline too) and, in an online fight,
+ * the players' names on the HUD (fight_hud_ui.inc): fight_hud_wanted() once a frame; draw_fight_hud draws
+ * them (no input). */
+bool fight_hud_wanted();
+void draw_fight_hud(ImDrawList *dl, ImVec2 display);
 bool fight_chat_wanted();
 bool draw_fight_chat(ImDrawList *dl, ImVec2 display);
 bool fight_chat_typing();
