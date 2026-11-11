@@ -374,10 +374,10 @@ SOCIAL_NET = [
 # opens, Y the on-screen keyboard, A types K, left and A types J, START sends "kj", B closes) and then
 # joins copy 1's room from FRIENDS (A on JOIN ROOM).
 SOCIAL_UI = [
-    "3:chat=friends;19:dm=Copy 1;25:chat=global;30:keyboard=yeah lets run it bac;35:close;40:chat=friends;44:chat=crew;"
+    "3:chat=friends;19:dm=Copy 1;25:chat=global;30:keyboard=yeah lets run it bac;35:close;40:chat=friends;42:hubcrew;43:pad=a;44:chat=crew;"
     "46:chat=global;47:type=;48:close;50:pad=back;51:pad=y;52:pad=a;53:pad=left;54:pad=a;55:pad=start;57:pad=b;58:chat=friends;"
     "59:pad=a;64:chat=room;66:type=hello room from copy 0;67:send;76:mute=Copy 1;92:close;"
-    "94:chat=crew;95:crewcreate=Bronx Kings:BXK;100:crewinvite=Copy 1;113:chat=crew;117:menu=Copy 1;119:close;"
+    "94:chat=crew;95:crewcreate=Bronx Kings:BXK;100:crewinvite=Copy 1;110:mycrew;113:chat=crew;117:menu=Copy 1;119:close;"
     "120:chat=global;121:menu=Copy 1;123:close;124:chat=messages;128:close",
     "5:chat=friends;12:quickedit=8:See you next round;16:dm=Copy 0;22:chat=global;27:friend=Tavo;32:close;33:room=create;36:chat=room;40:chat=global;41:close;"
     "44:key=enter;45:text=typed on a keyboard;46:key=enter;47:key=escape;62:chat=room;65:type=hey copy 0, gl;66:send;"
@@ -700,6 +700,10 @@ def social(timeout=300, relay_port=27900, off=False, lock_timeout=None, log=None
                                    if "[SOCIAL-TEST] state:" in l),
                 "crew_role_seen": "[BXK] lieutenant" in state[1],
                 "crew_role": any("Copy 1=lieutenant" in l for l in lines[0] if "[SOCIAL-TEST] state:" in l),
+                # build 77: MY CREW in the hub (hubcrew, then A) opens the CREW tab with no crew yet; in the room (no hub)
+                # its opener alone (mycrew) shows the crew's page
+                "hub_my_crew_none": has(0, "chat opened (MY CREW, no crew)"),
+                "hub_my_crew_page": has(0, "chat opened (MY CREW, the crew's page)"),
                 "report_sent": has(0, "reported 2 ("),
                 # the quick-chat wheel: copy 0's pad in the room reaches copy 1; copy 1's on GLOBAL goes out
                 # a room line's report carries the room's code

@@ -2760,6 +2760,12 @@ void chat_test_step()
         if (C.kb) kb_submit(); else chat_send();
     } else if (what == "close") {
         C.open = C.kb = C.menu = C.rp = false;
+    } else if (what == "hubcrew") {                 // build 77: the window shut, the hub on MY CREW (then pad=a)
+        C.open = C.kb = C.menu = C.rp = false;
+        S.page = HUB;
+        S.hub_sel = HUB_CREW;
+    } else if (what == "mycrew") {                  // build 77: what A on MY CREW does (in a room: no hub)
+        open_my_crew();
     } else if (what == "pad" || what == "key") {    // as the pad's or the keyboard's own press arrives
         held = test_key(arg);
         if (held != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(held, true);
@@ -3324,6 +3330,42 @@ bool chat_begin()
     quick_online_open(r);
     C.mouse_off = C.open || QW.open;
     return C.open || QW.open;
+}
+
+// MY CREW in the hub (build 77, online_screen.cpp draw_hub). Signed in it shows while the CREW tab would
+// (the service's social features on, its crews switch on: tab_shown), once the first snapshot is in;
+// signed out it shows too and A asks for the sign-in (the crew is the account's). RECOMP_SOCIAL=off and
+// the builds without the social service (Windows only for now): never.
+bool my_crew_shown()
+{
+    if (gallery_on()) return G.my_crew;
+#if defined(_WIN32)
+    static const bool off = [] {
+        const char *e = getenv("RECOMP_SOCIAL");
+        return e && (!_stricmp(e, "off") || !strcmp(e, "0"));
+    }();
+    if (off) return false;
+    enum AccountState acc = acc_state();
+    if (acc != ACCOUNT_IN && acc != ACCOUNT_CHECKING) return true;
+    return social_enabled() && C.v.ready && (C.v.crews || C.v.crew);
+#else
+    return false;
+#endif
+}
+
+// A on MY CREW: the chat window on the CREW tab, on the crew's page (not its chat or the ladder); with no
+// crew the tab's own page (the invites, CREATE A CREW). B closes the window as ever: back on the hub.
+void open_my_crew()
+{
+    C.open = C.opened_once = true;
+    C.kb = C.menu = C.rp = C.picker = false;
+    C.tab = TAB_CREW;
+    C.crew_view = 0;
+    C.sel[TAB_CREW] = -1;
+    C.line_skip = 0;
+    C.confirm_leave = C.confirm_decline = false;
+    C.opened_at = GetTickCount64();     // the A that chose it is still down: the window takes no press yet
+    fprintf(stderr, "[SOCIAL-UI] chat opened (MY CREW, %s)\n", C.v.crew ? "the crew's page" : "no crew");
 }
 
 // The small CHAT chip on every online page while the window is shut: what opens it, and what is new.

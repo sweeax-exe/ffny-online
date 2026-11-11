@@ -949,6 +949,7 @@ struct Gallery {
     bool rb_must = false;           // build 52: ... and makes it mandatory for the sample room's mode
     int room_rb[NETPLAY_ROOM_SLOTS] = {};   // each sample member's rollback byte (netplay_room_rollback)
     NetCrew crew = {};              // crew battles (stage 3): the crew-battle pages' sample (battle 0: none)
+    bool my_crew = false;           // build 77: the hub shows MY CREW
 } G;
 NetHillWatch G_hill_hud;            // build 70: the spectator HUD pages' sample (count 0: none)
 NetHillMenu G_hill_menu;            // build 73: the room menu pages' sample (results 0: not the results strip)
@@ -1584,10 +1585,15 @@ void open_servers()
 
 // ---- hub ----
 
-const int HUB_ITEMS = 10, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9;
+const int HUB_ITEMS = 11, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9, HUB_CREW = 10;
 // The hub's order: TURF WAR (stage 4) after MY STATS; it shows while the account service answers the map.
 // TOURNAMENT MATCH after RANKED MATCH; it shows while signed in on a relay that offers tournament sets.
-const int HUB_ORDER[HUB_ITEMS] = { 0, 1, HUB_TSET, 2, 3, 4, HUB_TURF, 5, 6, 7 };
+// MY CREW (build 77) after TURF WAR (after MY STATS when TURF WAR is hidden): the chat window's CREW tab
+// on the crew's page in one step (social_ui.inc); it shows while the social service offers crews, and
+// signed out (A then asks for the sign-in).
+const int HUB_ORDER[HUB_ITEMS] = { 0, 1, HUB_TSET, 2, 3, 4, HUB_TURF, HUB_CREW, 5, 6, 7 };
+bool my_crew_shown();   // social_ui.inc
+void open_my_crew();
 bool tset_shown();      // tset_ui.inc
 void tset_join();
 void tset_poll();
@@ -1845,10 +1851,11 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
 void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static const char *const items[] = { "QUICK MATCH", "RANKED MATCH", "FIND A ROOM", "CREATE A ROOM", "MY STATS",
-                                         "PLAYERS ONLINE", "VOICE CHAT", "LEAVE", "TURF WAR", "TOURNAMENT MATCH" };
+                                         "PLAYERS ONLINE", "VOICE CHAT", "LEAVE", "TURF WAR", "TOURNAMENT MATCH", "MY CREW" };
     static const char *const subs[] = { "STRAIGHT INTO A FIGHT", "ONE ON ONE FOR YOUR RATING", "OPEN ROOMS", "YOUR RULES",
                                         "RECORD AND LEADERBOARD", "WHO IS AROUND", "TALK IN ROOMS AND FIGHTS",
-                                        "BACK TO THE MENU", "CREWS FIGHT FOR NEW YORK", "YOUR SET IN A TOURNAMENT" };
+                                        "BACK TO THE MENU", "CREWS FIGHT FOR NEW YORK", "YOUR SET IN A TOURNAMENT",
+                                        "YOUR CREW'S PAGE" };
     static const char *const descs[] = {
         "You are put into an open room of this mode, or one is opened for the next players.",
         "Classic (stock fighters) or Open (your created fighter too), best of three sets against a player of a "
@@ -1864,6 +1871,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         "Lieutenant challenges; a crew battle decides.",
         "Your tournament set, once the host has made your match: you are put into its room. The server runs the "
         "set by the tournament's rules: the coin toss, the stage picks, Dave's rule and the winner's fighter.",
+        "Your crew's page: its members and who is online, its level, record and turf, the crew chat and the "
+        "ladder. Not in a crew yet: your crew invites, or found one of your own. Sign in with Discord to have one.",
     };
     std::vector<int> quick_modes = mode_cycle();     // King of the Hill last, when the relay has it
     int mode_count = (int)quick_modes.size();
@@ -1871,10 +1880,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     turf_poll();
     tset_poll();
     int shown[HUB_ITEMS], count = 0, at = 0;
-    bool turf = turf_shown(), tour = tset_shown();
+    bool turf = turf_shown(), tour = tset_shown(), crew = my_crew_shown();
     for (int k = 0; k < HUB_ITEMS; k++) {
         int i = HUB_ORDER[k];
-        if ((i != HUB_RANKED || ranked_shown()) && (i != HUB_TURF || turf) && (i != HUB_TSET || tour)) shown[count++] = i;
+        if ((i != HUB_RANKED || ranked_shown()) && (i != HUB_TURF || turf) && (i != HUB_TSET || tour) && (i != HUB_CREW || crew))
+            shown[count++] = i;
     }
     for (int k = 0; k < count; k++) if (shown[k] == S.hub_sel) at = k;
     if (pad.up) at = (at + count - 1) % count;
@@ -1922,7 +1932,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         }
     }
     {   // the items on one glass panel
-        float bottom = count > 9 ? 78 + (count - 1) * 33 + 31 : count > 8 ? 80 + (count - 1) * 37 + 35
+        float bottom = count > 10 ? 77 + (count - 1) * 29.5f + 28 : count > 9 ? 78 + (count - 1) * 33 + 31 : count > 8 ? 80 + (count - 1) * 37 + 35
                      : count > 7 ? 84 + (count - 1) * 41 + 39 : count > 6 ? 84 + (count - 1) * 45 + 42 : 88 + (count - 1) * 53 + 46;
         glass(dl, f, 36, 74, 290, bottom - 74 + 10);
     }
@@ -1930,15 +1940,16 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         int i = shown[k];
         // eight items (ranked shown) sit closer, so the panel still ends above the hints
         // nine (ranked and turf shown): closer still, a little smaller
-        // ten (tournament match too): closer still
-        bool nine = count > 8, ten = count > 9;
-        float x = 50, y = ten ? 78 + k * 33 : nine ? 80 + k * 37 : count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
-        float h = ten ? 31 : nine ? 35 : count > 7 ? 39 : count > 6 ? 42 : 46;
+        // ten (tournament match too): closer still; eleven (MY CREW too, build 77): closer still
+        bool nine = count > 8, ten = count > 9, eleven = count > 10;
+        float x = 50, y = eleven ? 77 + k * 29.5f : ten ? 78 + k * 33 : nine ? 80 + k * 37 : count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
+        float h = eleven ? 28 : ten ? 31 : nine ? 35 : count > 7 ? 39 : count > 6 ? 42 : 46;
         if (mouse_pick(f, x, y, w, h)) S.hub_sel = i;
         bool sel = S.hub_sel == i;
         if (sel) selector(dl, f, x, y, w, h);
-        text(dl, f, g_title, ten ? 19 : nine ? 21 : 23, x + 16, y + (nine ? 1 : 3), sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
-        text(dl, f, g_hand, ten ? 10 : nine ? 11 : 12, x + 18, y + (ten ? 21 : nine ? 24 : 29), sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
+        text(dl, f, g_title, eleven ? 17 : ten ? 19 : nine ? 21 : 23, x + 16, y + (nine ? 1 : 3),
+             sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
+        text(dl, f, g_hand, eleven ? 9 : ten ? 10 : nine ? 11 : 12, x + 18, y + (eleven ? 19.5f : ten ? 21 : nine ? 24 : 29), sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
         // build 62: who searches ranked right now (every mode, each player once), at the item's right
         if (i == HUB_RANKED) {
             searching_poll();
@@ -2041,6 +2052,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         case HUB_VOICE: S.page = VOICE; S.voice_sel = 0; break;
         case HUB_TURF: open_turf(HUB); break;
         case HUB_TSET: tset_join(); break;
+        case HUB_CREW:      // the crew is the account's: signed out, the sign-in first
+            if (!signed_in) say(acc == ACCOUNT_WAITING ? "Finish signing in with Discord in your browser first."
+                                                       : pad_text("Sign in with Discord first: press {y}."));
+            else open_my_crew();
+            break;
         case HUB_LEAVE: break;      // handled by the caller (closes)
         }
     }
@@ -4451,7 +4467,7 @@ NetRoom sample_room(int mode, int max, int count)
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
 {
-    static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "hub-team",
+    static const char *const pages[] = { "connecting", "offline", "hub", "hub-signin", "hub-voice", "hub-crew", "hub-crew-signin", "hub-team",
                                          "hub-special", "hub-koth", "rooms", "rooms-special", "code",
                                          "create", "create-3", "create-6", "create-1", "create-koth",
                                          "create-koth-3", "create-koth-6", "create-koth-1",
@@ -4659,6 +4675,7 @@ void gallery_step()
     G.rollback = G.rb_must = false;
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
     G.crew = NetCrew();
+    G.my_crew = false;
     std::string p = page;
     // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
     G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
@@ -4678,6 +4695,12 @@ void gallery_step()
     else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
     else if (p == "hub-signin") { S.page = HUB; S.hub_sel = 3; G.account = ACCOUNT_OUT; }
     else if (p == "hub-voice") { S.page = HUB; S.hub_sel = HUB_VOICE; }
+    // build 77: MY CREW chosen with every entry shown (ranked, turf war, tournament match: eleven); signed out
+    else if (p == "hub-crew" || p == "hub-crew-signin") {
+        S.page = HUB; S.hub_sel = HUB_CREW; G.ranked = true; G.my_crew = true;
+        TW.gallery_entry = TS.gallery_entry = p == "hub-crew";
+        if (p == "hub-crew-signin") G.account = ACCOUNT_OUT;
+    }
     else if (p == "hub-rollback-restart") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }   // build 46: the restart notice
     else if (p == "hub-team" || p == "hub-special" || p == "hub-koth" || p == "hub-rot") {     // QUICK MATCH with Team, Inferno, King of the Hill or FFA rotation
         S.page = HUB;
