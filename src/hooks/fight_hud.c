@@ -40,7 +40,7 @@
 static FightPerfect s_perfect;
 static uint32_t s_step;
 static int s_fighting, s_logged, s_test = -1;
-static volatile uint32_t s_round, s_mask, s_beat, s_active, s_cpu, s_live;
+static volatile uint32_t s_round, s_mask, s_beat, s_active, s_cpu, s_live, s_shown_step;
 
 static float f32(uint32_t address)
 {
@@ -55,7 +55,7 @@ static uint32_t record(int slot) { return ACTORS + (uint32_t)slot * STRIDE; }
 void fight_hud_match_start(void)
 {
     fight_perfect_reset(&s_perfect);
-    s_step = 0;
+    s_step = s_shown_step = 0;
     s_fighting = s_logged = 0;
     s_mask = s_live = 0;
     s_active = s_cpu = 0;
@@ -70,6 +70,7 @@ void fight_hud_step(void)
     if (!rerun) s_beat++;
     if (netplay_fight_step(&step)) s_step = step;
     else if (!rerun) s_step++;
+    s_shown_step = s_step;
     memset(&s, 0, sizeof(s));
     s.step = s_step;
     for (slot = 0; slot < FIGHT_HUD_SLOTS; slot++) {
@@ -126,6 +127,7 @@ void fight_hud_view(FightHudView *out)
     out->live = s_live;
     out->active = s_active;
     out->cpu = s_cpu;
+    out->step = s_shown_step;
 }
 
 /* Called on the game thread from the step that reports the result: the tracker has the steps

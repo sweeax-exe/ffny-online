@@ -54,6 +54,7 @@
 #include "pc_input.h"
 #include "pc_content.h"
 #include "fight_hud.h"
+#include "start_countdown.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -145,14 +146,14 @@ int netplay_room_chat_send(const char *t) { (void)t; return 0; }
 void netplay_sync_point(void) {}
 void netplay_on_main_menu(void) {}
 int netplay_match_abandoned(void) { return 0; }
-void netplay_on_match_start(void) { fight_hud_match_start(); }
+void netplay_on_match_start(void) { start_countdown_match_start(); fight_hud_match_start(); }
 void netplay_on_pad_pass(void) {}
-void netplay_on_step(void) { fight_hud_step(); }
+void netplay_on_step(void) { start_countdown_step(0); fight_hud_step(); }
 void netplay_on_update(void) {}
 extern void sub_00137010(void);
 void netplay_sound_command(void) { sub_00137010(); }
 void *netplay_sound_handler(uint32_t va) { (void)va; return NULL; }
-void netplay_on_pad_read(uint32_t a) { (void)a; }
+void netplay_on_pad_read(uint32_t a) { start_countdown_hold(a, start_countdown_offline_step()); }
 int netplay_local_slot(void) { return -1; }
 int netplay_delay_info(NetDelayInfo *o) { if (o) memset(o, 0, sizeof(*o)); return 0; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
@@ -7011,6 +7012,7 @@ void netplay_on_match_start(void)
 
 static void match_start_body(void)
 {
+    start_countdown_match_start();
     if (!N.lockstep) { if (soak_depth()) soak_match_start(); return; }
     cpu_level_apply();          /* the room's CPU level, before the brains load */
     g_cp_stale = 1;
@@ -7799,7 +7801,10 @@ static void commit_local(uint32_t target)
     EnterCriticalSection(&g_cs);
     for (t = N.local_last ? N.local_last + 1 : target; t <= target; t++) {
         uint32_t k = t % RING;
-        memcpy(N.in[N.pos][k], N.latest_local, ENTRY);
+        /* build 77: a step of the start countdown goes out at rest (start_countdown.h), so what the
+         * others, the relay's recording and a spectator get is what the fight used */
+        if (start_countdown_enabled() && start_countdown_held_at(1, t)) memset(N.in[N.pos][k], 0, ENTRY);
+        else memcpy(N.in[N.pos][k], N.latest_local, ENTRY);
         N.in_tag[N.pos][k] = t + 1;
         N.in_match[N.pos][k] = N.match;
     }
@@ -7821,6 +7826,7 @@ static void step_body(void)
 {
     uint32_t s, k, need;
     ULONGLONG waited_since, last_send, last_note;
+    start_countdown_step(N.resim);
     if (N.lockstep) versus_hold();
     created_fighter_on_step();  /* created fighters: unlinked once their looks are built */
     cp_pose_in_step();          /* created fighters: posed once a step, on every PC alike */
@@ -8280,7 +8286,24 @@ static void soak_pad(uint32_t actor)
     }
 }
 
+/* The step of the fight a pad read belongs to, counted from its first step: in a lockstep or rollback
+ * fight (and the rollback soak) the agreed step, which rollback's re-runs repeat; otherwise this PC's
+ * own count. */
+static uint32_t round_step(void)
+{
+    return N.lockstep || soak_depth() ? N.step : start_countdown_offline_step();
+}
+
+static void pad_read_body(uint32_t actor);
 void netplay_on_pad_read(uint32_t actor)
+{
+    pad_read_body(actor);
+    /* build 77: the start countdown holds every fighter at rest once the entry is in place, by the
+     * step number every PC shares (start_countdown.h) */
+    start_countdown_hold(actor, round_step());
+}
+
+static void pad_read_body(uint32_t actor)
 {
     uint32_t slot, base, s;
     int i;

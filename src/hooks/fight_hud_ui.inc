@@ -11,6 +11,13 @@
 //             HUD, this PC's own in orange ([online] name_tags). Offline nothing is drawn. The places
 //             are fight_hud_rules.c's (2 to 4 fighters, 4:3, stretched, widescreen at the edges or centred).
 //
+//   Countdown "3 - 2 - 1 - FIGHT!" over the first 180 steps of every fight (build 77), while every fighter's
+//             input is held at rest (start_countdown.h; netplay.c applies the hold), then FIGHT! for a
+//             second. The game's own grey FIGHT! lettering, up for the first second and a half of the
+//             steps, sits under the numbers' dark plate. Drawn from the round's step, so it shows what
+//             the simulation does on every PC, and it stands still while the steps do (a pause, a wait
+//             for another player).
+//
 // Tests: RECOMP_TEST_NAME_TAGS=A,B,C,D names the fighters of an offline fight (the tags' pictures
 // without four copies of the game); RECOMP_TEST_PERFECT=1 is fight_hud.c's.
 
@@ -27,6 +34,9 @@ struct FightHudUi {
     uint32_t round = 0, mask = 0, shown_round = 0;
     unsigned long long mask_at = 0;
     bool banner = false, tags = false;
+    // the start countdown: 3, 2, 1, 0 for FIGHT!, -1 none; how far into it (0..1)
+    int count = -1;
+    float count_t = 0;
     NetVersus match{};
     bool match_live = false;
     std::vector<std::string> test_names;
@@ -77,6 +87,54 @@ void fh_banner(ImDrawList *dl, const Frame &f, unsigned long long age, const cha
         text(dl, f, g_title, 15, 320, cy + 26, with_alpha(CREAM, alpha), who, CENTER, 1.2f);
 }
 
+// A dark band across the picture with gold rules (the PERFECT banner's look), opaque in the middle:
+// it covers the game's own grey FIGHT! lettering, which is up under the first numbers.
+void fh_band(ImDrawList *dl, const Frame &f, float cy, float alpha, float dense)
+{
+    const float bh = 104, half = 330, solid = 160;
+    ImU32 dark = with_alpha(IM_COL32(6, 6, 8, 255), dense * alpha), none = with_alpha(IM_COL32(6, 6, 8, 255), 0);
+    ImVec2 a = f.p(320 - half, cy - bh / 2), b = f.p(320 + half, cy + bh / 2);
+    ImVec2 sa = f.p(320 - solid, cy - bh / 2), sb = f.p(320 + solid, cy + bh / 2);
+    dl->AddRectFilledMultiColor(a, ImVec2(sa.x, b.y), none, dark, dark, none);
+    dl->AddRectFilled(sa, sb, dark);
+    dl->AddRectFilledMultiColor(ImVec2(sb.x, a.y), b, dark, none, none, dark);
+    ImU32 gold = with_alpha(GOLD, alpha), gold0 = with_alpha(GOLD, 0);
+    for (int k = 0; k < 2; k++) {
+        float y = k ? b.y : a.y - 2 * f.s();
+        dl->AddRectFilledMultiColor(ImVec2(a.x, y), ImVec2(sa.x, y + 2 * f.s()), gold0, gold, gold, gold0);
+        dl->AddRectFilled(ImVec2(sa.x, y), ImVec2(sb.x, y + 2 * f.s()), gold);
+        dl->AddRectFilledMultiColor(ImVec2(sb.x, y), ImVec2(b.x, y + 2 * f.s()), gold, gold0, gold0, gold);
+    }
+}
+
+// The start countdown: each number slams in (large to its size), holds and fades as the next comes, on
+// the band; FIGHT! slams in the same way, then the band and it fade out.
+void fh_countdown(ImDrawList *dl, const Frame &f, int n, float t)
+{
+    const float cy = 228;      // where the game's own FIGHT! lettering stands
+    float in = t < 0.16f ? t / 0.16f : 1.0f;
+    float pop = (1.0f - in) * (1.0f - in);
+    if (n > 0) {
+        // the band stays through the numbers (up within the first steps of the 3)
+        fh_band(dl, f, cy, n == 3 ? std::min(1.0f, t * 30.0f) : 1.0f, 0.97f);
+        float out = t > 0.82f ? (1.0f - t) / 0.18f : 1.0f;
+        float alpha = std::max(0.0f, std::min(1.0f, in * 1.6f)) * std::max(0.0f, out);
+        float size = 128.0f * (1.0f + pop * 1.4f) * (0.92f + 0.08f * out);
+        char digit[2] = { (char)('0' + n), 0 };
+        float ty = cy - size * 0.5f;
+        text(dl, f, g_stencil, size, 320 + 4.0f, ty + 5.0f, with_alpha(RED, alpha * 0.9f), digit, CENTER, 0);
+        text(dl, f, g_stencil, size, 320, ty, with_alpha(GOLD, alpha), digit, CENTER, 3.0f);
+        return;
+    }
+    float out = t > 0.7f ? (1.0f - t) / 0.3f : 1.0f;
+    float alpha = std::max(0.0f, std::min(1.0f, in * 1.4f)) * std::max(0.0f, out);
+    float size = 112.0f * (1.0f + pop * 1.3f) * (1.0f + (1.0f - out) * 0.15f);
+    fh_band(dl, f, cy, std::max(0.0f, out), 0.7f);
+    float ty = cy - size * 0.5f;
+    text(dl, f, g_stencil, size, 320 + 3.0f, ty + 4.0f, with_alpha(RED, alpha * 0.9f), "FIGHT!", CENTER, 0);
+    text(dl, f, g_stencil, size, 320, ty, with_alpha(GOLD, alpha), "FIGHT!", CENTER, 2.8f);
+}
+
 void fh_tags(ImDrawList *dl, ImVec2 display)
 {
     FightPicture pic;
@@ -123,6 +181,16 @@ bool fight_hud_wanted()
     // the game's HUD is up while the round is fought and its steps run (not in a special move's camera, not
     // once the round is decided, not in a paused fight)
     bool hud_up = FH.view.live && FH.beat_at && now - FH.beat_at < FH_HUD_STALE_MS;
+    // the start countdown, while the round's first steps run (the phase word may still say "start" at step 1)
+    bool steps_run = FH.beat_at && now - FH.beat_at < FH_HUD_STALE_MS;
+    FH.count = steps_run ? start_countdown_shown(start_countdown_enabled(), FH.view.step, &FH.count_t) : -1;    if (FH.count >= 0) {
+        static uint32_t logged_round;
+        if (logged_round != FH.view.round) {
+            logged_round = FH.view.round;
+            fprintf(stderr, "[FIGHTHUD] start countdown up (round %u, step %u)\n", (unsigned)FH.view.round,
+                    (unsigned)FH.view.step);
+        }
+    }
     // the banner: from a moment after the round is a perfect, once per round
     if (FH.view.round != FH.round || FH.view.perfect != FH.mask) {
         FH.round = FH.view.round;
@@ -153,12 +221,13 @@ bool fight_hud_wanted()
             }
         }
     }
-    return FH.banner || FH.tags;
+    return FH.banner || FH.tags || FH.count >= 0;
 }
 
 void draw_fight_hud(ImDrawList *dl, ImVec2 display)
 {
     if (FH.tags) fh_tags(dl, display);
+    if (FH.count >= 0) fh_countdown(dl, menu_frame(display), FH.count, FH.count_t);
     if (FH.banner) {
         // online: whose perfect it is (the winner's name; a Team side's two)
         std::string who;
