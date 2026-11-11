@@ -1902,7 +1902,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                 # a copy taken off its results by the game may skip the rewards (and the lingering one always
                 # does; so does one that went to the room screen or left from them): each fight's summary counts
                 rewards = [c.watch.count("[FUNCCALL] Game.GetMatchSummary(0)") for c in cs]
-            gone = set([leaver[0]] if leaver else []) | set([results_leaver[0]] if results_leaver else [])
+            gone = set([leaver[0]] if leaver else []) | set([results_leaver[0]] if results_leaver else []) | set([idle_copy[0]] if idle_copy else [])
             if spectate_after and len(cs) == players and rewards[0] >= spectate_after and not spectate_due:
                 spectate_due = time.time() + float(spectate_delay or 0)
             if spectate_due and len(cs) == players and time.time() >= spectate_due:
@@ -2084,9 +2084,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         if idle_copy:   # it fights no more after it went idle: not a match row
             analyses.pop(idle_copy[0], None)
             problems[:] = [p for p in problems if not p.startswith("m") or " copy %d" % idle_copy[0] not in p]
+            ok = not problems   # online_rows failed on the idle copy's rows alone otherwise
     if mode == "ffarot":
         result["rotation"] = rotation_check(logs, rot_relay_log, matches, players, problems,
-                                            leaver or ((results_leaver[0], None) if results_leaver else None))
+                                            leaver or ((results_leaver[0], None) if results_leaver else None) or
+                                            ((idle_copy[0], idle_copy[1], "idle") if idle_copy else None))
     if maintenance:
         told = [i for i, p in logs.items() if "the relay restarts in" in logparse.read_text(p)]
         result["maintenance_told"] = told
@@ -2379,6 +2381,9 @@ def rotation_check(logs, relay_log, matches, players, problems, leaver=None):
     out = {"copies": {}, "relay": {}}
     fighting = min(players, 4)
     left = leaver[0] if leaver else None
+    # the first fight with one fighter fewer: the second (a leaver in the first), or with an idle copy (build 76,
+    # leaver (COPY, K, 'idle'): idle from its K-th call) the K-th
+    short_from = (leaver[1] - 1) if leaver and len(leaver) > 2 else 1
     for i, p in logs.items():
         text = logparse.read_text(p)
         c = {"rot_starts": text.count("(an FFA rotation fight)"),
@@ -2404,7 +2409,7 @@ def rotation_check(logs, relay_log, matches, players, problems, leaver=None):
     if len(fights) < matches:
         problems.append("relay: %d FFA rotation fights started, want %d" % (len(fights), matches))
     for k, (mode, slots) in enumerate(fights[:matches]):
-        n = fighting if k == 0 or left is None else min(players - 1, 4)
+        n = fighting if k < short_from or left is None else min(players - 1, 4)
         wm = want_mode if n == fighting else ("3" if n == 4 else "2" if n == 3 else "0")
         if mode != wm or len(slots.split()) != n:
             problems.append("relay: fight %d mode %s slots [%s], want mode %s with %d" % (k + 1, mode, slots, wm, n))

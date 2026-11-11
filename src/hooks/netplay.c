@@ -3932,7 +3932,7 @@ static void on_packet(const uint8_t *b, int len)
                         N.relay_caps & CAPS_SPECTATE ? " (spectators)" : "",
                         N.relay_caps & CAPS_CHAT ? " (room chat)" : "", N.relay_caps & CAPS_CREW ? " (crew battles)" : "");
             if (N.relay_caps & CAPS_TSET) fprintf(stderr, "[NETPLAY] the relay offers tournament sets\n");
-            if (N.relay_caps & CAPS_HILL_READYUP)
+            if (had != N.relay_caps && (N.relay_caps & CAPS_HILL_READYUP))
                 fprintf(stderr, "[NETPLAY] the relay waits for READY on the room screen between hill fights\n");
             rollback_server_allows((N.relay_caps & CAPS_ROLLBACK) != 0);    /* for the next start's audio arena */
             {   /* rollback everywhere (build 52): the mode mask after the caps word; the relay sends the answer
