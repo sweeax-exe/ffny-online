@@ -35,7 +35,6 @@ FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c
 static NewFighter g_new[NEW_FIGHTER_MAX];
 static uint32_t g_row_off[NEW_FIGHTER_MAX];             /* the row's file offset in djv2.sod */
 static uint32_t g_words[NEW_FIGHTER_MAX][ROW_WORDS];    /* its words (stats, style bits) */
-static uint8_t g_head[32];                              /* the file's first bytes: finds the loaded copy */
 static int g_new_count = -1;
 
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
@@ -112,7 +111,6 @@ static void load(void)
             break;
         }
     }
-    memcpy(g_head, d, size >= sizeof(g_head) ? sizeof(g_head) : size);
     free(d);
     /* the template: the stock fighter with a cell of its own (word 13 = 1) and the same coreID */
     for (i = 0; i < g_new_count; i++)
@@ -284,7 +282,7 @@ static void rebuild_list(void)
  * says feID 98 in the loaded database, the E3 Hero's, which the list skips, and gets its own back right after.
  * The select screens then see the new fighters only through this module's strings, and the feID can be any
  * byte from 100 up (the grid thumbnail is the template cell's). The rows are in the database as the game loaded
- * it (it keeps the file as read and adds its base to the offsets): found once by the file's first bytes. */
+ * it (it keeps the file as read and adds its base to the offsets): found once by the first new row's words. */
 static uint32_t g_base;     /* guest address of the loaded djv2.sod, 0: not found (yet) */
 
 static uint32_t find_loaded_database(void)
@@ -296,11 +294,12 @@ static uint32_t find_loaded_database(void)
         uintptr_t start = (uintptr_t)mi.BaseAddress, end = start + mi.RegionSize;
         if (mi.State == MEM_COMMIT && !(mi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) && end > start) {
             uintptr_t q;
-            for (q = start < lo ? lo : start; q + sizeof(g_head) <= end && q + sizeof(g_head) <= hi; q += 16)
-                if (*(const uint32_t *)q == 0x42444F53u && !memcmp((const void *)q, g_head, sizeof(g_head))) {
-                    uint32_t a = (uint32_t)(q - lo), i;
-                    /* the rows must be where the file has them */
-                    for (i = 0; i < (uint32_t)g_new_count; i++)
+            /* the first new row's words (string indices and numbers only, so as in the file) */
+            for (q = start < lo ? lo : start; q + 4 * ROW_WORDS <= end && q + 4 * ROW_WORDS <= hi; q += 4)
+                if (*(const uint32_t *)q == g_words[0][0] && !memcmp((const void *)q, g_words[0], 4 * ROW_WORDS)) {
+                    uint32_t row = (uint32_t)(q - lo), a = row - g_row_off[0], i;
+                    /* the other rows must be where the file has them, from the same base */
+                    for (i = 1; i < (uint32_t)g_new_count; i++)
                         if (MEM32(a + g_row_off[i] + 4u * W_FE_ID) != g_words[i][W_FE_ID]) break;
                     if (i == (uint32_t)g_new_count) return a;
                 }
@@ -318,10 +317,15 @@ void new_fighters_reset_list(void)
     int k;
     if (new_fighters_list(NULL) <= 0) { sub_00047BC0(); return; }
     if (!g_base) {
-        g_base = find_loaded_database();
-        fprintf(stderr, "[NEWFIGHTER] the loaded database is at %08X\n", g_base);
+        static int tries;       /* a 64 MB scan: a few times at most (not found: the game lists the rows) */
+        if (tries < 4) {
+            tries++;
+            g_base = find_loaded_database();
+            fprintf(stderr, "[NEWFIGHTER] the loaded database is at %08X\n", g_base);
+        }
     }
-    if (g_base && memcmp((const void *)XBOX_PTR(g_base), g_head, sizeof(g_head))) g_base = 0;   /* reloaded elsewhere */
+    if (g_base && memcmp((const void *)XBOX_PTR(g_base + g_row_off[0]), g_words[0], 4 * ROW_WORDS))
+        g_base = 0;         /* reloaded elsewhere: found again next time */
     if (g_base)
         for (k = 0; k < g_new_count; k++)
             if (g_new[k].template_fe_id >= 0) MEM32(g_base + g_row_off[k] + 4u * W_FE_ID) = 98u;
