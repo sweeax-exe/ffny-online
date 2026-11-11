@@ -29,6 +29,8 @@ constexpr uint32_t kClothingType = 0x0E334DC7u;     // "Type": a clothing row's 
 constexpr size_t kProfileFile = 0x5990, kProfileAt = 0x80;
 constexpr size_t kItemStates = 0x4DC4;      // sub_000148B0: the six state arrays, one after another
 constexpr size_t kCash = 0x20;              // GetPlayerCash (sub_0004CA30)
+constexpr size_t kDevPoints = 0x28;         // GetPlayerDevPts (sub_0004CA70); the gym spends them (sub_0004EB60)
+constexpr size_t kBaseStats = 0xFC;         // six dwords; the gym trains the first five
 // Unlocked-row counters (sub_00015B80 raises them per delivered item): word per kind, in profile
 // order of kinds hair, tattoo, jewellery, clothing, Blazin (styles have none); dwords per clothing type.
 constexpr size_t kRowCounter[6] = {0xA8, 0xAA, 0xAE, 0xAC, 0xB0, 0};
@@ -163,6 +165,13 @@ std::string plural(int n, const char *one, const char *many)
 {
     return std::to_string(n) + " " + (n == 1 ? one : many);
 }
+
+std::string thousands(uint32_t n)       // 272625 -> "272,625"
+{
+    std::string s = std::to_string(n);
+    for (int i = (int)s.size() - 3; i > 0; i -= 3) s.insert((size_t)i, ",");
+    return s;
+}
 } // namespace
 
 bool unlock_layout(const Bytes &sod, UnlockLayout &out, std::string *error)
@@ -208,6 +217,14 @@ bool unlock_layout(const Bytes &sod, UnlockLayout &out, std::string *error)
     return true;
 }
 
+uint32_t training_cost(const uint32_t stats[5])
+{
+    uint32_t cost = 0;
+    for (int i = 0; i < 5; i++)
+        for (uint32_t v = stats[i]; v < kGymStatCap; v++) cost += kGymCost[v / 5];
+    return cost;
+}
+
 bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, UnlockCounts &counts, std::string *error)
 {
     if (b.size() != kProfileFile || !header_fault(b).empty() || !identity_is(b, "DJFFNY::User")) {
@@ -241,6 +258,17 @@ bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, Unloc
     if (cash && rd(b, kProfileAt + kCash) < kUnlockCash) {
         wr(b, kProfileAt + kCash, kUnlockCash);
         counts.cash = true;
+    }
+    // Development points: enough to train the five stats from where they are to the gym's cap, no more.
+    counts.dev_points = 0;
+    if (cash) {
+        uint32_t stats[5];
+        for (int i = 0; i < 5; i++) stats[i] = rd(b, kProfileAt + kBaseStats + 4 * i);
+        uint32_t want = training_cost(stats);
+        if (rd(b, kProfileAt + kDevPoints) < want) {
+            wr(b, kProfileAt + kDevPoints, want);
+            counts.dev_points = want;
+        }
     }
     return true;
 }
@@ -311,11 +339,12 @@ UnlockResult unlock_everything(const fs::path &save_dir, const fs::path &backups
     r.ok = true;
     r.message = profile.name + ": everything is unlocked (" + plural(items, "item", "items") + ", " +
                 plural(r.counts.fighters, "fighter", "fighters") + ", " + plural(r.counts.venues, "venue", "venues") +
-                ", " + plural(r.counts.songs, "song", "songs") + (r.counts.cash ? ", $999,999" : "") + " new).";
-    fprintf(stderr, "[SAVES] unlock %s: items %d/%d/%d/%d/%d/%d, fighters %d, venues %d, songs %d, cash %d, backup %s\n",
+                ", " + plural(r.counts.songs, "song", "songs") + (r.counts.cash ? ", $999,999" : "") +
+                (r.counts.dev_points ? ", " + thousands(r.counts.dev_points) + " development points" : "") + " new).";
+    fprintf(stderr, "[SAVES] unlock %s: items %d/%d/%d/%d/%d/%d, fighters %d, venues %d, songs %d, cash %d, dev points %u, backup %s\n",
             profile.folder.c_str(), r.counts.items[0], r.counts.items[1], r.counts.items[2], r.counts.items[3],
             r.counts.items[4], r.counts.items[5], r.counts.fighters, r.counts.venues, r.counts.songs, (int)r.counts.cash,
-            r.backup.c_str());
+            r.counts.dev_points, r.backup.c_str());
     fflush(stderr);
     return r;
 }

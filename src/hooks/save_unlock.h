@@ -44,10 +44,21 @@ struct UnlockCounts
     int items[6] = {};          // items that were locked and are now unlocked, per kind
     int fighters = 0, venues = 0, songs = 0;
     bool cash = false;          // the cash was raised to $999,999
+    uint32_t dev_points = 0;    // the development points it now has, when they were raised (else 0)
 };
 constexpr uint32_t kUnlockCash = 999999;
+// Development points (profile +0x28) pay for the gym's training: a point of one of the five trained stats
+// (profile +0xFC.., Upper, Lower, Speed, Toughness, Health) costs kGymCost[stat / 5] (the game's table at
+// 0x002DBB70, read by the gym purchase sub_0004EB60), and the gym stops at kGymStatCap. So 0 -> 50 is
+// 54,525 points a stat and 272,625 for all five; a Story run's bounties hold 313,700.
+constexpr uint32_t kGymCost[10] = {5, 25, 50, 100, 225, 500, 1000, 1500, 2500, 5000};
+constexpr uint32_t kGymStatCap = 50;
+// What it costs to train the five stats from where they are to the cap: what Unlock all tops the
+// profile's points up to (with the cash; never lowered), so a fighter trained with them has no stat
+// above what Story mode gives and the online stat check (50 a stat) passes.
+uint32_t training_cost(const uint32_t stats[5]);
 // The edits on the file bytes, unsigned (resign() after). False with *error when the file is not one
-// they know (nothing is changed then).
+// they know (nothing is changed then). `cash` also tops up the development points (training_cost).
 bool unlock_profile_bytes(Bytes &profile, const UnlockLayout &layout, bool cash, UnlockCounts &counts,
                           std::string *error);
 bool unlock_options_bytes(Bytes &options, const UnlockLayout &layout, UnlockCounts &counts, std::string *error);

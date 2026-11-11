@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import os
 import random
+import re
 import shutil
 import struct
 import subprocess
@@ -34,7 +35,8 @@ static void spit(const char *p, const Bytes &b) {
 static void counts(const UnlockCounts &c) {
     std::cout << "items";
     for (int n : c.items) std::cout << " " << n;
-    std::cout << "\nfighters " << c.fighters << "\nvenues " << c.venues << "\nsongs " << c.songs << "\ncash " << c.cash << "\n";
+    std::cout << "\nfighters " << c.fighters << "\nvenues " << c.venues << "\nsongs " << c.songs << "\ncash " << c.cash
+              << "\ndev " << c.dev_points << "\n";
 }
 int main(int argc, char **argv) {
     std::string cmd = argc > 1 ? argv[1] : "", error;
@@ -289,6 +291,73 @@ def test_cash_box_raises_only(tool, sod, tmp_path):
     src.write_bytes(profile_blob(cash=2000000))
     assert parse(run(tool, 'profile', sod, src, dst, 1))['cash'] == '0'
     assert struct.unpack_from('<I', dst.read_bytes(), 0xA0)[0] == 2000000
+
+
+GYM_COST = (5, 25, 50, 100, 225, 500, 1000, 1500, 2500, 5000)      # the game's table at 0x2DBB70
+GYM_CAP = 50
+
+
+def training_cost(stats):
+    return sum(GYM_COST[v // 5] for s in stats for v in range(s, GYM_CAP))
+
+
+def stats_blob(stats, dev, cash=500):
+    blob = bytearray(profile_blob(cash=cash))
+    struct.pack_into('<5I', blob, 0x80 + 0xFC, *stats)
+    struct.pack_into('<I', blob, 0x80 + 0x28, dev)
+    return bytes(blob)      # unsigned is fine: the 'profile' command edits the bytes only
+
+
+def test_development_points_cover_training_to_the_cap_and_no_more(tool, sod, tmp_path):
+    """With the cash box: the points to train the five stats from where they are to 50, never lowered."""
+    src, dst = tmp_path / 'p', tmp_path / 'q'
+    assert training_cost([0] * 5) == 272625 and training_cost([0]) == 54525
+    for stats, dev in (((0, 5, 5, 0, 0), 400), ((0, 0, 0, 0, 0), 0), ((50, 49, 12, 30, 7), 10)):
+        before = stats_blob(stats, dev)
+        src.write_bytes(before)
+        out = parse(run(tool, 'profile', sod, src, dst, 1))
+        after = dst.read_bytes()
+        want = training_cost(stats)
+        assert out['dev'] == str(want) and struct.unpack_from('<I', after, 0x80 + 0x28)[0] == want
+        assert after[0x80 + 0xFC:0x80 + 0x144] == before[0x80 + 0xFC:0x80 + 0x144]     # stats, bonus, moves, styles
+        # spending them the gym's way reaches the cap exactly: nothing is left to go past it
+        left, trained = want, list(stats)
+        for i in range(5):
+            while trained[i] < GYM_CAP:
+                left -= GYM_COST[trained[i] // 5]
+                trained[i] += 1
+        assert left == 0 and trained == [GYM_CAP] * 5
+        # again: nothing more
+        src.write_bytes(after)
+        assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == '0'
+        assert dst.read_bytes() == after
+
+
+def test_development_points_are_never_lowered_or_given_without_the_box(tool, sod, tmp_path):
+    src, dst = tmp_path / 'p', tmp_path / 'q'
+    src.write_bytes(stats_blob((0, 0, 0, 0, 0), 300000))               # more than the training costs: kept
+    assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == '0'
+    assert struct.unpack_from('<I', dst.read_bytes(), 0x80 + 0x28)[0] == 300000
+    src.write_bytes(stats_blob((50, 50, 50, 50, 50), 7))               # fully trained: nothing to give
+    assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == '0'
+    assert struct.unpack_from('<I', dst.read_bytes(), 0x80 + 0x28)[0] == 7
+    src.write_bytes(stats_blob((60, 0xFFFFFFFF, 50, 50, 50), 7))       # an edited save above the cap: no cost
+    assert parse(run(tool, 'profile', sod, src, dst, 1))['dev'] == '0'
+    src.write_bytes(stats_blob((0, 5, 5, 0, 0), 400))                  # box not ticked: untouched
+    assert parse(run(tool, 'profile', sod, src, dst, 0))['dev'] == '0'
+    assert struct.unpack_from('<I', dst.read_bytes(), 0x80 + 0x28)[0] == 400
+
+
+def test_a_fully_trained_fighter_passes_the_online_stat_limits():
+    """The cap the points are sized for is the one the clients clamp to and the relay refuses beyond
+    (created_fighter.c MAX_BASE; the relay's MaxBaseStat is the same 50, with no cap on the sum)."""
+    hooks = ROOT / "src" / "hooks"
+    client = (hooks / 'created_fighter.c').read_text(encoding='utf-8')
+    header = (hooks / 'save_unlock.h').read_text(encoding='utf-8')
+    assert re.search(r'#define MAX_BASE\s+50\b', client)
+    assert 'No cap on the sum of the base stats' in client
+    assert re.search(r'kGymStatCap = 50;', header)
+    assert 'kGymCost[10] = {5, 25, 50, 100, 225, 500, 1000, 1500, 2500, 5000}' in header
 
 
 def test_options_get_every_fighter_venue_and_song(tool, sod, tmp_path):
