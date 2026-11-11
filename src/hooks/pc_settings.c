@@ -114,6 +114,12 @@ static RecompSetting g_display_settings[] = {
       "Watch fights while waiting: in King of the Hill and FFA rotation rooms the current fight runs live on your "
       "screen while you wait for your turn (START goes back to the hill screen for that fight). Off: the hill screen "
       "shows who fights and the result." },
+    { "online", "perfect_banner", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_PERFECT_BANNER", 0,
+      "Show PERFECT on the screen when a round is won without losing any health, against the CPU and online. "
+      "A picture over the game only: the fight itself is not changed." },
+    { "online", "name_tags", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_NAME_TAGS", 0,
+      "In an online fight show each player's online name over the fighter's name on the HUD (your own in "
+      "orange), so you can tell who is who. Offline nothing is shown." },
     { "online", "rollback", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Beta: rollback netcode in online fights, used only when every player in the match has it on. Your presses "
       "count at once and the game corrects itself when the other player's arrive late. It can still crash." },

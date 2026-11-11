@@ -463,6 +463,8 @@ int netplay_match_locked(void);
 
 /* 1 while a fight runs, online or not (the game's match phase): no notices over it. */
 int netplay_in_fight(void);
+/* 1 and the running fight step's number while this PC counts them (lockstep, rollback); else 0. */
+int netplay_fight_step(uint32_t *step);
 /* 1 while this PC (a fighter of a hub room's match) is on the match's summary and results: its own menu
  * there, the fight over (the quick-chat wheel may open; never in the fight). */
 int netplay_on_results(void);
