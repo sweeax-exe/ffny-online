@@ -7191,13 +7191,13 @@ static void cpus_only_end(uint32_t s, int offline)
 static void match_start_body(void);
 void netplay_on_match_start(void)
 {
-    InterlockedExchange(&g_phase_stale, 0);     /* a new fight: the phase is the game's again */
     match_start_body();
     fight_hud_match_start();
 }
 
 static void match_start_body(void)
 {
+    InterlockedExchange(&g_phase_stale, 0);     /* a new fight: the phase is the game's again */
     start_countdown_match_start();
     if (!N.lockstep) { if (soak_depth()) soak_match_start(); return; }
     cpu_level_apply();          /* the room's CPU level, before the brains load */
