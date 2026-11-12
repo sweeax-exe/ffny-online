@@ -23,7 +23,8 @@ def test_caps_bit_21_only_when_on():
     net = _src('src/hooks/netplay.c')
     assert re.search(r'#define CAPS_XPLAY_ANDROID 2097152u', net)
     assert 2097152 == 1 << 21
-    assert '(recomp_settings_get("online", "crossplay_android", 0) ? CAPS_XPLAY_ANDROID : 0)' in net
+    assert '#define CAPS_XPLAY_OPT (recomp_settings_get("online", "crossplay_android", 0) ? CAPS_XPLAY_ANDROID : 0u)' in net
+    assert re.search(r'put32\(cb \+ n, CAPS_[A-Z_| \n]+\| CAPS_XPLAY_OPT \| CAPS_HILL_CREATED\); n \+= 4;', net)
     # every other CAPS bit is distinct from bit 21
     others = [int(v.rstrip('u')) for n, v in re.findall(r'#define (CAPS_[A-Z_]+)\s+(\d+u)', net) if n != 'CAPS_XPLAY_ANDROID']
     assert all(v != 1 << 21 for v in others)
