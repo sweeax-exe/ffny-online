@@ -70,7 +70,7 @@ static void compare(int f, double det, double host)
             if (d > g_cmp[f].max_ulp) g_cmp[f].max_ulp = d;
         }
     }
-    if ((++g_cmp_total & ((1u << 22) - 1)) == 0) recomp_detmath_report();   /* every 4M calls */
+    if ((++g_cmp_total & ((1u << 18) - 1)) == 0) recomp_detmath_report();   /* every 256K calls (copies are often killed, not exited) */
 }
 
 void recomp_detmath_report(void)

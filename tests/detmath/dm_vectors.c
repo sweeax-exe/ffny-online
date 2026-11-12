@@ -226,6 +226,9 @@ static void run_trace(const char *path)
 {
     static unsigned char buf[24 * 4096];
     uint64_t h[F_COUNT], n[F_COUNT];
+#ifndef DM_FREESTANDING
+    uint64_t tdiff[F_COUNT] = {0}, tworst[F_COUNT] = {0};
+#endif
     long fd = file_open(path), got, k;
     int f;
     if (fd < 0) { out("cannot open the trace\n"); return; }
@@ -237,13 +240,28 @@ static void run_trace(const char *path)
             int j;
             for (j = 7; j >= 0; j--) { a = (a << 8) | buf[k + 8 + j]; b = (b << 8) | buf[k + 16 + j]; }
             if (id >= F_COUNT) continue;
-            h[id] = fnv(h[id], asu(run_dm((int)id, asd(a), asd(b))));
+            {
+                double r = run_dm((int)id, asd(a), asd(b));
+                h[id] = fnv(h[id], asu(r));
+#ifndef DM_FREESTANDING
+                if (g_host) {
+                    double q = run_host((int)id, asd(a), asd(b));
+                    if (asu(q) != asu(r)) { uint64_t d = ulps(q, r); if (d) { tdiff[id]++; if (d > tworst[id]) tworst[id] = d; } }
+                }
+#endif
+            }
             n[id]++;
         }
         if (got % 24) break;                    /* (the writer only writes whole records) */
     }
     for (f = 0; f < F_COUNT; f++)
-        if (n[f]) line(fn_name[f], "trace", n[f], h[f]);
+        if (n[f]) {
+            line(fn_name[f], "trace", n[f], h[f]);
+#ifndef DM_FREESTANDING
+            if (g_host)
+                printf("    vs host libm: %llu differ (max %llu ulp)\n", (unsigned long long)tdiff[f], (unsigned long long)tworst[f]);
+#endif
+        }
 }
 
 static int dm_main(int argc, char **argv)
