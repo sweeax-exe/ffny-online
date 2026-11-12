@@ -8016,6 +8016,8 @@ static void step_body(void)
         }
         g_fight_waits.last = now;
         g_fight_waits.steps++;
+    } else if (g_fight_waits.steps > 1 && !g_fight_waits.told && !N.resim && N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u) {
+        fight_waits_log();      /* decided: a room match in a test or a match not reported goes no other way */
     }
 }
 
@@ -9511,8 +9513,8 @@ static void rb_budget_tick(void)
          * player's, whose step is the newest entry it sent (committed delay steps ahead) less the delay, plus the
          * path in steps it took to come. About 0 when both run alike; a PC that fell behind makes the others roll
          * back deeper. */
-        int i, lf = (path_ping_ms() * 3 + 49) / 50, have = 0;
-        double worst = 0;
+        int i, have = 0;
+        double worst = 0, lf = path_ping_ms() * 0.06;   /* the path in steps (ms / 16.67), not rounded */
         for (i = 0; i < N.players && i < MAXP; i++) {
             double adv;
             if (i == N.pos || g_steps_match[i] != N.match || !g_steps_last[i]) continue;
