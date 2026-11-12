@@ -263,13 +263,14 @@ static const char *status_word(const std::string &status)
 {
     if (status == "live") return "ACCEPTED";
     if (status == "rejected") return "REJECTED";
+    if (status == "withdrawn") return "WITHDRAWN";   // a pack admin took the live pack out of the catalogue
     return "IN REVIEW";
 }
 
 static ImVec4 status_color(const std::string &status)
 {
     if (status == "live") return k_green;
-    if (status == "rejected") return k_error;
+    if (status == "rejected" || status == "withdrawn") return k_error;
     return k_gold;
 }
 
@@ -392,7 +393,8 @@ static void community_view(float lx, float top, float inner, float height, float
     py += 22 * s;
     std::string state = std::string(status_word(c.status)) +
                         (c.status == "live" ? ": installed for every player by the sync." :
-                         c.status == "rejected" ? (c.reason.empty() ? std::string(".") : ": " + c.reason) :
+                         c.status == "rejected" || c.status == "withdrawn" ?
+                             (c.reason.empty() ? std::string(".") : ": " + c.reason) :
                                                   ": the team reviews it. View only until it is accepted.");
     float wrap = pw - 36 * s;
     dl->AddText(bold_font(), 13.5f * s, ImVec2(x, py), col(status_color(c.status)), state.c_str(), nullptr, wrap);
