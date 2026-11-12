@@ -78,22 +78,22 @@ int milestones_rows(const uint8_t *p, uint32_t size, int toughness_fix, Mileston
     put(out, max, &n, MS_UPPER, "Punches landed", "+2 Upper Body", punches, 5000, 1, MS_NOTE_REPLACES);
     put(out, max, &n, MS_LOWER, "Kicks landed", "+1 Lower Body", kicks, 100, 1, MS_NOTE_NONE);
     put(out, max, &n, MS_LOWER, "Kicks landed", "+2 Lower Body", kicks, 5000, 1, MS_NOTE_REPLACES);
-    put(out, max, &n, MS_SPEED, "Quick strikes landed", "+1 Speed", rd16(p, size, 0x70), 250, 0, MS_NOTE_NONE);
-    put(out, max, &n, MS_SPEED, "Time on the move", "+1 Speed", rd16(p, size, 0x72), 250, 0, MS_NOTE_NONE);
+    put(out, max, &n, MS_SPEED, "Running attacks landed", "+1 Speed", rd16(p, size, 0x70), 250, 1, MS_NOTE_NONE);
+    put(out, max, &n, MS_SPEED, "Time running", "+1 Speed", rd16(p, size, 0x72), 250, 1, MS_NOTE_NONE);
     put(out, max, &n, MS_TOUGHNESS, "Wins in fights with 3+ fighters", "+1 Toughness", rd16(p, size, 0x74), 10, 1,
         toughness_fix ? MS_NOTE_TOUGHNESS_FIX : MS_NOTE_TOUGHNESS_RETAIL);
     put(out, max, &n, MS_TOUGHNESS, "Comebacks from low health", "+1 Toughness", rd16(p, size, 0x76), 25, 0,
         MS_NOTE_NONE);
     put(out, max, &n, MS_HEALTH, "Fights ended at full health", "+1 Health", rd16(p, size, 0x80), 5, 1, MS_NOTE_NONE);
-    put(out, max, &n, MS_HEALTH, "Stagger hits + a fight count", "+1 Health", rd32(p, size, 0x7C), 100, 0, MS_NOTE_NONE);
+    put(out, max, &n, MS_HEALTH, "Counters and blocks", "+1 Health", rd32(p, size, 0x7C), 100, 1, MS_NOTE_NONE);
     if (n > 0 && out[n - 1].group == MS_HEALTH && out[n - 1].target == 100) {
         MilestoneRow *r = &out[n - 1];
         r->count2 = rd32(p, size, 0x78);
         r->target2 = 500;
         r->reached = r->count >= r->target && r->count2 >= r->target2;
     }
-    put(out, max, &n, MS_CHARISMA, "Reaction moves", "+1 Charisma", rd32(p, size, 0x84), 25, 0, MS_NOTE_NONE);
-    put(out, max, &n, MS_CHARISMA, "Grapple moves landed", "+1 Charisma", rd32(p, size, 0x88), 250, 0, MS_NOTE_NONE);
+    put(out, max, &n, MS_CHARISMA, "Crowd grab attacks", "+1 Charisma", rd32(p, size, 0x84), 25, 1, MS_NOTE_NONE);
+    put(out, max, &n, MS_CHARISMA, "Wall grabs landed", "+1 Charisma", rd32(p, size, 0x88), 250, 1, MS_NOTE_NONE);
     put(out, max, &n, MS_CHARISMA, "Fights played to the finish", "+1 Charisma", rd16(p, size, 0x8C), 5, 0,
         MS_NOTE_NONE);
     put(out, max, &n, MS_CHARISMA, "Knockouts by the surroundings", "+1 Charisma", rd16(p, size, 0x82), 5, 0,
