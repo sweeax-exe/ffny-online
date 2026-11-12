@@ -82,6 +82,7 @@ placeholder pictures (`--pictures copy|renamed`). The files are the player's own
 | `20261112-011125-nfcap` | the same, automatch Blaze 4 (254) vs Doc 3 (200) | hangs in `Game.GetMatchInfo()` before `StartGame`: no frames after it |
 | `20261112-011930-nfe128` | Doc copy as feID 128 vs Doc | **crash** after `ControllerSetup(0,0,128,0)`: read of guest address 0xFFFFFFF0 (a sign-extended fighter byte as an index) |
 | `20261112-012013-nfe127` | Doc copy as feID 127 vs Doc | fight runs, damage dealt |
+| `20261112-123723-nffinal` (rebased on build 77) | `Doc X 1` (100), `Doc X 2` (127), renamed pictures | Doc's cell 1 2 3 with Doc's portrait on the new outfits; outfit 2 picked (`ControllerSetup(0,0,100,0)`), fight vs CPU Blaze, HUD `DOC X 1` |
 
 Model notes: the game keeps a fight in its intro until the intro/extro cameras of both models load; their
 names come from `IntroExtro.xml` (`nis.viv`), keyed by the model name. Doc 2's own *look* needs Studio's body
