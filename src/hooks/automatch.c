@@ -416,6 +416,8 @@ void automatch_on_funccall(const char *text)
     if (!g_env_read) read_env();
     online_menu_on_funccall(text);
     print_result(text);
+    if (strstr(text, "GetScreenInfo(intMain/mainMenu.swf") || strstr(text, "GetScreenInfo(battle/cmtype"))
+        netplay_note_front_end();                   /* a fight quit from its pause menu is over */
     if (g_running) return;
     /* the main menu, or the battle match-type screen the summary of a match returns to */
     if (strstr(text, "intMain/mainMenu.swf") || strstr(text, "GetScreenInfo(battle/cmtype")) {

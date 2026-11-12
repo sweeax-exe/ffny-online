@@ -5,6 +5,7 @@
 #include "music_library.h"
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -300,6 +301,83 @@ FightWatch::Event FightWatch::feed(int phase)
     }
     if (ended && phase == 0 && was >= 2) { ended = false; return BEGAN; }
     return NONE;
+}
+
+void LevelMeter::feed(const int16_t *stereo, long frames)
+{
+    const long per_block = rate > 0 ? (long)rate * 2 / 5 : 17640;
+    for (long i = 0; i < frames; i++) {
+        double l = stereo[2 * i] / 32768.0, r = stereo[2 * i + 1] / 32768.0;
+        block_sum += 0.5 * (l * l + r * r);
+        if (++block_frames >= per_block) {
+            double ms = block_sum / (double)block_frames;
+            if (ms > kGate * kGate) {
+                gated_sum += ms;
+                gated_blocks++;
+            }
+            block_sum = 0;
+            block_frames = 0;
+        }
+    }
+}
+
+double LevelMeter::rms() const
+{
+    return gated_blocks ? std::sqrt(gated_sum / (double)gated_blocks) : 0.0;
+}
+
+double LevelMeter::gain() const
+{
+    double level = rms();
+    if (level <= 0) return 1.0;
+    return std::max(kMinGain, std::min(kMaxGain, kTarget / level));
+}
+
+void Playlist::reset(size_t own_songs, size_t game_turns, bool shuffled, uint64_t seed)
+{
+    own = own_songs;
+    game = game_turns;
+    shuffle = shuffled;
+    rng.seed(seed);
+    last = (size_t)-1;
+    new_round();
+}
+
+void Playlist::new_round()
+{
+    order.clear();
+    if (shuffle) {
+        for (size_t i = 0; i < own + game; i++) order.push_back(i);
+        std::shuffle(order.begin(), order.end(), rng);
+        // no immediate repeat across rounds (one game turn after another is the game's next track)
+        if (order.size() > 1 && order[0] == last) std::swap(order[0], order[1 + rng() % (order.size() - 1)]);
+    } else {
+        size_t g = 0;
+        for (size_t i = 0; i < own; i++) {
+            order.push_back(i);
+            if (g < game) order.push_back(own + g++);
+        }
+        while (g < game) order.push_back(own + g++);
+    }
+    at = 0;
+}
+
+size_t Playlist::next(bool avoid_game)
+{
+    if (own + game == 0) return 0;
+    if (at >= order.size()) new_round();
+    if (avoid_game && own && is_game(order[at])) {
+        size_t j = at;
+        while (j < order.size() && is_game(order[j])) j++;
+        if (j == order.size()) {            // only game turns left in this round: the next round
+            new_round();
+            j = at;
+            while (j < order.size() && is_game(order[j])) j++;
+        }
+        if (j < order.size()) std::swap(order[at], order[j]);
+    }
+    last = order[at++];
+    return last;
 }
 
 } // namespace musiclib

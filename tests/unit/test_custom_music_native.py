@@ -87,6 +87,44 @@ int main(int argc, char **argv)
         printf("\n");
         return 0;
     }
+    if (cmd == "playlist") {      // own game shuffle seed draws [avoid-game every k-th draw]: the items, 'g' a game turn
+        size_t own = (size_t)atoi(argv[2]), game = (size_t)atoi(argv[3]);
+        int draws = atoi(argv[6]), avoid_every = argc > 7 ? atoi(argv[7]) : 0;
+        Playlist p;
+        p.reset(own, game, atoi(argv[4]) != 0, strtoull(argv[5], nullptr, 10));
+        for (int i = 0; i < draws; i++) {
+            size_t item = p.next(avoid_every && (i % avoid_every) == avoid_every - 1);
+            if (p.is_game(item)) printf("g%zu ", item - own); else printf("%zu ", item);
+        }
+        printf("\n");
+        return 0;
+    }
+    if (cmd == "firsts") {        // own game first_seed seeds: the first item of `seeds` fresh shuffled lists
+        size_t own = (size_t)atoi(argv[2]), game = (size_t)atoi(argv[3]);
+        unsigned long long seed0 = strtoull(argv[4], nullptr, 10);
+        int seeds = atoi(argv[5]);
+        for (int i = 0; i < seeds; i++) {
+            Playlist p;
+            p.reset(own, game, true, seed0 + (unsigned long long)i * 0x9E3779B97F4A7C15ull);
+            size_t item = p.next();
+            printf("%zu ", item);
+        }
+        printf("\n");
+        return 0;
+    }
+    if (cmd == "level") {         // the level gain of a file (decoded whole)
+        char why[160] = "";
+        MusicDecoder *d = music_decoder_open(argv[2], why, sizeof(why));
+        if (!d) { printf("BAD %s\n", why); return 0; }
+        LevelMeter m;
+        m.rate = music_decoder_rate(d);
+        short buf[2 * 1000];
+        long n;
+        while ((n = music_decoder_read(d, buf, 1000)) > 0) m.feed(buf, n);
+        music_decoder_close(d);
+        printf("%.4f %.4f\n", m.rms(), m.gain());
+        return 0;
+    }
     if (cmd == "remove") {
         auto songs = scan(from_utf8(argv[2]));
         for (auto &s : songs) if (s.rel == argv[3]) { std::string why; printf("%s\n", remove(from_utf8(argv[2]), s, &why) ? "REMOVED" : why.c_str()); }
@@ -319,3 +357,70 @@ def test_fight_watch_new_fight_after_a_fight_is_over(tool):
     assert events('1*600,0*100,1*10') == [('E', 629), ('B', 700)]
     # junk before the game sets the phase counts as no fight
     assert events('77*50,0*50') == []
+
+
+def test_playlist_first_item_is_random_across_songs_and_game_tracks(tool):
+    # mix with 3 songs and 3 game turns: the first item is uniform over all six (the player's report: the
+    # first was always one of the songs), over 6000 fresh lists
+    firsts = [int(x) for x in run(tool, 'firsts', 3, 3, 12345, 6000).split()]
+    counts = [firsts.count(i) for i in range(6)]
+    assert all(800 < c < 1200 for c in counts), counts
+    assert sum(counts[3:]) > 2500                      # the game's own music first about half of the time
+
+
+def test_playlist_each_item_once_per_round_and_no_immediate_repeat(tool):
+    for own, game in ((5, 5), (1, 1), (2, 0), (87, 30), (4, 0)):
+        n = own + game
+        items = run(tool, 'playlist', own, game, 1, 777 + own, n * 50).split()
+        for i in range(0, len(items), n):
+            assert sorted(items[i:i + n]) == sorted(set(items[i:i + n])) and len(items[i:i + n]) == n
+        for a, b in zip(items, items[1:]):
+            assert a != b                              # never the same song (or game turn) twice in a row
+
+
+def test_playlist_in_order_alternates_songs_and_game_like_before(tool):
+    assert run(tool, 'playlist', 3, 2, 0, 1, 10).split() == ['0', 'g0', '1', 'g1', '2', '0', 'g0', '1', 'g1', '2']
+    assert run(tool, 'playlist', 3, 0, 0, 1, 6).split() == ['0', '1', '2', '0', '1', '2']
+
+
+def test_playlist_new_fight_after_the_game_music_gets_a_song(tool):
+    # avoid-game on every draw (each one a new fight after the game's music): always a song while any
+    # exist, and every song still comes round
+    items = run(tool, 'playlist', 4, 4, 1, 99, 40, 1).split()
+    assert not any(x.startswith('g') for x in items)
+    assert set(items) == {'0', '1', '2', '3'}
+    # avoid-game on every second draw: a game turn is never followed by one
+    items = run(tool, 'playlist', 3, 3, 1, 7, 600, 2).split()
+    assert any(x.startswith('g') for x in items)
+    for i in range(1, len(items), 2):
+        assert not items[i].startswith('g')
+    # only game turns: nothing to avoid with, the game's music it is
+    assert run(tool, 'playlist', 0, 2, 1, 5, 3, 1).split()[0].startswith('g')
+
+
+def test_level_meter_brings_loud_and_quiet_songs_to_one_level(tool, tmp_path):
+    # write_wav's sine peaks at 12000 (RMS 0.259, a loud master): turned down to -20 dBFS
+    write_wav(tmp_path / 'loud.wav', 3.0)
+    rms, gain = map(float, run(tool, 'level', tmp_path / 'loud.wav').split())
+    assert abs(rms - 12000 / 32768 / math.sqrt(2)) < 0.01 and abs(gain - 0.1 / rms) < 0.01
+    # a quiet one (peak 1200) comes up, silence before it does not count, and the gain stays within 0.1..2
+    frames = [0] * (2 * 44100 * 2) + [int(1200 * math.sin(2 * math.pi * 440 * i / 44100)) for i in range(44100 * 3)
+                                      for _ in range(2)]
+    with wave.open(str(tmp_path / 'quiet.wav'), 'wb') as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(struct.pack('<%dh' % len(frames), *frames))
+    rms, gain = map(float, run(tool, 'level', tmp_path / 'quiet.wav').split())
+    assert abs(rms - 1200 / 32768 / math.sqrt(2)) < 0.003 and abs(gain - 2.0) < 1e-6
+    # nothing over the gate: unchanged
+    with wave.open(str(tmp_path / 'silent.wav'), 'wb') as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(bytes(4 * 44100))
+    assert run(tool, 'level', tmp_path / 'silent.wav').split() == ['0.0000', '1.0000']
+
+
+def test_playlist_seeds_differ(tool):
+    assert run(tool, 'playlist', 20, 20, 1, 1, 40).split() != run(tool, 'playlist', 20, 20, 1, 2, 40).split()

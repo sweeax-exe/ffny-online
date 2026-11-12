@@ -464,8 +464,11 @@ int netplay_active(void);
  * menu's own match-setup calls are dropped (automatch_hold_funccall). */
 int netplay_match_locked(void);
 
-/* 1 while a fight runs, online or not (the game's match phase): no notices over it. */
+/* 1 while a fight runs, online or not (the game's match phase, unless a quit fight left it stale): no
+ * notices over it. */
 int netplay_in_fight(void);
+/* automatch.c: the main menu or the match-type screen is up (a phase still at fighting is stale then). */
+void netplay_note_front_end(void);
 /* 1 and the running fight step's number while this PC counts them (lockstep, rollback); else 0. */
 int netplay_fight_step(uint32_t *step);
 /* 1 while this PC (a fighter of a hub room's match) is on the match's summary and results: its own menu
