@@ -128,7 +128,8 @@ def main():
         arc = viv.Archive(str(base))
         add = []
         for fe in fe_ids:
-            add += nf.picture_copies(arc, a.template, fe, rename_inner=a.pictures == "renamed")
+            add += [(n, viv.refpack_store(d))
+                    for n, d in nf.picture_copies(arc, a.template, fe, rename_inner=a.pictures == "renamed")]
         (out / "screens").mkdir(parents=True, exist_ok=True)
         viv.compose_archive(str(base), str(out / "screens" / "screens.viv"), add=add)
         print("screens.viv (%s): + %d pictures" % (base, len(add)))

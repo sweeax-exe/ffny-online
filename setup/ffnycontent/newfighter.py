@@ -19,6 +19,10 @@ cell (1) or outfit (0), 14 Model, 15 Order, 16 and 17 two more stats, 18 style b
 
 The new row keeps the template's coreID (moves, styles, AI and animation banks are per coreID), so no
 per-character data is needed. Standard library only; reads and writes the player's own files.
+
+One implementation for both sides: FFNY Studio (``ffnystudio/newfighter.py``) and the player's install
+(``setup/ffnycontent/newfighter.py`` of the game repository) hold the same text below their first comment lines
+(Studio's tests compare the two when both are there).
 """
 
 import re
@@ -240,9 +244,11 @@ PICTURE_FAMILIES = (
 
 
 def picture_copies(archive, template_fe_id, fe_id, rename_inner=True):
-    """[(new entry name, stored bytes)]: the template's menu pictures under the new ID (placeholders). Each is a
-    small BIG whose entries are named after it (``p_cf_56_2p.apt/.const/.o/.xsh``); with ``rename_inner`` the
-    copy's entries take the new name too. ``archive`` is a ``viv.Archive`` of screens.viv."""
+    """[(new entry name, bytes)]: the template's menu pictures under the new ID (placeholders), as plain (not
+    RefPack-stored) archives. Each is a small BIG whose entries are named after it (``p_cf_56_2p.apt/.const/.o/
+    .xsh``); with ``rename_inner`` the copy's entries take the new name too (without it the picture stays blank,
+    measured 2026-11-11). ``archive``: anything with ``names()`` and ``read(name)`` (the unwrapped bytes) of
+    screens.viv, e.g. a ``viv.Archive``."""
     from . import viv
     names = {n.lower(): n for n in archive.names()}
     out = []
@@ -253,9 +259,9 @@ def picture_copies(archive, template_fe_id, fe_id, rename_inner=True):
             old, new = pattern % args_old, pattern % args_new
             if old.lower() not in names or new.lower() in names:
                 continue
-            raw = archive.raw(names[old.lower()])
+            raw = archive.read(names[old.lower()])
             if rename_inner:
-                inner = viv.Archive(viv.unwrap(raw))
+                inner = viv.Archive(raw)
                 stem_old = old.rsplit("/", 1)[1][:-4]
                 stem_new = new.rsplit("/", 1)[1][:-4]
                 files = []
@@ -264,7 +270,7 @@ def picture_copies(archive, template_fe_id, fe_id, rename_inner=True):
                     if n.lower().startswith(stem_old.lower()):
                         n = stem_new + n[len(stem_old):]
                     files.append((n, inner.raw(e)))
-                raw = viv.refpack_store(viv.build_archive(files, magic=inner.magic, size_le=bool(inner.size_le)))
+                raw = viv.build_archive(files, magic=inner.magic, size_le=bool(inner.size_le))
             out.append((new, raw))
     return out
 
@@ -272,11 +278,14 @@ def picture_copies(archive, template_fe_id, fe_id, rename_inner=True):
 def model_banks(v2ta, template_model, model):
     """[(entry, bytes)]: the template model's camera banks in ``assets/v2ta.viv`` (``CE_109A.viv``, the entrance,
     and ``CI_109A.viv``, the intro; loaded by the model's code) copied for ``model`` with their inner entries
-    renamed (``CE_109A_EYE.o`` -> ``CE_901A_EYE.o``) and the symbols in them. Without them a fight with the new model stalls in the
-    intro with no fighters (measured 2026-11-11). ``v2ta`` is a ``viv.Archive``; the bytes are plain archives."""
+    renamed (``CE_109A_EYE.o`` -> ``CE_7K3A_EYE.o``) and the symbols in them. Without them a fight with the new
+    model stalls in the intro with no fighters (measured 2026-11-11). ``v2ta``: anything with ``names()`` and
+    ``read(name)`` (a ``viv.Archive``); the bytes are plain archives."""
     from . import viv
     old = template_model.upper().replace("V2IP_", "")
     new = model.upper().replace("V2IP_", "")
+    if len(old) != len(new):
+        raise FighterError("a model copy keeps the code length (%s -> %s)" % (old, new))
     names = {n.lower(): n for n in v2ta.names()}
     out = []
     for prefix in ("CE_", "CI_"):
@@ -285,8 +294,6 @@ def model_banks(v2ta, template_model, model):
             continue
         inner = viv.Archive(v2ta.read(src))
         # the entries' own symbols carry the code too (CI_109A_s, CE_109A_EYE...): renamed, same length
-        if len(old) != len(new):
-            raise FighterError("a model copy keeps the code length (%s -> %s)" % (old, new))
         files = [(re.sub(re.escape(old), new, e.name, flags=re.I),
                   viv.unwrap(inner.raw(e)).replace(b"_" + old.encode("latin-1"), b"_" + new.encode("latin-1")))
                  for e in inner.entries]
@@ -306,9 +313,10 @@ def rename_model_symbols(blob, old_model, new_model):
 
 
 def add_taunt(taunt_bytes, template_model, model):
-    """``assets/taunt.xml`` with a ``<taunt>`` for ``model``: the template's, its intro and extro camera banks
-    (``CI_109A``/``CE_109A``) renamed after the model's code. Without one a fight with the new model stalls in the
-    intro (measured 2026-11-11)."""
+    """``assets/IntroExtro.xml`` (in nis.viv; the loose ``assets/taunt.xml`` is the same list and is never read)
+    with a ``<taunt>`` for ``model``: the template's, its intro and extro camera banks (``CI_109A``/``CE_109A``)
+    renamed after the model's code. Without one a fight with the new model stalls in the intro (measured
+    2026-11-11)."""
     text = taunt_bytes.decode("latin-1")
     if re.search(r"<name>\s*%s\s*</name>" % re.escape(model), text, re.I):
         return taunt_bytes
@@ -320,3 +328,174 @@ def add_taunt(taunt_bytes, template_model, model):
             at = b.end()        # right after the template's, inside the same list
             return (text[:at] + "\r\n\r\n\t" + block + text[at:]).encode("latin-1")
     raise FighterError("no taunt.xml entry for %s" % template_model)
+
+
+# -- the new-fighter pack (FFNY Studio "Add as new fighter"; the launcher's install) --------------------------------
+#
+# A new-fighter pack's install.json (type "new-fighter", kind content) has
+#   * entries: the new model's own files in assets/v2ip.viv, mode "add": <model>.o, <model>.xsh and <model>_F.o,
+#     each a delta against the template's entry of the same suffix (the model's own symbols renamed, so the
+#     game finds them under the new name);
+#   * one op {"op": "new-fighter", "template_fe_id": 55, "template_model": "V2IP_109A", "model": "V2IP_7K3A",
+#     "name": "Doc 2"}: everything else is derived from the player's own files when the pack is installed
+#     (``apply_op``): the Character row in djv2.sod, the entity, the IntroExtro entry, the camera banks and
+#     placeholder menu pictures.
+#
+# The front-end ID (100..127) is not in the pack: the account service gives every accepted new fighter its place
+# and the signed catalogue carries it (``fighter_fe_id``), so every player with the same packs gets the same IDs
+# whatever else is installed. A pack installed by hand or tested from Studio says it in the op (``fe_id``).
+
+SOD_PATH = "assets/djv2.sod"
+ENTITY_XML = "assets/entity.xml"
+MODEL_ARCHIVE = "assets/v2ip.viv"
+NIS_ARCHIVE = "assets/nis.viv"
+INTRO_EXTRO = "assets/IntroExtro.xml"
+BANK_ARCHIVE = "assets/v2ta.viv"
+SCREENS_ARCHIVE = "screens/screens.viv"
+OP = "new-fighter"
+OP_KEYS = ("op", "template_fe_id", "template_model", "model", "name")
+MODEL_SUFFIXES = (".o", ".xsh", "_F.o")
+TEMPLATE_MODEL = re.compile(r"^V2IP_[0-9]{3}[A-Z]$")
+NEW_MODEL = re.compile(r"^V2IP_7[0-9A-Z]{2}A$")
+NAME_MAX = 11               # the row name gets an 8-character suffix and must stay under 20 bytes
+NAME_CHARS = re.compile(r"^[A-Za-z0-9'.!-]+( [A-Za-z0-9'.!-]+)*$")
+# fighters with their own select cell: the templates a new fighter may copy (not the alternate outfits 80..84, 98)
+OUTFIT_FE_IDS = (80, 81, 82, 83, 84, 98)
+# the stock fighters' display names (djv2.sod word 5, fighter.xml): a new fighter takes none of them
+STOCK_NAMES = (
+    "Trejo", "Ghostface Killah", "Capone", "Ludacris", "Baxter", "Kimora", "Shawnna", "Trick", "Joe Budden", "Meca",
+    "Bo", "Baby Chris", "Xzibit", "Teck", "Fam-Lay", "Santos", "Starks", "Freeway", "Skull", "Solo", "Sticky Fingaz",
+    "Elephant Man", "Cruz", "Shaniqua", "Jacob", "House", "Manny", "Havoc", "Lil' Kim", "Jervis", "Memphis Bleek",
+    "Doc", "Carmen Electra", "Bonecrusher", "WC", "Comp", "Bubba Sparxxx", "Scarface", "Sean Paul", "Masa", "Bless",
+    "Rome", "Erick Sermon", "Nyne", "Ice-T", "Rollins", "Stingray", "Mack 10", "O.E.", "Crazy Legs", "Flava Flav",
+    "Prodigy", "Magic", "Lil' Flip", "Crow", "Slick Rick", "Warren G", "NORE", "D-Mob", "Dan G", "Pockets", "Suspect",
+    "Blaze", "Crack", "Banner", "Lauren", "Snowman", "Chiang", "Cindy J", "Hero")
+
+
+def name_problems(name):
+    """Why ``name`` cannot be a new fighter's name in the game ([] when it can), in words for the mod creator.
+    The name is the HUD's (upper-cased by the game) and the select screen's, and the base of the row name."""
+    name = name if isinstance(name, str) else ""
+    if not name.strip():
+        return ["give your fighter a name for the game"]
+    out = []
+    if len(name.encode("latin-1", "replace")) > NAME_MAX:
+        out.append("%d characters is %d too many: the game takes at most %d (it adds its own ending to the name)"
+                   % (len(name), len(name) - NAME_MAX, NAME_MAX))
+    if not NAME_CHARS.match(name):
+        out.append("letters A-Z, digits, single spaces and ' . ! - only, no space at the start or end")
+    if name.strip().lower() in {n.lower() for n in STOCK_NAMES}:
+        out.append("%s is a fighter of the game already; add something (e.g. \"%s 2\")" % (name.strip(),
+                                                                                        name.strip()[:9]))
+    return out
+
+
+def model_for(pack_id):
+    """The new model's name for a pack: ``V2IP_7`` + two letters or digits from the pack id's hash + ``A``. Same
+    length as the game's (``V2IP_109A``), so the symbol rename keeps every offset; no stock model starts with 7.
+    The account service refuses a model another pack holds (its entries are claimed)."""
+    import hashlib
+    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    n = int.from_bytes(hashlib.sha256(pack_id.encode("utf-8")).digest()[:4], "big")
+    return "V2IP_7%s%sA" % (alphabet[n % 36], alphabet[(n // 36) % 36])
+
+
+def make_op(template_fe_id, template_model, model, name, fe_id=None):
+    op = {"op": OP, "template_fe_id": int(template_fe_id), "template_model": template_model, "model": model,
+          "name": name}
+    if fe_id is not None:
+        op["fe_id"] = int(fe_id)
+    return op
+
+
+def op_problems(op, allow_fe_id=False):
+    """What is wrong with a new-fighter op ([] when nothing): the account service's rules; ``allow_fe_id`` for a
+    pack installed by hand or tested from Studio (the server gives a submitted pack its place)."""
+    if not isinstance(op, dict) or op.get("op") != OP:
+        return ["not a new-fighter op"]
+    keys = set(OP_KEYS) | ({"fe_id"} if allow_fe_id else set())
+    out = []
+    if "fe_id" in op and not allow_fe_id:
+        out.append("leave fe_id out; the server gives a new fighter its place (100 to 127)")
+    extra = sorted(set(op) - keys - {"fe_id"})
+    if extra or any(k not in op for k in OP_KEYS):
+        out.append("a new-fighter op holds exactly %s" % ", ".join(OP_KEYS))
+    t = op.get("template_fe_id")
+    if not (isinstance(t, int) and not isinstance(t, bool) and 0 <= t < FIRST_NEW_FE_ID and t not in OUTFIT_FE_IDS):
+        out.append("template_fe_id must be a stock fighter with its own select cell")
+    if not TEMPLATE_MODEL.match(str(op.get("template_model", ""))):
+        out.append("template_model must be a stock model (V2IP_109A)")
+    if not NEW_MODEL.match(str(op.get("model", ""))):
+        out.append("model must be V2IP_7xxA")
+    if "fe_id" in op and allow_fe_id:
+        f = op["fe_id"]
+        if not (isinstance(f, int) and not isinstance(f, bool) and FIRST_NEW_FE_ID <= f <= LAST_NEW_FE_ID):
+            out.append("fe_id must be %d..%d" % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID))
+    out += ["name: " + p for p in name_problems(op.get("name"))]
+    return out
+
+
+def model_entries(template_model, model, originals, results=None):
+    """The new model's entries: [(entry, base entry, base bytes, result bytes)] for each suffix the template has
+    (``originals`` {suffix: the template's bytes}); ``results`` {suffix: bytes} replaces a file (an imported body,
+    textures painted into the .xsh); the rest are the template's. Every result gets the model's own symbols
+    renamed (``rename_model_symbols``)."""
+    out = []
+    for suffix in MODEL_SUFFIXES:
+        if suffix not in originals:
+            continue
+        base = originals[suffix]
+        result = (results or {}).get(suffix)
+        out.append((model + suffix, template_model + suffix, base,
+                    rename_model_symbols(base if result is None else result, template_model, model)))
+    return out
+
+
+class _View:
+    """One archive of ``files`` as ``picture_copies`` and ``model_banks`` read it."""
+
+    def __init__(self, files, rel):
+        self.files, self.rel = files, rel
+
+    def names(self):
+        return self.files.names(self.rel)
+
+    def read(self, name):
+        return self.files.current(self.rel, name)
+
+
+def apply_op(files, op, fe_id, pictures=True):
+    """The edits of one new-fighter op on the player's files as the packs so far left them: [(where, path,
+    entry, bytes)], ``where`` "loose" (a whole file, entry None), "replace" or "add" (an archive entry; plain bytes,
+    the caller stores them). ``files`` gives ``current(path, entry="")`` (bytes; a missing file or entry raises
+    KeyError or OSError) and ``names(path)`` (an archive's entry names, the added ones too). ``fe_id`` is the
+    place (100..127). Raises FighterError when the op does not fit (the ID or the model is taken, no such
+    template)."""
+    problems = op_problems(op, allow_fe_id=True)
+    if problems:
+        raise FighterError(problems[0])
+    if not (isinstance(fe_id, int) and FIRST_NEW_FE_ID <= fe_id <= LAST_NEW_FE_ID):
+        raise FighterError("a new fighter needs its place (front-end ID %d..%d)" % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID))
+    template_fe_id, template, model, name = op["template_fe_id"], op["template_model"], op["model"], op["name"]
+    sod_blob = files.current(SOD_PATH)
+    rows = {r["fe_id"]: r for r in characters(sod_blob)}
+    if template_fe_id not in rows or rows[template_fe_id]["model"].upper() != template.upper():
+        raise FighterError("%s is not fighter %d of your game" % (template, template_fe_id))
+    if any(r["model"].upper() == model.upper() for r in rows.values()):
+        raise FighterError("the model %s is another fighter's already" % model)
+    edits = []
+    sod_out, _, _ = append_character(sod_blob, template_fe_id, fe_id, name, name, model)
+    edits.append(("loose", SOD_PATH, None, sod_out))
+    edits.append(("loose", ENTITY_XML, None, add_entity(files.current(ENTITY_XML), template, model)))
+    nis = next((n for n in files.names(NIS_ARCHIVE) if n.lower() == INTRO_EXTRO.lower()), None)
+    if nis is None:
+        raise FighterError("%s has no %s" % (NIS_ARCHIVE, INTRO_EXTRO))
+    edits.append(("replace", NIS_ARCHIVE, nis, add_taunt(files.current(NIS_ARCHIVE, nis), template, model)))
+    banks = model_banks(_View(files, BANK_ARCHIVE), template, model)
+    if len(banks) != 2:
+        raise FighterError("the camera banks of %s are missing, or %s has its own already" % (template, model))
+    edits += [("add", BANK_ARCHIVE, n, data) for n, data in banks]
+    if pictures:
+        edits += [("add", SCREENS_ARCHIVE, n, data)
+                  for n, data in picture_copies(_View(files, SCREENS_ARCHIVE), template_fe_id, fe_id)]
+    return edits
