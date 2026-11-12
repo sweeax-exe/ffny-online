@@ -46,6 +46,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "cheats.h"
 #include "online_guard.h"
+#include "hooks/new_fighters.h"
 
 extern void sub_000158F0(void);
 
@@ -226,6 +227,7 @@ static void start_game_wrapper(void)
     if (real)
         real();
     cheats_start_game_done(gd);
+    new_fighters_start_game_done(gd);   /* a new fighter's own stats and Blazins (src/hooks/new_fighters.c) */
 }
 
 /* Always wrapped: the Story hero cheat can be turned on in the overlay at any time. Without a

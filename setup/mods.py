@@ -64,7 +64,7 @@ MAX_INDEX = 8 * 1024**2
 MAX_FILE = 512 * 1024**2
 MAX_ARCHIVE = 8 * 1024**3
 MAX_FILES = 65536
-ALLOWED = {'.ini', '.png', '.dds', '.json', '.txt', '.md', '.djd', '.ffdelta'}  # language and FFNY Studio deltas
+ALLOWED = {'.ini', '.png', '.dds', '.json', '.txt', '.md', '.djd', '.ffdelta', '.sch', '.asf'}  # language and FFNY Studio deltas; .sch/.asf: a new fighter's own voice clips (EA SCHl)
 
 
 class ModError(ValueError):
