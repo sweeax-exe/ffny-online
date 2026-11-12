@@ -32,6 +32,14 @@ own entry plus the modder's bytes) that `replace`s or `add`s one archive entry o
 `venue.xml` and `entity.xml`. The catalogue lists them with the capability `content-v1`; content.ini marks them
 `composed=1`.
 
+A new venue may carry its own far crowd (the rows drawn at the bones of a locator file in `assets/icrowd.viv`):
+the op's optional `"crowd_locator": "icl_<code>"` and exactly one entry, the `add` of `assets/icrowd.viv|icl_<code>.o`
+from a retail locator (`icl_<template code>.o`), an ELF file of the same size. The new entity's
+`<instancecrowdlocator>` names it; the template's stays untouched. Anything else in `icrowd.viv` from a new-venue
+pack, or one of the two without the other, skips the pack (`ffnycontent/newvenue.py`, `check_crowd`). Launchers
+up to build 79 ignore the field: the venue installs and the copy keeps the template's far crowd (drawn only,
+never in the fight).
+
 On the player's PC the base of a path is `<data>/override/<path>` when it exists, else the dump
 (`--game-dir`, default `<data>/extracted`, else `./game`; the launcher passes its `game` junction resolved).
 Packs apply in catalogue order, minus replacements switched off; ops first, then entries. A pack whose delta

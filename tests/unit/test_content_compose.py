@@ -14,7 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'setup'))
 import content_compose as cc  # noqa: E402
-from ffnycontent import clothing, cpparts, delta, loc, sod, sodwrite, viv  # noqa: E402
+from ffnycontent import clothing, cpparts, delta, loc, newvenue, sod, sodwrite, viv  # noqa: E402
 sys.path.pop(0)
 
 
@@ -323,6 +323,85 @@ def test_new_venue(game, data):
     result = compose(data, game, [pack, again])
     assert result["applied"] == ["the-block"] and result["skipped"][0][0] == "the-block-2"
     assert "feID 28 is taken" in result["skipped"][0][1]
+
+
+
+LOCATOR = b"\x7fELF" + bytes(range(256)) * 40           # a stand-in locator file (10244 bytes)
+CROWD_OP = {"op": "new-venue", "template": "V2BG_03A", "template_code": "03A", "template_fe_id": 3,
+            "filename": "V2BG_28A", "code": "28A", "fe_id": 28, "title": "The Block", "dispname": "28A The Block",
+            "drop_objects": False, "crowd_locator": "icl_28A"}
+
+
+def crowd_game(game):
+    """The test game with a far crowd: icrowd.viv holds icl_03A.o and the template's entity names it."""
+    (game / "assets" / "icrowd.viv").write_bytes(viv.build_archive(
+        [("icrowd01.o", viv.refpack_store(b"\x7fELF" + bytes(64))), ("icl_03A.o", viv.refpack_store(LOCATOR))],
+        align=128))
+    ent = ENTITY_XML.replace("\t\t<xml>V2BG_03A</xml>\r\n", "\t\t<xml>V2BG_03A</xml>\r\n\t\t<instancecrowd>\r\n"
+                             "\t\t\t<instancecrowdxml>icrowd01</instancecrowdxml>\r\n"
+                             "\t\t\t<instancecrowdlocator>icl_03A</instancecrowdlocator>\r\n\t\t</instancecrowd>\r\n")
+    (game / "assets" / "entity.xml").write_bytes(ent.encode("latin-1"))
+    return game
+
+
+def crowd_entry(entry="icl_28A.o", mode="add", base_entry="icl_03A.o", result=None):
+    moved = LOCATOR[:100] + b"\x41" * 12 + LOCATOR[112:]          # places moved: same size, same kind
+    return ("assets/icrowd.viv", entry, mode, "assets/icrowd.viv", base_entry, LOCATOR,
+            moved if result is None else result)
+
+
+def test_new_venue_with_its_own_far_crowd(game, data):
+    crowd_game(game)
+    pack = make_pack(data, "far", "venue", [crowd_entry()], [CROWD_OP])
+    result = compose(data, game, [pack])
+    assert result["applied"] == ["far"], result
+    icrowd = viv.Archive(out(data, "assets/icrowd.viv"))
+    assert icrowd.read("icl_28A.o") == crowd_entry()[6] and icrowd.read("icl_03A.o") == LOCATOR
+    entity = out(data, "assets/entity.xml").read_text("latin-1")
+    template, new = entity.split("<name>V2BG_28A</name>", 1)
+    assert "<instancecrowdlocator>icl_03A</instancecrowdlocator>" in template       # the standard venue's stays
+    assert "<instancecrowdlocator>icl_28A</instancecrowdlocator>" in new
+
+
+def test_new_venue_far_crowd_is_refused_unless_it_is_its_own_add(game, data):
+    crowd_game(game)
+    plain = {k: v for k, v in CROWD_OP.items() if k != "crowd_locator"}
+    cases = {
+        "retail": ([crowd_entry("icl_03A.o", "replace", "icl_03A.o")], CROWD_OP),      # replaces a retail locator
+        "other": ([crowd_entry("icl_29A.o")], CROWD_OP),                              # not its own code
+        "unnamed": ([crowd_entry()], plain),                                          # added, not named
+        "missing": ([], CROWD_OP),                                                    # named, not added
+        "foreign": ([crowd_entry()], dict(CROWD_OP, crowd_locator="icl_03A")),        # names a retail locator
+        "base": ([crowd_entry(base_entry="icrowd01.o")], CROWD_OP),                   # not from a locator
+        "notlocator": ([crowd_entry(result=b"<xml/>" + bytes(len(LOCATOR) - 6))], CROWD_OP),
+        "size": ([crowd_entry(result=LOCATOR + bytes(64))], CROWD_OP),
+    }
+    for order, (pack_id, (entries, op)) in enumerate(sorted(cases.items()), 1):
+        pack = make_pack(data, pack_id, "venue", entries, [op], order=order)
+        result = compose(data, game, [pack])
+        assert result["applied"] == [] and result["skipped"][0][0] == pack_id, (pack_id, result)
+    # icl_28A.o in the game already (another mod's): the pack does not overwrite it
+    (game / "assets" / "icrowd.viv").write_bytes(viv.build_archive(
+        [("icl_03A.o", viv.refpack_store(LOCATOR)), ("icl_28A.o", viv.refpack_store(LOCATOR))], align=128))
+    pack = make_pack(data, "taken", "venue", [crowd_entry()], [CROWD_OP], order=20)
+    result = compose(data, game, [pack])
+    assert result["applied"] == [] and "exists already" in result["skipped"][0][1]
+
+
+def test_crowd_locator_only_changes_the_new_entity_s_locator(game, data):
+    """With crowd_locator the new entity names its own far crowd; without it (a pack before the field, or a
+    launcher before it, which reads only the op fields it knows) the copy shares the template's, as before."""
+    crowd_game(game)
+    op = dict(CROWD_OP)
+    venue_xml, entity_xml, _ = newvenue.apply((game / "venue.xml").read_bytes(),
+                                              (game / "assets" / "entity.xml").read_bytes(),
+                                              (game / "assets" / "djv2.sod").read_bytes(), op)
+    assert b"<instancecrowdlocator>icl_28A</instancecrowdlocator>" in entity_xml
+    op.pop("crowd_locator")
+    _, entity_xml, _ = newvenue.apply((game / "venue.xml").read_bytes(),
+                                      (game / "assets" / "entity.xml").read_bytes(),
+                                      (game / "assets" / "djv2.sod").read_bytes(), op)
+    assert entity_xml.count(b"<instancecrowdlocator>icl_03A</instancecrowdlocator>") == 2
 
 
 def test_two_packs_combine_in_order(game, data):
