@@ -435,19 +435,28 @@ def op_problems(op, allow_fe_id=False):
     return out
 
 
+def texture_name(model):
+    """The main texture's name in a fighter model's files: the outfit letter and the number (``V2IP_109A`` ->
+    ``A109``; the .xsh holds it, the .o names it twice, as the shape and in ``SHAPENAME=A109``)."""
+    code = model.upper().replace("V2IP_", "")
+    return code[-1] + code[:-1]
+
+
 def model_entries(template_model, model, originals, results=None):
     """The new model's entries: [(entry, base entry, base bytes, result bytes)] for each suffix the template has
     (``originals`` {suffix: the template's bytes}); ``results`` {suffix: bytes} replaces a file (an imported body,
     textures painted into the .xsh); the rest are the template's. Every result gets the model's own symbols
-    renamed (``rename_model_symbols``)."""
+    renamed (``rename_model_symbols``) and its main texture too (``A109`` -> ``A7K3``), so it never shares a name
+    with the template's while both are in a fight."""
     out = []
+    tex_old, tex_new = texture_name(template_model).encode("latin-1"), texture_name(model).encode("latin-1")
     for suffix in MODEL_SUFFIXES:
         if suffix not in originals:
             continue
         base = originals[suffix]
         result = (results or {}).get(suffix)
-        out.append((model + suffix, template_model + suffix, base,
-                    rename_model_symbols(base if result is None else result, template_model, model)))
+        result = rename_model_symbols(base if result is None else result, template_model, model)
+        out.append((model + suffix, template_model + suffix, base, result.replace(tex_old, tex_new)))
     return out
 
 
