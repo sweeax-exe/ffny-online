@@ -7,7 +7,10 @@
  * its kind ("content": new fighters, clothing, venues, always on; "replacement": retextures and
  * language packs, on unless the player switched them off), type, version, content hash and its
  * place in the catalogue's fixed order. The player's switches are settings.ini [content] off
- * (a comma-separated list of pack ids). */
+ * (a comma-separated list of pack ids). The mods of a pack of several mods ("Pack (N mods)") are
+ * sections of their own like any single pack, with bundle= and bundle_name= naming their pack;
+ * the launcher installs and removes them together, and everything here (the switches, the online
+ * print) still counts them one by one. */
 #ifndef PC_CONTENT_H
 #define PC_CONTENT_H
 
@@ -29,6 +32,8 @@ typedef struct PcContentPack {
     char language[16];      /* language packs: the ISO 639 code */
     char content_sha256[72];
     char description[512];
+    char bundle[96];        /* one mod of a pack of several mods: the pack's id ("" for a single pack) */
+    char bundle_name[160];  /* ... and its title */
     int order;              /* the catalogue's install order (1 = first) */
     long long bytes;
     int installed;          /* its folder is in <data>/mods */

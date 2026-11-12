@@ -32,10 +32,12 @@ import mod_catalogue as contract
 import content_compose
 
 # FFNY Online's own catalogue: the account service signs it with its content key when the team accepts a
-# pack (docs/content-packs.md); the launcher syncs it at every start ("sync"). index-v2.json lists new fighters
-# too (type new-fighter, with the place the server gave them); index.json is the same catalogue without them, for
-# launchers up to build 78.
-CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v2.json'
+# pack (docs/content-packs.md); the launcher syncs it at every start ("sync"). index-v3.json lists everything,
+# also the mods of a pack of several mods (with "bundle" and "bundle_name"); index-v2.json is the same catalogue
+# without pack items, for launchers of build 79; index.json also leaves new fighters out, for launchers up to
+# build 78. The three share their revisions.
+CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v3.json'
+CATALOGUE_URL_V2 = 'https://play.defjam.online/updates/content/index-v2.json'
 CATALOGUE_URL_V1 = 'https://play.defjam.online/updates/content/index.json'
 KEYS = Path(__file__).resolve().parents[1] / 'config/mods/catalogue-keys.json'
 
@@ -508,8 +510,8 @@ class Manager:
         raw = fetch_small(url, MAX_INDEX)
         signature = fetch_small(url + '.sig', 64)
         previous = read_json(self.root / 'catalogue.json', {})
-        # index.json and index-v2.json share their revisions but not their bytes: the same revision from the other
-        # file is no change without a new revision (an older revision is still a rollback)
+        # index.json, index-v2.json and index-v3.json share their revisions but not their bytes: the same revision
+        # from another file is no change without a new revision (an older revision is still a rollback)
         same_file = previous.get('url', CATALOGUE_URL_V1) == url
         index = verify_index(raw, signature, self.keys, previous.get('revision', 0),
                              previous.get('sha256') if same_file else None, fresh=True)
@@ -691,6 +693,11 @@ class Manager:
                                bytes=version['archive']['unpacked_size'])
                 if 'fighter_fe_id' in mod:
                     receipt.update(fighter_fe_id=mod['fighter_fe_id'])
+                if 'bundle' in mod:
+                    # one mod of a pack of several: the pack is installed and removed as one unit; its mods at
+                    # this catalogue revision tell an interrupted sync's half pack (drop_broken_bundles)
+                    items = sorted(m['id'] for m in self.trusted()['mods'] if m.get('bundle') == mod['bundle'])
+                    receipt.update(bundle=mod['bundle'], bundle_name=mod['bundle_name'], bundle_items=items)
             self.cancelled()
             self.progress('Installing verified package')
             self.commit(mod_id, stage, receipt)
@@ -700,10 +707,22 @@ class Manager:
             if stage.exists():
                 shutil.rmtree(stage)
 
+    def bundle_members(self, mod_id):
+        """The installed synced mods of the pack ``mod_id`` names (the pack's id or one of its mods), else []."""
+        installed = self.state()['installed']
+        bundle = installed[mod_id].get('bundle') if mod_id in installed else mod_id
+        if not bundle:
+            return []
+        return sorted(i for i, r in installed.items() if r.get('synced') and r.get('bundle') == bundle)
+
     def remove(self, mod_id):
-        check(mod_id in self.state()['installed'], 'Only managed mods can be removed here')
-        synced = self.state()['installed'][mod_id].get('synced')
-        self.commit(mod_id, None, None)
+        """Remove a managed mod; a pack of several mods (its id or one of its mods' ids) goes whole."""
+        installed = self.state()['installed']
+        members = [] if mod_id in installed and not installed[mod_id].get('synced') else self.bundle_members(mod_id)
+        check(mod_id in installed or members, 'Only managed mods can be removed here')
+        synced = bool(members) or installed[mod_id].get('synced')
+        for item in members or [mod_id]:
+            self.commit(item, None, None)
         if synced:
             # a community pack: content.ini and the composed files follow at once (as a sync that drops it),
             # so the game neither lists a missing pack nor serves files built with it
@@ -756,7 +775,9 @@ class Manager:
         try:
             done = self.sync_packs(index, problems)
         except ModError:
-            # PLAY cancelled the downloads: the game still gets files that match the packs on disk
+            # PLAY cancelled the downloads: the game still gets files that match the packs on disk (and never
+            # half of a pack of several mods)
+            self.drop_broken_bundles(problems)
             self.write_content(index['revision'])
             self.compose_quietly(problems)
             raise
@@ -771,16 +792,21 @@ class Manager:
 
     def sync_packs(self, index, problems):
         listed, done = set(), 0
-        for mod in sorted(index['mods'], key=lambda m: (m.get('order', 1 << 30), m['id'])):
+        ordered = sorted(index['mods'], key=lambda m: (m.get('order', 1 << 30), m['id']))
+        wanted, reasons = {}, {}        # the catalogue's version of each mod; why a pack's mod did not install
+        for mod in ordered:
             listed.add(mod['id'])
             installed = self.state()['installed'].get(mod['id'])
             try:
                 _, version = self.choose(mod['id'])
+                wanted[mod['id']] = version
                 if installed and not installed.get('synced'):
                     raise ModError('a pack installed by hand uses this id; it is kept')
                 if (installed and installed.get('version') == version['version']
                         and installed.get('archive_sha256') == version['archive']['sha256']
-                        and installed.get('fighter_fe_id') == mod.get('fighter_fe_id')):
+                        and installed.get('fighter_fe_id') == mod.get('fighter_fe_id')
+                        and installed.get('bundle') == mod.get('bundle')
+                        and installed.get('bundle_name') == mod.get('bundle_name')):
                     continue
                 self.progress('Downloading ' + mod['name'])
                 self.install(mod['id'], version['version'], synced=True)
@@ -788,7 +814,11 @@ class Manager:
             except (ValueError, OSError, KeyError, zipfile.BadZipFile, urllib.error.URLError) as error:
                 if isinstance(error, ModError) and 'cancelled' in str(error):
                     raise
-                problems.append('%s: %s' % (mod['id'], error))
+                if mod.get('bundle'):
+                    reasons[mod['id']] = '%s: %s' % (mod['name'], error)     # reported for its pack below
+                else:
+                    problems.append('%s: %s' % (mod['id'], error))
+        done += self.sync_bundles(ordered, wanted, reasons, problems)
         for mod_id, receipt in list(self.state()['installed'].items()):
             mod = next((m for m in index['mods'] if m['id'] == mod_id), None)
             if receipt.get('synced') and (mod is None or receipt.get('version') in mod['revoked_versions']):
@@ -799,6 +829,53 @@ class Manager:
                     problems.append('%s: %s' % (mod_id, error))
         return done
 
+    def sync_bundles(self, ordered, wanted, reasons, problems):
+        """A pack of several mods is one unit: unless every mod of it is installed at the catalogue's version,
+        none of them stays. Returns the count of mods removed."""
+        bundles, done = {}, 0
+        for mod in ordered:
+            if mod.get('bundle'):
+                bundles.setdefault(mod['bundle'], []).append(mod)
+        for bundle, items in bundles.items():
+            reason = None
+            for mod in items:
+                receipt = self.state()['installed'].get(mod['id'])
+                version = wanted.get(mod['id'])
+                if mod['id'] in reasons or not (receipt and receipt.get('synced') and version
+                                                 and receipt.get('version') == version['version']
+                                                 and receipt.get('archive_sha256') == version['archive']['sha256']):
+                    reason = reasons.get(mod['id'], '%s: not installed' % mod['name'])
+                    break
+            if reason is None:
+                continue
+            for item in self.bundle_members(bundle):
+                try:
+                    self.commit(item, None, None)
+                    done += 1
+                except (ValueError, OSError) as error:
+                    problems.append('%s: %s' % (item, error))
+            problems.append('%s: not installed (%s)' % (items[0]['bundle_name'], reason))
+        return done
+
+    def drop_broken_bundles(self, problems):
+        """A sync stopped half way: remove every pack of several mods whose installed mods are not one whole
+        version of it, all its mods (the next sync installs it again)."""
+        groups = {}
+        for mod_id, r in self.state()['installed'].items():
+            if r.get('synced') and r.get('bundle'):
+                groups.setdefault(r['bundle'], []).append((mod_id, r))
+        for bundle, rows in sorted(groups.items()):
+            ids = sorted(i for i, _ in rows)
+            if len({r.get('version') for _, r in rows}) == 1 and all(r.get('bundle_items') == ids for _, r in rows):
+                continue
+            for mod_id in ids:
+                try:
+                    self.commit(mod_id, None, None)
+                except (ValueError, OSError) as error:
+                    problems.append('%s: %s' % (mod_id, error))
+            problems.append('%s: not installed (the sync stopped before all its mods were in)' %
+                            rows[0][1].get('bundle_name', bundle))
+
     def composed_packs(self):
         """Every synced pack with an install.json, for content_compose."""
         out = []
@@ -806,9 +883,13 @@ class Manager:
             contract.slug(mod_id)
             folder = self.mods / mod_id
             if r.get('synced') and not linked(folder) and (folder / 'install.json').is_file():
-                out.append(dict(id=mod_id, version=r.get('version', ''), content_sha256=r.get('content_sha256', ''),
-                                kind=r.get('kind', 'replacement'), order=r.get('order', 0), folder=folder,
-                                fighter_fe_id=r.get('fighter_fe_id', 0)))
+                pack = dict(id=mod_id, version=r.get('version', ''), content_sha256=r.get('content_sha256', ''),
+                            kind=r.get('kind', 'replacement'), order=r.get('order', 0), folder=folder,
+                            fighter_fe_id=r.get('fighter_fe_id', 0))
+                if r.get('bundle'):
+                    # content_compose applies a pack of several mods whole or not at all
+                    pack.update(bundle=r['bundle'], bundle_name=r.get('bundle_name', r['bundle']))
+                out.append(pack)
         return out
 
     def compose(self):
@@ -845,7 +926,7 @@ class Manager:
             contract.slug(mod_id)
             lines.append('[pack.' + mod_id + ']')
             for key in ('name', 'authors', 'kind', 'type', 'version', 'language', 'content_sha256', 'order', 'bytes',
-                        'description', 'fighter_fe_id'):
+                        'description', 'fighter_fe_id', 'bundle', 'bundle_name'):
                 value = str(r.get(key, '')).replace('\n', ' ').replace('\r', ' ')[:500]
                 lines.append(key + '=' + value)
             if (self.mods / mod_id / 'install.json').is_file():
@@ -872,7 +953,8 @@ class Manager:
                     channel=latest['channel'] if latest else '', compatible=int(bool(latest) and not stale),
                     revoked=int(revoked), update=int(bool(latest) and bool(installed) and
                         semver(latest['version']) > semver(installed['version'])),
-                    load_after=','.join(latest['load_after']) if latest else ''))
+                    load_after=','.join(latest['load_after']) if latest else '',
+                    bundle=mod.get('bundle', ''), bundle_name=mod.get('bundle_name', '')))
         except (ValueError, OSError, ImportError) as error:
             info = str(error)
         lines = ['[manager]', 'message=' + self.message, 'catalogue=' + info]
@@ -885,7 +967,8 @@ class Manager:
         for mod_id, receipt in state['installed'].items():
             contract.slug(mod_id)
             section('installed.' + mod_id, dict(id=mod_id, folder=receipt['folder'], name=receipt['name'],
-                    version=receipt['version'], rollback=int(bool(receipt.get('previous')))))
+                    version=receipt['version'], rollback=int(bool(receipt.get('previous'))),
+                    bundle=receipt.get('bundle', ''), bundle_name=receipt.get('bundle_name', '')))
         atomic_bytes(self.root / 'view.ini', ('\n'.join(lines) + '\n').encode())
 
 

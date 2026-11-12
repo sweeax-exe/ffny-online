@@ -622,3 +622,68 @@ def test_install_json_shape_is_checked(data):
                 {**info, "entries": info["entries"] * 2}):
         with pytest.raises(cc.ComposeError):
             cc.check_install(bad)
+
+
+# -- packs of several mods ------------------------------------------------------------------------------------
+
+def bundled(pack, bundle="winter-set", name="Winter set"):
+    pack.update(bundle=bundle, bundle_name=name)
+    return pack
+
+
+def test_a_pack_of_several_mods_applies_all_or_none(game, data):
+    single = body_pack(data, "body-one", BODY_O + b"single", order=1)
+    good = bundled(make_pack(data, "set-hood", "clothing", [(
+        "assets/v2cp_1.viv", "V2CP_114_0005_W01_01.xsh", "add", "assets/v2cp_1.viv", "V2CP_114_0005_A01_01.xsh",
+        TEX_A, TEX_A + b"set")], order=2))
+    stale = bundled(make_pack(data, "set-body", "fighter-body", [(
+        "assets/v2ip.viv", "V2IP_109A.xsh", "replace", "assets/v2ip.viv", "V2IP_109A.xsh", BODY_XSH + b"old",
+        BODY_XSH)], order=3))
+    result = compose(data, game, [single, good, stale])
+    assert result["applied"] == ["body-one"]
+    reasons = dict(result["skipped"])
+    assert [i for i, _ in result["skipped"]] == ["set-hood", "set-body"]       # catalogue order
+    assert reasons["set-hood"] == "another mod of the pack Winter set could not be applied"
+    assert "not the version" in reasons["set-body"]
+    # nothing of the pack is in the files: its good mod's archive is not even written
+    assert result["files"] == ["assets/v2ip.viv"] and not out(data, "assets/v2cp_1.viv").exists()
+    assert viv.Archive(out(data, "assets/v2ip.viv")).read("V2IP_109A.o") == BODY_O + b"single"
+    ini = files_ini(data)
+    assert ini["applied"] == "body-one" and ini["skipped"].startswith("set-hood: another mod of the pack Winter set")
+    # unchanged inputs: the same answer from the state file
+    again = compose(data, game, [single, good, stale])
+    assert again["unchanged"] and dict(again["skipped"]) == reasons
+    # the whole pack applies once its mods all do
+    fixed = bundled(make_pack(data, "set-body2", "fighter-body", [(
+        "assets/v2ip.viv", "V2IP_109A.xsh", "replace", "assets/v2ip.viv", "V2IP_109A.xsh", BODY_XSH,
+        BODY_XSH + b"new")], order=3))
+    result = compose(data, game, [single, good, fixed])
+    assert result["applied"] == ["body-one", "set-hood", "set-body2"] and result["skipped"] == []
+    assert viv.Archive(out(data, "assets/v2cp_1.viv")).read("V2CP_114_0005_W01_01.xsh") == TEX_A + b"set"
+
+
+def test_a_dropped_pack_frees_what_it_would_have_clashed_with(game, data):
+    """The pack's mods come out of every round: a later single that clashed only with the pack's good mod
+    applies, as if the pack were not installed."""
+    entry = ("assets/v2cp_1.viv", "V2CP_114_0005_W01_01.xsh", "add", "assets/v2cp_1.viv",
+             "V2CP_114_0005_A01_01.xsh", TEX_A, TEX_A + b"pack")
+    good = bundled(make_pack(data, "set-hood", "clothing", [entry], order=1))
+    stale = bundled(make_pack(data, "set-body", "fighter-body", [(
+        "assets/v2ip.viv", "V2IP_109A.o", "replace", "assets/v2ip.viv", "V2IP_109A.o", BODY_O + b"old", BODY_O)],
+        order=2))
+    later = make_pack(data, "later-hood", "clothing", [entry[:6] + (TEX_A + b"single",)], order=3)
+    result = compose(data, game, [good, stale, later])
+    assert result["applied"] == ["later-hood"]
+    assert viv.Archive(out(data, "assets/v2cp_1.viv")).read("V2CP_114_0005_W01_01.xsh") == TEX_A + b"single"
+    assert set(dict(result["skipped"])) == {"set-hood", "set-body"}
+
+
+def test_singles_compose_as_before_beside_packs(game, data):
+    """Two singles where one fails: the same applied/skipped as without bundles (no second round)."""
+    first = body_pack(data, "body-one", BODY_O + b"one", order=1)
+    stale = make_pack(data, "stale", "fighter-body", [("assets/v2ip.viv", "V2IP_109A.o", "replace",
+                                                       "assets/v2ip.viv", "V2IP_109A.o", BODY_O + b"old", BODY_O)],
+                      order=2)
+    result = compose(data, game, [first, stale])
+    assert result["applied"] == ["body-one"] and [i for i, _ in result["skipped"]] == ["stale"]
+    assert "another mod" not in dict(result["skipped"])["stale"]

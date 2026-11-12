@@ -31,6 +31,9 @@ TYPES = ('fighter-texture', 'fighter-body', 'fighter-model', 'clothing', 'venue'
 # a new fighter's front-end ID, given by the account service when the pack is submitted (index-v2.json only:
 # launchers up to build 78 read index.json, which leaves new fighters out, and would refuse the key and the type)
 FIGHTER_FE_IDS = range(100, 128)
+# a mod that is one item of a pack of several mods ("Pack (N mods)"): the pack's id and title, always together
+# (index-v3.json only: launchers of build 79 read index-v2.json, which leaves bundle items out, and would refuse
+# the keys). The launcher installs and removes a pack's mods as one unit.
 
 
 def ffny_mod(mod):
@@ -46,6 +49,11 @@ def ffny_mod(mod):
     if 'language' in mod:
         require(isinstance(mod['language'], str) and re.fullmatch(r'[a-z]{2,3}(-[A-Za-z0-9]{2,8})?', mod['language']),
                 'Invalid language code')
+    if 'bundle' in mod or 'bundle_name' in mod:
+        require('bundle' in mod and 'bundle_name' in mod, 'A pack item needs bundle and bundle_name')
+        slug(mod['bundle'])
+        text(mod['bundle_name'])
+        require(mod['bundle'] != mod['id'], 'A pack item has the pack id')
 
 
 def ffny_version(row):
@@ -102,7 +110,7 @@ def positive(value):
 
 def validate_mod(mod):
     fields(mod, 'id name description authors class licence homepage versions revoked_versions',
-           'kind type order language fighter_fe_id')
+           'kind type order language fighter_fe_id bundle bundle_name')
     ffny_mod(mod)
     slug(mod['id'])
     for key in ('name', 'description', 'licence'):

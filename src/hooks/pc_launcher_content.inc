@@ -4,7 +4,8 @@
 // packs, synced from our signed catalogue by setup/mods.py sync (pc_mods.cpp runs it) and read back from
 // <data>/mod-manager/content.ini (pc_content.c). New fighters, clothing and venues ("content") are always
 // on and decide who meets online; retextures and language packs ("replacement") can be switched off here.
-// docs/content-packs.md.
+// A pack of several mods ("Pack (N mods)", content.ini bundle=) is one card with its mods listed; a single
+// pack's card says "Single". docs/content-packs.md.
 
 // Sync once at the launcher's start and again with each update check; PLAY cancels a sync that is still
 // downloading (the packs come at the next start) and waits for it to stop, since an install holds the
@@ -53,7 +54,20 @@ static const char *content_type_label(const char *type)
     if (!strcmp(type, "fighter-body") || !strcmp(type, "fighter-model")) return "Fighter";
     if (!strcmp(type, "clothing")) return "Clothing";
     if (!strcmp(type, "venue")) return "Venue";
+    if (!strcmp(type, "new-fighter")) return "New fighter";
+    if (!strcmp(type, "bundle")) return "Pack";
     return type[0] ? type : "Pack";
+}
+
+// A small rounded label after a title: "Single", "Pack (N mods)". Returns its width.
+static float content_tag(ImDrawList *dl, ImVec2 at, const char *text, float s, const ImVec4 &tint)
+{
+    ImVec2 ts = text_size(bold_font(), 11.5f * s, text);
+    ImVec2 a(at.x, at.y), b(at.x + ts.x + 14 * s, at.y + ts.y + 6 * s);
+    dl->AddRectFilled(a, b, col(tint, 0.16f), 9 * s);
+    dl->AddRect(a, b, col(tint, 0.50f), 9 * s);
+    dl->AddText(bold_font(), 11.5f * s, ImVec2(a.x + 7 * s, a.y + 3 * s), col(tint), text);
+    return b.x - a.x;
 }
 
 #include "pc_launcher_community.inc"   // the Community tab: every submitted pack's page, votes
@@ -125,15 +139,95 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
                                                          "accepts them.", nullptr, inner - 20 * s);
         ImGui::Dummy(ImVec2(inner - 20 * s, 60 * s));
     }
+    // a switch moved: the composed files follow (fighter bodies, clothing and venues are composed into the
+    // game's files: again, now)
+    auto toggle = [&](const PcContentPack &p, bool on) {
+        pc_content_set_off(p.id, on ? 1 : 0);
+        pc_settings_save();
+        changed = true;
+        composing = pcui::mod_start("compose");
+    };
     for (int i = 0; i < count; i++) {
         PcContentPack &p = packs[i];
+        if (p.bundle[0]) {
+            // a pack of several mods: one card where its first mod comes, its mods listed inside
+            bool first = true;
+            for (int j = 0; j < i && first; j++) first = strcmp(packs[j].bundle, p.bundle) != 0;
+            if (!first) continue;
+            int members[PC_CONTENT_MAX], nm = 0, ncontent = 0;
+            long long bytes = 0;
+            for (int j = i; j < count; j++)
+                if (!strcmp(packs[j].bundle, p.bundle)) {
+                    members[nm++] = j;
+                    ncontent += !strcmp(packs[j].kind, "content");
+                    bytes += packs[j].bytes;
+                }
+            float row_h = 30 * s;
+            ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 70 * s + nm * row_h + 8 * s);
+            ld->AddRectFilled(ra, rb, col(k_white, 0.05f), 12 * s);
+            ld->AddRect(ra, rb, col(k_white, 0.06f), 12 * s);
+            const char *title = p.bundle_name[0] ? p.bundle_name : p.bundle;
+            ld->PushClipRect(ra, ImVec2(rb.x - 150 * s, rb.y), true);
+            ld->AddText(bold_font(), 17 * s, ImVec2(ra.x + 18 * s, ra.y + 10 * s), col(k_white), title);
+            char tag[48];
+            snprintf(tag, sizeof tag, "Pack (%d mods)", nm);
+            content_tag(ld, ImVec2(ra.x + 18 * s + text_size(bold_font(), 17 * s, title).x + 10 * s, ra.y + 11 * s), tag, s,
+                        k_gold);
+            char line[400];
+            snprintf(line, sizeof line, "%s  \xC2\xB7  v%s  \xC2\xB7  %.1f MB%s%s",
+                     ncontent == nm ? "always on, part of online matching" :
+                     ncontent ? "new content always on, the rest your choice" : "your choice per mod",
+                     p.version, (double)bytes / 1048576.0, p.authors[0] ? "  \xC2\xB7  by " : "", p.authors);
+            ld->AddText(ImGui::GetFont(), 13 * s, ImVec2(ra.x + 18 * s, ra.y + 36 * s), col(ImVec4(0.80f, 0.80f, 0.82f, 1)), line);
+            ld->PopClipRect();
+            if (ncontent == nm)
+                ld->AddText(bold_font(), 14 * s, ImVec2(rb.x - 114 * s, ra.y + 29 * s), col(k_green), "ALWAYS ON");
+            // its mods: name and type; a replacement (a language, a look) keeps its own switch
+            float iy = ra.y + 64 * s;
+            for (int m = 0; m < nm; m++) {
+                PcContentPack &q = packs[members[m]];
+                bool content = !strcmp(q.kind, "content");
+                bool on = content || !pc_content_is_off(q.id);
+                ld->AddLine(ImVec2(ra.x + 18 * s, iy), ImVec2(rb.x - 18 * s, iy), col(k_white, 0.06f));
+                ld->PushClipRect(ImVec2(ra.x, iy), ImVec2(rb.x - 130 * s, iy + row_h), true);
+                const char *name = q.name[0] ? q.name : q.id;
+                ImVec4 ink = on ? k_white : ImVec4(1, 1, 1, 0.55f);
+                ld->AddText(ImGui::GetFont(), 14 * s, ImVec2(ra.x + 30 * s, iy + 7 * s), col(ink), name);
+                float nx = ra.x + 30 * s + text_size(ImGui::GetFont(), 14 * s, name).x;
+                char sub[160];
+                snprintf(sub, sizeof sub, "  \xC2\xB7  %s%s", content_type_label(q.type),
+                         !strcmp(q.type, "language") ? (on ? "  \xC2\xB7  choose it under Settings > General > Game language"
+                                                           : "  \xC2\xB7  off: not offered as a game language") : "");
+                ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(nx, iy + 8 * s), col(k_white, 0.55f), sub);
+                ld->PopClipRect();
+                if (!content) {
+                    char id[128];
+                    snprintf(id, sizeof id, "##content_switch_%s", q.id);
+                    if (glass_button(id, on ? "On" : "Off", ImVec2(rb.x - 114 * s, iy + 3 * s), ImVec2(96 * s, row_h - 6 * s), s,
+                                     on ? GLASS_RED : GLASS_PLAIN, bold_font(), 13 * s, !busy))
+                        toggle(q, on);
+                } else if (ncontent != nm) {
+                    ld->AddText(bold_font(), 12 * s, ImVec2(rb.x - 104 * s, iy + 8 * s), col(k_green), "ALWAYS ON");
+                }
+                iy += row_h;
+            }
+            y = rb.y + 10 * s;
+            ImGui::SetCursorScreenPos(ImVec2(lx, y));
+            ImGui::Dummy(ImVec2(1, 1));
+            continue;
+        }
         bool content = !strcmp(p.kind, "content");
         bool on = content || !pc_content_is_off(p.id);
         ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 76 * s);
         ld->AddRectFilled(ra, rb, col(k_white, on ? 0.05f : 0.025f), 12 * s);
         ld->AddRect(ra, rb, col(k_white, 0.06f), 12 * s);
         ImVec4 ink = on ? k_white : ImVec4(1, 1, 1, 0.55f);
-        ld->AddText(bold_font(), 17 * s, ImVec2(ra.x + 18 * s, ra.y + 10 * s), col(ink), p.name[0] ? p.name : p.id);
+        const char *title = p.name[0] ? p.name : p.id;
+        ld->PushClipRect(ra, ImVec2(rb.x - 150 * s, rb.y), true);
+        ld->AddText(bold_font(), 17 * s, ImVec2(ra.x + 18 * s, ra.y + 10 * s), col(ink), title);
+        content_tag(ld, ImVec2(ra.x + 18 * s + text_size(bold_font(), 17 * s, title).x + 10 * s, ra.y + 11 * s), "Single", s,
+                    ImVec4(1, 1, 1, on ? 0.75f : 0.45f));
+        ld->PopClipRect();
         char line[400];
         snprintf(line, sizeof line, "%s  \xC2\xB7  %s  \xC2\xB7  v%s  \xC2\xB7  %.1f MB%s%s", content_type_label(p.type),
                  content ? "always on, part of online matching" : "your choice", p.version, (double)p.bytes / 1048576.0,
@@ -153,11 +247,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
             ld->AddText(bold_font(), 14 * s, ImVec2(ba.x + 22 * s, ba.y + 9 * s), col(k_green), "ALWAYS ON");
         } else if (glass_button(id, on ? "On" : "Off", ba, ImVec2(118 * s, 36 * s), s, on ? GLASS_RED : GLASS_PLAIN,
                                 bold_font(), 14.5f * s, !busy)) {
-            pc_content_set_off(p.id, on ? 1 : 0);
-            pc_settings_save();
-            changed = true;
-            // fighter bodies, clothing and venues are composed into the game's files: again, now
-            composing = pcui::mod_start("compose");
+            toggle(p, on);
         }
         y += 86 * s;
         ImGui::SetCursorScreenPos(ImVec2(lx, y));

@@ -10,8 +10,8 @@ repository (`docs/content-catalogue.md` there); Studio's side is in the Studio r
 
 | Piece | What it does |
 |---|---|
-| `setup/mods.py sync` | Fetches `https://play.defjam.online/updates/content/index.json` and `.sig`, checks the Ed25519 signature against `config/mods/catalogue-keys.json` (the content key's public half), the 30-day expiry and the revision (no rollback). Installs every listed pack in the catalogue's `order` (clothing IDs depend on it), downloading only packs whose version or archive changed; checks each pack's `content_sha256` and `pack_signature`; removes synced packs the catalogue dropped or revoked; keeps a folder the player installed by hand. Writes `<data>/mod-manager/content.ini`. |
-| `setup/mod_catalogue.py` | The catalogue contract, with FFNY's optional fields: `kind` (`content` / `replacement`), `type`, `order`, `language`; per version `content_sha256`, `pack_signature`. |
+| `setup/mods.py sync` | Fetches `https://play.defjam.online/updates/content/index-v3.json` and `.sig` (below: which file for which launcher), checks the Ed25519 signature against `config/mods/catalogue-keys.json` (the content key's public half), the 30-day expiry and the revision (no rollback). Installs every listed pack in the catalogue's `order` (clothing IDs depend on it), downloading only packs whose version or archive changed; checks each pack's `content_sha256` and `pack_signature`; removes synced packs the catalogue dropped or revoked; keeps a folder the player installed by hand. Writes `<data>/mod-manager/content.ini`. |
+| `setup/mod_catalogue.py` | The catalogue contract, with FFNY's optional fields: `kind` (`content` / `replacement`), `type`, `order`, `language`, `fighter_fe_id`, `bundle` with `bundle_name` (always together); per version `content_sha256`, `pack_signature`. |
 | `setup/mods.py compose`, `setup/content_compose.py` | Composed packs (below): rebuilds the patched game files from the player's dump and each pack's deltas and ops. Runs at the end of every `sync`, as `mods.py compose` (the Content page's switch starts it), and is skipped when the packs, the switches and the bases are unchanged. `setup/ffnycontent/` is the part of FFNY Studio's library it needs (deltas, BIG archives, `djv2.sod`, `.loc`, the parts list, clothing ops, new venues). |
 | `src/hooks/pc_content.c` | Reads `content.ini` and the player's switches (`settings.ini [content] off`). At game start the synced texture packs go beneath the player's own packs in `RECOMP_TEXTURE_PACKS`, and the composed files are served through the game-file redirect (ahead of `<data>/override`; the language and song redirects chain to it; `[CONTENT] n composed file(s) served` in the log). The online **content print** (FNV-1a over id, version and content hash of every `content` pack, in order) is mixed into the build fingerprint and sent after the build number in HELLO, so rooms only match PCs with the same `content` set; a composed `content` pack counts only when `files.ini` lists it as applied. Replacements and language packs never count. |
 | Launcher | Syncs at its start and with each update check (`pc_launcher_content.inc`); PLAY during a sync cancels the download and waits for it to stop. The **Content** button opens the page: installed packs in catalogue order, `content` packs marked ALWAYS ON, a switch for each `replacement`. Settings > General > Game language lists English, French and every language pack that is on. |
@@ -91,11 +91,41 @@ pack**, carried in the signed catalogue as the mod's `fighter_fe_id` and kept in
 same packs build the same files whatever else they have. A synced new fighter without a place, or whose place or
 model is taken, is skipped. A pack installed by hand (or a Studio test) names its place in the op (`fe_id`).
 The catalogue with new fighters is `index-v2.json`; `index.json` is the same catalogue without them for launchers
-up to build 78, whose strict check would refuse the type and the key. The launcher reads `index-v2.json` from
-this branch on; a cached revision of the other file is not "changed without a new revision".
+up to build 78, whose strict check would refuse the type and the key. Launchers of build 79 read `index-v2.json`;
+from the mod-bundles branch on the launcher reads `index-v3.json` (see "Packs of several mods" below). The three files share their
+revisions: a cached revision of another file is not "changed without a new revision".
 
 A relay before this branch refuses the longer HELLO; it is sent only by a PC with `content` packs, so the relay
 goes out first. The relay answers a code join between different content sets with ERROR 15 (14 is the relay's "client not supported").
+
+## Packs of several mods (bundles)
+
+A modder can submit several mods as one **pack** ("Pack (N mods)", e.g. three new fighters, a venue and clothing
+colours); everything else stays a **single** ("Single"). The account service checks each mod of a pack like a
+single and, on Accept, lists every one of them as an ordinary catalogue mod (own id, type, kind, order, archive,
+content hash and pack signature, all at the pack's version) with two more fields: `bundle` (the pack's id) and
+`bundle_name` (its title). Only **`index-v3.json`** lists pack items; `index-v2.json` (build 79) and `index.json`
+(up to build 78) leave them out, so older launchers never see them and refuse nothing.
+
+The launcher treats a pack as one unit:
+
+- **sync**: after installing, a pack listed in the catalogue whose mods are not all installed at the catalogue's
+  version (one failed its download, hash or signature, needs a capability this launcher lacks, or a hand-installed
+  folder uses its id) loses every installed mod of it, and the sync reports `<pack name>: not installed (<first
+  reason>)` once. A sync that PLAY cancelled half way removes a pack whose installed mods are not one whole
+  version of it (the receipts keep the pack's mod list, `bundle_items`); the next sync installs it again.
+- **compose**: when `content_compose` skips any mod of a pack, the packs are applied again without any mod of that
+  pack, so the composed files hold nothing of it; its other mods are listed as skipped with `another mod of the
+  pack <name> could not be applied`. Singles compose exactly as before.
+- **remove**: `mods.py remove --id <pack id or one of its mods' ids>` removes every mod of the pack.
+- `content.ini` has `bundle=` and `bundle_name=` in each `[pack.<id>]` (empty for a single); `view.ini` carries
+  them too. The game counts a pack's mods one by one, like singles: the switches (a language in a pack keeps its
+  own On/Off) and the online content print are per mod, unchanged.
+
+What players see: the Content page shows one card per pack, titled with its name, tagged **Pack (N mods)** and
+listing its mods (name and type, and an On/Off switch for a replacement such as a language); a single's card is
+tagged **Single**. The Community tab tags each gallery card **Single** or **Pack (N mods)** (the gallery's `form`
+and `item_count`; a missing `form` is a single), and a pack's page lists its mods (`items`: title, type).
 
 ## Testing
 
