@@ -1017,6 +1017,7 @@ static int host_main(void)
      * does nothing while appearing to be set. */
     xbox_WatchdogStart();
     hang_watch_start();     /* the players' one: logs a freeze, kills nothing */
+    { extern void memstat_start(void); memstat_start(); }   /* RECOMP_MEMSTAT=<s>: [MEMSTAT] pool/window use */
 
     /* Step 7: Call the recompiled entry point */
     printf("\nStarting game...\n");
