@@ -44,9 +44,11 @@ def wsl_path(p):
 def build_msvc(out, n):
     vcvars = VS / "VC/Auxiliary/Build/vcvars64.bat"
     exe = out / "dm_msvc.exe"
-    cmd = f'call "{vcvars}" >nul && cl /nologo /O2 /fp:precise /DDM_N={n} /Fe:"{exe}" /Fo:"{out}\\\\" ' + \
-          " ".join(f'"{s}"' for s in SRC)
-    subprocess.run(["cmd", "/c", cmd], check=True, cwd=out, stdout=subprocess.DEVNULL)
+    script = out / "build-msvc.cmd"
+    lines = ["@echo off", 'call "%s" >nul 2>nul' % vcvars,
+             'cl /nologo /O2 /fp:precise /DDM_N=%d /Fe:"%s" %s' % (n, exe, " ".join('"%s"' % s for s in SRC))]
+    script.write_text("\r\n".join(lines) + "\r\n")
+    subprocess.run(["cmd", "/c", str(script)], check=True, cwd=out, stdout=subprocess.DEVNULL)
     return exe
 
 
@@ -74,7 +76,7 @@ def main():
     ap.add_argument("--trace")
     ap.add_argument("--out")
     a = ap.parse_args()
-    out = Path(a.out or tempfile.mkdtemp(prefix="detmath-"))
+    out = Path(a.out or tempfile.mkdtemp(prefix="detmath-")).resolve()
     out.mkdir(parents=True, exist_ok=True)
     builds = {"msvc-x64": build_msvc(out, a.n)}
     elf_cfg = {
