@@ -23,6 +23,7 @@
 #include "recomp_settings.h"
 #include "hooks/guest_call.h"
 #include "toughness_fix.h"
+#include "hooks/milestones.h"
 
 #define MANAGERS        0x002FB148u
 #define GAMEDATA_SLOT   0x18u
@@ -79,6 +80,7 @@ void toughness_fix_before_rewards(int slot)
         }
         s_before = MEM16(s_profile + S_MULTI_WINS);
     }
+    milestones_before_rewards(s_profile);   /* the milestone toast (hooks/milestones.c): read only */
 }
 
 void toughness_fix_after_rewards(void)
@@ -101,4 +103,5 @@ void toughness_fix_after_rewards(void)
     if (told++ < 64)
         fprintf(stderr, "[TOUGHNESS] slot %d: multi-fighter wins %u -> %u (%s), bonus toughness %d\n", s_slot,
                 (unsigned)s_before, (unsigned)sum, on ? "fix on" : "retail", (int)MEM32(p + S_BONUS_TOUGH));
+    milestones_after_rewards(p);            /* after the fix: the rows as the save will hold them */
 }

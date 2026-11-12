@@ -38,6 +38,19 @@ bool take_exit_test_request();
 void exit_prompt_begin();
 int draw_exit_prompt(ImVec2 display);
 
+/* MILESTONES (build 79, milestones_ui.inc): on the Battle user-ID screen and in the Story crib, a chip
+ * (VIEW MILESTONES) that the pad's VIEW or a click opens into the profile's milestone progress. The
+ * overlay holds the game's input while the page is open, as for EXIT. milestones_chip_at takes window
+ * pixels. draw_milestones returns false when the player closes it. RECOMP_TEST_OPEN_MILESTONES=1 (tests)
+ * opens it once where it is offered. milestone_toast: the notice after a match that reached one. */
+bool milestones_wanted();
+bool milestones_chip_at(float x, float y);
+void draw_milestones_chip(ImDrawList *dl, ImVec2 display);
+void milestones_begin();
+bool draw_milestones(ImVec2 display);
+bool take_milestones_test_request();
+bool milestone_toast(char *out, int size);
+
 /* The player chose ONLINE (once per choice). */
 bool take_open_request();
 

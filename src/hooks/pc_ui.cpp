@@ -3635,6 +3635,8 @@ std::atomic<bool> g_note_shown(false);  // F9's "What's wrong?" box is up (pc_ui
 bool g_online = false;              // the overlay shows the online screens (the main menu's ONLINE)
 bool g_exit = false;                // the overlay shows the main menu's QUIT FFNY ONLINE? prompt
 std::atomic<bool> g_exit_req{false};    // ESC or a click on the EXIT chip (window thread)
+bool g_ms = false;                  // the overlay shows MILESTONES (the user-ID screen, the Story crib)
+std::atomic<bool> g_ms_req{false};      // a click on the MILESTONES chip (window thread)
 std::atomic<int> g_menu_eats_back{0};   // the title reads no BACK (VIEW) on the main menu (game thread)
 bool g_exit_view_down = true;       // the pad's VIEW was held last frame (true: a held one never opens it)
 // A VIEW press the title's own pad read saw and lost to g_menu_eats_back (game thread,
@@ -3752,7 +3754,7 @@ void set_open(bool open)
     if (g_open.load() == open) return;
     g_open = open;
     g_just_opened = open;
-    if (!open) g_online = g_exit = false;
+    if (!open) g_online = g_exit = g_ms = false;
     if (open) { g_hold_input = false; xbox_HostInputSetUiActive(1); }
     else g_hold_input = true;           // released in release_input_when_idle
 #if !defined(_WIN32)
@@ -4390,6 +4392,17 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
             return 1;
         }
     }
+    // MILESTONES (build 79): a click on its chip opens the page; the click is kept from the game
+    if (!note && !g_open.load() && msg == WM_LBUTTONDOWN) {
+        ui_lock();
+        bool want = !ui_capturing() && online_screen::milestones_wanted() &&
+                    online_screen::milestones_chip_at((float)(short)LOWORD(lp), (float)(short)HIWORD(lp));
+        ui_unlock();
+        if (want) {
+            g_ms_req = true;
+            return 1;
+        }
+    }
     if (!g_open.load() && !note) return 0;
     ui_lock();
     int handled = 0;
@@ -4461,13 +4474,22 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         bool latched = g_exit_view_latch.exchange(false);
         bool view_press = ((view && !g_exit_view_down) || latched) && !ptt;
         g_exit_view_down = view;
-        g_menu_eats_back = online_screen::exit_wanted() && !ptt ? 1 : 0;
+        // build 79: on the user-ID screen and in the Story crib VIEW opens MILESTONES (the game reads
+        // VIEW there as BACK, like B, so it loses that bit there too)
+        bool ms_here = online_screen::milestones_wanted();
+        g_menu_eats_back = (online_screen::exit_wanted() || ms_here) && !ptt ? 1 : 0;
         bool req = g_exit_req.exchange(false);
+        bool ms_req = g_ms_req.exchange(false);
         if (!g_open.load() && !g_note.open && !toggled && online_screen::exit_wanted() &&
             (req || view_press || online_screen::take_exit_test_request())) {
             set_open(true);
             g_exit = true;
             online_screen::exit_prompt_begin();
+        } else if (!g_open.load() && !g_note.open && !toggled && ms_here &&
+                   (ms_req || view_press || online_screen::take_milestones_test_request())) {
+            set_open(true);
+            g_ms = true;
+            online_screen::milestones_begin();
         }
     }
     // Closed, the overlay still draws the versus screen while a room's match loads (it takes no
@@ -4484,6 +4506,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     bool hillres = !g_open.load() && !versus && !decor && !hillhud && online_screen::hill_results_wanted();
     // Build 76: the PERFECT banner and an online fight's name tags (fight_hud_ui.inc), drawing only
     bool fighthud = !g_open.load() && !versus && !decor && online_screen::fight_hud_wanted();
+    // Build 79: the MILESTONES chip on the user-ID screen and in the Story crib, drawing only
+    bool mschip = !g_open.load() && !versus && !decor && online_screen::milestones_wanted();
     // Build 76: the input delay line over an online fight (delay_hud_ui.inc), drawing only
     bool delayhud = !g_open.load() && !versus && !decor && !hillhud && online_screen::delay_hud_wanted();
     static bool fc_held;
@@ -4505,6 +4529,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     // the online menu, it was hidden there); the netplay notices are for the fight only.
     bool toast = bug_report_toast(notice, sizeof(notice)) ||
                  (!g_open.load() && netplay_toast(notice, sizeof(notice))) ||  // online: a wait, a desync
+                 (!g_open.load() && online_screen::milestone_toast(notice, sizeof(notice))) ||  // a milestone reached
                  update_notice(notice, sizeof(notice));                         // a newer build is out
     // F9's picture is taken this frame: without the notice F9 itself put up ("taking a picture"), which
     // would cover the screen being reported. With nothing else drawn, the game's frame stays the picture.
@@ -4518,7 +4543,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (g_note.open) toast = false;     // F9's "taking a picture" would sit over the box
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
-    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !fighthud && !delayhud && !offer) { ui_unlock(); return; }
+    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !fighthud && !delayhud && !mschip && !offer) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -4563,6 +4588,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         }
     } else if (g_online) {
         if (!online_screen::draw(io.DisplaySize)) close_request = true;
+    } else if (g_ms) {
+        if (g_note.open ? false : !online_screen::draw_milestones(io.DisplaySize)) close_request = true;
     } else if (g_exit) {
         int answer = g_note.open ? 0 : online_screen::draw_exit_prompt(io.DisplaySize);
         if (answer == 2 && g_window) {
@@ -4600,6 +4627,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
             if (logged++ < 20) fprintf(stderr, "[SOCIAL] caught: an exception (fight HUD)\n");
         }
     }
+    if (mschip) online_screen::draw_milestones_chip(ImGui::GetForegroundDrawList(), io.DisplaySize);
     if (delayhud) {
         try {
             online_screen::draw_delay_hud(ImGui::GetForegroundDrawList(), io.DisplaySize);

@@ -57,6 +57,7 @@
 #include "fight_hud.h"
 #include "fight_hud_rules.h"
 #include "start_countdown.h"
+#include "milestones.h"
 #include <time.h>
 
 namespace {
@@ -69,6 +70,7 @@ std::atomic<int> g_open_req{0};
 std::atomic<int> g_menu_ticks{0};   // Online.Tick() since the menu came up: it is on screen
 std::atomic<long long> g_last_tick_ms{0};
 bool g_closed_for_match = false;    // overlay thread: the last close was MATCH FOUND running out
+std::atomic<int> g_ms_screen{0};    // MILESTONES (milestones_ui.inc): 1 the Battle user-ID screen, 2 the Story crib
 
 long long now_ms()
 {
@@ -80,7 +82,10 @@ long long now_ms()
 
 extern "C" void online_menu_on_funccall(const char *text)
 {
+    milestones_on_funccall(text);
     if (!strncmp(text, "Control.GetScreenInfo(", 22)) {
+        // case: the dump writes both story/crib and Story/Crib
+        g_ms_screen = strstr(text, "options/battleID") ? 1 : (strstr(text, "tory/crib") || strstr(text, "tory/Crib")) ? 2 : 0;
         int up = strstr(text, "intMain/mainMenu") != nullptr;
         // A hub match's summary leads to the battle match-type screen: the room comes back
         // instead of that menu (the match is still "connected" at this point; automatch then
@@ -4468,6 +4473,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "turf_ui.inc"
 #include "tset_ui.inc"
 #include "delay_hud_ui.inc"
+#include "milestones_ui.inc"
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -4551,7 +4557,9 @@ void gallery_step()
                                          "hub-tset", "tset-coin", "tset-select", "tset-why", "tset-pick", "tset-pick-wait",
                                          "tset-intro", "tset-waiting", "tset-over", "tset-grid",
                                          // build 64: the relay's restart countdown (it holds new fights)
-                                         "maint-hub", "maint-room", "maint-vote" };
+                                         "maint-hub", "maint-room", "maint-vote",
+                                         // build 79: MILESTONES (milestones_ui.inc; the sample profile RICO)
+                                         "milestones", "milestones-tough", "milestones-card", "milestones-chip" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -4690,6 +4698,7 @@ void gallery_step()
         static const std::string base_stats = G.stats;
         G.stats = base_stats;
         ranked_stats_tab() = 0;
+        if (milestones_gallery(p)) return;
         if (tset_gallery(p)) return;
         if (turf_gallery(p)) return;
         if (locker_gallery(p)) return;
@@ -5282,6 +5291,60 @@ int draw_exit_prompt(ImVec2 display)
     return choose == 0 ? 2 : 1;
 }
 
+// ---- MILESTONES (build 79, milestones_ui.inc) ------------------------------------------------------
+// On the Battle user-ID screen and in the Story crib, with a user ID to show and no fight running: the
+// chip (drawing only), and the page the pad's VIEW or a click on the chip opens (pc_ui.cpp).
+
+bool milestones_wanted()
+{
+    if (gallery_on() || !g_ms_screen.load()) return false;
+    if (netplay_active() || netplay_match_locked() || ms_fight_running()) return false;
+    static uint8_t buf[MS_PROFILE_BYTES];
+    char name[24];
+    return ms_profile(buf, name, sizeof(name)) != 0;
+}
+
+bool milestones_chip_at(float x, float y)
+{
+    if (GetTickCount64() - MS.chip_ms > 300) return false;
+    return x >= MS.chip.x && x < MS.chip.z && y >= MS.chip.y && y < MS.chip.w;
+}
+
+void draw_milestones_chip(ImDrawList *dl, ImVec2 display)
+{
+    ms_draw_chip(dl, menu_frame(display));
+}
+
+void milestones_begin()
+{
+    MS.sel = MS.top = 0;
+    MS.opened = GetTickCount64();
+    fprintf(stderr, "[UI] milestones page opened (screen %d)\n", g_ms_screen.load());
+    fflush(stderr);
+}
+
+bool draw_milestones(ImVec2 display)
+{
+    if (!milestones_wanted()) {
+        fprintf(stderr, "[UI] milestones page: closed, the screen is gone\n");
+        return false;
+    }
+    ImGui::GetIO().KeyRepeatDelay = 0.45f;
+    Pad pad = read_pad();
+    if (GetTickCount64() - MS.opened < 250) pad = Pad();
+    return ms_page(ImGui::GetForegroundDrawList(), menu_frame(display), display, pad);
+}
+
+bool take_milestones_test_request()
+{
+    static int once;
+    if (once || !milestones_wanted() || !getenv("RECOMP_TEST_OPEN_MILESTONES")) return false;
+    once = 1;
+    return true;
+}
+
+bool milestone_toast(char *out, int size) { return milestones_toast(out, size) != 0; }
+
 void draw_decor(ImDrawList *dl, ImVec2 display)
 {
     if (!decor_wanted()) return;
@@ -5616,6 +5679,12 @@ bool draw_pages(ImVec2 display)
         pad = Pad();
     }
     ranked_board_test_step();
+    if (gallery_on() && MS.gallery) {           // build 79: MILESTONES, over a stand-in for the user-ID screen
+        backdrop(dl, f, display, true, LOOK_STATS);
+        if (MS.gallery_chip) ms_draw_chip(dl, f);
+        else ms_page(dl, f, display, pad);
+        return true;
+    }
 
     NetRoom room;
     lobby_room(&room);
@@ -5906,6 +5975,13 @@ bool exit_wanted() { return false; }
 bool exit_chip_at(float, float) { return false; }
 bool take_exit_test_request() { return false; }
 void exit_prompt_begin() {}
+bool milestones_wanted() { return false; }
+bool milestones_chip_at(float, float) { return false; }
+void draw_milestones_chip(ImDrawList *, ImVec2) {}
+void milestones_begin() {}
+bool draw_milestones(ImVec2) { return false; }
+bool take_milestones_test_request() { return false; }
+bool milestone_toast(char *out, int size) { return milestones_toast(out, size) != 0; }
 int draw_exit_prompt(ImVec2) { return 1; }
 bool take_open_request() { return g_open_req.exchange(0) != 0 && false; }
 bool draw(ImVec2) { return false; }
