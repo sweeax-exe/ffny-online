@@ -1529,7 +1529,7 @@ int rollback_reference(void)
         s_game_thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentThreadId());
     if (!s_ref || !s_ndseg) {
         fprintf(stderr, "[ROLLBACK] off for this match: no reference copy (%s)\n",
-                !s_ref ? "no memory for the 42 MB copy" : "no .data segments were built");
+                !s_ref ? "no memory for the heap copy" : "no .data segments were built");
         return -1;
     }
     memcpy(s_ref, XBOX_PTR(HEAP_LO), (size_t)HEAP_PAGES * PAGE);
