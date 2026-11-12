@@ -189,6 +189,8 @@ if(DEFJAM_BUILD_GAME)
     add_executable(${PROJECT_NAME} WIN32
         src/main.c
         src/recomp_manual.c
+        src/detmath/detmath.c
+        src/detmath/detmath_select.c
         ${HOST_SOURCES}
         ${HOOK_SOURCES}
         ${PATCH_SOURCES}
@@ -229,6 +231,20 @@ if(DEFJAM_BUILD_GAME)
         # the crash report can name the one that faulted.
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS ON)
     endif()
+    # Deterministic math (src/detmath, docs/research/deterministic-math.md): the lifted code's
+    # sin/cos/tan/atan2/log2/log1p/expm1 go to one fixed implementation on every platform instead
+    # of the host libm (RECOMP_DETMATH=0 switches back for comparison runs). Force-included, so
+    # neither the toolkit nor the generated code changes. detmath.c itself must never be
+    # contracted into fused multiply-adds: /fp:precise is MSVC's default and contracts nothing
+    # on x64; elsewhere -ffp-contract=off is set on the whole target above.
+    set(DEFJAM_DETMATH_REDIRECT "${CMAKE_CURRENT_SOURCE_DIR}/src/detmath/detmath_redirect.h")
+    if(MSVC)
+        set(DEFJAM_DETMATH_FI "/FI${DEFJAM_DETMATH_REDIRECT}")
+        set_source_files_properties(src/detmath/detmath.c PROPERTIES COMPILE_OPTIONS "/fp:precise")
+    else()
+        set(DEFJAM_DETMATH_FI "-include;${DEFJAM_DETMATH_REDIRECT}")
+    endif()
+    set_property(SOURCE ${RECOMP_GEN_SOURCES} src/recomp_manual.c APPEND PROPERTY COMPILE_OPTIONS ${DEFJAM_DETMATH_FI})
     target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_VERSION=\"${PROJECT_VERSION}\")
     if(DEFJAM_MOD_WIDE)
         target_compile_definitions(${PROJECT_NAME} PRIVATE DEFJAM_MOD_WIDE=1)

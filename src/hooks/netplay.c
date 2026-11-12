@@ -56,6 +56,7 @@
 #include "pc_content.h"
 #include "fight_hud.h"
 #include "start_countdown.h"
+#include "detmath/detmath.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -328,7 +329,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                * scale and match generator apart (netplay_check.h); the first 37 bytes unchanged */
 #define P_RTT         6     /* hub: u32 START seed, u16 this PC's ping to the relay in ms, u8 rollback,
                                * since build 23 u32 the game files' fingerprint */
-#define LOCKSTEP_VERSION 4     /* 3: builds 19-20, rollback on; 4: build 21, rollback off again, reclaim on */
+#define LOCKSTEP_VERSION 5     /* 3: builds 19-20, rollback on; 4: build 21, rollback off again, reclaim on;
+                               * 5: deterministic math (src/detmath): the same fight bits on every platform */
 
 #define MAXP          NETPLAY_MAX_PLAYERS   /* fighters in a match: positions 0..3 */
 #define ROOMSLOTS     NETPLAY_ROOM_SLOTS    /* members of a room: relay slots 0..9 */
@@ -4713,6 +4715,10 @@ void netplay_build_fingerprint(uint8_t out[8])
     for (v = DEFJAM_VERSION; *v; v++) h1 = (h1 ^ (uint8_t)*v) * 16777619u;
     for (k = 0; k < 4; k++) h1 = (h1 ^ (uint8_t)(build >> (8 * k))) * 16777619u;
     h2 = mix32(h1 ^ LOCKSTEP_VERSION);
+    /* RECOMP_DETMATH=0 (the host libm, comparison runs only) computes other fight bits: such a copy
+     * meets only copies like it. RECOMP_TEST_DETMATH_SAME_FP=1 (tests) lets it meet the others on
+     * purpose, to measure the desync the libm difference causes. */
+    if (recomp_detmath_mode() == 0 && !getenv("RECOMP_TEST_DETMATH_SAME_FP")) h2 = mix32(h2 ^ 0x444D3000u);
     {   /* FFNY Online's community content (pc_content.c): a PC with `content` packs (new fighters,
          * clothing, venues) only meets PCs with the same set. None: the fingerprint builds before
          * 72 had. Replacements and language packs never count. */
@@ -8050,6 +8056,7 @@ static void step_run(void)
 {
     uint32_t s, k, need;
     ULONGLONG waited_since, last_send, last_note;
+    recomp_detmath_fenv_guard();    /* round to nearest, no flush-to-zero: whatever a driver or overlay set */
     start_countdown_step(N.resim);
     if (N.lockstep) versus_hold();
     created_fighter_on_step();  /* created fighters: unlinked once their looks are built */

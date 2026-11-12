@@ -106,6 +106,8 @@ The plan built from these is in [docs/widescreen](../widescreen/README.md), whic
 - [Toolkit rebase acceptance](toolkit-rebase-acceptance.md)
 - [Toolkit rebase ledger](toolkit-rebase-ledger.md): maps the 108 retired patch numbers to fork commits
 - [macOS and Linux port survey](macos-linux-port-survey.md)
+- [Deterministic math for cross-platform lockstep](deterministic-math.md): which floating point differs between hosts, the fixed libm layer and its x86-64/arm64 proof
+- [Cross-play with Android: the PC player's opt-in](crossplay-optin.md): the setting, the CAPS bit and the relay pairing rule (design)
 
 ## Performance
 
