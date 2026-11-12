@@ -27,6 +27,7 @@ typedef struct FightHudView {
     uint32_t live;          /* 1 while the round is fought (begun, not decided): the game's HUD is up */
     uint32_t active;        /* fighter slots in the fight */
     uint32_t cpu;           /* the CPU's among them */
+    uint32_t step;          /* the round's step (1 = its first; rollback's re-runs repeat numbers): the start countdown */
 } FightHudView;
 void fight_hud_view(FightHudView *out);
 

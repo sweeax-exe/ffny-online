@@ -327,6 +327,10 @@ def execute(args):
                 env[name] = value
             if args.rng_seed is not None:
                 env['RECOMP_TEST_RNG_SEED'] = str(args.rng_seed)
+            if args.step_input:
+                # A step-timed fight plays the retail start: the build 77 start countdown would hold its
+                # first 180 steps and part it from tests/golden/fight-stream.json.
+                env.setdefault('RECOMP_START_COUNTDOWN', '0')
             if args.isolate_crowd:
                 env['RECOMP_TEST_ISOLATE_CROWD'] = '1'
             sessions_before = recorder_sessions() if getattr(args, 'record', False) else None
