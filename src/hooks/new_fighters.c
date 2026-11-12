@@ -21,19 +21,24 @@
 #include <string.h>
 #include "recomp/gen/recomp_types.h"
 #include "new_fighters.h"
+#include "fighter_gameplay.h"
 
 unsigned int defjam_fe_call(const char *command);                   /* recomp_manual.c */
 FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c: as the print reads it */
 
 #define CHARACTER_TABLE 0x4CE5B1B2u
 #define ROW_WORDS 26
+#define W_BLAZINS 3         /* gameplay words (fighter_gameplay.h); the game reads neither */
 #define W_DISPLAY 5
 #define W_FE_ID 8
 #define W_CORE_ID 10
+#define W_GAMEPLAY 11
 #define W_MAIN 13
 
 static NewFighter g_new[NEW_FIGHTER_MAX];
 static uint32_t g_words[NEW_FIGHTER_MAX][ROW_WORDS];    /* its words (stats, style bits) */
+static FighterGameplay g_gp[NEW_FIGHTER_MAX];           /* its own gameplay, when g_gp_ok */
+static int g_gp_ok[NEW_FIGHTER_MAX];
 static int g_new_count = -1;
 
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
@@ -117,9 +122,208 @@ static void load(void)
                 g_new[i].template_fe_id = (int)stock[j].fe;
                 break;
             }
-    for (i = 0; i < g_new_count; i++)
+    for (i = 0; i < g_new_count; i++) {
+        const FighterGameplay *g = &g_gp[i];
+        g_gp_ok[i] = fighter_gameplay_decode(g_words[i][W_BLAZINS], g_words[i][W_GAMEPLAY], &g_gp[i]);
         fprintf(stderr, "[NEWFIGHTER] feID %d \"%s\": coreID %d, an outfit of feID %d\n", g_new[i].fe_id,
                 g_new[i].name, g_new[i].core_id, g_new[i].template_fe_id);
+        if (g_gp_ok[i])
+            fprintf(stderr, "[NEWFIGHTER] feID %d gameplay: stats %d %d %d %d %d %d %d, moves %s%d, Blazins %d %d %d %d\n",
+                    g_new[i].fe_id, g->stats[0], g->stats[1], g->stats[2], g->stats[3], g->stats[4], g->stats[5],
+                    g->stats[6], g->moveset ? "archetype " : "template's", g->moveset ? FGP_ARCHETYPE_BASE + g->moveset : 0,
+                    g->blazins[0], g->blazins[1], g->blazins[2], g->blazins[3]);
+        else if ((g_words[i][W_GAMEPLAY] >> 28) != 0 || g_words[i][W_BLAZINS] != 0)
+            fprintf(stderr, "[NEWFIGHTER] feID %d: gameplay words %08x %08x refused (out of range); the template's "
+                    "gameplay\n", g_new[i].fe_id, g_words[i][W_BLAZINS], g_words[i][W_GAMEPLAY]);
+    }
+}
+
+const FighterGameplay *new_fighter_gameplay(int fe_id)
+{
+    int i;
+    if (g_new_count < 0) load();
+    for (i = 0; i < g_new_count; i++)
+        if (g_new[i].fe_id == fe_id) return g_gp_ok[i] ? &g_gp[i] : NULL;
+    return NULL;
+}
+
+static int new_fighter_core(int fe_id)
+{
+    int i;
+    if (g_new_count < 0) load();
+    for (i = 0; i < g_new_count; i++)
+        if (g_new[i].fe_id == fe_id) return g_new[i].core_id;
+    return -1;
+}
+
+/* ---- the gameplay at match set-up ----
+ *
+ * The created-fighter path's three override points, written for a new fighter's slot the way the game's
+ * created-fighter branch writes them (docs/research/new-fighter-gameplay.md):
+ *   1. after Game.StartGame: the slot's stat block GS+0x2B0+0x1C*slot (7 dwords) with its flag GS+0x2AC+slot,
+ *      and the four Blazin keys GS+0xE0/+0xD8/+0xE4/+0xDC+16*slot (keys 0..3) and their copy 0x40 above;
+ *   2. the fight's set-up (sub_001A4D90, before the records spawn): a style combination's character index in
+ *      0x3B90B8+4*slot, so the record's styles, moves (WWAZ), animation bank and Blazin rule follow it;
+ *   3. the Blazins' registration (sub_001A8180, after the spawn): a template-moveset fighter's four Blazins into
+ *      its record (the game does that for character index 86 and above only).
+ * Every value comes from the fighter byte of the set-up and the database every PC shares (in the fight-file
+ * print), and is written before the first fight step, so lockstep and rollback start from the same state on
+ * every PC. The template's coreID stays in the slot (GS+0x168: speech row, intro clip, AI file). */
+#define MANAGERS        0x002FB148u
+#define GAMEDATA_SLOT   0x18u
+#define GD_FIGHTER      0x1AAAu         /* + 5 * slot: the fighter byte (unsigned) */
+#define GD_CORE         0x168u          /* + 4 * slot */
+#define GD_STATS_ON     0x2ACu          /* + slot, byte */
+#define GD_STATS        0x2B0u          /* + 0x1C * slot, 7 dwords */
+#define GD_BLAZIN_KEY0  0xE0u           /* + 16 * slot; key 1 at 0xD8, key 2 at 0xE4, key 3 at 0xDC */
+#define GD_BLAZIN_COPY  0x40u           /* the game's second copy of each key */
+#define CHAR_INDEX      0x003B90B8u     /* + 4 * slot (sub_000871F0: setup core - 1) */
+#define SLOT_CORE       0x003B9278u     /* + 4 * slot: the set-up's coreID as the AI file picker reads it */
+#define RECORDS         0x003B92E0u     /* the four fighter records, 0x12E8 bytes each */
+#define RECORD_SIZE     0x12E8u
+#define REC_SLOT        0x28u
+#define REC_CHAR_INDEX  0x2Cu
+#define REC_STYLES      0xAE4u          /* three dwords, 7 = none */
+#define REC_STATS       0xB34u          /* seven dwords */
+#define REC_BLAZINS     0xBB8u          /* four dwords: keys 1, 3, 0, 2 */
+#define REC_MAX_HEALTH  0x354u
+#define CP_FIRST_INDEX  86              /* sub_001A8180 applies the set-up's Blazins from here on */
+
+static uint32_t game_data(void) { return MEM32(MANAGERS + GAMEDATA_SLOT * 4); }
+
+/* The gameplay of slot s's new fighter (NULL for any other fighter, or one without its own). */
+static const FighterGameplay *slot_gameplay(uint32_t gd, int s, int *fe_out)
+{
+    int fe;
+    if (gd < 0x10000u) return NULL;
+    fe = (int)MEM8(gd + GD_FIGHTER + 5u * (uint32_t)s);
+    if (fe_out) *fe_out = fe;
+    if (fe < NEW_FIGHTER_FIRST || fe > NEW_FIGHTER_LAST) return NULL;
+    return new_fighter_gameplay(fe);
+}
+
+void new_fighters_start_game_done(uint32_t gd)
+{
+    static const uint32_t key_at[FGP_BLAZINS] = { 0xE0u, 0xD8u, 0xE4u, 0xDCu };
+    int s, k, fe;
+    for (s = 0; s < 4; s++) {
+        const FighterGameplay *g = slot_gameplay(gd, s, &fe);
+        uint32_t core;
+        if (!g) continue;
+        core = MEM32(gd + GD_CORE + 4u * (uint32_t)s);
+        if ((int)core != new_fighter_core(fe)) {
+            /* not the row's slot as the game set it up (a Story or created-fighter slot): leave it */
+            fprintf(stderr, "[NEWFIGHTER] slot %d feID %d: the slot holds coreID %u, not the row's; gameplay left\n",
+                    s, fe, core);
+            continue;
+        }
+        for (k = 0; k < FGP_STATS; k++)
+            MEM32(gd + GD_STATS + 0x1Cu * (uint32_t)s + 4u * (uint32_t)k) = (uint32_t)g->stats[k];
+        MEM8(gd + GD_STATS_ON + (uint32_t)s) = 1;
+        for (k = 0; k < FGP_BLAZINS; k++) {
+            MEM32(gd + key_at[k] + 16u * (uint32_t)s) = (uint32_t)g->blazins[k];
+            MEM32(gd + key_at[k] + GD_BLAZIN_COPY + 16u * (uint32_t)s) = (uint32_t)g->blazins[k];
+        }
+        fprintf(stderr, "[NEWFIGHTER] slot %d feID %d: own stats and Blazins set (moves: %s)\n", s, fe,
+                g->moveset ? "a style combination" : "the template's");
+    }
+}
+
+/* RECOMP_NF_STATS_DUMP=1: every character index's decoded parameters (styles, the seven stats, Blazins) in
+ * the log once, with the game's own decoder (sub_001A3AD0: out, WPAR), into the last fighter record, which
+ * sub_001A4D90 clears right after this. A measurement for docs/research/new-fighter-gameplay.md. */
+extern void sub_001A3AD0(void);
+static void dump_stock_stats(void)
+{
+    static int done;
+    const char *e = getenv("RECOMP_NF_STATS_DUMP");
+    uint32_t out = RECORDS + 3u * RECORD_SIZE + REC_STYLES, sp = g_esp;
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp;
+    double fp[8];
+    int fp_top = g_fp_top, idx, k;
+    uint16_t fp_cw = g_fp_control_word;
+    if (done || !e || !*e || !strcmp(e, "0")) return;
+    done = 1;
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    for (idx = 0; idx < 141; idx++) {
+        uint32_t wpar = MEM32(0x003B864Cu + 16u * (uint32_t)idx);
+        if (wpar < 0x10000u) {
+            fprintf(stderr, "[NFSTATS] index %d: no WPAR\n", idx);
+            continue;
+        }
+        for (k = 0; k < 232; k += 4) MEM32(out + (uint32_t)k) = 0;
+        g_esp = (sp - 0x200u) & ~3u;
+        PUSH32(g_esp, wpar);
+        PUSH32(g_esp, out);
+        PUSH32(g_esp, 0u);
+        sub_001A3AD0();
+        g_esp = sp;
+        fprintf(stderr, "[NFSTATS] index %d core %d: styles %d %d %d stats", idx, idx + 1, (int)MEM32(out),
+                (int)MEM32(out + 4), (int)MEM32(out + 8));
+        for (k = 0; k < 7; k++) fprintf(stderr, " %d", (int)MEM32(out + (REC_STATS - REC_STYLES) + 4u * (uint32_t)k));
+        fprintf(stderr, " blazins");
+        for (k = 0; k < 4; k++) fprintf(stderr, " %d", (int)MEM32(out + (REC_BLAZINS - REC_STYLES) + 4u * (uint32_t)k));
+        fprintf(stderr, "\n");
+    }
+    for (k = 0; k < 232; k += 4) MEM32(out + (uint32_t)k) = 0;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp;
+}
+
+void new_fighters_fight_setup(void)
+{
+    uint32_t gd = game_data();
+    int s, fe;
+    dump_stock_stats();
+    for (s = 0; s < 4; s++) {
+        const FighterGameplay *g = slot_gameplay(gd, s, &fe);
+        uint32_t at = CHAR_INDEX + 4u * (uint32_t)s, was = MEM32(at);
+        if (!g) continue;
+        if ((int)was != new_fighter_core(fe) - 1) {
+            fprintf(stderr, "[NEWFIGHTER] slot %d feID %d: character index %u is not the template's; left\n", s,
+                    fe, was);
+            continue;
+        }
+        if (g->moveset)
+            MEM32(at) = (uint32_t)fighter_gameplay_char_index(g);
+        fprintf(stderr, "[NEWFIGHTER] slot %d feID %d: character index %u -> %u (set-up core for the AI %u)\n", s,
+                fe, was, MEM32(at), MEM32(SLOT_CORE + 4u * (uint32_t)s));
+    }
+}
+
+void new_fighters_blazins(void)
+{
+    uint32_t gd = game_data();
+    uint32_t r;
+    for (r = 0; r < 4; r++) {
+        uint32_t rec = RECORDS + r * RECORD_SIZE, slot = MEM32(rec + REC_SLOT), idx = MEM32(rec + REC_CHAR_INDEX);
+        const FighterGameplay *g;
+        int fe = -1;
+        if (slot > 3u) continue;
+        g = slot_gameplay(gd, (int)slot, &fe);
+        if (g && idx < CP_FIRST_INDEX) {
+            MEM32(rec + REC_BLAZINS + 0) = (uint32_t)g->blazins[1];
+            MEM32(rec + REC_BLAZINS + 4) = (uint32_t)g->blazins[3];
+            MEM32(rec + REC_BLAZINS + 8) = (uint32_t)g->blazins[0];
+            MEM32(rec + REC_BLAZINS + 12) = (uint32_t)g->blazins[2];
+        }
+        if (g && idx >= CP_FIRST_INDEX)     /* the game's body copies these (keys 1, 3, 0, 2) into the record */
+            fprintf(stderr, "[NEWFIGHTER] record %u: index %u, the set-up's Blazins %d %d %d %d go in as the game "
+                    "does for a created fighter\n", r, idx, (int)MEM32(0x003B9288u + 16u * slot),
+                    (int)MEM32(0x003B9288u + 16u * slot + 4), (int)MEM32(0x003B9288u + 16u * slot + 8),
+                    (int)MEM32(0x003B9288u + 16u * slot + 12));
+        if (g || getenv("RECOMP_NF_STATS_DUMP"))
+            fprintf(stderr, "[NEWFIGHTER] record %u (slot %u, fighter %d): index %u styles %d %d %d stats %d %d %d %d "
+                    "%d %d %d Blazins %d %d %d %d%s, max health %.1f\n", r, slot, fe, idx, (int)MEM32(rec + REC_STYLES),
+                    (int)MEM32(rec + REC_STYLES + 4), (int)MEM32(rec + REC_STYLES + 8), (int)MEM32(rec + REC_STATS),
+                    (int)MEM32(rec + REC_STATS + 4), (int)MEM32(rec + REC_STATS + 8), (int)MEM32(rec + REC_STATS + 12),
+                    (int)MEM32(rec + REC_STATS + 16), (int)MEM32(rec + REC_STATS + 20), (int)MEM32(rec + REC_STATS + 24),
+                    (int)MEM32(rec + REC_BLAZINS), (int)MEM32(rec + REC_BLAZINS + 4), (int)MEM32(rec + REC_BLAZINS + 8),
+                    (int)MEM32(rec + REC_BLAZINS + 12), g && idx < CP_FIRST_INDEX ? " (set here)" : "",
+                    (double)MEMF(rec + REC_MAX_HEALTH));
+    }
 }
 
 int new_fighters_list(const NewFighter **out)

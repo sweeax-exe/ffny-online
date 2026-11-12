@@ -131,6 +131,7 @@ void sub_0007A8F0_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 static void crowd_guard_match_start(void);
 void sub_001A4D90_enter(void)
 {
+    new_fighters_fight_setup();     /* a new fighter's style combination (src/hooks/new_fighters.c) */
     defjam_test_match_start();
     defjam_crowd_match_start();
     netplay_on_match_start();
@@ -138,6 +139,9 @@ void sub_001A4D90_enter(void)
     cheats_match_start();       /* [cheats] (src/patches/cheats.c): a step count and logs only */
     if (combo_log_on()) combo_log_match_start();
 }
+/* The fight's Blazins (sub_001A4D90 tail-jumps here once the records spawned): a new fighter on its template's
+ * moves gets its own four Blazins in its record before the body registers them (src/hooks/new_fighters.c). */
+void sub_001A8180_enter(void) { new_fighters_blazins(); }
 /* Combo log (RECOMP_COMBO_LOG=1, src/hooks/combo_log.c): one hit, cdecl (attacker, defender,
  * hit flags) at g_esp+4/+8/+12, before the body copies the move to the defender's +0xFB8. */
 void sub_001C6CD0_enter(void)
