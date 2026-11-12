@@ -1454,6 +1454,10 @@ const std::vector<OnlineFighter> &roster()
             if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) list.push_back(all[i]);
         }
         if (list.empty()) for (int i = 0; i < n; i++) list.push_back(all[i]);
+        // new fighters (content packs, online_new_fighters): with or without their own art
+        const OnlineFighter *added;
+        int m = online_new_fighters(&added);
+        for (int i = 0; i < m; i++) list.push_back(added[i]);
         std::sort(list.begin(), list.end(), [](const OnlineFighter &a, const OnlineFighter &b) {
             return _stricmp(a.name, b.name) < 0; });
     }
