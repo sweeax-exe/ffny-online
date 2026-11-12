@@ -150,8 +150,11 @@ def test_the_results_screen_never_holds_the_next_fight():
     # build 52: bit 1, the server makes rollback mandatory for the match's mode on the sender
     assert 'p[14] = (uint8_t)(1 | (N.peer_rb_must[N.pos] ? 2 : 0));' in NETPLAY_C
     # build 54: bytes 15-16, the sender's rollback ping limit for the match (rb_path_limit takes the lowest)
-    assert 'p[15] = (uint8_t)N.peer_rb_max[N.pos];' in NETPLAY_C and 'send_data(p, 17);' in NETPLAY_C
+    assert 'p[15] = (uint8_t)N.peer_rb_max[N.pos];' in NETPLAY_C
     assert 'N.peer_rb_max[from] = len >= 17 ? (p[15] | (p[16] << 8)) : 0;' in NETPLAY_C
+    # build 78: byte 17, the sender's R0 of the hybrid rollback delay (match_rb_r0 takes the lowest; 0: build-76 delay)
+    assert 'p[17] = (uint8_t)N.peer_rb_r0[N.pos];' in NETPLAY_C and 'send_data(p, 18);' in NETPLAY_C
+    assert 'N.peer_rb_r0[from] = len >= 18 ? p[17] : 0;' in NETPLAY_C
     assert 'N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);' in NETPLAY_C
     assert "leave the last fight's results" in NETPLAY_C
 

@@ -20,6 +20,15 @@ extern "C" {
  * of a lockstep match of three or four players (0 or 1). */
 int netdelay_steps(int a_ms, int b_ms, int rollback, int multi_margin);
 
+/* Build 78, the hybrid delay of rollback matches (community rollback-high-ping-study.md 3a): the delay covers
+ * most of the path and rollback a small, ping-growing remainder R:
+ *   Lf = path in steps, rounded up; R = r0 + max(0, (Lf - 3) / 3); d = clamp(Lf + 1 - R, NETDELAY_MIN, NETDELAY_MAX).
+ * r0 (1..NETDELAY_R0_MAX) comes from the relay (rollback-frames). With rollback 0 or r0 <= 0 it is
+ * netdelay_steps (lockstep, and rollback matches with a player whose build sends no R0). */
+#define NETDELAY_R0_DEFAULT 2
+#define NETDELAY_R0_MAX     8
+int netdelay_steps_r0(int a_ms, int b_ms, int rollback, int multi_margin, int r0);
+
 /* The slowest path between two players: half of each of the two highest pings (negative: 0). */
 int netdelay_path_ms(int a_ms, int b_ms);
 

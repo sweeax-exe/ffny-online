@@ -34,6 +34,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <time.h>
 #include "recomp/gen/recomp_types.h"
@@ -296,6 +297,9 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_RB_PING  1024u     /* the rollback ping limit (build 54), both ways, with CAPS_RB_MODES: the answer
                                  * carries a u32 after the mode mask, the path ping in ms over which a match
                                  * plays in lockstep (0: the relay sets none, RB_PATH_DEFAULT_MS) */
+#define CAPS_RB_FRAMES 1048576u /* the hybrid rollback delay (build 78), both ways, with CAPS_RB_PING: the answer
+                                 * carries R0 in bits 16-23 of the ping limit's u32, the frames rollback covers at
+                                 * short paths (the relay's rollback-frames switch; 0: none set, NETDELAY_R0_DEFAULT) */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -622,6 +626,9 @@ static struct {
     unsigned rb_modes;
     int rb_max_ping;                    /* the relay's rollback ping limit (CAPS_RB_PING; 0: none set) */
     int peer_rb_max[MAXP];              /* each position's ping limit for this match (P_RTT bytes 15-16, build 54; 0: older) */
+    int rb_frames;                      /* the relay's R0 for the hybrid delay (CAPS_RB_FRAMES; 0: none set) */
+    int peer_rb_r0[MAXP];               /* each position's R0 for this match (P_RTT byte 17, build 78; 0: older or the
+                                         * build-76 formula) */
     /* the per-match fallback for a PC that cannot keep up (rb_budget_tick): this PC stops predicting and
      * rolls back no more until the next START; the window's start, the ms of rollback work in it, and
      * how many windows in a row went over */
@@ -630,6 +637,8 @@ static struct {
     double rbb_ms;
     unsigned rbb_over, rbb_updates, rbb_depth, rbb_count;
     unsigned rbb_heavy;                 /* windows in a row with RB_HEAVY_RERUN steps or more run again per update */
+    double rbb_adv_sum;                 /* build 78: the frame advantage summed over the window's updates */
+    unsigned rbb_adv_n;
     /* Build 55: a fallback in a fight (too slow, or too many rollbacks) keeps the rest of the START's rematch
      * chain in lockstep on every PC. chain_ask: this PC fell back, its rematch choices say so (P_REMATCH byte
      * 9); rematch_flags: each player's byte 9 with bit 7 set when its choice carried one (an older build
@@ -652,7 +661,14 @@ static struct {
     struct { unsigned count, steps, deepest, slow; double ms_max, ms_total; uint32_t first_pred; int on, told; unsigned num;
              /* where a rollback's time goes: the load, the saves and the created fighters' pose passes of the
               * re-runs; the pose passes of normal steps; passes that left the device holding a texture/palette */
-             double ms_load, ms_save, ms_pose, ms_pose_step; unsigned poses, poses_step, pose_binds; } rbm;
+             double ms_load, ms_save, ms_pose, ms_pose_step; unsigned poses, poses_step, pose_binds;
+             /* build 78 (rollback-high-ping-study.md section 4): rollbacks by depth (1..9, [10] deeper), what the
+              * first wrong step's prediction got wrong (held word, poll-edge word, sticks, the rest; mixed: two
+              * different predictions in one step), the snap (the fighters' largest jump in X/Z between the
+              * predicted state and the corrected one, world units), and the frame advantage (this PC's step
+              * minus the other's, less the path in frames; window averages over RB_BUDGET_WINDOW_MS) */
+             unsigned depth[11], mis_held, mis_edge, mis_stick, mis_other, mis_mixed, snaps;
+             double snap_sum, snap_max, adv_sum, adv_min, adv_max; unsigned adv_n, adv_windows; } rbm;
     unsigned rb_matches;                /* rollback matches this session (rbm.num) */
     char toast[160];                /* a notice for the fight (netplay_toast), until toast_until */
     ULONGLONG toast_until;
@@ -787,6 +803,7 @@ int netplay_rerunning(void) { return N.resim; }
  * rollback bytes (an estimate: the START's own pings decide). 0: nothing to say (offline, watching, a
  * room with a ping not reported yet). Reads only; no game memory. */
 static int own_rb_limit(void);
+static int own_rb_r0(void);
 static int room_rollback_flags(void);
 int netplay_delay_info(NetDelayInfo *o)
 {
@@ -820,7 +837,7 @@ int netplay_delay_info(NetDelayInfo *o)
             if (o->path_ms > own_rb_limit()) rb = 0;
             if (NETPLAY_IS_HILL(N.roomv.settings.mode) && !rb_mandatory_here()) rb = 0;   /* as every_player_rolls_back */
             o->rollback = rb;
-            o->frames = netdelay_steps(a, b, rb, !rb && n >= 3 ? MULTI_MARGIN : 0);
+            o->frames = netdelay_steps_r0(a, b, rb, !rb && n >= 3 ? MULTI_MARGIN : 0, rb ? own_rb_r0() : 0);
             o->estimate = 1;
             ok = 1;
         }
@@ -1706,7 +1723,30 @@ static void spec_play_summary(void);
 /* A fighter's lockstep waits mid-fight (build 70, for the hill watchers' tests: a watcher must never hold
  * the fighters up): waits of 100 ms or more for another player's entries once the fight is under way, and
  * the longest, logged when the match ends for this PC. */
-static struct { unsigned n; ULONGLONG longest; int told; } g_fight_waits;
+/* Build 78: also the fight's pacing (every normal fight step while the phase word says fighting): how many
+ * steps waited for another player's entries (any wait, and 8 ms or more), the wait in all, the gaps between
+ * two steps over 20 and 33 ms (a frame the player sees late), and the steps per second. */
+static struct {
+    unsigned n; ULONGLONG longest; int told;
+    unsigned steps, waited, waited8, gap20, gap33;
+    double wait_ms, wait_max, span_ms;
+    LARGE_INTEGER last;
+    unsigned gaph[64];              /* the gaps between two steps by whole ms ([63]: 63 ms or more) */
+} g_fight_waits;
+
+/* The gap (ms) under which `pct` percent of the fight's step gaps fall. */
+static int fight_gap_pct(int pct)
+{
+    unsigned total = 0, run = 0;
+    int i;
+    for (i = 0; i < 64; i++) total += g_fight_waits.gaph[i];
+    if (!total) return 0;
+    for (i = 0; i < 64; i++) {
+        run += g_fight_waits.gaph[i];
+        if (run * 100u >= total * (unsigned)pct) return i + 1;
+    }
+    return 64;
+}
 
 /* Once per fight of this PC's own, at its decision or its end: a hill fighter's game is often taken
  * straight to its next fight (the deferred START) without end_hub_match. */
@@ -1716,6 +1756,15 @@ static void fight_waits_log(void)
     g_fight_waits.told = 1;
     fprintf(stderr, "[NETPLAY] fight waits: %u of 100 ms or more mid-fight, the longest %llu ms\n", g_fight_waits.n,
             (unsigned long long)g_fight_waits.longest);
+    if (g_fight_waits.steps > 1)
+        fprintf(stderr, "[NETPLAY] fight pacing: %u steps in %.1f s (%.1f a second, delay %d, %s), %u waited (%u of 8 ms "
+                "or more, %.0f ms in all, the longest %.1f ms), step gaps over 20 ms %u, over 33 ms %u, p50/p95/p99 under "
+                "%d/%d/%d ms\n",
+                g_fight_waits.steps, g_fight_waits.span_ms / 1000.0,
+                g_fight_waits.span_ms > 0 ? (g_fight_waits.steps - 1) * 1000.0 / g_fight_waits.span_ms : 0.0, N.delay,
+                N.rb_on ? "rollback" : "lockstep", g_fight_waits.waited, g_fight_waits.waited8, g_fight_waits.wait_ms,
+                g_fight_waits.wait_max, g_fight_waits.gap20, g_fight_waits.gap33, fight_gap_pct(50), fight_gap_pct(95),
+                fight_gap_pct(99));
 }
 
 static void end_hub_match(const char *why)
@@ -2312,7 +2361,7 @@ void netplay_data_print_start(void)
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
 static void send_rtt(void)
 {
-    uint8_t p[17];
+    uint8_t p[18];
     int rtt;
     if (N.pos < 0 || N.watching) return;    /* a spectator: nothing of the lockstep goes out */
     data_print_ready();     /* again after a reset at game start (netplay_data_print_reset) */
@@ -2333,7 +2382,10 @@ static void send_rtt(void)
      * RB_PATH_DEFAULT_MS); every PC takes the lowest of the players' (rb_path_limit) */
     p[15] = (uint8_t)N.peer_rb_max[N.pos];
     p[16] = (uint8_t)(N.peer_rb_max[N.pos] >> 8);
-    send_data(p, 17);
+    /* builds before 78 send 17: R0 of the hybrid rollback delay this PC uses (0: the build-76 formula); every
+     * PC takes the lowest of the players' (match_rb_r0) */
+    p[17] = (uint8_t)N.peer_rb_r0[N.pos];
+    send_data(p, 18);
     N.last_rtt_sent = GetTickCount64();
 }
 
@@ -2390,7 +2442,19 @@ static int known_rb_ping(const uint8_t *b, int len)
     uint32_t v;
     if (N.relay_caps <= 0 || !(N.relay_caps & CAPS_RB_MODES) || !(N.relay_caps & CAPS_RB_PING) || len < 18) return 0;
     v = get32(b + 14);
+    if (N.relay_caps & CAPS_RB_FRAMES) v &= 0xFFFFu;   /* build 78: R0 rides in bits 16-23 (known_rb_frames) */
     return v > RB_PATH_MAX_MS ? RB_PATH_MAX_MS : (int)v;
+}
+
+/* The relay's CAPS answer b: R0 of the hybrid rollback delay, bits 16-23 of the ping limit's word (the answer
+ * stays as long as the request), when it answers CAPS_RB_FRAMES (build 78); 0: none set or an older relay. */
+static int known_rb_frames(const uint8_t *b, int len)
+{
+    uint32_t v;
+    if (N.relay_caps <= 0 || !(N.relay_caps & CAPS_RB_MODES) || !(N.relay_caps & CAPS_RB_PING) ||
+        !(N.relay_caps & CAPS_RB_FRAMES) || len < 18) return 0;
+    v = get32(b + 14) >> 16 & 0xFFu;
+    return v > NETDELAY_R0_MAX ? NETDELAY_R0_MAX : (int)v;
 }
 
 /* This PC's rollback ping limit for the next match: the relay's (CAPS_RB_PING), else the default. */
@@ -2402,6 +2466,14 @@ static int own_rb_limit(void)
 /* The match's rollback ping limit: the lowest of the players' (P_RTT bytes 15-16), which every PC has
  * alike. A player on a build before 54 sends none and decides with RB_PATH_MAX_MS by itself: then
  * every PC uses that, so they still agree. *older (may be NULL): such a player plays. */
+/* RECOMP_ROLLBACK_PREDICT=repeat (tests): a guessed entry keeps the poll-edge word (builds before 78). */
+static int predict_repeat_edge(void)
+{
+    static int v = -1;
+    if (v < 0) v = getenv("RECOMP_ROLLBACK_PREDICT") && !strcmp(getenv("RECOMP_ROLLBACK_PREDICT"), "repeat");
+    return v;
+}
+
 static int rb_path_limit(int *older)
 {
     int i, lim = RB_PATH_MAX_MS, old = 0;
@@ -2411,6 +2483,34 @@ static int rb_path_limit(int *older)
     }
     if (older) *older = old;
     return old ? RB_PATH_MAX_MS : lim;
+}
+
+/* Build 78, the hybrid delay of rollback matches (rollback-high-ping-study.md 3a, netdelay_steps_r0): R0, the
+ * frames rollback covers at short paths. The relay's (CAPS_RB_FRAMES, its rollback-frames switch), else
+ * NETDELAY_R0_DEFAULT. Tests: RECOMP_ROLLBACK_R0=<1..8> this one; RECOMP_ROLLBACK_HYBRID=0 sends 0, which makes
+ * the whole match use the build-76 formula (as a player on an older build does). */
+static int own_rb_r0(void)
+{
+    static int forced = -2;
+    if (forced == -2) {
+        const char *h = getenv("RECOMP_ROLLBACK_HYBRID"), *r = getenv("RECOMP_ROLLBACK_R0");
+        forced = h && *h == '0' ? 0 : r && atoi(r) > 0 ? atoi(r) : -1;
+        if (forced > NETDELAY_R0_MAX) forced = NETDELAY_R0_MAX;
+    }
+    if (forced >= 0) return forced;
+    return N.rb_frames > 0 ? (N.rb_frames < NETDELAY_R0_MAX ? N.rb_frames : NETDELAY_R0_MAX) : NETDELAY_R0_DEFAULT;
+}
+
+/* The match's R0: the lowest of the players' (P_RTT byte 17), which every PC has alike; 0 (the build-76
+ * formula) when any player sent none (an older build) or 0. */
+static int match_rb_r0(void)
+{
+    int i, r0 = NETDELAY_R0_MAX;
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        if (N.peer_rb_r0[i] <= 0) return 0;
+        if (N.peer_rb_r0[i] < r0) r0 = N.peer_rb_r0[i];
+    }
+    return r0;
 }
 
 static int every_player_rolls_back(void)
@@ -2443,7 +2543,9 @@ static int agreed_delay(void)
      * gap of any player, 2026-11-02). One step more of margin there. From N.players and the P_RTT flags
      * alone, which every PC of the match has the same. (netplay_delay_rules.c since build 76, the same
      * numbers, so the fight's delay line says exactly this.) */
-    return netdelay_steps(a, b, rb, !rb && N.players >= 3 ? MULTI_MARGIN : 0);
+    /* Build 78: a rollback match with every player's R0 takes the hybrid delay (netdelay_steps_r0); lockstep is
+     * unchanged. */
+    return netdelay_steps_r0(a, b, rb, !rb && N.players >= 3 ? MULTI_MARGIN : 0, rb ? match_rb_r0() : 0);
 }
 
 static void on_data(int from, const uint8_t *p, int len)
@@ -2499,6 +2601,7 @@ static void on_data(int from, const uint8_t *p, int len)
             N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);
             N.peer_rb_must[from] = len >= 15 && (p[14] & 2);   /* build 52: the server makes it mandatory there */
             N.peer_rb_max[from] = len >= 17 ? (p[15] | (p[16] << 8)) : 0;   /* build 54: its rollback ping limit */
+            N.peer_rb_r0[from] = len >= 18 ? p[17] : 0;                     /* build 78: its R0 (hybrid delay) */
             if (len >= 12 && g_data_print && get32(p + 8) && get32(p + 8) != g_data_print) {
                 static uint32_t warned_seed[MAXP];
                 if (warned_seed[from] != N.start_seed) {
@@ -3656,8 +3759,9 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.delay = LOBBY_DELAY;
     N.delay_fixed = 0;
     for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = N.peer_rb_cp[i] = N.peer_rb_must[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
-    for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0, N.peer_rb_max[i] = 0;
+    for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0, N.peer_rb_max[i] = 0, N.peer_rb_r0[i] = 0;
     if (pos >= 0 && pos < MAXP) N.peer_rb_max[pos] = own_rb_limit();   /* the relay's answer came before START */
+    if (pos >= 0 && pos < MAXP) N.peer_rb_r0[pos] = own_rb_r0();        /* build 78 */
     N.rb_slow_off = 0;              /* the per-match fallback for a slow PC holds until the next START */
     N.rbb_over = 0, N.rbb_start = 0, N.rbb_heavy = 0;
     N.chain_ask = N.chain_lock = 0;
@@ -3905,7 +4009,7 @@ static void on_packet(const uint8_t *b, int len)
                     N.caps_tries = 0;
                     N.caps_sent = 0;
                     N.relay_caps = -1;
-                    N.rb_modes_known = 0, N.rb_modes = 0, N.rb_max_ping = 0;
+                    N.rb_modes_known = 0, N.rb_modes = 0, N.rb_max_ping = 0, N.rb_frames = 0;
                     chat_reset();       /* room chat: a new session, a new IDENT */
                     N.pc_tries = 0;         /* this PC's fingerprint, for one session per PC (T_PC) */
                     N.pc_sent = 0;
@@ -4004,6 +4108,13 @@ static void on_packet(const uint8_t *b, int len)
                     fprintf(stderr, "[NETPLAY] the relay's rollback ping limit: %s%d ms\n",
                             ms > 0 ? "" : "none set, the default ", ms > 0 ? ms : RB_PATH_DEFAULT_MS);
                 N.rb_max_ping = ms;
+            }
+            {   /* the hybrid delay's R0 (build 78): a u32 after the ping limit; 0 or an older relay: the default */
+                int r0 = known_rb_frames(b, len);
+                if (r0 != N.rb_frames)
+                    fprintf(stderr, "[NETPLAY] the relay's rollback frames (R0 of the hybrid delay): %s%d\n",
+                            r0 > 0 ? "" : "none set, the default ", r0 > 0 ? r0 : NETDELAY_R0_DEFAULT);
+                N.rb_frames = r0;
             }
         }
         break;
@@ -4337,7 +4448,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
+                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
                               CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
@@ -4643,7 +4754,7 @@ static int start(const char *server, const char *name, int creating, const char 
     for (i = 0; i < ROOMSLOTS; i++) { N.pos_of_slot[i] = i < 2 ? i : -1; N.slot_rtt[i] = N.slot_rb[i] = -1; }
     N.last_pinginfo = 0;
     N.relay_caps = -1;
-    N.rb_modes_known = 0, N.rb_modes = 0, N.rb_max_ping = 0;
+    N.rb_modes_known = 0, N.rb_modes = 0, N.rb_max_ping = 0, N.rb_frames = 0;
     chat_reset();
     N.online_twice = 0;
     /* created fighters: read the player's own again (a new one may have been made meanwhile) */
@@ -5652,6 +5763,35 @@ static int json_put(char *out, int size, int n, const char *s)
  * the fighters' controller slots: the room's players in slot order, then the CPU fighters. The
  * JSON goes to json; returns its length, 0 when there is no match to report. Called with g_cs
  * not held. */
+/* Build 78: the match's connection facts for the account service ("net", rollback-high-ping-study.md 5), so the
+ * server collects real players' data per path: the path and delay, R0 (0: the build-76 formula or lockstep), the
+ * fight's pacing (steps, steps a second, the 95th percentile step gap, steps that waited), and with rollback its
+ * counts: rollbacks, steps run again, deepest, depths 1-9 and 10+, what the wrong guesses got wrong, the snap
+ * (thousandths of a world unit) and the frame advantage (hundredths of a step). Integers only. */
+static int net_json(char *json, int size, int n)
+{
+    int i;
+    if (n <= 0 || n >= size - 400 || !N.fighting_seen) return n;
+    n += snprintf(json + n, (size_t)(size - n), ",\"net\":{\"rb\":%d,\"path\":%d,\"delay\":%d,\"r0\":%d,\"steps\":%u,"
+                  "\"sps\":%d,\"gap95\":%d,\"waited\":%u,\"waited8\":%u", N.rb_match ? 1 : 0, path_ping_ms(), N.delay,
+                  N.rb_match ? match_rb_r0() : 0, g_fight_waits.steps,
+                  g_fight_waits.span_ms > 0 ? (int)((g_fight_waits.steps - 1) * 1000.0 / g_fight_waits.span_ms + 0.5) : 0,
+                  fight_gap_pct(95), g_fight_waits.waited, g_fight_waits.waited8);
+    if (N.rbm.on) {
+        n += snprintf(json + n, (size_t)(size - n), ",\"rollbacks\":%u,\"rerun\":%u,\"deepest\":%u,\"depth\":[", N.rbm.count,
+                      N.rbm.steps, N.rbm.deepest);
+        for (i = 1; i <= 10; i++) n += snprintf(json + n, (size_t)(size - n), "%s%u", i > 1 ? "," : "", N.rbm.depth[i]);
+        n += snprintf(json + n, (size_t)(size - n), "],\"wrong\":{\"held\":%u,\"edge\":%u,\"stick\":%u,\"other\":%u,"
+                      "\"mixed\":%u},\"snap_avg\":%d,\"snap_max\":%d,\"adv\":%d", N.rbm.mis_held, N.rbm.mis_edge,
+                      N.rbm.mis_stick, N.rbm.mis_other, N.rbm.mis_mixed,
+                      N.rbm.snaps ? (int)(N.rbm.snap_sum * 1000.0 / N.rbm.snaps + 0.5) : 0,
+                      (int)(N.rbm.snap_max * 1000.0 + 0.5),
+                      N.rbm.adv_windows ? (int)(N.rbm.adv_sum * 100.0 / N.rbm.adv_windows + (N.rbm.adv_sum >= 0 ? 0.5 : -0.5)) : 0);
+    }
+    n += snprintf(json + n, (size_t)(size - n), "}");
+    return n < size ? n : size;
+}
+
 static int report_json(const char *event, uint32_t winners, uint32_t left, int draw, char *json, int size)
 {
     AutoMatch m;
@@ -5722,6 +5862,7 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
         n = json_put(json, size, n, g_data_over);
         n += snprintf(json + n, (size_t)(size - n), "}");
         n = ac_json(json, size - 2, n);
+        n = net_json(json, size - 2, n);
     }
     n += snprintf(json + n, (size_t)(size - n), "}");
     return n < size ? n : 0;
@@ -5729,7 +5870,7 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
 
 static void report_event(const char *event, uint32_t winners, uint32_t left, int draw)
 {
-    char json[2048];
+    char json[3072];
     static int show = -1;   /* RECOMP_NETPLAY_REPORT_LOG=1 (tests): every report as it is made */
     if (!report_json(event, winners, left, draw, json, (int)sizeof(json))) return;
     if (show < 0) show = getenv("RECOMP_NETPLAY_REPORT_LOG") != NULL;
@@ -5949,8 +6090,11 @@ void netplay_sync_point(void)
         fprintf(stderr, "[NETPLAY] input delay %d steps (pings %d/%d/%d/%d ms%s)\n", N.delay,
                 N.peer_rtt[0], N.peer_rtt[1], N.peer_rtt[2], N.peer_rtt[3], known ? "" : ", some missing");
         if (N.rb_match) {
-            fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on%s (path ping %d ms, limit %d)\n",
-                    every_player_must() ? " (the server makes it mandatory)" : "", path_ping_ms(), rb_path_limit(NULL));
+            int r0 = match_rb_r0();
+            fprintf(stderr, "[NETPLAY] rollback on for this match: every player has it on%s (path ping %d ms, limit %d, "
+                    "%s)\n", every_player_must() ? " (the server makes it mandatory)" : "", path_ping_ms(),
+                    rb_path_limit(NULL), r0 > 0 ? "hybrid delay" : "build-76 delay");
+            if (r0 > 0) fprintf(stderr, "[NETPLAY] hybrid delay: R0 %d, path %d ms, delay %d steps\n", r0, path_ping_ms(), N.delay);
         } else {
             rb_off_reasons();
         }
@@ -6821,6 +6965,28 @@ static void rbm_summary(const char *why)
                 N.rbm.num, N.rbm.ms_load / N.rbm.count, N.rbm.ms_save / N.rbm.count, N.rbm.ms_pose / N.rbm.count,
                 N.rbm.poses, N.rbm.poses ? N.rbm.ms_pose / N.rbm.poses : 0.0,
                 N.rbm.poses_step ? N.rbm.ms_pose_step / N.rbm.poses_step : 0.0, N.rbm.poses_step, N.rbm.pose_binds);
+    {   /* build 78 (rollback-high-ping-study.md section 4) */
+        const unsigned *h = N.rbm.depth;
+        fprintf(stderr, "[ROLLBACK] match %u depths 1-9,10+: %u %u %u %u %u %u %u %u %u %u; wrong guesses: held %u, edge %u, "
+                "stick %u, other %u, mixed %u; snap %.2f average, %.2f largest (%u); frame advantage %.2f average (%u windows, "
+                "%.2f to %.2f)\n", N.rbm.num, h[1], h[2], h[3], h[4], h[5], h[6], h[7], h[8], h[9], h[10], N.rbm.mis_held,
+                N.rbm.mis_edge, N.rbm.mis_stick, N.rbm.mis_other, N.rbm.mis_mixed,
+                N.rbm.snaps ? N.rbm.snap_sum / N.rbm.snaps : 0.0, N.rbm.snap_max, N.rbm.snaps,
+                N.rbm.adv_windows ? N.rbm.adv_sum / N.rbm.adv_windows : 0.0, N.rbm.adv_windows, N.rbm.adv_min, N.rbm.adv_max);
+    }
+}
+
+/* Build 78: what a wrong guess (the first step of a rollback) got wrong, by the entry's words: held buttons,
+ * poll edge, the four stick floats, the rest; mixed: the step read two different guesses. */
+static void rbm_note_wrong(int i, uint32_t k)
+{
+    const uint8_t *u = N.used[i][k], *r = N.in[i][k];
+    if (!N.rbm.on) return;
+    if (N.used_mixed[i][k]) N.rbm.mis_mixed++;
+    if (memcmp(u, r, 4)) N.rbm.mis_held++;
+    if (memcmp(u + 4, r + 4, 4)) N.rbm.mis_edge++;
+    if (memcmp(u + 8, r + 8, 16)) N.rbm.mis_stick++;
+    if (memcmp(u + 24, r + 24, ENTRY - 24)) N.rbm.mis_other++;
 }
 
 static double qpc_ms(LARGE_INTEGER a, LARGE_INTEGER b)
@@ -7018,6 +7184,10 @@ static void match_start_body(void)
     g_cp_stale = 1;
     g_ndynvb = 0;
     rbm_reset();        /* the last match's line, if it never said "off for the rest" (B3, G2) */
+    if (g_fight_waits.steps > 1) {      /* build 78: a rematch counts its own pacing */
+        fight_waits_log();
+        memset(&g_fight_waits, 0, sizeof(g_fight_waits));
+    }
     EnterCriticalSection(&g_cs);
     N.match_count++;
     N.match = mix32(N.session ^ (N.match_count * 0x9E3779B9u));   /* the same on every PC, new per match */
@@ -7816,13 +7986,47 @@ static void commit_local(uint32_t target)
 }
 
 static void step_body(void);
+static LARGE_INTEGER g_wait_q0;        /* step_body's wait for the others' entries began (0: none this step) */
+
 void netplay_on_step(void)
 {
     step_body();
     fight_hud_step();
 }
 
+static void step_run(void);
+
+/* The step, then its pacing (build 78, g_fight_waits): the wait for the others' entries and the gap since the
+ * last step, normal fight steps only. */
 static void step_body(void)
+{
+    g_wait_q0.QuadPart = 0;
+    step_run();
+    if (N.lockstep && !N.resim && !N.watching && N.fighting_seen && MEM32(G_MATCH_PHASE) == 1u) {
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        if (g_wait_q0.QuadPart) {
+            double w = qpc_ms(g_wait_q0, now);
+            if (w >= 1.0) g_fight_waits.waited++;
+            if (w >= 8.0) g_fight_waits.waited8++;
+            g_fight_waits.wait_ms += w;
+            if (w > g_fight_waits.wait_max) g_fight_waits.wait_max = w;
+        }
+        if (g_fight_waits.steps) {
+            double gap = qpc_ms(g_fight_waits.last, now);
+            g_fight_waits.span_ms += gap;
+            if (gap > 20.0) g_fight_waits.gap20++;
+            if (gap > 33.4) g_fight_waits.gap33++;
+            g_fight_waits.gaph[gap < 63.0 ? (int)gap : 63]++;
+        }
+        g_fight_waits.last = now;
+        g_fight_waits.steps++;
+    } else if (g_fight_waits.steps > 1 && !g_fight_waits.told && !N.resim && N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u) {
+        fight_waits_log();      /* decided: a room match in a test or a match not reported goes no other way */
+    }
+}
+
+static void step_run(void)
 {
     uint32_t s, k, need;
     ULONGLONG waited_since, last_send, last_note;
@@ -8024,7 +8228,14 @@ static void step_body(void)
      * read, from the poll of the update before: every press counted one step later than the delay
      * (input study 2026-11-11: a grab at step 401 offline came at 404 online at delay 2). A step whose
      * read did not happen (none is known) still gets its entry here, from the last poll, as before. */
-    if (s > 1) commit_local(s - 1 + (uint32_t)N.delay);
+    {   /* RECOMP_NETPLAY_COMMIT_AT_STEP=1 (tests): build 75's timing, the entry for step s + delay committed and sent
+         * here, before the wait and before this step's own read, from the poll of the update before (one step
+         * more input delay, one step more lead for the network) */
+        static int at_step = -1;
+        if (at_step < 0) at_step = getenv("RECOMP_NETPLAY_COMMIT_AT_STEP") && *getenv("RECOMP_NETPLAY_COMMIT_AT_STEP") == '1';
+        if (at_step) commit_local(s + (uint32_t)N.delay);
+        else if (s > 1) commit_local(s - 1 + (uint32_t)N.delay);
+    }
     {   /* tests: RECOMP_TEST_LEAVE_STEP=<n> leaves the room at fight step n of the START's first match (a
          * player who quits mid-fight through the room), then plays that fight on offline */
         static int leave_at = -1;
@@ -8072,6 +8283,7 @@ static void step_body(void)
     need = N.predicting ? (s > RB_AHEAD ? s - RB_AHEAD : 0) : s;
     if (need <= (uint32_t)N.delay) return;
     waited_since = last_send = GetTickCount64();
+    QueryPerformanceCounter(&g_wait_q0);    /* fight pacing (netplay_on_step) */
     last_note = 0;
     for (;;) {
         int ready = 1, i, late = -1;
@@ -8342,6 +8554,13 @@ static void pad_read_body(uint32_t actor)
                     memcpy(entry, N.in[slot][t % RING], ENTRY);
                     break;
                 }
+            /* Build 78: the poll-edge word (+4, the buttons pressed at that poll) is guessed 0: a held button goes
+             * on being held, no new press. Repeating it (builds 17-77) guessed the press again on every step after
+             * it, wrong each time, so every press cost a second rollback one step later (relay replays: 55 edge
+             * words per 1000 steps, rollback-high-ping-study.md 3g). A guess never reaches a final step: a step
+             * that ran on one is compared with the real entry byte for byte and run again when they differ, so
+             * the rule cannot part the PCs. RECOMP_ROLLBACK_PREDICT=repeat (tests): the old guess. */
+            if (!predict_repeat_edge()) memset(entry + 4, 0, 4);
         }
         if ((int)slot != N.pos) N.step_reads[k]++;
         if ((int)slot != N.pos && !N.watching) {
@@ -8707,6 +8926,8 @@ static void rollback_to(uint32_t f)
     LARGE_INTEGER freq, t0, t1;
     double ms;
     unsigned loads_before;
+    float snap_x[MAXP], snap_z[MAXP];   /* build 78: the fighters' X/Z as predicted, for the snap's size */
+    int snap_n = N.fighters < MAXP ? N.fighters : MAXP, q;
     if (!N.snap[slot].valid || N.snap[slot].step != f || N.updates < N.snap[slot].update ||
         N.updates - N.snap[slot].update > ROLLBACK_HOLD_SAVES) {
         if (N.rb_failed++ < 5)
@@ -8716,6 +8937,10 @@ static void rollback_to(uint32_t f)
     }
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
+    for (q = 0; q < snap_n; q++) {
+        snap_x[q] = MEMF(ACTORS + (uint32_t)q * STRIDE + 0x44u);
+        snap_z[q] = MEMF(ACTORS + (uint32_t)q * STRIDE + 0x4Cu);
+    }
     memcpy(fp, g_fp_stack, sizeof(fp));
     n = N.updates - N.snap[slot].update;
     g_last_rb_target = f;
@@ -8794,6 +9019,19 @@ static void rollback_to(uint32_t f)
     N.rbm.count++;
     N.rbm.steps += depth;
     if (depth > N.rbm.deepest) N.rbm.deepest = depth;
+    N.rbm.depth[depth < 10 ? depth : 10]++;
+    {   /* the snap: how far the corrected state put a fighter from where the prediction had it (X/Z) */
+        double big = 0.0;
+        for (q = 0; q < snap_n; q++) {
+            double dx = (double)MEMF(ACTORS + (uint32_t)q * STRIDE + 0x44u) - snap_x[q];
+            double dz = (double)MEMF(ACTORS + (uint32_t)q * STRIDE + 0x4Cu) - snap_z[q];
+            double d = sqrt(dx * dx + dz * dz);
+            if (d == d && d < 1e6 && d > big) big = d;
+        }
+        N.rbm.snap_sum += big;
+        if (big > N.rbm.snap_max) N.rbm.snap_max = big;
+        N.rbm.snaps++;
+    }
     if (ms > N.rbm.ms_max) N.rbm.ms_max = ms;
     N.rbm.ms_total += ms;
     N.rbb_ms += ms;         /* rb_budget_tick */
@@ -9288,11 +9526,40 @@ static void rb_budget_tick(void)
         N.rbb_start = now;
         N.rbb_ms = 0;
         N.rbb_updates = N.rbb_depth = N.rbb_count = 0;
+        N.rbb_adv_sum = 0;
+        N.rbb_adv_n = 0;
         return;
     }
     N.rbb_updates++;
+    if (N.rb_on && !N.resim) {
+        /* Build 78: the frame advantage (rollback-high-ping-study.md 3e): this PC's step less the furthest-behind
+         * player's, whose step is the newest entry it sent (committed delay steps ahead) less the delay, plus the
+         * path in steps it took to come. About 0 when both run alike; a PC that fell behind makes the others roll
+         * back deeper. */
+        int i, have = 0;
+        double worst = 0, lf = path_ping_ms() * 0.06;   /* the path in steps (ms / 16.67), not rounded */
+        for (i = 0; i < N.players && i < MAXP; i++) {
+            double adv;
+            if (i == N.pos || g_steps_match[i] != N.match || !g_steps_last[i]) continue;
+            adv = (double)N.step - ((double)g_steps_last[i] - N.delay + lf);
+            if (!have || adv > worst) worst = adv;
+            have = 1;
+        }
+        if (have) { N.rbb_adv_sum += worst; N.rbb_adv_n++; }
+    }
     span = now - N.rbb_start;
     if (span < RB_BUDGET_WINDOW_MS) return;
+    if (N.rbb_adv_n && N.rbm.on) {
+        static int advlog = -1;
+        double avg = N.rbb_adv_sum / N.rbb_adv_n;
+        if (advlog < 0) advlog = getenv("RECOMP_ROLLBACK_ADVLOG") != NULL;
+        if (!N.rbm.adv_windows || avg < N.rbm.adv_min) N.rbm.adv_min = avg;
+        if (!N.rbm.adv_windows || avg > N.rbm.adv_max) N.rbm.adv_max = avg;
+        N.rbm.adv_sum += avg;
+        N.rbm.adv_windows++;
+        if (advlog) fprintf(stderr, "[ROLLBACK] frame advantage %.2f steps over %llu ms (step %u)\n", avg,
+                            (unsigned long long)span, N.step);
+    }
     share = N.rbb_ms * 100.0 / (double)span;
     if (share >= percent) {
         N.rbb_over++;
@@ -9336,6 +9603,8 @@ static void rb_budget_tick(void)
     N.rbb_start = now;
     N.rbb_ms = 0;
     N.rbb_updates = N.rbb_depth = N.rbb_count = 0;
+    N.rbb_adv_sum = 0;
+    N.rbb_adv_n = 0;
 }
 
 void netplay_on_update(void)
@@ -9419,7 +9688,10 @@ void netplay_on_update(void)
                 if (i == N.pos) continue;
                 if (!entry_known(i, t)) { all = 0; continue; }
                 if (N.used_tag[i][k] == t + 1 && N.used_pred[i][k] &&
-                    (N.used_mixed[i][k] || memcmp(N.used[i][k], N.in[i][k], ENTRY))) wrong = 1;
+                    (N.used_mixed[i][k] || memcmp(N.used[i][k], N.in[i][k], ENTRY))) {
+                    if (!wrong) rbm_note_wrong(i, k);   /* build 78: what the guess got wrong */
+                    wrong = 1;
+                }
             }
         if (wrong) { f = t; break; }
         if (!all) break;

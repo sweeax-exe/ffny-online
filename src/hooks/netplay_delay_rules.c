@@ -36,6 +36,17 @@ int netdelay_steps(int a_ms, int b_ms, int rollback, int multi_margin)
     return d;
 }
 
+int netdelay_steps_r0(int a_ms, int b_ms, int rollback, int multi_margin, int r0)
+{
+    int lf, r, d;
+    if (!rollback || r0 <= 0) return netdelay_steps(a_ms, b_ms, rollback, multi_margin);
+    if (r0 > NETDELAY_R0_MAX) r0 = NETDELAY_R0_MAX;
+    lf = (netdelay_path_ms(a_ms, b_ms) * 3 + 49) / 50;  /* the path in steps, rounded up */
+    r = r0 + (lf > 3 ? (lf - 3) / 3 : 0);               /* what rollback covers grows a step per 3 of path */
+    d = lf + 1 - r;
+    return d < NETDELAY_MIN ? NETDELAY_MIN : d > NETDELAY_MAX ? NETDELAY_MAX : d;
+}
+
 int netdelay_line(char *out, int size, int rollback, int frames, int path_ms, int estimate)
 {
     int n;

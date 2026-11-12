@@ -1,5 +1,8 @@
 """The online input delay and its line (src/hooks/netplay_delay_rules.c, build 76), compiled natively.
 
+Build 78: netdelay_steps_r0, the hybrid delay of rollback matches (rollback-high-ping-study.md 3a), against
+the study's formula and its table over the ping grid; lockstep and r0 <= 0 stay netdelay_steps.
+
 netdelay_steps must give exactly the delay builds 19-75 agreed (the old inline formula of agreed_delay,
 written out again below), so a match plays with the same delay as before and the line says what it plays
 with. Needs MSVC (`cl` on PATH, e.g. after scripts/env.ps1); skips without it."""
@@ -27,6 +30,16 @@ int main(void)
     printf("steps|110|110|0|0|%d\n", netdelay_steps(110, 110, 0, 0));
     printf("steps|110|110|1|0|%d\n", netdelay_steps(110, 110, 1, 0));
     printf("steps|398|397|0|0|%d\n", netdelay_steps(398, 397, 0, 0));
+    for (a = -1; a <= 400; a += 3)
+        for (b = -1; b <= a; b += 7)
+            for (rb = 0; rb < 2; rb++)
+                for (mm = 0; mm < 2; mm++) {
+                    int r0;
+                    for (r0 = -1; r0 <= 9; r0++)
+                        printf("hyb|%d|%d|%d|%d|%d|%d\n", a, b, rb, mm, r0, netdelay_steps_r0(a, b, rb, mm, r0));
+                }
+    for (a = 0; a <= 300; a += 10)
+        printf("hybgrid|%d|%d\n", a, netdelay_steps_r0(a, a, 1, 0, 2));
     {
         int p[6] = { 40, -1, 120, 90, 120, 10 }, x, y;
         netdelay_top2(p, 6, &x, &y);
@@ -59,6 +72,16 @@ def old_delay(a, b, rb, players_3plus):
 def delay_761(a, b, rb, players_3plus):
     """Build 76.1: lockstep adds one step after the clamp (build 75's slack), rollback unchanged."""
     return old_delay(a, b, rb, players_3plus) + (0 if rb else 1)
+
+
+def hybrid_delay(a, b, rb, mm, r0):
+    """the study's formula: Lf = path in steps rounded up, R = R0 + max(0, (Lf-3)//3), d = clamp(Lf+1-R)"""
+    if not rb or r0 <= 0:
+        return delay_761(a, b, rb, mm)
+    r0 = min(r0, 8)
+    lf = ((max(a, 0) + max(b, 0)) // 2 * 3 + 49) // 50
+    d = lf + 1 - (r0 + max(0, (lf - 3) // 3))
+    return 2 if d < 2 else 10 if d > 10 else d
 
 
 @pytest.fixture(scope='module')
@@ -111,3 +134,23 @@ def test_line_words(rows):
         [f'No rollback (path 0 ms) {dot} about 7 frames'],
     ]
     assert by(rows, 'short') == [['7']]
+
+
+def test_hybrid_formula(rows):
+    hyb = by(rows, 'hyb')
+    assert len(hyb) > 10000
+    for a, b, rb, mm, r0, got in hyb:
+        a, b, rb, mm, r0, got = int(a), int(b), int(rb), int(mm), int(r0), int(got)
+        assert got == hybrid_delay(a, b, rb, mm, r0), (a, b, rb, mm, r0)
+        if not rb:
+            assert got == delay_761(a, b, 0, mm)     # lockstep (76.1) never changes, whatever R0 says
+
+
+def test_hybrid_study_table(rows):
+    """the study's table (section 3a, R0 = 2): path ms -> delay (two players with the same ping: path = ping)"""
+    grid = {int(p): int(d) for p, d in by(rows, 'hybgrid')}
+    want = {20: 2, 40: 2, 60: 3, 80: 4, 100: 4, 120: 6, 140: 6, 160: 7, 180: 8, 200: 8}
+    for path, d in want.items():
+        assert grid[path] == d, path
+    assert all(2 <= d <= 10 for d in grid.values())
+    assert [grid[p] for p in sorted(grid)] == sorted(grid[p] for p in sorted(grid))     # never less delay for more ping
