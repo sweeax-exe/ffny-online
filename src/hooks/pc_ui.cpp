@@ -253,6 +253,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "name", "Your name"},
         {"online", "input_delay", "Input delay (steps)"},
         {"online", "rollback", "Rollback netcode (beta)"},
+        {"online", "crossplay_android", "Play with Android players"},
         {"online", "voice", "Voice chat"},
         {"online", "voice_key", "Push-to-talk key"},
         {"online", "voice_pad", "Push-to-talk on the controller"},
@@ -865,6 +866,16 @@ static void settings_group(const char *section, std::initializer_list<const char
         RecompSetting *s = find(section, key);
         if (s) setting_widget(s);
     }
+}
+
+// Build 80: cross-play with the community Android port, the PC player's own opt-in (off by default;
+// docs/research/crossplay-optin.md). The relay pairs an opted-in PC with Android players only in builds
+// it has cleared for cross-play.
+static void crossplay_setting()
+{
+    settings_group("online", { "crossplay_android" });
+    ImGui::TextDisabled("Off by default. When on, you can be matched with players of the Android port once a "
+                        "build is cleared for cross-play. Ranked never mixes platforms.");
 }
 
 // ---- window size ----------------------------------------------------------------------------------------
@@ -1871,6 +1882,7 @@ static void page_online(UiMode mode)
     }
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });
+    crossplay_setting();
     ImGui::Spacing();
     ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.1f);
     ImGui::TextColored(k_gold, "Online play is in the game: choose ONLINE in the main menu.");
@@ -2781,6 +2793,7 @@ static void page_basics()
         settings_group("online", { "rollback" });
         ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
     }
+    crossplay_setting();
     ImGui::SeparatorText("HD textures");
     settings_group("textures", { "enabled" });
     ImGui::TextDisabled("Experimental: they can cause white screens or wrong pictures. Make them under Advanced, Textures.");

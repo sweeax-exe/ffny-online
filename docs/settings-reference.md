@@ -141,6 +141,12 @@ Tests only: `RECOMP_TEST_PERFECT=1` makes every round with a winner a perfect, a
 |---|---|---|
 | `delay_display` | `true` | In an online fight, a small line at the bottom of the screen says how the match plays: `Rollback · 3 frames`, or `No rollback (path 140 ms) · 10 frames` when it plays in lockstep (a path over the rollback limit, a player without rollback, King of the Hill). A frame is 1/60 s: your presses count that many frames after you make them. In a room the same line shows before READY as an estimate (`about N frames`) from the players' pings; the START's own pings decide. A picture over the game only. Env `RECOMP_DELAY_DISPLAY`. |
 
+## [online] cross-play with Android players
+
+| Key | Default | Meaning |
+|---|---|---|
+| `crossplay_android` | `false` | Build 80: lets quick match, rooms and King of the Hill pair you with players of the community Android port (by contatg), only in builds that FFNY Online has cleared for cross-play (the relay's switch). Off: you only meet PC players. Ranked never mixes platforms. Sent to the relay as CAPS bit 21 when you go online; takes effect the next time you go online. Launcher: Online, "Play with Android players". |
+
 ## [gamepad]
 
 Applies to every pad. Which physical control acts as which Xbox control, and the dead zones.
