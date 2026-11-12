@@ -137,7 +137,7 @@ def test_sync_keeps_a_hand_installed_folder(setup, tmp_path):
 
 
 def test_catalogue_url_is_ours_and_local_http_only_for_tests():
-    assert mods.CATALOGUE_URL == 'https://play.defjam.online/updates/content/index-v2.json'
+    assert mods.CATALOGUE_URL == 'https://play.defjam.online/updates/content/index-v3.json'
     assert mods.local_test_url('http://127.0.0.1:8095/updates/content/index.json')
     assert not mods.local_test_url('http://example.com:80/index.json')
     assert not mods.local_test_url('http://127.0.0.1.evil.com:80/x')
@@ -238,3 +238,182 @@ def test_install_json_pack_validation(tmp_path):
     (pack / 'install.json').write_text('{"schema": 1, "type": "fighter-body", "entries": [], "ops": [{"op": "item"}]}')
     with pytest.raises(mods.ModError, match='Invalid install.json'):
         mods.validate_pack(pack)
+
+
+# -- packs of several mods ("Pack (N mods)", index-v3.json) ---------------------------------------------------
+
+V3 = 'https://play.defjam.online/updates/content/index-v3.json'
+
+
+def bundle_items(key, tmp_path, sign_ok=(True, True), version='1.0.0', bundle='winter-set', title='Winter set'):
+    """Two mods of one pack as the account service lists them: ordinary entries plus bundle / bundle_name."""
+    rows, archives = [], {}
+    for n, (name, color, ok) in enumerate(zip(('doc-coat', 'doc-hat'), ('red', 'blue'), sign_ok)):
+        path, mod = base.package(tmp_path, name=name, version=version, color=color)
+        ffny(key, path, mod, order=10 + n, sign_ok=ok)
+        mod.update(bundle=bundle, bundle_name=title)
+        rows.append(mod)
+        archives[mod['versions'][0]['archive']['sha256']] = path
+    return rows, archives
+
+
+def single_item(key, tmp_path, archives):
+    path, mod = base.package(tmp_path, name='lone-skin', color='green')
+    ffny(key, path, mod, order=1)
+    archives[mod['versions'][0]['archive']['sha256']] = path
+    return mod
+
+
+def sync_v3(manager, raw, sig, archives, url=V3):
+    def fetch(fetched, limit):
+        assert fetched in (url, url + '.sig')
+        return sig if fetched.endswith('.sig') else raw
+
+    def download(self, archive):
+        return archives[archive['sha256']]
+    with patch.object(mods, 'fetch_small', fetch), patch.object(mods.Manager, 'download', download):
+        manager.sync(url)
+
+
+def test_contract_bundle_fields_only_together(setup, tmp_path):
+    manager, key = setup
+    rows, _ = bundle_items(key, tmp_path)
+    mods.contract.validate_mod(rows[0])
+    for change in ({'bundle': None}, {'bundle_name': None}, {'bundle': 'Not A Slug'}, {'bundle_name': ''},
+                   {'bundle_name': 'two\nlines'}, {'bundle': 'doc-coat'}, {'bundle': 7}):
+        bad = json.loads(json.dumps(rows[0]))
+        for k, v in change.items():
+            if v is None:
+                del bad[k]
+            else:
+                bad[k] = v
+        with pytest.raises(ValueError):
+            mods.contract.validate_mod(bad)
+
+
+def test_sync_installs_a_pack_of_two_mods_and_writes_its_fields(setup, tmp_path):
+    manager, key = setup
+    rows, archives = bundle_items(key, tmp_path)
+    single = single_item(key, tmp_path, archives)
+    raw, sig = publish(key, rows + [single], 1)
+    sync_v3(manager, raw, sig, archives)
+    installed = manager.state()['installed']
+    assert installed['doc-coat']['bundle'] == 'winter-set' and installed['doc-hat']['bundle_name'] == 'Winter set'
+    assert installed['doc-coat']['bundle_items'] == ['doc-coat', 'doc-hat'] and 'bundle' not in installed['lone-skin']
+    text = content_ini(manager)
+    coat = text[text.index('[pack.doc-coat]'):text.index('[pack.doc-hat]')]
+    assert 'bundle=winter-set\n' in coat and 'bundle_name=Winter set\n' in coat
+    lone = text[text.index('[pack.lone-skin]'):text.index('[pack.doc-coat]')]
+    assert 'bundle=\n' in lone and 'bundle_name=\n' in lone
+    manager.view()
+    view = (manager.root / 'view.ini').read_text(encoding='utf-8')
+    assert 'bundle=winter-set' in view and 'bundle_name=Winter set' in view
+    sync_v3(manager, raw, sig, {})                  # unchanged: nothing downloaded, the pack stays
+    assert 'up to date: 3 pack(s)' in manager.message
+
+
+def test_a_failing_mod_leaves_its_whole_pack_out(setup, tmp_path):
+    manager, key = setup
+    rows, archives = bundle_items(key, tmp_path, sign_ok=(True, False))
+    single = single_item(key, tmp_path, archives)
+    raw, sig = publish(key, rows + [single], 1)
+    sync_v3(manager, raw, sig, archives)
+    assert not (manager.mods / 'doc-coat').exists() and not (manager.mods / 'doc-hat').exists()
+    assert set(manager.state()['installed']) == {'lone-skin'} and '[pack.doc-' not in content_ini(manager)
+    assert 'Winter set: not installed (Paper test: Pack signature is invalid)' in manager.message
+    assert 'doc-hat:' not in manager.message        # reported once, for the pack
+
+
+def test_a_failing_update_removes_the_installed_pack(setup, tmp_path):
+    manager, key = setup
+    rows, archives = bundle_items(key, tmp_path)
+    raw, sig = publish(key, rows, 1)
+    sync_v3(manager, raw, sig, archives)
+    assert (manager.mods / 'doc-coat').is_dir() and (manager.mods / 'doc-hat').is_dir()
+    (tmp_path / 'v2').mkdir()
+    rows2, archives2 = bundle_items(key, tmp_path / 'v2', sign_ok=(True, False), version='1.1.0')
+    raw, sig = publish(key, rows2, 2)
+    sync_v3(manager, raw, sig, archives2)
+    assert manager.state()['installed'] == {}
+    assert not (manager.mods / 'doc-coat').exists() and not (manager.mods / 'doc-hat').exists()
+    assert 'Winter set: not installed' in manager.message
+
+
+def test_remove_by_pack_id_or_mod_id_removes_every_mod_of_the_pack(setup, tmp_path):
+    manager, key = setup
+    rows, archives = bundle_items(key, tmp_path)
+    single = single_item(key, tmp_path, archives)
+    raw, sig = publish(key, rows + [single], 4)
+    for target in ('winter-set', 'doc-hat'):
+        sync_v3(manager, raw, sig, archives)
+        assert set(manager.state()['installed']) == {'doc-coat', 'doc-hat', 'lone-skin'}
+        manager.remove(target)
+        assert set(manager.state()['installed']) == {'lone-skin'}
+        assert not (manager.mods / 'doc-coat').exists() and not (manager.mods / 'doc-hat').exists()
+        assert '[pack.doc-' not in content_ini(manager) and '[pack.lone-skin]' in content_ini(manager)
+    manager.remove('lone-skin')                     # a single goes alone, as before
+    assert manager.state()['installed'] == {}
+    with pytest.raises(mods.ModError, match='Only managed mods'):
+        manager.remove('winter-set')
+
+
+def test_remove_command_line_takes_the_pack_id(setup, tmp_path, monkeypatch):
+    manager, key = setup
+    rows, archives = bundle_items(key, tmp_path)
+    raw, sig = publish(key, rows, 1)
+    sync_v3(manager, raw, sig, archives)
+    monkeypatch.setattr(sys, 'argv', ['mods.py', 'remove', '--data-dir', str(manager.data), '--id', 'winter-set'])
+    assert mods.main() == 0
+    assert mods.Manager(manager.data).state()['installed'] == {}
+
+
+def test_an_interrupted_sync_never_leaves_half_a_pack(setup, tmp_path):
+    manager, key = setup
+    rows, archives = bundle_items(key, tmp_path)
+    raw, sig = publish(key, rows, 1)
+    real = mods.Manager.install
+
+    def install(self, mod_id, *args, **kwargs):
+        if mod_id == 'doc-hat':
+            raise mods.ModError('Operation cancelled; previous installation preserved')
+        return real(self, mod_id, *args, **kwargs)
+    with patch.object(mods.Manager, 'install', install), pytest.raises(mods.ModError, match='cancelled'):
+        sync_v3(manager, raw, sig, archives)
+    assert manager.state()['installed'] == {} and not (manager.mods / 'doc-coat').exists()
+    assert '[pack.' not in content_ini(manager)
+    sync_v3(manager, raw, sig, archives)            # the next sync installs it whole
+    assert set(manager.state()['installed']) == {'doc-coat', 'doc-hat'}
+
+
+def test_v3_after_v2_at_the_same_revision_is_not_a_changed_catalogue(setup, tmp_path):
+    manager, key = setup
+    rows, archives = bundle_items(key, tmp_path)
+    single = single_item(key, tmp_path, archives)
+    raw2, sig2 = publish(key, [single], 7)          # index-v2.json: no pack items
+    sync_v3(manager, raw2, sig2, archives, url=mods.CATALOGUE_URL_V2)
+    raw3, sig3 = publish(key, rows + [single], 7)   # index-v3.json, same revision
+    sync_v3(manager, raw3, sig3, archives)
+    assert set(manager.state()['installed']) == {'doc-coat', 'doc-hat', 'lone-skin'}
+    raw3b, sig3b = publish(key, [single], 7)        # the same file changed without a new revision
+    sync_v3(manager, raw3b, sig3b, archives)
+    assert 'changed without a new revision' in manager.message
+
+
+def test_composed_packs_carry_the_pack(tmp_path, monkeypatch):
+    monkeypatch.setenv('RECOMP_SETTINGS', 'none')
+    key = Ed25519PrivateKey.generate()
+    game = tmp_path / 'game'
+    manager = mods.Manager(tmp_path / 'data', '0.13.0', ['textures-v1', 'language-v1', 'content-v1'],
+                           keys=[key.public_key().public_bytes_raw().hex()], game_dir=game)
+    path, mod, result = body_package(tmp_path, game)
+    ffny(key, path, mod, kind='content', type_='fighter-body', order=3)
+    mod.update(bundle='body-set', bundle_name='Body set')
+    other_path, other = base.package(tmp_path, name='body-set-look')
+    ffny(key, other_path, other, order=4)
+    other.update(bundle='body-set', bundle_name='Body set')
+    raw, sig = publish(key, [mod, other], 1)
+    sync_v3(manager, raw, sig, {mod['versions'][0]['archive']['sha256']: path,
+                                other['versions'][0]['archive']['sha256']: other_path})
+    packs = manager.composed_packs()
+    assert [(p['id'], p['bundle'], p['bundle_name']) for p in packs] == [('new-body', 'body-set', 'Body set')]
+    assert 'applied=new-body' in (manager.root / 'content-files' / 'files.ini').read_text(encoding='utf-8')
