@@ -121,7 +121,7 @@ out-of-range one is skipped), the server's `packs_fighter_gameplay_test.go`, Stu
 ## 5. Open
 
 * The 6th stat (`grapple`): 0 in every measured fighter; its effect is unknown, the editor keeps it 0.
-* Own voice (study section 4): the pack's `voice` key is reserved (`{"mode": "template"}` only).
+* Own voice: done on `feat/fighter-voice`, see `new-fighter-voice.md`.
 * A style combination keeps the template's AI file (`char0010` for Doc); it fights, but whether `char0001` (the
   CP cores') plays the archetype's moves better was not compared.
 * The select screen's style letters for a style combination come from word 18 (written by the installer); not
