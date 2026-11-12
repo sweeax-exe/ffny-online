@@ -184,6 +184,7 @@ int pc_content_list(PcContentPack *out, int max)
             CONTENT_TEXT(name); CONTENT_TEXT(authors); CONTENT_TEXT(kind); CONTENT_TEXT(type); CONTENT_TEXT(version);
             CONTENT_TEXT(language);
             CONTENT_TEXT(content_sha256); CONTENT_TEXT(description);
+            CONTENT_TEXT(bundle); CONTENT_TEXT(bundle_name);
             else if (!strcmp(k, "order")) p->order = atoi(v);
             else if (!strcmp(k, "composed")) p->composed = atoi(v) == 1;
             else if (!strcmp(k, "bytes")) p->bytes = atoll(v);

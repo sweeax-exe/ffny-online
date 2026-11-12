@@ -5,14 +5,22 @@
 // docs/content-catalogue.md; FFNY Studio's Community view reads the same). View only: an unaccepted pack has
 // pictures and text, never a download; accepted ones arrive by the sync. Signed-in players vote, one vote
 // per account and pack. The network work runs on a thread of its own; the pictures become textures here,
-// through the front end's PNG loader.
+// through the front end's PNG loader. Each card says "Single" or "Pack (N mods)" (the gallery's form and
+// item_count; a missing form is a single); a pack's page lists its mods (items: title, type).
 
 #include <thread>
 
 namespace community {
 
+struct Item {
+    std::string id, title, type, kind;
+};
+
 struct Card {
     std::string id, sid, version, title, author, kind, type, status, preview;
+    bool bundle = false;                // form "bundle": a pack of several mods
+    int item_count = 1;
+    std::vector<Item> items;            // its mods (bundle only)
     int votes = 0;
     bool my_vote = false;
     // the page (GET /api/gallery/{id}), once asked
@@ -157,12 +165,33 @@ static int get(const std::string &path, std::vector<char> &buf, int *len)
     return account_fetch(path.c_str(), buf.data(), (int)buf.size(), len);
 }
 
+// form, item_count and items of a gallery card or page (a single when the service does not say)
+static void form_from(const J &j, Card &c)
+{
+    if (j["form"].kind == J::STR) c.bundle = j["form"].s == "bundle";
+    if (j["items"].kind == J::ARR) {
+        c.items.clear();
+        for (auto &row : j["items"].a) {
+            if (row.kind != J::OBJ || c.items.size() >= 32) continue;
+            c.items.push_back({row["id"].str(), row["title"].str(), row["type"].str(), row["kind"].str()});
+        }
+    }
+    if (j["item_count"].kind == J::NUM) c.item_count = std::max(1, std::min(j["item_count"].num(), 99));
+    else if (!c.items.empty()) c.item_count = (int)c.items.size();
+}
+
+static std::string form_label(const Card &c)
+{
+    return c.bundle ? "Pack (" + std::to_string(c.item_count) + " mods)" : std::string("Single");
+}
+
 static void card_from(const J &j, Card &c)
 {
     c.id = j["id"].str(); c.sid = j["submission_id"].str(); c.version = j["version"].str();
     c.title = j["title"].str(); c.author = j["author_name"].str(); c.kind = j["kind"].str();
     c.type = j["type"].str(); c.status = j["status"].str(); c.preview = j["preview_url"].str();
     c.votes = j["votes"].num(); c.my_vote = j["my_vote"].kind == J::BOOL && j["my_vote"].b;
+    form_from(j, c);
 }
 
 static void load_list()
@@ -226,6 +255,7 @@ static void load_page(std::string id)
         c.description = doc["description"].str(); c.changelog = doc["changelog"].str();
         c.reason = doc["reason"].str(); c.live_version = doc["live_version"].str();
         c.votes = doc["votes"].num(); c.my_vote = doc["my_vote"].kind == J::BOOL && doc["my_vote"].b;
+        form_from(doc, c);
         c.page_loaded = true;
     }
 }
@@ -351,8 +381,11 @@ static void community_view(float lx, float top, float inner, float height, float
         }
         ld->PushClipRect(ra, ImVec2(rb.x - 70 * s, rb.y), true);
         ld->AddText(bold_font(), 15 * s, ImVec2(tx, ra.y + 9 * s), col(k_white), c.title.c_str());
-        std::string sub = std::string(content_type_label(c.type.c_str())) + "  \xC2\xB7  " + c.author;
-        ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(tx, ra.y + 33 * s), col(k_white, 0.6f), sub.c_str());
+        std::string form = form_label(c);
+        float fw = content_tag(ld, ImVec2(tx, ra.y + 32 * s), form.c_str(), s, c.bundle ? k_gold : ImVec4(1, 1, 1, 0.75f));
+        std::string sub = (c.bundle ? std::string() : std::string(content_type_label(c.type.c_str())) + "  \xC2\xB7  ") +
+                          c.author;
+        ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(tx + fw + 8 * s, ra.y + 34 * s), col(k_white, 0.6f), sub.c_str());
         ld->PopClipRect();
         ld->AddText(bold_font(), 11.5f * s, ImVec2(rb.x - 66 * s, ra.y + 10 * s), col(status_color(c.status)), status_word(c.status));
         char votes[32];
@@ -386,8 +419,9 @@ static void community_view(float lx, float top, float inner, float height, float
     dl->PushClipRect(pa, ImVec2(pb.x, pb.y - 64 * s), true);      // the text stops above the vote
     dl->AddText(display_font(), 22 * s, ImVec2(x, py), col(k_white), c.title.c_str());
     py += 30 * s;
-    std::string meta = std::string(content_type_label(c.type.c_str())) + "  \xC2\xB7  " +
-                       (c.kind == "content" ? "new content" : "replacement") + "  \xC2\xB7  v" + c.version + "  \xC2\xB7  by " + c.author;
+    std::string meta = (c.bundle ? form_label(c) : "Single  \xC2\xB7  " + std::string(content_type_label(c.type.c_str()))) +
+                       "  \xC2\xB7  " + (c.kind == "content" ? "new content" : "replacement") + "  \xC2\xB7  v" + c.version +
+                       "  \xC2\xB7  by " + c.author;
     dl->AddText(ImGui::GetFont(), 13 * s, ImVec2(x, py), col(k_white, 0.65f), meta.c_str());
     py += 22 * s;
     std::string state = std::string(status_word(c.status)) +
@@ -400,6 +434,18 @@ static void community_view(float lx, float top, float inner, float height, float
     if (!c.description.empty()) {
         dl->AddText(ImGui::GetFont(), 13 * s, ImVec2(x, py), col(k_white, 0.85f), c.description.c_str(), nullptr, wrap);
         py += text_size(ImGui::GetFont(), 13 * s, c.description.c_str(), wrap).y + 8 * s;
+    }
+    if (c.bundle && !c.items.empty()) {
+        // the pack's mods, one line each: title and type
+        dl->AddText(bold_font(), 13 * s, ImVec2(x, py), col(k_white, 0.85f), "Its mods:");
+        py += 20 * s;
+        for (auto &item : c.items) {
+            std::string text = "\xE2\x80\xA2  " + (item.title.empty() ? item.id : item.title) + "  \xC2\xB7  " +
+                               content_type_label(item.type.c_str());
+            dl->AddText(ImGui::GetFont(), 13 * s, ImVec2(x + 6 * s, py), col(k_white, 0.8f), text.c_str());
+            py += 19 * s;
+        }
+        py += 6 * s;
     }
     if (!c.changelog.empty()) {
         std::string text = "Changes: " + c.changelog;
