@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,7 @@ struct Song
     int state = UNCHECKED;
     double seconds = -1;
     std::string why;            // BAD: the reason
+    double level_gain = -1;     // the game's player: LevelMeter::gain() once measured, -1 before
 };
 
 constexpr size_t kMaxFiles = 2000;      // a huge folder: the first 2000 songs by name, the rest is skipped
@@ -81,6 +83,53 @@ struct FightWatch
     int last = -1, fighting = 0, away = 0;
     bool fought = false, ended = false;
     Event feed(int phase);
+};
+
+// How loud a song is, to bring the player's songs to the level of the game's own music (most
+// releases are mastered far louder). Gated RMS in 400 ms blocks of interleaved stereo: blocks under
+// -50 dBFS (silence, fades) do not count, like the gate of a loudness meter, so a quiet intro does
+// not pull the gain up. No K-weighting; the blocks' mean power is enough to even out masters.
+struct LevelMeter
+{
+    static constexpr double kGate = 0.00316;    // -50 dBFS
+    static constexpr double kTarget = 0.1;      // -20 dBFS RMS: about the game's own music
+    static constexpr double kMinGain = 0.1, kMaxGain = 2.0;
+    int rate = 44100;
+    double block_sum = 0, gated_sum = 0;
+    long block_frames = 0, gated_blocks = 0;
+    void feed(const int16_t *stereo, long frames);
+    double rms() const;     // of the blocks over the gate; 0 when none
+    // The gain that brings the song to kTarget, within kMinGain..kMaxGain (1 when nothing was heard).
+    double gain() const;
+};
+
+// The order the music plays in: the player's songs (items 0..own-1) and, in mix, `game` turns of the game's
+// own soundtrack (items own..own+game-1, all the same: "the game's music until its next track"). Each item
+// once per round; shuffled, so the first item is random across both; in order, the songs in folder order
+// with a game turn after each while any are left (the mix of earlier builds). A new round never starts
+// with the item the last one ended on. Host only: its own random numbers, never the game's.
+struct Playlist
+{
+    static constexpr size_t kGameTracks = 30;   // the game's soundtrack, about 30 tracks (audio/music*.viv)
+    // The game turns mix gives `own` songs: as many as songs, up to the soundtrack's size, so a few songs
+    // still play about half of the time and many songs share it fairly with the game's tracks.
+    static size_t game_turns(size_t own) { return own < kGameTracks ? own : kGameTracks; }
+
+    size_t own = 0, game = 0;
+    bool shuffle = true;
+    std::mt19937_64 rng;
+    std::vector<size_t> order;
+    size_t at = 0;
+    size_t last = (size_t)-1;
+
+    void reset(size_t own_songs, size_t game_turns, bool shuffled, uint64_t seed);
+    bool is_game(size_t item) const { return item >= own; }
+    // The next item. `avoid_game`: a song rather than a game turn when one is left (a new fight after the
+    // game's music played through the last one, so the new fight does not keep the game's track).
+    size_t next(bool avoid_game = false);
+
+private:
+    void new_round();
 };
 
 } // namespace musiclib

@@ -18,12 +18,18 @@
  *    fades; [0x33EA18], written only by the game's two music volume setters).
  *  - The game's music events say when music plays: a stream opened (sub_0001D5B0) starts or resumes our
  *    song, a stream stopped (sub_0001D7C0) pauses it, the director's track change (sub_0003BE50) is
- *    where "mix" hands back from the game's track to the next song of ours.
- *  - A new fight starts the next song ([music] new_song_per_match, on by default): the match phase the game
- *    keeps ([0x3B8F30], only read) says when a fight is over and the next begins (musiclib::FightWatch);
- *    the song that played through the last fight gives way. Host only, like the rest.
+ *    where "mix" goes on to the next in the list.
+ *  - The list (musiclib::Playlist): the songs and, in mix, turns of the game's own soundtrack, shuffled
+ *    together, so the first music is random across both. Its random numbers are the PC's own (seeded from
+ *    the time), never the game's.
+ *  - A new fight starts the next in the list ([music] new_song_per_match, on by default): the match phase
+ *    the game keeps ([0x3B8F30], only read) says when a fight is over and the next begins
+ *    (musiclib::FightWatch); the music that played through the last fight, a song or the game's track,
+ *    gives way, and after the game's track a song comes. Host only, like the rest.
+ *  - Each song is brought to about the level of the game's music (musiclib::LevelMeter, measured once on
+ *    the player thread), then follows the game's MUSIC volume.
  * Settings: [music] mode (auto, mine, mix, original), shuffle and new_song_per_match; RECOMP_MUSIC_DIR points at another
- * folder (tests), RECOMP_MUSIC_GAIN (percent, default 50) sets how loud the songs are against the game. */
+ * folder (tests), RECOMP_MUSIC_GAIN (percent, default 100) trims how loud the songs are against the game. */
 #ifndef DEFJAM_CUSTOM_MUSIC_H
 #define DEFJAM_CUSTOM_MUSIC_H
 
