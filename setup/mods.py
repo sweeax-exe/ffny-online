@@ -32,8 +32,11 @@ import mod_catalogue as contract
 import content_compose
 
 # FFNY Online's own catalogue: the account service signs it with its content key when the team accepts a
-# pack (docs/content-packs.md); the launcher syncs it at every start ("sync").
-CATALOGUE_URL = 'https://play.defjam.online/updates/content/index.json'
+# pack (docs/content-packs.md); the launcher syncs it at every start ("sync"). index-v2.json lists new fighters
+# too (type new-fighter, with the place the server gave them); index.json is the same catalogue without them, for
+# launchers up to build 78.
+CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v2.json'
+CATALOGUE_URL_V1 = 'https://play.defjam.online/updates/content/index.json'
 KEYS = Path(__file__).resolve().parents[1] / 'config/mods/catalogue-keys.json'
 
 
@@ -505,10 +508,15 @@ class Manager:
         raw = fetch_small(url, MAX_INDEX)
         signature = fetch_small(url + '.sig', 64)
         previous = read_json(self.root / 'catalogue.json', {})
-        index = verify_index(raw, signature, self.keys, previous.get('revision', 0), previous.get('sha256'), fresh=True)
+        # index.json and index-v2.json share their revisions but not their bytes: the same revision from the other
+        # file is no change without a new revision (an older revision is still a rollback)
+        same_file = previous.get('url', CATALOGUE_URL_V1) == url
+        index = verify_index(raw, signature, self.keys, previous.get('revision', 0),
+                             previous.get('sha256') if same_file else None, fresh=True)
         atomic_json(self.root / 'catalogue.json', dict(raw=base64.b64encode(raw).decode(),
                     signature=base64.b64encode(signature).decode(), revision=index['revision'],
-                    sha256=hashlib.sha256(raw).hexdigest(), fetched=dt.datetime.now(dt.timezone.utc).isoformat()))
+                    sha256=hashlib.sha256(raw).hexdigest(), fetched=dt.datetime.now(dt.timezone.utc).isoformat(),
+                    url=url))
         self.progress('Catalogue verified and refreshed')
 
     def choose(self, mod_id, requested=None, prerelease=None):
@@ -681,6 +689,8 @@ class Manager:
                                authors=', '.join(mod['authors']), description=mod['description'][:500],
                                content_sha256=version.get('content_sha256', content_hash(receipt['files'])),
                                bytes=version['archive']['unpacked_size'])
+                if 'fighter_fe_id' in mod:
+                    receipt.update(fighter_fe_id=mod['fighter_fe_id'])
             self.cancelled()
             self.progress('Installing verified package')
             self.commit(mod_id, stage, receipt)
@@ -769,7 +779,8 @@ class Manager:
                 if installed and not installed.get('synced'):
                     raise ModError('a pack installed by hand uses this id; it is kept')
                 if (installed and installed.get('version') == version['version']
-                        and installed.get('archive_sha256') == version['archive']['sha256']):
+                        and installed.get('archive_sha256') == version['archive']['sha256']
+                        and installed.get('fighter_fe_id') == mod.get('fighter_fe_id')):
                     continue
                 self.progress('Downloading ' + mod['name'])
                 self.install(mod['id'], version['version'], synced=True)
@@ -796,7 +807,8 @@ class Manager:
             folder = self.mods / mod_id
             if r.get('synced') and not linked(folder) and (folder / 'install.json').is_file():
                 out.append(dict(id=mod_id, version=r.get('version', ''), content_sha256=r.get('content_sha256', ''),
-                                kind=r.get('kind', 'replacement'), order=r.get('order', 0), folder=folder))
+                                kind=r.get('kind', 'replacement'), order=r.get('order', 0), folder=folder,
+                                fighter_fe_id=r.get('fighter_fe_id', 0)))
         return out
 
     def compose(self):
@@ -833,7 +845,7 @@ class Manager:
             contract.slug(mod_id)
             lines.append('[pack.' + mod_id + ']')
             for key in ('name', 'authors', 'kind', 'type', 'version', 'language', 'content_sha256', 'order', 'bytes',
-                        'description'):
+                        'description', 'fighter_fe_id'):
                 value = str(r.get(key, '')).replace('\n', ' ').replace('\r', ' ')[:500]
                 lines.append(key + '=' + value)
             if (self.mods / mod_id / 'install.json').is_file():

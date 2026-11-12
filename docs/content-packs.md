@@ -23,7 +23,7 @@ Kinds: `content` (new fighters, clothing, venues) is always on and part of onlin
 (retextures, language packs) downloads too but can be switched off per PC. A language pack is used only
 when chosen as the Game language.
 
-## Composed packs (fighter-body, clothing, venue)
+## Composed packs (fighter-body, clothing, venue, new-fighter)
 
 These packs never carry the game's bytes. Their `install.json` (schema 1; the shared contract with the
 server and Studio) lists **entries**, each a delta (`deltas/*.ffdelta`, FFDL v1: copy ranges from the player's
@@ -70,6 +70,21 @@ built on the language pack <id>`). A language pack whose rebuild fails here, or 
 apply alike, is left out (`language-skipped=<id>: <reason>`): the game then rebuilds that pack's files itself,
 as before, without the packs' names. The language packs' `language.ini` and deltas are part of the unchanged
 check, so a pack installed by hand is taken up at the next sync or `compose`.
+
+**New fighters (type `new-fighter`, kind content).** FFNY Studio's "Add as new fighter" makes a pack whose
+entries add the new model's own files to `assets/v2ip.viv` (`V2IP_7xxA.o/.xsh/_F.o`, deltas against the
+template's, the model's symbols renamed) and whose one op `{"op": "new-fighter", "template_fe_id", "template_model",
+"model", "name"}` the composer turns into the rest from the player's own files (`setup/ffnycontent/newfighter.py`,
+the same text as Studio's `ffnystudio/newfighter.py`): a Character row in `djv2.sod` (the template's row with its
+own front-end ID, name and model; the template's coreID, so it fights like the template), the model's
+`entity.xml` entity, its `IntroExtro.xml` entry in `nis.viv`, its `CE_`/`CI_` camera banks in `v2ta.viv` and
+placeholder menu pictures in `screens.viv`. The front-end ID (100..127) is the **account service's place for the
+pack**, carried in the signed catalogue as the mod's `fighter_fe_id` and kept in the receipt: two players with the
+same packs build the same files whatever else they have. A synced new fighter without a place, or whose place or
+model is taken, is skipped. A pack installed by hand (or a Studio test) names its place in the op (`fe_id`).
+The catalogue with new fighters is `index-v2.json`; `index.json` is the same catalogue without them for launchers
+up to build 78, whose strict check would refuse the type and the key. The launcher reads `index-v2.json` from
+this branch on; a cached revision of the other file is not "changed without a new revision".
 
 A relay before this branch refuses the longer HELLO; it is sent only by a PC with `content` packs, so the relay
 goes out first. The relay answers a code join between different content sets with ERROR 15 (14 is the relay's "client not supported").

@@ -32,6 +32,7 @@
 #include "hooks/save_compat.h"
 #include "hooks/pc_launcher_saves.h"
 #include "hooks/test_observations.h"
+#include "hooks/new_fighters.h"
 #include "hooks/pc_settings.h"
 #include "recomp_settings.h"
 #include "hooks/netplay.h"
@@ -1786,6 +1787,7 @@ static void funccall_hook(void)
     if (!ffny_online_locked())
         cheats_on_funccall(text);          /* Story tracking and Story cheats, src/patches/cheats.c; never online */
     sub_00068BA0();
+    new_fighters_after_funccall(text);     /* new fighters as outfits of their template's cell */
     options_audio_after_funccall(text);
     /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
     fe_inject_after_call(text);
@@ -2054,6 +2056,8 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         return funccall_hook;
     if (xbox_va == 0x000D6670u)
         return first_time_help_hook;
+    if (xbox_va == 0x000480E0u)         /* Game.GetNextFighter: new fighters as outfits (new_fighters.c) */
+        return new_fighters_get_next;
     if (xbox_va == 0x00081170u)         /* the crowd's update: its own generator copy online */
         return netplay_crowd_update;
     if (xbox_va == 0x0011EC80u)         /* the mixer's stream packet callback: released chunks */

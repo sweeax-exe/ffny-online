@@ -41,11 +41,11 @@ import re
 import shutil
 import struct
 
-from ffnycontent import clothing, cpparts, delta, loc, newvenue, viv
+from ffnycontent import clothing, cpparts, delta, loc, newfighter, newvenue, viv
 
 SCHEMA = 1
-COMPOSER = 2                    # bump when the output for the same inputs changes
-TYPES = ('fighter-body', 'clothing', 'venue')
+COMPOSER = 3                    # bump when the output for the same inputs changes
+TYPES = ('fighter-body', 'clothing', 'venue', 'new-fighter')
 OUT = 'content-files'
 LANG_DIR = 'lang'               # content-files/lang/<language pack>/<P>: the packs on top of that translation
 LANG_MAX = 8                    # language packs composed with (each costs a copy of the files it covers)
@@ -55,6 +55,7 @@ MAX_RESULT = 64 * 1024**2
 MAX_DELTA = 32 * 1024**2
 CLOTHING_OPS = ('colour', 'item')
 VENUE_OPS = ('new-venue',)
+FIGHTER_OPS = ('new-fighter',)
 PATH = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*')
 ENTRY = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_./ -]{0,199}')
 HEX = re.compile(r'[0-9a-f]{64}')
@@ -111,11 +112,17 @@ def check_install(info):
             raise ComposeError('invalid hash in install.json')
         if not isinstance(e['result_size'], int) or not 0 <= e['result_size'] <= MAX_RESULT:
             raise ComposeError('invalid result size')
-    allowed = CLOTHING_OPS if info['type'] == 'clothing' else VENUE_OPS if info['type'] == 'venue' else ()
+    allowed = {'clothing': CLOTHING_OPS, 'venue': VENUE_OPS, 'new-fighter': FIGHTER_OPS}.get(info['type'], ())
     for op in ops:
         if not isinstance(op, dict) or op.get('op') not in allowed:
             raise ComposeError('op %r is not allowed in a %s pack' % (op.get('op') if isinstance(op, dict) else op,
                                                                       info['type']))
+    if info['type'] == 'new-fighter':
+        if len(ops) != 1:
+            raise ComposeError('a new-fighter pack holds exactly one new-fighter op')
+        problems = newfighter.op_problems(ops[0], allow_fe_id=True)
+        if problems:
+            raise ComposeError('new fighter: ' + problems[0])
     return deltas
 
 
@@ -349,8 +356,45 @@ class Work:
         self._archive(rel)[2].append([entry, bytes(data)])
 
 
-def apply_pack(work, folder, info):
-    """One pack's ops (first, on the files as the earlier packs left them) and entries; raises on any failure."""
+class FighterFiles:
+    """The player's files as the packs so far left them, as ``newfighter.apply_op`` reads them."""
+
+    def __init__(self, work):
+        self.work = work
+
+    def current(self, rel, entry=''):
+        return self.work.current(rel, entry)
+
+    def names(self, rel):
+        names = list(self.work.bases.archive(rel).names()) if self.work.bases.exists(rel) else []
+        a = self.work.archives.get(rel.lower())
+        return names + [n for n, _ in (a[2] if a else [])]
+
+
+def fighter_place(op, fe_id):
+    """A new fighter's front-end ID: the signed catalogue's (``fighter_fe_id``, the account service's place for
+    the pack: the same for every player), else the op's own (a pack installed by hand or tested from Studio)."""
+    place = fe_id if fe_id else op.get('fe_id')
+    if not isinstance(place, int) or isinstance(place, bool):
+        raise ComposeError('this new fighter has no place in the roster yet (the catalogue gives none)')
+    return place
+
+
+def apply_new_fighter(work, op, fe_id):
+    for where, rel, entry, data in newfighter.apply_op(FighterFiles(work), op, fighter_place(op, fe_id)):
+        if where == 'loose':
+            work.set_loose(rel, data)
+        elif where == 'replace':
+            work.replace(rel, entry, data)
+        else:
+            if work.exists(rel, entry):
+                raise ComposeError('%s|%s exists already' % (rel, entry))
+            work.add(rel, entry, data)
+
+
+def apply_pack(work, folder, info, fe_id=None):
+    """One pack's ops (first, on the files as the earlier packs left them) and entries; raises on any failure.
+    ``fe_id``: a new-fighter pack's place from the signed catalogue."""
     clothing_ops = [op for op in info.get('ops', []) if op['op'] in CLOTHING_OPS]
     if clothing_ops:
         tables = {}
@@ -377,6 +421,9 @@ def apply_pack(work, folder, info):
         work.set_loose(newvenue.VENUE_XML, venue_xml)
         work.set_loose(newvenue.ENTITY_XML, entity_xml)
         work.set_loose(clothing.SOD_PATH, sod_blob)
+    for op in info.get('ops', []):
+        if op['op'] == 'new-fighter':
+            apply_new_fighter(work, op, fe_id)
     for e in info.get('entries', []):
         rel, entry = e['archive'], e['entry']
         if entry and not work.bases.exists(rel):
@@ -467,9 +514,9 @@ def run_packs(bases, chosen, log):
         snap = work.snapshot()
         try:
             info = read_install(p['folder'])
-            apply_pack(work, p['folder'], info)
+            apply_pack(work, p['folder'], info, p.get('fighter_fe_id'))
             applied.append(p)
-        except PACK_ERRORS + (cpparts.PartsError, loc.LocError) as error:
+        except PACK_ERRORS + (cpparts.PartsError, loc.LocError, newfighter.FighterError) as error:
             work.restore(snap)
             reason = str(error) if not isinstance(error, KeyError) else 'not found: %s' % error.args[0]
             skipped.append((p['id'], reason))
@@ -542,7 +589,8 @@ def read_files_ini(root):
 
 def inputs_key(game, packs, off, languages=()):
     raw = json.dumps([COMPOSER, str(Path(game).resolve()),
-                      [[p['id'], p['version'], p['content_sha256']] for p in packs], sorted(off),
+                      [[p['id'], p['version'], p['content_sha256'], p.get('fighter_fe_id', 0)] for p in packs],
+                      sorted(off),
                       [[lang['id'], lang['stamp']] for lang in languages]])
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
@@ -569,8 +617,8 @@ def unchanged(root, state, key, data, game):
 
 
 def compose(data, game, packs, off=None, root=None, log=print, languages=None):
-    """Compose ``packs`` ([{id, version, content_sha256, kind, order, folder}], every synced pack with an
-    install.json) for the player, and once more with each installed language pack (``languages``: the list
+    """Compose ``packs`` ([{id, version, content_sha256, kind, order, folder, fighter_fe_id}], every synced pack
+    with an install.json; ``fighter_fe_id`` the catalogue's place of a new fighter) for the player, and once more with each installed language pack (``languages``: the list
     ``language_packs`` makes, found when None). Returns {applied, skipped, files, lang_files, lang_skipped,
     unchanged}."""
     data = Path(data)
