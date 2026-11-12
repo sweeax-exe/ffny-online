@@ -541,7 +541,8 @@ STAT_KEYS = ("upper", "lower", "speed", "toughness", "health", "grapple", "chari
 STAT_NAMES = ("Upper body", "Lower body", "Speed", "Toughness", "Health", "Grapple", "Charisma")
 STAT_MIN, STAT_MAX = 1, 15
 GRAPPLE_MIN = 0             # the sixth stat: 0 for every stock and created fighter (its effect is not measured)
-STAT_BUDGET = 60            # the largest stock stat sum (all seven), measured; the game and the server use the same
+STAT_BUDGET = 60            # the largest stock stat sum (Suspect 10 x 6; Crow 54, Doc and Blaze 50), measured; the game
+#                             and the server use the same
 BAR_KEYS = ("upper", "lower", "speed", "toughness", "health", "charisma")
 BAR_WORDS = (17, 16, 22, 25, 12, 2)     # the select screen's U L S T H C bars, 0..50
 BAR_MAX = 50
@@ -722,9 +723,16 @@ def _item_index(sod_blob, row_offset):
     return None
 
 
+# Own Blazins the table does not tie to a fighter (owner -1), as the game gave them in a run (2026-11-12):
+# Suspect's is 56, "Blazing_Shadowy Figure".
+OWN_BLAZIN_MEASURED = {60: 56}
+
+
 def own_blazin(sod_blob, fe_id):
     """The Blazin id of a stock fighter's own Blazin (the Blazin row whose owner, word 1, is the fighter's item
-    ID), or None (Suspect has none)."""
+    ID; OWN_BLAZIN_MEASURED for the one without an owner row), or None."""
+    if fe_id in OWN_BLAZIN_MEASURED:
+        return OWN_BLAZIN_MEASURED[fe_id]
     s = Sod(sod_blob)
     rows = {r["fe_id"]: r for r in characters(sod_blob)}
     if fe_id not in rows or BLAZIN_TABLE not in s.table_hashes:
@@ -744,8 +752,7 @@ def template_gameplay(sod_blob, fe_id):
     """A stock fighter's own gameplay as a gameplay block (its moves: no ``styles``), for the editor's start and
     "Reset": the stats from its select-screen bars (a fifth of each; measured exact for Doc and Blaze, whose
     stats the game decodes as 9 6 10 5 10 0 10 and 10 9 5 10 7 0 9), Grapple 0 and its own Blazin in all four
-    keys, as the game gives a stock fighter (``None`` in the four when it has none of its own). None when there
-    is no such fighter."""
+    keys, as the game gives a stock fighter. None when there is no such fighter."""
     rows = {r["fe_id"]: r for r in characters(sod_blob)}
     if fe_id not in rows:
         return None

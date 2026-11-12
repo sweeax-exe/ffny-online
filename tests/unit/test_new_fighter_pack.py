@@ -33,7 +33,7 @@ pytestmark = pytest.mark.skipif(GAME is None, reason="needs the user's own dump"
 TEMPLATE, TEMPLATE_MODEL = 55, "V2IP_109A"
 
 
-def make_pack(folder, model, name, fe_id=None):
+def make_pack(folder, model, name, fe_id=None, gameplay=None):
     """A new-fighter pack as FFNY Studio writes it: the template's model files under the new name (symbols
     renamed) as add entries, and the op."""
     folder = Path(folder)
@@ -49,7 +49,7 @@ def make_pack(folder, model, name, fe_id=None):
                         "original_sha256": hashlib.sha256(base).hexdigest(),
                         "result_sha256": hashlib.sha256(result).hexdigest(), "result_size": len(result)})
     info = {"schema": 1, "type": "new-fighter", "entries": entries,
-            "ops": [nf.make_op(TEMPLATE, TEMPLATE_MODEL, model, name, fe_id)]}
+            "ops": [nf.make_op(TEMPLATE, TEMPLATE_MODEL, model, name, fe_id, gameplay=gameplay)]}
     (folder / "install.json").write_text(json.dumps(info), encoding="utf-8")
     return folder
 
@@ -83,6 +83,29 @@ def test_new_fighter_is_composed_from_the_catalogue_place(tmp_path):
     assert b"V2IP_7K3A" in composed(data, nf.ENTITY_XML).read_bytes()
     screens = viv.Archive(str(composed(data, nf.SCREENS_ARCHIVE)))
     assert screens.has("screens/portrait/p_CF/p_cf_102_2p.big")     # p_ families are feID + 1
+
+
+def test_new_fighter_gameplay_is_written_into_its_row(tmp_path):
+    """The op's gameplay block lands in the row's words 3 and 11 (what the game applies), its bars and its style
+    bits; the composed row reads back as the same block."""
+    g = {"version": 1, "stats": dict(zip(nf.STAT_KEYS, (12, 9, 4, 6, 15, 0, 4))), "styles": ["W", "B"],
+         "blazins": [74, 44, 16, 65]}
+    pack = make_pack(tmp_path / "packs" / "doc-gp", "V2IP_7G1A", "Doc Gp", gameplay=g)
+    data = tmp_path / "data"
+    got = content_compose.compose(data, GAME, [record(pack, "doc-gp", 1, 100)], off=(), log=lambda t: None,
+                                  languages=[])
+    assert got["applied"] == ["doc-gp"]
+    new = nf.characters(composed(data, nf.SOD_PATH).read_bytes())[-1]
+    assert new["fe_id"] == 100 and new["core_id"] == 10
+    assert nf.gameplay_from_words(new["words"]) == g
+    assert [new["words"][w] for w in nf.BAR_WORDS] == [nf.stat_bar(v) for v in (12, 9, 4, 6, 15, 4)]
+    assert new["words"][nf.W_STYLE_BITS] == (1 << nf.STYLE_BITS["W"]) | (1 << nf.STYLE_BITS["B"])
+    # a block out of range is refused at install as the server refuses it at submit
+    bad = make_pack(tmp_path / "packs" / "doc-bad", "V2IP_7G2A", "Doc Bad",
+                    gameplay=dict(g, stats=dict(g["stats"], health=0)))
+    got = content_compose.compose(tmp_path / "data2", GAME, [record(bad, "doc-bad", 1, 100)], off=(),
+                                  log=lambda t: None, languages=[])
+    assert got["applied"] == [] and got["skipped"]
 
 
 def test_same_packs_same_files_whatever_the_order_of_places(tmp_path):

@@ -180,3 +180,29 @@ def test_c_decoder_agrees(decoder):
     want += ["-", "-", "-"]
     assert decoder(cases) == want
     assert any(x != "-" for x in want) and any(x == "-" for x in want)
+
+
+# The stats, Blazins and max health the game decoded for these stock fighters (RECOMP_NF_STATS_DUMP=1,
+# logs/dj/20261112-153657-offline and 20261112-171413-offline): U L S T H 6th C, the four Blazin keys.
+MEASURED = {55: ((9, 6, 10, 5, 10, 0, 10), 4, 304.0), 56: ((10, 9, 5, 10, 7, 0, 9), 2, 265.6),
+            58: ((7, 9, 10, 9, 9, 0, 10), 0, 291.2), 60: ((10, 10, 10, 10, 10, 0, 10), 56, 304.0)}
+
+
+def test_template_gameplay_matches_the_game():
+    sod = None
+    for base in (ROOT / "game", Path("D:/DefJam/data/extracted")):
+        if (base / "assets" / "djv2.sod").is_file():
+            sod = (base / "assets" / "djv2.sod").read_bytes()
+            break
+    if sod is None:
+        pytest.skip("needs the user's own dump (djv2.sod)")
+    for fe, (stats, blazin, health) in MEASURED.items():
+        g = nf.template_gameplay(sod, fe)
+        assert tuple(g["stats"][k] for k in nf.STAT_KEYS) == stats
+        assert g["blazins"] == [blazin] * 4
+        assert abs(176 + 12.8 * stats[4] - health) < 0.01
+    assert max(sum(s) for s, _, _ in MEASURED.values()) == nf.STAT_BUDGET
+    # every template's own block is a valid one, inside the budget
+    for r in nf.characters(sod):
+        if r["main"] == 1 and r["fe_id"] < nf.FIRST_NEW_FE_ID:
+            assert nf.gameplay_problems(nf.template_gameplay(sod, r["fe_id"])) == []
