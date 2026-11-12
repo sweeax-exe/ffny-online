@@ -115,7 +115,7 @@ class Archive:
         self.size_le = self.total_size == self.length
         if not self.size_le and struct.unpack_from(">I", head, 4)[0] != self.length:
             self.size_le = None
-        self._by_name = {e.name.lower(): e for e in self.entries}
+        self._by_name = {e.name.replace("\\", "/").lower(): e for e in self.entries}
 
     def names(self):
         return [e.name for e in self.entries]
@@ -189,7 +189,7 @@ def compose_archive(src, dst, replace=None, add=(), align=None, chunk=1 << 20):
     source = Archive(src)
     if not source.entries:
         raise ValueError("cannot compose an empty archive")
-    known = {e.name.lower(): e for e in source.entries}
+    known = {e.name.replace("\\", "/").lower(): e for e in source.entries}
     replaced = {}
     for name, data in (replace or {}).items():
         entry = known.get(name.replace("\\", "/").lower())
@@ -201,9 +201,9 @@ def compose_archive(src, dst, replace=None, add=(), align=None, chunk=1 << 20):
         if not name or "\0" in name:
             raise ValueError("invalid entry name %r" % name)
         name.encode("latin-1")
-        if name.lower() in seen:
+        if name.replace("\\", "/").lower() in seen:
             raise ValueError("entry %r already exists (replace it instead)" % name)
-        seen.add(name.lower())
+        seen.add(name.replace("\\", "/").lower())
         added.append((name, bytes(data)))
     align = align or entry_alignment(source.entries)
     with _source(source) as fh:

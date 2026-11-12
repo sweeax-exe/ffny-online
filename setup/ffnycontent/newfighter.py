@@ -28,6 +28,7 @@ One implementation for both sides: FFNY Studio (``ffnystudio/newfighter.py``) an
 import re
 import struct
 
+from . import fightervoice
 from .sod import Sod, name_hash
 from .sodwrite import name_above
 
@@ -354,7 +355,7 @@ BANK_ARCHIVE = "assets/v2ta.viv"
 SCREENS_ARCHIVE = "screens/screens.viv"
 OP = "new-fighter"
 OP_KEYS = ("op", "template_fe_id", "template_model", "model", "name")
-OP_OPTIONAL = ("gameplay",)     # the fighter's own stats, styles and Blazins (``gameplay_problems``)
+OP_OPTIONAL = ("gameplay",)     # the fighter's own stats, styles, Blazins and voice (``gameplay_problems``)
 MODEL_SUFFIXES = (".o", ".xsh", "_F.o")
 TEMPLATE_MODEL = re.compile(r"^V2IP_[0-9]{3}[A-Z]$")
 NEW_MODEL = re.compile(r"^V2IP_7[0-9A-Z]{2}A$")
@@ -478,13 +479,13 @@ class _View:
         return self.files.current(self.rel, name)
 
 
-def apply_op(files, op, fe_id, pictures=True):
+def apply_op(files, op, fe_id, pictures=True, pack=None):
     """The edits of one new-fighter op on the player's files as the packs so far left them: [(where, path,
     entry, bytes)], ``where`` "loose" (a whole file, entry None), "replace" or "add" (an archive entry; plain bytes,
     the caller stores them). ``files`` gives ``current(path, entry="")`` (bytes; a missing file or entry raises
     KeyError or OSError) and ``names(path)`` (an archive's entry names, the added ones too). ``fe_id`` is the
-    place (100..127). Raises FighterError when the op does not fit (the ID or the model is taken, no such
-    template)."""
+    place (100..127). ``pack(path)`` reads one of the pack's own files (an own voice's clips, ``voice/...``).
+    Raises FighterError when the op does not fit (the ID or the model is taken, no such template)."""
     problems = op_problems(op, allow_fe_id=True)
     if problems:
         raise FighterError(problems[0])
@@ -499,6 +500,20 @@ def apply_op(files, op, fe_id, pictures=True):
         raise FighterError("the model %s is another fighter's already" % model)
     edits = []
     words = gameplay_words(op["gameplay"]) if "gameplay" in op else None
+    voice = (op.get("gameplay") or {}).get("voice") or {}
+    if voice.get("mode") == "own":
+        # the own voice: its five files at N = 40 + feID - 100 in the speech archive, and N in word 21
+        if pack is None:
+            raise FighterError("this new fighter's own voice needs the pack's voice files")
+        words = dict(words or {})
+        words[W_SPEECH] = fightervoice.voice_number(fe_id)
+        try:
+            edits += [("add", fightervoice.SPEECH_ARCHIVE, n, data) for n, data in fightervoice.voice_files(
+                lambda e: files.current(fightervoice.SPEECH_ARCHIVE, e),
+                lambda: files.names(fightervoice.SPEECH_ARCHIVE), template_fe_id,
+                rows[template_fe_id]["words"][W_SPEECH], fe_id, voice["lines"], pack)]
+        except (fightervoice.VoiceError, KeyError, OSError) as e:
+            raise FighterError("voice: %s" % e)
     sod_out, _, _ = append_character(sod_blob, template_fe_id, fe_id, name, name, model, edits=words)
     edits.append(("loose", SOD_PATH, None, sod_out))
     edits.append(("loose", ENTITY_XML, None, add_entity(files.current(ENTITY_XML), template, model)))
@@ -530,7 +545,12 @@ def apply_op(files, op, fe_id, pictures=True):
 #                                                           # has its own one in all four)
 #                "bars": {"upper": 30, ...},                # optional: the select screen's bars 0..50
 #                                                           # (U L S T H C); left out: made from the stats
-#                "voice": {"mode": "template"}}             # optional, reserved: the template's voice for now
+#                "voice": {"mode": "own", "lines": {...}}}  # optional: the fighter's own voice
+#                                                           # (``fightervoice.py``); left out or
+#                                                           # {"mode": "template"}: the template's
+#
+# A block may hold only "version" and "voice" (an own voice on the template's gameplay): words 3 and 11 stay
+# the template's, so the game applies no gameplay of its own.
 #
 # The game applies it at match set-up the way it applies a created fighter's (the per-slot stat block, the
 # style-combination core 86..140 and the four Blazin keys), the same on every PC: the values live in two words
@@ -621,6 +641,12 @@ def gameplay_problems(g):
         out.append("unknown key%s %s" % ("s" if len(extra) > 1 else "", ", ".join(extra)))
     if g.get("version") != GAMEPLAY_VERSION:
         out.append("version must be %d" % GAMEPLAY_VERSION)
+    if "voice" in g:
+        out += fightervoice.voice_problems(g["voice"])
+    if voice_only(g):
+        if (g.get("voice") or {}).get("mode") != "own":
+            out.append("a block without stats and Blazins holds an own voice")
+        return out
     stats = g.get("stats")
     if not isinstance(stats, dict) or set(stats) != set(STAT_KEYS):
         out.append("stats must name all seven: %s" % ", ".join(STAT_KEYS))
@@ -646,9 +672,12 @@ def gameplay_problems(g):
         if not (isinstance(bars, dict) and set(bars) == set(BAR_KEYS)
                 and all(_int(bars[k]) and 0 <= bars[k] <= BAR_MAX for k in BAR_KEYS)):
             out.append("bars: %s, each 0 to %d" % (", ".join(BAR_KEYS), BAR_MAX))
-    if "voice" in g and g["voice"] != {"mode": "template"}:
-        out.append('voice: only {"mode": "template"} for now (own voices come later)')
     return out
+
+
+def voice_only(g):
+    """Whether a gameplay block holds a voice and no gameplay (no stats, styles, Blazins or bars)."""
+    return isinstance(g, dict) and not any(k in g for k in ("stats", "styles", "blazins", "bars"))
 
 
 def gameplay_words(g):
@@ -658,6 +687,8 @@ def gameplay_words(g):
     problems = gameplay_problems(g)
     if problems:
         raise FighterError("gameplay: " + problems[0])
+    if voice_only(g):
+        return {}
     moveset = moveset_of(g.get("styles"))
     w11 = GAMEPLAY_VERSION << 28 | ((moveset >> 4) & 3) << 30
     for k, key in enumerate(STAT_KEYS):

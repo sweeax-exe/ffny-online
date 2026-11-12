@@ -380,8 +380,26 @@ def fighter_place(op, fe_id):
     return place
 
 
-def apply_new_fighter(work, op, fe_id):
-    for where, rel, entry, data in newfighter.apply_op(FighterFiles(work), op, fighter_place(op, fe_id)):
+MAX_VOICE_FILE = 1024 * 1024
+
+
+def pack_reader(folder):
+    """``read(path)`` of a pack's own files for its ops (a new fighter's voice clips, ``voice/<name>``)."""
+    def read(rel):
+        parts = PurePosixPath(rel).parts
+        if (not isinstance(rel, str) or len(parts) != 2 or parts[0] != 'voice' or '..' in parts
+                or not re.fullmatch(r'[A-Za-z0-9_.\-]{1,64}', parts[1])):
+            raise ComposeError('%r is not a voice file of the pack' % (rel,))
+        path = Path(folder).joinpath(*parts)
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_VOICE_FILE:
+            raise ComposeError('%s is missing from the pack' % rel)
+        return path.read_bytes()
+    return read
+
+
+def apply_new_fighter(work, op, fe_id, folder=None):
+    pack = pack_reader(folder) if folder is not None else None
+    for where, rel, entry, data in newfighter.apply_op(FighterFiles(work), op, fighter_place(op, fe_id), pack=pack):
         if where == 'loose':
             work.set_loose(rel, data)
         elif where == 'replace':
@@ -423,7 +441,7 @@ def apply_pack(work, folder, info, fe_id=None):
         work.set_loose(clothing.SOD_PATH, sod_blob)
     for op in info.get('ops', []):
         if op['op'] == 'new-fighter':
-            apply_new_fighter(work, op, fe_id)
+            apply_new_fighter(work, op, fe_id, folder)
     for e in info.get('entries', []):
         rel, entry = e['archive'], e['entry']
         if entry and not work.bases.exists(rel):
@@ -463,8 +481,14 @@ def clean(text):
     return re.sub(r'[\r\n;]+', ' ', str(text))[:300]
 
 
-def stored(data):
-    """An added entry as the archives keep them: literal RefPack (raw when too large for its 3-byte size)."""
+RAW_ARCHIVES = ('audio/',)     # the sound engine reads its archives' entries as they are (no RefPack)
+
+
+def stored(data, rel=''):
+    """An added entry as the archives keep them: literal RefPack (raw when too large for its 3-byte size, and in
+    the audio archives, whose stock entries are plain SCHl/BNK data the speech and sound code read in place)."""
+    if rel.lower().replace(chr(92), '/').startswith(RAW_ARCHIVES):
+        return data
     return viv.refpack_store(data) if len(data) < 1 << 24 else data
 
 
@@ -489,7 +513,7 @@ def write_files(folder, work, only=None):
             rep[name] = (viv.refpack_store(data) if len(data) < 1 << 24 else data) if viv.is_refpack(raw) else data
         target = folder.joinpath(*PurePosixPath(rel).parts)
         target.parent.mkdir(parents=True, exist_ok=True)
-        viv.compose_archive(str(src), str(target), replace=rep, add=[(n, stored(d)) for n, d in add])
+        viv.compose_archive(str(src), str(target), replace=rep, add=[(n, stored(d, rel)) for n, d in add])
         files.append(rel)
     return files
 
