@@ -7824,7 +7824,6 @@ static void commit_local(uint32_t target)
 static void step_body(void);
 void netplay_on_step(void)
 {
-    recomp_detmath_fenv_guard();    /* round to nearest, no flush-to-zero: whatever a driver or overlay set */
     step_body();
     fight_hud_step();
 }
@@ -7833,6 +7832,7 @@ static void step_body(void)
 {
     uint32_t s, k, need;
     ULONGLONG waited_since, last_send, last_note;
+    recomp_detmath_fenv_guard();    /* round to nearest, no flush-to-zero: whatever a driver or overlay set */
     start_countdown_step(N.resim);
     if (N.lockstep) versus_hold();
     created_fighter_on_step();  /* created fighters: unlinked once their looks are built */
