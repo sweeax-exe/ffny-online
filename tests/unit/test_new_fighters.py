@@ -85,7 +85,7 @@ def test_several_and_refusals():
     with pytest.raises(nf.FighterError):
         nf.append_character(out, 55, 100, "Again", "Again")
     with pytest.raises(nf.FighterError):
-        nf.append_character(SOD, 55, 255, "Too far", "Too far")
+        nf.append_character(SOD, 55, 128, "Too far", "Too far")
     with pytest.raises(nf.FighterError):
         nf.append_character(SOD, 55, 100, "x", "x", edits={nf.W_CORE_ID: 1})
 

@@ -2058,8 +2058,6 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         return first_time_help_hook;
     if (xbox_va == 0x000480E0u)         /* Game.GetNextFighter: new fighters as outfits (new_fighters.c) */
         return new_fighters_get_next;
-    if (xbox_va == 0x00047BC0u)         /* Game.ResetFighterList: new rows kept out of its 128-entry list */
-        return new_fighters_reset_list;
     if (xbox_va == 0x00081170u)         /* the crowd's update: its own generator copy online */
         return netplay_crowd_update;
     if (xbox_va == 0x0011EC80u)         /* the mixer's stream packet callback: released chunks */

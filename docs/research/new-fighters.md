@@ -37,7 +37,7 @@ A **Character row appended to `assets/djv2.sod`**, copied from a stock fighter (
 | 4 | Block 0's key; does appending change an item ID? | Word 13: 1 own cell, 0 outfit (the six alternates). Appending changes no ID [V]. |
 | 5 | IDs 100..141 vs the created-fighter archetypes | The game **reads `FIGHTER.XML`** (archetypes 86..141 of created fighters live there, e.g. ID 100 = `CP KBW`). So a new fighter gets **no fighter.xml record** (it would duplicate an archetype ID); Battle and the hub read the database. In `Game.StartGame` the created-fighter branch (`sub_00020270` at 0x2096D) writes the archetype into the slot after the Character scan, which matches the fighter byte 99, so the scan never sees an archetype ID [I, static]. A Battle match of a created fighter with archetype 100..141 next to a new row of that feID is not run yet [U]. |
 | 6 | Name fields | `ResetFighterList` copies the row's name string into a 32-byte list record at +4 with no bound (+0x18 and +0x1C follow: tier, feID): row names must stay **under 20 bytes** [V, code]; `name_above` adds 8 characters, so a base name of at most 11. The slot's model/name/shadow copies at +0x148/+0x158/+0x168 are 16 bytes apart: keep model and row names under 16 [I]. The HUD shows the display name (word 5) [V]. |
-| 7 | Copied portraits: inner names? | The select screen's big portrait of an outfit is `portrait/p_CF/p_cf_<feID+1>_<n>p` (blank for feID 100 without it [V, screenshot]); the name logo stays the cell's. Each picture is a small BIG whose entries are named after it (`p_cf_56_2p.apt/.const/.o/.xsh`). Families and ID offsets: `p_cf`, `p_ML`, `p_CT`, `portrait/<n>_<k>p` use feID + 1; `l_CF`, `l_ML`, `I_ML`, `l_MS`, `t_MS`, `t_CT`, `t_CO`, `thumbs/thumb` use feID [V, dump listing]. `newfighter.picture_copies` makes the copies (outer only, or inner entries renamed); which one the movie needs is section 4. |
+| 7 | Copied portraits: inner names? | The select screen's big portrait of an outfit is `portrait/p_CF/p_cf_<feID+1>_<n>p` (blank for feID 100 without it [V, screenshot]); the name logo stays the cell's. Each picture is a small BIG whose entries are named after it (`p_cf_56_2p.apt/.const/.o/.xsh`). Families and ID offsets: `p_cf`, `p_ML`, `p_CT`, `portrait/<n>_<k>p` use feID + 1; `l_CF`, `l_ML`, `I_ML`, `l_MS`, `t_MS`, `t_CT`, `t_CO`, `thumbs/thumb` use feID [V, dump listing]. `newfighter.picture_copies` makes the copies. **The inner entries must be renamed**: with `p_cf_101_*` renamed inside, Doc 2's outfit shows Doc's portrait; with an outer copy only (`p_cf_201_*` holding `p_cf_56_*` entries) Doc 3's stays blank [V, screenshots `doc2-m2-doc2`, `doc2-m3-doc3`]. |
 | 8 | Story; the unlock tool with 76 rows | Not run [U]. The select hooks only answer the select screens; Story reads its own lists. |
 | 9 | Online | Not run (no relay change deployed). See section 6. |
 
@@ -46,12 +46,7 @@ A **Character row appended to `assets/djv2.sod`**, copied from a stock fighter (
 `src/hooks/new_fighters.c`:
 
 * **Read the database the game reads** (`netplay_open_fight_file`: the override/composed copy the print hashes)
-  and list every row with feID 100..254, its template = the stock fighter with an own cell and the same coreID.
-* **`Game.ResetFighterList` wrapper** (`sub_00047BC0`, reached through the command vtable, so
-  `recomp_lookup_manual` can wrap it; no re-lift): the game keeps its list in a global array of **128 entries**
-  (0x3A07B0, no bound check), 74 stock. While it runs, each new row says feID 98 (the E3 Hero, which the list
-  skips) in the loaded database and gets its own back right after, so the game's array never holds a new row.
-  The loaded database is found once in guest memory by the file's first 32 bytes and checked by the rows' feIDs.
+  and list every row with feID 100..127, its template = the stock fighter with an own cell and the same coreID.
 * **After `Game.ResetFighterList`**: read the game's whole list once (its own strings, its order), then answer the
   screen's `Game.GetNextFighter` calls from a copy (the **`GetNextFighter` wrapper**, `sub_000480E0`: the game's
   call runs, then its answer buffer at `this+0x10` gets the copy's string): every new fighter is one more outfit
@@ -60,6 +55,10 @@ A **Character row appended to `assets/djv2.sod`**, copied from a stock fighter (
   profile's fighter set (80 entries) is not touched.
 * Result [V]: Doc's cell shows outfits **1 2**; outfit 2 is Doc 2 (`Controller.ControllerSetup(0,0,100,0)`),
   the fight runs with `DOC 2` on the HUD.
+* Tried and dropped: a `Game.ResetFighterList` wrapper that hid the new rows from the game's own 128-entry list
+  array (0x3A07B0) by poking their feID to 98 in the loaded database. The loaded rows are not laid out as in the
+  file (no place in guest memory had the row's feID and coreID words where the file has them), and with the
+  127 cap below the array has room anyway (74 stock + 48 at most = 122 of 128).
 
 `src/hooks/online_data.c`: `online_new_fighters()` lists the new fighters (name = display name, style = the
 template's) and the hub's fighter picker (`online_screen.cpp`, `roster()`) offers them; `online_fighter_name()`
@@ -72,32 +71,50 @@ placeholder pictures (`--pictures copy|renamed`). The files are the player's own
 
 ## 4. Measured with the hooks
 
-(Filled in from the runs listed in the hand-off; see the report.)
+| Run (logs/dj/...) | Override | Result |
+|---|---|---|
+| `20261111-221639-nfprobe` | Doc 2 = feID 100, Doc's row and model, no hooks | grid and probe strings of section 2 |
+| `20261111-222714-nfsel` | same, outfit hooks | Doc's cell has outfits 1 2; outfit 2 = feID 100; big portrait blank (no `p_cf_101`); fight vs CPU Blaze, HUD `DOC 2` |
+| `20261111-223813-nfstats` | Doc 2 with every stat bar at 10, Wrestling style bit, speechID 22, bodysize 2 | fight runs; max health 304, per-slot stat block and voice as Doc's |
+| `20261111-223001-offline`, `-223933`, `-224146`, `-224654`, `-224908`, `-225237-nfmodel` | new model `V2IP_901A` missing one part each (no symbol rename, no banks, bank symbols, IntroExtro entry, loose taunt.xml only) | intro stalls: venue and crowd, no fighters, no HUD |
+| `20261112-002756-nfmodel` | new model `V2IP_901A` with all parts | **fight runs with the new model name**, HUD `DOC 2` |
+| `20261112-010346-nfmulti` | Doc 2 (100), Doc 3 (200, bars set to 10), Blaze 4 (254); pictures for 100 (renamed) and 200 (outer copy) | Doc's cell **1 2 3**, Doc 3 shows its own bars (U/L/S 10); P1 picks Doc 3: `ControllerSetup(0,0,200,0)`. Blaze's cell shows **1 2 3 and a fourth card without a number**; the cursor stopped on 3 (Blaze 3, locked in a fresh profile: `LOCKED`, A refused), so outfit 4 was not reached in this run |
+| `20261112-011125-nfcap` | the same, automatch Blaze 4 (254) vs Doc 3 (200) | hangs in `Game.GetMatchInfo()` before `StartGame`: no frames after it |
+| `20261112-011930-nfe128` | Doc copy as feID 128 vs Doc | **crash** after `ControllerSetup(0,0,128,0)`: read of guest address 0xFFFFFFF0 (a sign-extended fighter byte as an index) |
+| `20261112-012013-nfe127` | Doc copy as feID 127 vs Doc | fight runs, damage dealt |
+
+Model notes: the game keeps a fight in its intro until the intro/extro cameras of both models load; their
+names come from `IntroExtro.xml` (`nis.viv`), keyed by the model name. Doc 2's own *look* needs Studio's body
+import into the copied files (Fighters page), unchanged: the copy only proves the name path.
 
 ## 5. How many fighters
 
-* **Now: 155** (feID 100..254) [code; 3 at once measured, section 4]. Limits that are gone with the hooks: the grid
-  thumbnail sprite (feID + 150 frames; outfits use the template cell's thumbnail), the 80-entry unlock set (not
-  used), the 128-entry list array (new rows are kept out of it).
-* What still limits it:
-  1. **The fighter ID is one byte** everywhere a match is set up: `Controller.ControllerSetup` writes a 5-byte
-     entry per slot (byte +1 = fighter), `Game.StartGame` compares the row's feID with it, and online the ID is one
-     byte in `READY`, `ROOM`, `START`, `RANKED`, `DRAFTACT`. 255 stays free, 98 and 99 are taken.
-  2. Unused feIDs below 100 (5, 15, 29, 37, 39..42, 49, 52, 53, 63, 66, 78, 79, 86..90, 94..97) are about 25 more,
-     but several are fighter.xml IDs of stock fighters the hub maps (40, 41, 52, 78) and the probe frames for
-     them are emptied: not worth it.
-  3. **Outfits per cell**: the clothing step draws one numbered card per outfit (`CLOTH_THUMB_SPACING` apart);
-     2 and 3 measured, more than about 6 on one template will run off the paper [I]. Spread new fighters over
-     templates, or (b2) give them own cells.
-  4. The hub list (`NEW_FIGHTER_MAX` 155) and the hook's answer list (256 strings) are sized for this.
-* **Beyond 255**: a 16-bit fighter ID through the front end's setup entries (`sub_000558E0`, `sub_0001E690`,
-  the 5-byte entry and the 20-byte copy at 0x2DDC08), `Game.StartGame`'s compare, the summary and rewards that
-  read the byte, and the netplay protocol (every message above, the relay's validation, ranked/draft) — a
-  protocol version step for every player. Several days plus a coordinated release. Not needed below ~150 packs.
+* **Now: 28** (feID 100..127) [V: 127 fights, 128 crashes, three at once on one select screen]. The fighter byte is
+  read **signed** somewhere on the match path (`Game.GetMatchInfo`/`Game.StartGame`): 128 is -128, used as an
+  index, and the load crashes (0xFFFFFFF0); 200 and 254 hang in `Game.GetMatchInfo`. So the grid thumbnail
+  sprite (frames feID and feID + 150), the 80-entry unlock set and the 128-entry list array are not the limit:
+  outfits use the template cell's thumbnail, the unlock set is not used, and 74 + 28 fits in 128.
+* **+20 cheaply**: the unused feIDs below 98 (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86..90, 94..97; leave out
+  40, 41, 52 and 78, the fighter.xml IDs the hub maps to Teck, Santos, O.E and Erick Sermon). Needs the hooks and
+  the hub to take a list of "new" IDs instead of the range 100..127. **48** in all, 122 of the list array's 128.
+* **To 155 (feID 100..254)**: find every place that sign-extends the fighter byte on the setup and match path
+  (`movsx` of the setup entry's byte +1: `Controller.ControllerSetup` `sub_000558E0`, the entry helpers
+  `sub_0001E690`/`sub_0001E820`, `Game.GetMatchInfo` `sub_00046D20`, `Game.StartGame` `sub_00046E40`/`sub_00020270`,
+  the summary and rewards) and override those functions in `src/recomp_manual.c` (direct callers: a re-lift, about
+  20 minutes) or patch the instructions; and keep the new rows out of the 128-entry list array (above 128 rows)
+  with a list hook that works on the loaded layout. Estimate 2-4 days with tests. Online IDs are bytes already;
+  the relay needs the wider range.
+* **Beyond 255**: a 16-bit fighter ID through the setup entries (5 bytes per slot, the 20-byte copy at 0x2DDC08),
+  every reader of the byte, and the netplay protocol (`READY`, `ROOM`, `START`, `RANKED`, `DRAFTACT`, the relay's
+  validation, ranked and draft): a protocol step for every player. Weeks, a coordinated release.
+* **Outfits per cell**: the clothing step numbers cards 1..3; a fourth card was drawn without a number [V,
+  Blaze's cell]; whether it can be picked is [U]. Plan for at most 3 outfits per cell (Doc, and most fighters with
+  one outfit, take 2 new ones; Sticky 1; Blaze and D-Mob 0) until that is measured, or give new fighters own
+  cells (b2: the thumbnail sprite writer, IDs up to 148 then).
 
 ## 6. Online (described, not deployed)
 
-The relay's `ValidFighters`/`safeFighter` turns any other ID into Doc (55). Needed: accept 100..254 in
+The relay's `ValidFighters`/`safeFighter` turns any other ID into Doc (55). Needed: accept 100..127 in
 `READY`/`ROOM`/`START`/hill rooms when the room's content print is non-zero (both PCs then have the same packs:
 `djv2.sod` and `v2ip.viv`, `v2ta.viv`, `nis.viv` are fight files in the print), never in Classic/ranked-stock,
 never as a CPU fill, draft and random stay stock; the accounts service claims feIDs per pack (like venues
@@ -109,7 +126,7 @@ never as a CPU fill, draft and random stay stock; the accounts service claims fe
 |---|---|---|
 | Name on the HUD | word 5 (display) | **yes** [V] |
 | Row name | word 0 | yes (hash must sort last; < 20 bytes) [V] |
-| Model and textures | word 14 + `v2ip.viv` (.o/.xsh/_F.o) + CE/CI banks + IntroExtro entry | **yes** (new model name) [V/section 4]; same skeleton as the template |
+| Model and textures | word 14 + `v2ip.viv` (.o/.xsh/_F.o) + CE/CI banks + IntroExtro entry | **yes** (new model name) [V, section 4]; same skeleton as the template |
 | Select-screen stat bars | words 17, 16, 22, 25, 12, 2 | yes, **display only**: a row with every bar at 10 fought with Doc's max health (304) and Doc's per-slot stat block [V, peek of record +0x350 and +0xB34] |
 | Style list on the select screen | word 18 bits, word 9 | display only [I: the fight's styles and moves come from the character index = coreID - 1] |
 | Cost, Order, tier | words 4, 15, 24 | menu (Rewards shop cost, order) [I] |

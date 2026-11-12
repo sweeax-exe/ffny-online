@@ -34,7 +34,7 @@ W_NAME, W_CHARISMA, W_COST, W_DISPLAY, W_ENTITY, W_FE_ID, W_CORE_ID, W_HEALTH, W
     0, 2, 4, 5, 6, 8, 10, 12, 13, 14
 W_SPEED, W_TOUGHNESS, W_SPEECH = 22, 25, 21
 FIRST_NEW_FE_ID = 100
-LAST_NEW_FE_ID = 254        # a byte (255 stays free); the select screens show new fighters as outfits of the template
+LAST_NEW_FE_ID = 127        # the match setup reads the fighter byte signed: 128 crashes the load
 STOCK_ROWS = 75
 
 
@@ -74,7 +74,7 @@ def characters(blob):
 
 def append_character(blob, template_fe_id, fe_id, name, display, model=None, edits=None):
     """``djv2.sod`` with a new Character row copied from the row of ``template_fe_id``: its own ``fe_id``
-    (100..254), row name (``name``, made to hash above every other row name), display name and model
+    (100..127), row name (``name``, made to hash above every other row name), display name and model
     (default: the template's). ``edits`` maps row word indices to new values (stats). Returns
     (bytes, row name, item ID).
 

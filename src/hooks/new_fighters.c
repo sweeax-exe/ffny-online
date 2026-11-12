@@ -6,7 +6,7 @@
  * The select screens (battle/chooseF2/3/4) build their grid from Game.ResetFighterList() and then one
  * Game.GetNextFighter() string per outfit, "CLOTH=<outfits of the cell>&FE_ID=<id>&LOCK=<1 unlocked>&U=..",
  * until "NO_RETURN". ResetFighterList (sub_00047BC0) lists the Character rows whose word 13 is 1, sorts them,
- * and groups Blaze 2/3, Sticky 2 and D-Mob 2/3 under their cells by hard-coded IDs. A new row (feID 100..254)
+ * and groups Blaze 2/3, Sticky 2 and D-Mob 2/3 under their cells by hard-coded IDs. A new row (feID 100..127)
  * comes out as a cell of its own, locked (it is not in the profile's 80-entry fighter set), with the grid
  * thumbnail of frame feID, which is empty.
  *
@@ -33,7 +33,6 @@ FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c
 #define W_MAIN 13
 
 static NewFighter g_new[NEW_FIGHTER_MAX];
-static uint32_t g_row_off[NEW_FIGHTER_MAX];             /* the row's file offset in djv2.sod */
 static uint32_t g_words[NEW_FIGHTER_MAX][ROW_WORDS];    /* its words (stats, style bits) */
 static int g_new_count = -1;
 
@@ -97,7 +96,6 @@ static void load(void)
                     nf->fe_id = (int)fe;
                     nf->core_id = (int)core;
                     nf->template_fe_id = -1;
-                    g_row_off[g_new_count - 1] = row;
                     for (i = 0; i < ROW_WORDS; i++) g_words[g_new_count - 1][i] = rd32(d + row + 4 * (uint32_t)i);
                     snprintf(nf->name, sizeof(nf->name), "%s", sod_string(d, size, rd32(d + row + 4 * W_DISPLAY)));
                     if (!nf->name[0]) snprintf(nf->name, sizeof(nf->name), "Fighter %u", fe);
@@ -225,8 +223,8 @@ static void rebuild_list(void)
             if (field(g_list[i], "FE_ID") == tpl) { at = i; break; }
         if (at < 0 || g_list_n >= LIST_MAX) continue;
         if (!add[0]) {
-            /* hidden from the game's own list (new_fighters_reset_list): the template's string with this row's
-             * ID and stat bars (U, L, S, T, H, C = words 17, 16, 22, 25, 12, 2); the styles are the template's */
+            /* not in the game's own list (it always is today; kept for a list hook): the template's string
+             * with this row's ID and stat bars (U, L, S, T, H, C = words 17, 16, 22, 25, 12, 2) */
             const uint32_t *w = g_words[k];
             snprintf(add, sizeof(add), "%s", g_list[at]);
             set_field(add, "FE_ID", g_new[k].fe_id);
@@ -273,65 +271,6 @@ static void rebuild_list(void)
                     if (field(g_list[i], "FE_ID") == g_new[k].fe_id || field(g_list[i], "FE_ID") == g_new[k].template_fe_id)
                         fprintf(stderr, "[NEWFIGHTER]   %d: %s\n", i, g_list[i]);
     }
-}
-
-/* ---- more new fighters than the game's own list holds ----
- *
- * ResetFighterList keeps its entries in a global array of 128 (0x3A07B0, no bound check; the next global is
- * 0x3A09B0), 74 of them stock. So the game never lists the new rows: while it runs, each new row with a template
- * says feID 98 in the loaded database, the E3 Hero's, which the list skips, and gets its own back right after.
- * The select screens then see the new fighters only through this module's strings, and the feID can be any
- * byte from 100 up (the grid thumbnail is the template cell's). The rows are in the database as the game loaded
- * it (it keeps the file as read and adds its base to the offsets): found once by the first new row's words. */
-static uint32_t g_base;     /* guest address of the loaded djv2.sod, 0: not found (yet) */
-
-static uint32_t find_loaded_database(void)
-{
-#if defined(_WIN32)
-    uintptr_t lo = XBOX_PTR(0), hi = XBOX_PTR(0x04000000u), p = lo;
-    MEMORY_BASIC_INFORMATION mi;
-    while (p < hi && VirtualQuery((LPCVOID)p, &mi, sizeof(mi))) {
-        uintptr_t start = (uintptr_t)mi.BaseAddress, end = start + mi.RegionSize;
-        if (mi.State == MEM_COMMIT && !(mi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) && end > start) {
-            uintptr_t q;
-            /* the first new row's words (string indices and numbers only, so as in the file) */
-            for (q = start < lo ? lo : start; q + 4 * ROW_WORDS <= end && q + 4 * ROW_WORDS <= hi; q += 4)
-                if (*(const uint32_t *)q == g_words[0][0] && !memcmp((const void *)q, g_words[0], 4 * ROW_WORDS)) {
-                    uint32_t row = (uint32_t)(q - lo), a = row - g_row_off[0], i;
-                    /* the other rows must be where the file has them, from the same base */
-                    for (i = 1; i < (uint32_t)g_new_count; i++)
-                        if (MEM32(a + g_row_off[i] + 4u * W_FE_ID) != g_words[i][W_FE_ID]) break;
-                    if (i == (uint32_t)g_new_count) return a;
-                }
-        }
-        p = end;
-    }
-#endif
-    return 0;
-}
-
-extern void sub_00047BC0(void);
-
-void new_fighters_reset_list(void)
-{
-    int k;
-    if (new_fighters_list(NULL) <= 0) { sub_00047BC0(); return; }
-    if (!g_base) {
-        static int tries;       /* a 64 MB scan: a few times at most (not found: the game lists the rows) */
-        if (tries < 4) {
-            tries++;
-            g_base = find_loaded_database();
-            fprintf(stderr, "[NEWFIGHTER] the loaded database is at %08X\n", g_base);
-        }
-    }
-    if (g_base && memcmp((const void *)XBOX_PTR(g_base + g_row_off[0]), g_words[0], 4 * ROW_WORDS))
-        g_base = 0;         /* reloaded elsewhere: found again next time */
-    if (g_base)
-        for (k = 0; k < g_new_count; k++)
-            if (g_new[k].template_fe_id >= 0) MEM32(g_base + g_row_off[k] + 4u * W_FE_ID) = 98u;
-    sub_00047BC0();
-    if (g_base)
-        for (k = 0; k < g_new_count; k++) MEM32(g_base + g_row_off[k] + 4u * W_FE_ID) = (uint32_t)g_new[k].fe_id;
 }
 
 /* Game.GetNextFighter (sub_000480E0, thiscall on the fighter list, reached through the command table's

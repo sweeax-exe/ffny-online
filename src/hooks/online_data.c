@@ -213,7 +213,7 @@ static void load(void)
 int online_fighters(const OnlineFighter **out) { load(); *out = g_fighters; return g_fighter_count; }
 
 /* The new fighters of the database the game reads (new_fighters.c: Character rows with a front-end ID of
- * 100..254, a content pack's), named by their row and styled as their template. Kept apart from
+ * 100..127, a content pack's), named by their row and styled as their template. Kept apart from
  * online_fighters(): the CPU places, the random pick and the draft stay stock, as the relay's list is. */
 static OnlineFighter g_new_fighters[NEW_FIGHTER_MAX];
 static int g_new_fighter_count = -1;
