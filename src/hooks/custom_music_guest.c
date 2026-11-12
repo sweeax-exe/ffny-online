@@ -64,7 +64,7 @@ void custom_music_options_ready(void) { g_options_ready = 1; }
 
 void custom_music_on_update(int rerun, int in_fight)
 {
-    int want, v, i, zeroed = 0;
+    int want, v, i, phase, zeroed = 0;
     if (rerun || !g_audio_up)
         return;
     g_updates++;
@@ -74,7 +74,12 @@ void custom_music_on_update(int rerun, int in_fight)
             fprintf(stderr, "[MUSIC] game music volume %d\n", v);
         g_last_asked = v;
     }
-    custom_music_note_phase((int)MEM32(MATCH_PHASE));    /* read only: a new fight, a new song */
+    /* read only: a new fight, a new song. A phase left at fighting by a fight quit from its pause menu
+     * counts as no fight (in_fight is netplay_in_fight(), which knows that). */
+    phase = (int)MEM32(MATCH_PHASE);
+    if (phase == 1 && !in_fight)
+        phase = 0;
+    custom_music_note_phase(phase);
     if (in_fight)
         g_options_ready = 1;
     custom_music_set_game_volume(g_options_ready ? v : 0);
