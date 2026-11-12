@@ -12,6 +12,9 @@ list, name tables, venue list and entity list. This module builds the result for
 * a pack whose delta original or result does not match, whose ``add`` name exists already (in the base or from
   an earlier pack), whose new venue's feID or filename is taken, or whose op fails is skipped whole; the others go
   on. Two ``replace`` of one entry: the later pack wins;
+* the mods of a pack of several mods (``bundle``, its title ``bundle_name``) apply all or none: when one of them
+  is skipped, the packs are applied again without any mod of that pack, so the files hold nothing of it (its other
+  mods are skipped with "another mod of the pack <name> could not be applied"); single packs are as above;
 * the output is ``<data>/mod-manager/content-files/<P>`` plus ``files.ini`` (which packs applied, which were
   skipped and why, the files), built in ``content-files.new`` and swapped in. With nothing applied the folder is
   removed, so the game reads the originals again;
@@ -524,6 +527,30 @@ def run_packs(bases, chosen, log):
     return work, applied, skipped
 
 
+def run_whole(bases, chosen, log):
+    """``run_packs``, with the mods of a pack of several mods (``bundle``) applied all or none: a pack with a
+    skipped mod is left out whole and the rest applied again from the bases, until no such pack is left (each
+    round leaves out at least one more). Returns (work, applied, skipped, used): ``used`` the packs applied on."""
+    dropped, reasons = set(), {}
+    while True:
+        used = [p for p in chosen if p.get('bundle') not in dropped]
+        work, applied, skipped = run_packs(bases, used, log)
+        failed = dict(skipped)
+        broken = {p['bundle'] for p in used if p.get('bundle') and p['id'] in failed}
+        if not broken:
+            break
+        reasons.update((p['id'], failed[p['id']]) for p in used if p.get('bundle') in broken and p['id'] in failed)
+        dropped |= broken
+    if not dropped:
+        return work, applied, skipped, used
+    for p in chosen:
+        if p.get('bundle') in dropped and p['id'] not in reasons:
+            reasons[p['id']] = 'another mod of the pack %s could not be applied' % (p.get('bundle_name') or p['bundle'])
+            log('[compose] %s skipped: %s' % (p['id'], reasons[p['id']]))
+    reasons.update(skipped)
+    return work, applied, [(p['id'], reasons[p['id']]) for p in chosen if p['id'] in reasons], used
+
+
 def compose_language(lang, chosen, applied, touched, data, game, bases, new, tmp):
     """The same packs once more on top of the language pack's rebuilt files: the paths it covers among
     ``touched`` (those the packs changed) go to <new>/lang/<id>/. Returns the paths written ([]: no overlap)."""
@@ -589,7 +616,8 @@ def read_files_ini(root):
 
 def inputs_key(game, packs, off, languages=()):
     raw = json.dumps([COMPOSER, str(Path(game).resolve()),
-                      [[p['id'], p['version'], p['content_sha256'], p.get('fighter_fe_id', 0)] for p in packs],
+                      [[p['id'], p['version'], p['content_sha256'], p.get('fighter_fe_id', 0)]
+                       + ([p['bundle']] if p.get('bundle') else []) for p in packs],
                       sorted(off),
                       [[lang['id'], lang['stamp']] for lang in languages]])
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
@@ -617,8 +645,9 @@ def unchanged(root, state, key, data, game):
 
 
 def compose(data, game, packs, off=None, root=None, log=print, languages=None):
-    """Compose ``packs`` ([{id, version, content_sha256, kind, order, folder, fighter_fe_id}], every synced pack
-    with an install.json; ``fighter_fe_id`` the catalogue's place of a new fighter) for the player, and once more with each installed language pack (``languages``: the list
+    """Compose ``packs`` ([{id, version, content_sha256, kind, order, folder, fighter_fe_id, bundle,
+    bundle_name}], every synced pack with an install.json; ``fighter_fe_id`` the catalogue's place of a new
+    fighter, ``bundle`` the pack of several mods it belongs to, applied all or none) for the player, and once more with each installed language pack (``languages``: the list
     ``language_packs`` makes, found when None). Returns {applied, skipped, files, lang_files, lang_skipped,
     unchanged}."""
     data = Path(data)
@@ -641,7 +670,7 @@ def compose(data, game, packs, off=None, root=None, log=print, languages=None):
                 'files': state.get('files', []), 'lang_files': [tuple(x) for x in state.get('lang_files', [])],
                 'lang_skipped': [tuple(s) for s in state.get('lang_skipped', [])], 'unchanged': True}
     bases = Bases(data, game)
-    work, applied, skipped = run_packs(bases, chosen, log)
+    work, applied, skipped, used = run_whole(bases, chosen, log)
     files, lang_files, lang_skipped = [], [], []
     if applied:
         new, tmp = root / (OUT + '.new'), root / (OUT + '.lang-tmp')
@@ -653,7 +682,7 @@ def compose(data, game, packs, off=None, root=None, log=print, languages=None):
         touched = set(work.loose) | set(work.archives)
         for lang in languages:
             try:
-                written = compose_language(lang, chosen, applied, touched, data, game, bases, new, tmp)
+                written = compose_language(lang, used, applied, touched, data, game, bases, new, tmp)
                 lang_files += [(lang['id'], rel) for rel in written]
             except PACK_ERRORS + (ComposeError, cpparts.PartsError, loc.LocError, langpack().PackError) as error:
                 lang_skipped.append((lang['id'], str(error)))
