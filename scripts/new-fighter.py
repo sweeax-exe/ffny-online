@@ -57,6 +57,8 @@ def main():
                     "the hub read the database; the game reads FIGHTER.XML for created-fighter archetypes 86..141, so a "
                     "record with the new ID duplicates one of those)")
     ap.add_argument("--set", action="append", default=[], help="WORD=VALUE: a row word (stats)")
+    ap.add_argument("--gameplay", help="a gameplay block (JSON, as a pack's new-fighter op holds it; newfighter.py "
+                                        "gameplay_words) for every new row: its own stats, styles and Blazins")
     ap.add_argument("--list", action="store_true")
     a = ap.parse_args()
     root = data_root(a.data)
@@ -72,6 +74,9 @@ def main():
     out = Path(a.out)
     fe_ids = a.fe_id or [100]
     edits = {}
+    if a.gameplay:
+        import json
+        edits.update(nf.gameplay_words(json.loads(a.gameplay)))
     for s in a.set:
         k, v = s.split("=", 1)
         edits[int(k)] = int(v)

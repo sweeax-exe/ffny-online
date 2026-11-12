@@ -354,6 +354,7 @@ BANK_ARCHIVE = "assets/v2ta.viv"
 SCREENS_ARCHIVE = "screens/screens.viv"
 OP = "new-fighter"
 OP_KEYS = ("op", "template_fe_id", "template_model", "model", "name")
+OP_OPTIONAL = ("gameplay",)     # the fighter's own stats, styles and Blazins (``gameplay_problems``)
 MODEL_SUFFIXES = (".o", ".xsh", "_F.o")
 TEMPLATE_MODEL = re.compile(r"^V2IP_[0-9]{3}[A-Z]$")
 NEW_MODEL = re.compile(r"^V2IP_7[0-9A-Z]{2}A$")
@@ -400,11 +401,13 @@ def model_for(pack_id):
     return "V2IP_7%s%sA" % (alphabet[n % 36], alphabet[(n // 36) % 36])
 
 
-def make_op(template_fe_id, template_model, model, name, fe_id=None):
+def make_op(template_fe_id, template_model, model, name, fe_id=None, gameplay=None):
     op = {"op": OP, "template_fe_id": int(template_fe_id), "template_model": template_model, "model": model,
           "name": name}
     if fe_id is not None:
         op["fe_id"] = int(fe_id)
+    if gameplay is not None:
+        op["gameplay"] = gameplay
     return op
 
 
@@ -413,13 +416,13 @@ def op_problems(op, allow_fe_id=False):
     pack installed by hand or tested from Studio (the server gives a submitted pack its place)."""
     if not isinstance(op, dict) or op.get("op") != OP:
         return ["not a new-fighter op"]
-    keys = set(OP_KEYS) | ({"fe_id"} if allow_fe_id else set())
+    keys = set(OP_KEYS) | set(OP_OPTIONAL) | ({"fe_id"} if allow_fe_id else set())
     out = []
     if "fe_id" in op and not allow_fe_id:
         out.append("leave fe_id out; the server gives a new fighter its place (100 to 127)")
     extra = sorted(set(op) - keys - {"fe_id"})
     if extra or any(k not in op for k in OP_KEYS):
-        out.append("a new-fighter op holds exactly %s" % ", ".join(OP_KEYS))
+        out.append("a new-fighter op holds %s (and optionally %s)" % (", ".join(OP_KEYS), ", ".join(OP_OPTIONAL)))
     t = op.get("template_fe_id")
     if not (isinstance(t, int) and not isinstance(t, bool) and 0 <= t < FIRST_NEW_FE_ID and t not in OUTFIT_FE_IDS):
         out.append("template_fe_id must be a stock fighter with its own select cell")
@@ -432,6 +435,8 @@ def op_problems(op, allow_fe_id=False):
         if not (isinstance(f, int) and not isinstance(f, bool) and FIRST_NEW_FE_ID <= f <= LAST_NEW_FE_ID):
             out.append("fe_id must be %d..%d" % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID))
     out += ["name: " + p for p in name_problems(op.get("name"))]
+    if "gameplay" in op:
+        out += ["gameplay: " + p for p in gameplay_problems(op["gameplay"])]
     return out
 
 
@@ -493,7 +498,8 @@ def apply_op(files, op, fe_id, pictures=True):
     if any(r["model"].upper() == model.upper() for r in rows.values()):
         raise FighterError("the model %s is another fighter's already" % model)
     edits = []
-    sod_out, _, _ = append_character(sod_blob, template_fe_id, fe_id, name, name, model)
+    words = gameplay_words(op["gameplay"]) if "gameplay" in op else None
+    sod_out, _, _ = append_character(sod_blob, template_fe_id, fe_id, name, name, model, edits=words)
     edits.append(("loose", SOD_PATH, None, sod_out))
     edits.append(("loose", ENTITY_XML, None, add_entity(files.current(ENTITY_XML), template, model)))
     nis = next((n for n in files.names(NIS_ARCHIVE) if n.lower() == INTRO_EXTRO.lower()), None)
@@ -508,3 +514,250 @@ def apply_op(files, op, fe_id, pictures=True):
         edits += [("add", SCREENS_ARCHIVE, n, data)
                   for n, data in picture_copies(_View(files, SCREENS_ARCHIVE), template_fe_id, fe_id)]
     return edits
+
+
+# -- the fighter's own gameplay (stats, fighting styles, Blazins) ---------------------------------------------------
+#
+# A new fighter fights on its template's gameplay unless its op has a ``gameplay`` block
+# (``docs/research/new-fighter-gameplay.md`` in the game repository):
+#
+#   "gameplay": {"version": 1,
+#                "stats": {"upper": 9, "lower": 7, "speed": 10, "toughness": 6, "health": 9, "grapple": 7,
+#                          "charisma": 8},                  # each 1..15 (grapple 0..15), the sum at most STAT_BUDGET
+#                "styles": ["K", "S", "M"],                 # optional: 1..3 styles, the first the main one;
+#                                                           # left out: the template's own moves and styles
+#                "blazins": [34, 7, 51, 12],                # four Blazin ids 0..81 (keys 0..3; a stock fighter
+#                                                           # has its own one in all four)
+#                "bars": {"upper": 30, ...},                # optional: the select screen's bars 0..50
+#                                                           # (U L S T H C); left out: made from the stats
+#                "voice": {"mode": "template"}}             # optional, reserved: the template's voice for now
+#
+# The game applies it at match set-up the way it applies a created fighter's (the per-slot stat block, the
+# style-combination core 86..140 and the four Blazin keys), the same on every PC: the values live in two words
+# of the fighter's Character row the game never reads (word 11: the stats, word 3: the Blazins; the moveset
+# split over both; ``src/hooks/fighter_gameplay.h``), so they are in the signed database and the fight-file print.
+
+STAT_KEYS = ("upper", "lower", "speed", "toughness", "health", "grapple", "charisma")
+STAT_NAMES = ("Upper body", "Lower body", "Speed", "Toughness", "Health", "Grapple", "Charisma")
+STAT_MIN, STAT_MAX = 1, 15
+GRAPPLE_MIN = 0             # the sixth stat: 0 for every stock and created fighter (its effect is not measured)
+STAT_BUDGET = 60            # the largest stock stat sum (all seven), measured; the game and the server use the same
+BAR_KEYS = ("upper", "lower", "speed", "toughness", "health", "charisma")
+BAR_WORDS = (17, 16, 22, 25, 12, 2)     # the select screen's U L S T H C bars, 0..50
+BAR_MAX = 50
+STYLES = ("B", "K", "S", "W", "M")      # the created fighters' archetype letters, in the game's order
+STYLE_NAMES = {"B": "Street Fighting", "K": "Kickboxing", "S": "Submissions", "W": "Wrestling",
+               "M": "Martial Arts"}
+STYLE_BITS = {"K": 0, "B": 1, "M": 2, "W": 3, "S": 4}    # Character row word 18 (the select screen's styles)
+BLAZIN_COUNT, BLAZIN_MAX = 4, 81
+GAMEPLAY_VERSION = 1
+GAMEPLAY_KEYS = ("version", "stats", "styles", "blazins", "bars", "voice")
+W_BLAZINS, W_GAMEPLAY, W_STYLE_BITS = 3, 11, 18
+ARCHETYPE_FIRST = 86        # fighter.xml "CP B__"; the 55 archetypes run to 140 "CP MW_"
+BLAZIN_TABLE = 0x47D305FD   # djv2.sod table 6: Blazing_<owner> rows, word 4 the Blazin id
+
+
+def archetypes():
+    """[(fighter.xml id, styles)] of the created fighters' 55 style combinations, in the game's order: per main
+    style (B K S W M) the main alone, then with each other one in that order, each followed by its pairs."""
+    out = []
+    for main in STYLES:
+        others = [x for x in STYLES if x != main]
+        combos = [()]
+        for i, a in enumerate(others):
+            combos.append((a,))
+            combos += [(a, b) for b in others[i + 1:]]
+        out += [(main,) + c for c in combos]
+    return [(ARCHETYPE_FIRST + i, c) for i, c in enumerate(out)]
+
+
+def archetype_name(styles):
+    """``CP KSM`` (fighter.xml's name of the archetype) for a style list."""
+    styles = list(styles)
+    return "CP " + "".join([styles[0]] + sorted(styles[1:], key=STYLES.index)).ljust(3, "_")
+
+
+def moveset_of(styles):
+    """The moveset number (1..55) of a style list (main first, then up to two others in any order); 0 for None
+    (the template's own moves)."""
+    if styles is None:
+        return 0
+    styles = list(styles)
+    key = tuple([styles[0]] + sorted(styles[1:], key=STYLES.index))
+    for k, (_, combo) in enumerate(archetypes()):
+        if combo == key:
+            return k + 1
+    raise FighterError("no style combination %s" % "".join(styles))
+
+
+def styles_of(moveset):
+    """The style list of a moveset number (None for 0, the template's moves)."""
+    return None if not moveset else list(archetypes()[moveset - 1][1])
+
+
+def stat_bar(value):
+    """The select screen's bar (0..50) for a stat: a stock fighter's bars are about five times its stats (Doc
+    9 6 10 5 10 10 -> 43 30 50 27 50 50), and no stock stat passes 10."""
+    return max(0, min(BAR_MAX, int(value) * 5))
+
+
+def stat_min(key):
+    return GRAPPLE_MIN if key == "grapple" else STAT_MIN
+
+
+def _int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def gameplay_problems(g):
+    """What is wrong with a gameplay block ([] when nothing), in words for the mod creator; the account service
+    checks the same."""
+    if not isinstance(g, dict):
+        return ["gameplay must be an object"]
+    out = []
+    extra = sorted(set(g) - set(GAMEPLAY_KEYS))
+    if extra:
+        out.append("unknown key%s %s" % ("s" if len(extra) > 1 else "", ", ".join(extra)))
+    if g.get("version") != GAMEPLAY_VERSION:
+        out.append("version must be %d" % GAMEPLAY_VERSION)
+    stats = g.get("stats")
+    if not isinstance(stats, dict) or set(stats) != set(STAT_KEYS):
+        out.append("stats must name all seven: %s" % ", ".join(STAT_KEYS))
+    else:
+        bad = [k for k in STAT_KEYS if not (_int(stats[k]) and stat_min(k) <= stats[k] <= STAT_MAX)]
+        if bad:
+            out.append("each stat is %d to %d, grapple 0 to %d (%s)" % (STAT_MIN, STAT_MAX, STAT_MAX, ", ".join(bad)))
+        else:
+            total = sum(stats.values())
+            if total > STAT_BUDGET:
+                out.append("the stats add up to %d, %d over the budget of %d points" % (total, total - STAT_BUDGET,
+                                                                                        STAT_BUDGET))
+    if g.get("styles") is not None:
+        st = g["styles"]
+        if not (isinstance(st, list) and 1 <= len(st) <= 3 and all(isinstance(x, str) and x in STYLES for x in st)
+                and len(set(st)) == len(st)):
+            out.append("styles: one main style and up to two more, all different, of %s" % " ".join(STYLES))
+    bl = g.get("blazins")
+    if not (isinstance(bl, list) and len(bl) == BLAZIN_COUNT and all(_int(x) and 0 <= x <= BLAZIN_MAX for x in bl)):
+        out.append("blazins: four Blazin ids, 0 to %d" % BLAZIN_MAX)
+    if "bars" in g:
+        bars = g["bars"]
+        if not (isinstance(bars, dict) and set(bars) == set(BAR_KEYS)
+                and all(_int(bars[k]) and 0 <= bars[k] <= BAR_MAX for k in BAR_KEYS)):
+            out.append("bars: %s, each 0 to %d" % (", ".join(BAR_KEYS), BAR_MAX))
+    if "voice" in g and g["voice"] != {"mode": "template"}:
+        out.append('voice: only {"mode": "template"} for now (own voices come later)')
+    return out
+
+
+def gameplay_words(g):
+    """{row word: value} for a valid gameplay block: words 11 and 3 (what the game applies, the encoding of the
+    game's ``src/hooks/fighter_gameplay.h``), the select screen's bars and, for a style combination, its style
+    bits (word 18)."""
+    problems = gameplay_problems(g)
+    if problems:
+        raise FighterError("gameplay: " + problems[0])
+    moveset = moveset_of(g.get("styles"))
+    w11 = GAMEPLAY_VERSION << 28 | ((moveset >> 4) & 3) << 30
+    for k, key in enumerate(STAT_KEYS):
+        w11 |= g["stats"][key] << (4 * k)
+    w3 = (moveset & 0xF) << 28
+    for k, v in enumerate(g["blazins"]):
+        w3 |= v << (7 * k)
+    out = {W_GAMEPLAY: w11, W_BLAZINS: w3}
+    bars = g.get("bars") or {k: stat_bar(g["stats"][k]) for k in BAR_KEYS}
+    for k, word in zip(BAR_KEYS, BAR_WORDS):
+        out[word] = bars[k]
+    if g.get("styles"):
+        out[W_STYLE_BITS] = sum(1 << STYLE_BITS[x] for x in g["styles"])
+    return out
+
+
+def gameplay_from_words(words):
+    """The gameplay block a Character row holds (words 3 and 11), or None (its template's): the reverse of
+    ``gameplay_words``, with the game's own checks."""
+    w3, w11 = words[W_BLAZINS], words[W_GAMEPLAY]
+    if (w11 >> 28) & 3 != GAMEPLAY_VERSION:
+        return None
+    moveset = (w3 >> 28) & 0xF | ((w11 >> 30) & 3) << 4
+    if moveset > len(archetypes()):
+        return None
+    g = {"version": GAMEPLAY_VERSION, "stats": {k: (w11 >> (4 * i)) & 0xF for i, k in enumerate(STAT_KEYS)},
+         "blazins": [(w3 >> (7 * k)) & 0x7F for k in range(BLAZIN_COUNT)]}
+    if moveset:
+        g["styles"] = styles_of(moveset)
+    return None if gameplay_problems(g) else g
+
+
+def blazin_names(sod_blob):
+    """{Blazin id: name} from the game's database (table 6: ``Blazing_<owner>`` rows, word 4 the id), the names
+    the Studio's Blazin pickers show (``Blazing_Doc`` -> ``Doc``, ``Blazing_CP WBS FRONT`` -> ``Created WBS
+    FRONT``)."""
+    s = Sod(sod_blob)
+    if BLAZIN_TABLE not in s.table_hashes:
+        return {}
+    off = s.table_offsets[s.table_hashes.index(BLAZIN_TABLE)]
+    classes = _u32(s.blob, off + 0x10)
+    _, count, stride, _, vals = _block(s.blob, _u32(s.blob, off + 0x18 + 4 * classes))
+    out = {}
+    for p in vals[::stride]:
+        bid = _u32(s.blob, p + 16)
+        if bid > BLAZIN_MAX:
+            continue
+        label = re.sub(r"^blazing_", "", s.string(_u32(s.blob, p)) or "", flags=re.I).strip()
+        out[bid] = re.sub(r"^CP ", "Created ", label) or "Blazin %d" % bid
+    return out
+
+
+def _item_index(sod_blob, row_offset):
+    """A Character row's item index (its place in the name-keyed class block; item ID = 7 << 24 | index)."""
+    s = Sod(sod_blob)
+    off = s.table_offsets[s.table_hashes.index(CHARACTER)]
+    classes = _u32(s.blob, off + 0x10)
+    for c in range(classes):
+        if _u32(s.blob, off + 0x18 + 4 * c) == CHARACTER:
+            _, _, stride, _, vals = _block(s.blob, _u32(s.blob, off + 0x18 + 4 * classes + 4 * c))
+            ptrs = list(vals[::stride])
+            return ptrs.index(row_offset) if row_offset in ptrs else None
+    return None
+
+
+def own_blazin(sod_blob, fe_id):
+    """The Blazin id of a stock fighter's own Blazin (the Blazin row whose owner, word 1, is the fighter's item
+    ID), or None (Suspect has none)."""
+    s = Sod(sod_blob)
+    rows = {r["fe_id"]: r for r in characters(sod_blob)}
+    if fe_id not in rows or BLAZIN_TABLE not in s.table_hashes:
+        return None
+    index = _item_index(sod_blob, rows[fe_id]["offset"])
+    item = (s.table_hashes.index(CHARACTER) << 24) | (index if index is not None else 0xFFFFFF)
+    off = s.table_offsets[s.table_hashes.index(BLAZIN_TABLE)]
+    classes = _u32(s.blob, off + 0x10)
+    _, _, stride, _, vals = _block(s.blob, _u32(s.blob, off + 0x18 + 4 * classes))
+    for p in vals[::stride]:
+        if _u32(s.blob, p + 4) == item:
+            return _u32(s.blob, p + 16)
+    return None
+
+
+def template_gameplay(sod_blob, fe_id):
+    """A stock fighter's own gameplay as a gameplay block (its moves: no ``styles``), for the editor's start and
+    "Reset": the stats from its select-screen bars (a fifth of each; measured exact for Doc and Blaze, whose
+    stats the game decodes as 9 6 10 5 10 0 10 and 10 9 5 10 7 0 9), Grapple 0 and its own Blazin in all four
+    keys, as the game gives a stock fighter (``None`` in the four when it has none of its own). None when there
+    is no such fighter."""
+    rows = {r["fe_id"]: r for r in characters(sod_blob)}
+    if fe_id not in rows:
+        return None
+    w = rows[fe_id]["words"]
+    stats = {k: max(STAT_MIN, min(STAT_MAX, int(w[word] / 5.0 + 0.5))) for k, word in zip(BAR_KEYS, BAR_WORDS)}
+    stats["grapple"] = GRAPPLE_MIN
+    own = own_blazin(sod_blob, fe_id)
+    return {"version": GAMEPLAY_VERSION, "stats": {k: stats[k] for k in STAT_KEYS}, "blazins": [own] * BLAZIN_COUNT}
+
+
+def template_styles(sod_blob, fe_id):
+    """The style letters a stock fighter's select-screen entry shows (Character row word 18)."""
+    rows = {r["fe_id"]: r for r in characters(sod_blob)}
+    bits = rows[fe_id]["words"][W_STYLE_BITS] if fe_id in rows else 0
+    return [x for x in STYLES if bits >> STYLE_BITS[x] & 1]
