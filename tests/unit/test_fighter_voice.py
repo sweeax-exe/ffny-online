@@ -233,6 +233,35 @@ def test_gameplay_block_with_a_voice():
     assert nf.op_problems(op) == []
 
 
+def tags_file(entries):
+    keys = sorted(entries, key=lambda k: struct.unpack("<Q", k)[0])
+    head, body, table = 8 + 4 * len(keys), b"", []
+    for k in keys:
+        table.append(head + len(body))
+        body += k + entries[k]
+    return b"TAGS" + struct.pack("<I", len(keys)) + struct.pack("<%dI" % len(keys), *table) + body
+
+
+def read_tags(blob):
+    n = struct.unpack_from("<I", blob, 4)[0]
+    offs = list(struct.unpack_from("<%dI" % n, blob, 8)) + [len(blob)]
+    return [(blob[offs[i]:offs[i] + 8], blob[offs[i] + 8:offs[i + 1]]) for i in range(n)]
+
+
+def test_new_model_gets_the_templates_speech_tags():
+    """The intro/victory speech starts from the camera banks' sound tags (audio/animtags.dat, keyed by the bank
+    name reversed); a new model's CE_/CI_ banks get copies of the template's."""
+    ci, ce = b"\x02\0\0\0" + b"\0\0\x01\0;\0\0\0n\0\x01\0;\0\0\0", b"\x01\0\0\0" + b"\0\0\x01\0<\0\0\0"
+    blob = tags_file({b"\0A901_IC": ci, b"\0A901_EC": ce, bytes(4) + b"601A": bytes(8), b"\0AZZZ_IC": b"\0" * 4})
+    out = nf.add_anim_tags(blob, "V2IP_109A", "V2IP_7K3A")
+    got = dict(read_tags(out))
+    assert got[b"\0A3K7_IC"] == ci and got[b"\0A3K7_EC"] == ce and len(got) == 6
+    keys = [k for k, _ in read_tags(out)]
+    assert keys == sorted(keys, key=lambda k: struct.unpack("<Q", k)[0])
+    assert nf.add_anim_tags(out, "V2IP_109A", "V2IP_7K3A") == out          # once only
+    assert nf.add_anim_tags(blob, "V2IP_999A", "V2IP_7K3A") == blob        # a template without tags
+
+
 def test_installer_rules():
     assert ".sch" in mods.ALLOWED and ".asf" in mods.ALLOWED
     assert content_compose.stored(b"SCHl data", "audio/speech2.viv") == b"SCHl data"

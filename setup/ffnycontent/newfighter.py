@@ -313,6 +313,43 @@ def rename_model_symbols(blob, old_model, new_model):
     return blob.replace(old, new)
 
 
+ANIM_TAGS = "audio/animtags.dat"
+
+
+def add_anim_tags(blob, template_model, model):
+    """``audio/animtags.dat`` with the template's entrance and intro camera banks' sound tags copied for the new
+    model's (``CE_109A`` -> ``CE_7K3A``, ``CI_109A`` -> ``CI_7K3A``). The file ("TAGS", u32 count, count u32
+    offsets, then per entry an 8-byte key, the bank's name reversed and zero-filled, and its tags) is sorted by the
+    key as a little-endian u64. The tags fire the fighter's intro and victory speech (the speech code's events
+    0xF000000A / 0xF000000C): without them a new model walks in and wins silent (measured 2026-11-12).
+    Returns the same bytes when the template has no tags or the model has them already."""
+    if blob[:4] != b"TAGS" or len(blob) < 8:
+        raise FighterError("audio/animtags.dat is not a tag file")
+    count = struct.unpack_from("<I", blob, 4)[0]
+    offs = list(struct.unpack_from("<%dI" % count, blob, 8)) + [len(blob)]
+    entries = {blob[offs[i]:offs[i] + 8]: blob[offs[i] + 8:offs[i + 1]] for i in range(count)}
+    old = template_model.upper().replace("V2IP_", "")
+    new = model.upper().replace("V2IP_", "")
+
+    def key(name):
+        return (name.encode("latin-1") + b"\0" * 8)[:8][::-1]
+    changed = False
+    for prefix in ("CE_", "CI_"):
+        src, dst = key(prefix + old), key(prefix + new)
+        if src in entries and dst not in entries:
+            entries[dst] = entries[src]
+            changed = True
+    if not changed:
+        return blob
+    keys = sorted(entries, key=lambda k: struct.unpack("<Q", k)[0])
+    head = 8 + 4 * len(keys)
+    out, table = bytearray(), []
+    for k in keys:
+        table.append(head + len(out))
+        out += k + entries[k]
+    return b"TAGS" + struct.pack("<I", len(keys)) + struct.pack("<%dI" % len(keys), *table) + bytes(out)
+
+
 def add_taunt(taunt_bytes, template_model, model):
     """``assets/IntroExtro.xml`` (in nis.viv; the loose ``assets/taunt.xml`` is the same list and is never read)
     with a ``<taunt>`` for ``model``: the template's, its intro and extro camera banks (``CI_109A``/``CE_109A``)
@@ -525,6 +562,12 @@ def apply_op(files, op, fe_id, pictures=True, pack=None):
     if len(banks) != 2:
         raise FighterError("the camera banks of %s are missing, or %s has its own already" % (template, model))
     edits += [("add", BANK_ARCHIVE, n, data) for n, data in banks]
+    try:
+        tags = files.current(ANIM_TAGS)
+    except (KeyError, OSError):
+        tags = None
+    if tags is not None:
+        edits.append(("loose", ANIM_TAGS, None, add_anim_tags(tags, template, model)))
     if pictures:
         edits += [("add", SCREENS_ARCHIVE, n, data)
                   for n, data in picture_copies(_View(files, SCREENS_ARCHIVE), template_fe_id, fe_id)]
