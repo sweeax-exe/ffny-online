@@ -113,6 +113,20 @@ def test_sync_removes_dropped_and_revoked_packs(setup, tmp_path):
     assert '[pack.' not in content_ini(manager)
 
 
+def test_sync_removes_a_withdrawn_pack_when_the_catalogue_is_empty(setup, tmp_path):
+    # the account service's withdraw (2026-11-12) publishes a revision without the pack; here the only one
+    manager, key = setup
+    a_path, a = base.package(tmp_path, name='only')
+    ffny(key, a_path, a, order=1)
+    raw, sig = publish(key, [a], 1)
+    run_sync(manager, raw, sig, {a['versions'][0]['archive']['sha256']: a_path})
+    assert (manager.mods / 'only').is_dir()
+    raw, sig = publish(key, [], 2)
+    run_sync(manager, raw, sig, {})
+    assert not (manager.mods / 'only').exists() and 'only' not in manager.state()['installed']
+    assert '[pack.' not in content_ini(manager) and 'up to date: 0 pack(s)' not in manager.message
+
+
 def test_sync_refuses_a_bad_pack_signature_and_keeps_going(setup, tmp_path):
     manager, key = setup
     a_path, a = base.package(tmp_path, name='good')
