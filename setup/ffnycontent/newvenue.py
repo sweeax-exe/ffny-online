@@ -7,6 +7,12 @@ name, row ``ID`` (max + 1 at install time) and ``feID``; it keeps the template's
 venue from the Venue table of ``assets/djv2.sod`` (``sod.append_venue``); ``venue.xml`` gets a ``<venue>`` record
 and ``assets/entity.xml`` the template's ``<entity>`` renamed. The venue's own archive entries are the pack's
 ``add`` entries.
+
+Its far crowd (the rows drawn at the bones of a locator file in ``assets/icrowd.viv``, named by the entity's
+``<instancecrowdlocator>``) is the template's unless the op names one of its own: ``"crowd_locator": "icl_28A"``,
+which the pack adds as ``assets/icrowd.viv|icl_28A.o`` (the template's locator with moved places). Only the pack's
+own code, only as an add (a retail locator is never replaced by a new venue), checked by ``check_crowd``. A
+launcher before this ignored the field: the venue played with the template's far crowd.
 """
 
 import re
@@ -17,6 +23,9 @@ from . import sod as sodmod
 VENUE_XML = "venue.xml"
 ENTITY_XML = "assets/entity.xml"
 VENUE_ARCHIVE = "assets/v2bg.viv"
+ICROWD_ARCHIVE = "assets/icrowd.viv"
+LOCATOR_ENTRY = re.compile(r"icl_\d\d[A-Z]\.o")
+LOCATOR_MIN, LOCATOR_MAX = 4 * 1024, 64 * 1024     # retail: 10640 to 20592 bytes
 
 
 class VenueError(ValueError):
@@ -69,6 +78,46 @@ def drop_entity_models(block, main):
     return re.sub(r"[ \t]*<model>.*?</model>[ \t]*\r?\n?", keep, block, flags=re.S)
 
 
+def set_crowd_locator(block, locator):
+    """An ``<entity>`` block whose ``<instancecrowdlocator>`` names ``locator``; VenueError without one."""
+    text, n = re.subn(r"(<instancecrowdlocator>)[^<]*(</instancecrowdlocator>)",
+                      lambda m: m.group(1) + locator + m.group(2), block, count=1)
+    if not n:
+        raise VenueError("the template %s has no far crowd" % locator)
+    return text
+
+
+def check_crowd(op, entries):
+    """A new-venue pack's far crowd: the op's ``crowd_locator`` is ``icl_<code>``, and the pack's only
+    ``icrowd.viv`` entry is the add of exactly that file from a locator of the same kind; or neither. Raises
+    VenueError."""
+    code = op.get("code")
+    locator = op.get("crowd_locator")
+    mine = [e for e in entries if e.get("archive") == ICROWD_ARCHIVE or e.get("base_archive") == ICROWD_ARCHIVE]
+    if locator is None:
+        if mine:
+            raise VenueError("the new venue changes icrowd.viv without naming its own far crowd")
+        return None
+    if not isinstance(code, str) or locator != "icl_" + code:
+        raise VenueError("invalid far crowd %r" % (locator,))
+    want = locator + ".o"
+    if len(mine) != 1:
+        raise VenueError("the new venue's far crowd needs exactly one icrowd.viv entry, %s" % want)
+    e = mine[0]
+    if (e.get("mode") != "add" or e.get("entry") != want or e.get("base_archive") != ICROWD_ARCHIVE
+            or not LOCATOR_ENTRY.fullmatch(str(e.get("base_entry")))):
+        raise VenueError("a new venue only adds its own far crowd %s to icrowd.viv" % want)
+    if not LOCATOR_MIN <= e.get("result_size", 0) <= LOCATOR_MAX:
+        raise VenueError("%s has an unlikely size" % want)
+    return want
+
+
+def check_locator(base, result):
+    """A far-crowd locator made from ``base`` (a retail one): an ELF object of the same size (only places move)."""
+    if result[:4] != b"\x7fELF" or len(result) != len(base):
+        raise VenueError("the far crowd file is not a locator like the template's")
+
+
 def _numbers(text, tag):
     out = []
     for block in re.finditer(r"<venue>.*?</venue>", text, re.S):
@@ -107,6 +156,8 @@ def apply(venue_xml, entity_xml, sod_blob, op, taken_names=()):
     block = entity_block(ent, template, filename)
     if op.get("drop_objects"):
         block = drop_entity_models(block, filename)
+    if op.get("crowd_locator") is not None:
+        block = set_crowd_locator(block, op["crowd_locator"])
     end = ent.rindex("</entitylist>")
     entity_out = (ent[:end].rstrip("\r\n") + "\r\n\t" + block + "\r\n" + ent[end:]).encode("latin-1")
     sod_out, _ = sodmod.append_venue(sod_blob, int(op["template_fe_id"]), fe_id, filename,

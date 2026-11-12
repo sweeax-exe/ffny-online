@@ -44,7 +44,7 @@ import struct
 from ffnycontent import clothing, cpparts, delta, loc, newfighter, newvenue, viv
 
 SCHEMA = 1
-COMPOSER = 3                    # bump when the output for the same inputs changes
+COMPOSER = 4                    # bump when the output for the same inputs changes
 TYPES = ('fighter-body', 'clothing', 'venue', 'new-fighter')
 OUT = 'content-files'
 LANG_DIR = 'lang'               # content-files/lang/<language pack>/<P>: the packs on top of that translation
@@ -425,9 +425,13 @@ def apply_pack(work, folder, info, fe_id=None):
         work.replace(clothing.PARTS_ARCHIVE, clothing.PARTS_XML, parts.encode('latin-1'))
         for name, blob in tables.items():
             work.replace(clothing.NAMES_ARCHIVE, name, blob)
+    crowd = None
     for op in info.get('ops', []):
         if op['op'] != 'new-venue':
             continue
+        crowd = newvenue.check_crowd(op, info.get('entries', []))
+        if crowd and work.exists(newvenue.ICROWD_ARCHIVE, crowd):
+            raise ComposeError('%s|%s exists already' % (newvenue.ICROWD_ARCHIVE, crowd))
         taken = set()
         if work.bases.exists(newvenue.VENUE_ARCHIVE):
             taken = {n.lower() for n in work.bases.archive(newvenue.VENUE_ARCHIVE).names()}
@@ -456,6 +460,8 @@ def apply_pack(work, folder, info, fe_id=None):
         result = delta.apply(base, path.read_bytes())
         if len(result) != e['result_size'] or hashlib.sha256(result).hexdigest() != e['result_sha256']:
             raise ComposeError('the result of %s does not match install.json' % e['delta'])
+        if crowd and rel == newvenue.ICROWD_ARCHIVE:
+            newvenue.check_locator(base, result)
         if e['mode'] == 'add':
             if work.exists(rel, entry):
                 raise ComposeError('%s exists already' % ('%s|%s' % (rel, entry) if entry else rel))
