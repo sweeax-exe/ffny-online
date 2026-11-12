@@ -82,7 +82,7 @@ int milestones_rows(const uint8_t *p, uint32_t size, int toughness_fix, Mileston
     put(out, max, &n, MS_SPEED, "Time running", "+1 Speed", rd16(p, size, 0x72), 250, 1, MS_NOTE_NONE);
     put(out, max, &n, MS_TOUGHNESS, "Wins in fights with 3+ fighters", "+1 Toughness", rd16(p, size, 0x74), 10, 1,
         toughness_fix ? MS_NOTE_TOUGHNESS_FIX : MS_NOTE_TOUGHNESS_RETAIL);
-    put(out, max, &n, MS_TOUGHNESS, "Comebacks from low health", "+1 Toughness", rd16(p, size, 0x76), 25, 0,
+    put(out, max, &n, MS_TOUGHNESS, "Wins after being in danger", "+1 Toughness", rd16(p, size, 0x76), 25, 1,
         MS_NOTE_NONE);
     put(out, max, &n, MS_HEALTH, "Fights ended at full health", "+1 Health", rd16(p, size, 0x80), 5, 1, MS_NOTE_NONE);
     put(out, max, &n, MS_HEALTH, "Counters and blocks", "+1 Health", rd32(p, size, 0x7C), 100, 1, MS_NOTE_NONE);
@@ -94,9 +94,9 @@ int milestones_rows(const uint8_t *p, uint32_t size, int toughness_fix, Mileston
     }
     put(out, max, &n, MS_CHARISMA, "Crowd grab attacks", "+1 Charisma", rd32(p, size, 0x84), 25, 1, MS_NOTE_NONE);
     put(out, max, &n, MS_CHARISMA, "Wall grabs landed", "+1 Charisma", rd32(p, size, 0x88), 250, 1, MS_NOTE_NONE);
-    put(out, max, &n, MS_CHARISMA, "Fights played to the finish", "+1 Charisma", rd16(p, size, 0x8C), 5, 0,
+    put(out, max, &n, MS_CHARISMA, "Fights finished", "+1 Charisma", rd16(p, size, 0x8C), 5, 1,
         MS_NOTE_NONE);
-    put(out, max, &n, MS_CHARISMA, "Knockouts by the surroundings", "+1 Charisma", rd16(p, size, 0x82), 5, 0,
+    put(out, max, &n, MS_CHARISMA, "Blazin moves done", "+1 Charisma", rd16(p, size, 0x82), 5, 1,
         MS_NOTE_NONE);
     put(out, max, &n, MS_CHARISMA, "Win a Story fight at the Window", "+1 Charisma", rd8(p, size, 0x8E) ? 1u : 0u, 1, 0,
         MS_NOTE_NONE);
