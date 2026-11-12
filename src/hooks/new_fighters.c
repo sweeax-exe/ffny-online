@@ -22,6 +22,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "new_fighters.h"
 #include "fighter_gameplay.h"
+#include "fighter_voice.h"
 
 unsigned int defjam_fe_call(const char *command);                   /* recomp_manual.c */
 FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c: as the print reads it */
@@ -324,6 +325,108 @@ void new_fighters_blazins(void)
                     (int)MEM32(rec + REC_BLAZINS + 12), g && idx < CP_FIRST_INDEX ? " (set here)" : "",
                     (double)MEMF(rec + REC_MAX_HEALTH));
     }
+}
+
+/* ---- the voice at match load (fighter_voice.h) ----
+ *
+ * sub_0003E170 (the speech set-up of a match) fills one 0x64-byte row per slot at 0x3403A4: +0x00 the slot's
+ * coreID (-1 empty), +0x10 the voice number (stock: 0x2DC5D0[coreID]; a created fighter: 0x28E48C[voice]); then
+ * it queues the slot's banks with sub_0003DB00 (whose entry runs this), and later sub_00038440 / 0x3C52B stream
+ * the intro / extro line by the same field. A new fighter whose row word 21 holds its own voice number gets
+ * that number here when the speech archive the game opens has all its files; else it keeps the template's. */
+#define W_SPEECH        21
+#define SPEECH_ROWS     0x003403A4u     /* + 0x64 * slot */
+#define SPEECH_ROW_SIZE 0x64u
+#define SPEECH_VOICE    0x10u
+
+static int g_voice_present[NEW_FIGHTER_MAX];   /* 0 unknown, 1 all files there, -1 not */
+
+static int voice_files_present(int voice)
+{
+    int idx = voice - FV_FIRST_VOICE, overridden = 0;
+    FILE *f;
+    uint8_t head[16], *dir;
+    uint32_t hsize;
+    if (idx < 0 || idx >= NEW_FIGHTER_MAX) return 0;
+    if (g_voice_present[idx]) return g_voice_present[idx] > 0;
+    g_voice_present[idx] = -1;
+    f = netplay_open_fight_file(FV_SPEECH_ARCHIVE, &overridden);
+    if (!f) return 0;
+    if (fread(head, 1, 16, f) == 16) {
+        hsize = (uint32_t)head[12] << 24 | (uint32_t)head[13] << 16 | (uint32_t)head[14] << 8 | head[15];
+        if (hsize >= 16 && hsize < 16u * 1024 * 1024 && (dir = (uint8_t *)malloc(hsize)) != NULL) {
+            memcpy(dir, head, 16);
+            if (fread(dir + 16, 1, hsize - 16, f) == hsize - 16 && fighter_voice_entries_present(dir, hsize, voice))
+                g_voice_present[idx] = 1;
+            free(dir);
+        }
+    }
+    fclose(f);
+    fprintf(stderr, "[VOICE] voice %03d: files %s in %s%s\n", voice, g_voice_present[idx] > 0 ? "all present" :
+            "missing", FV_SPEECH_ARCHIVE, overridden ? " (pack copy)" : "");
+    return g_voice_present[idx] > 0;
+}
+
+/* The own voice number of new fighter fe_id when its row asks for one (word 21 = 40 + feID - 100), else -1. */
+static int new_fighter_voice(int fe_id)
+{
+    int i, n = fighter_voice_number(fe_id);
+    if (n < 0) return -1;
+    if (g_new_count < 0) load();
+    for (i = 0; i < g_new_count; i++)
+        if (g_new[i].fe_id == fe_id) return (int)g_words[i][W_SPEECH] == n ? n : -1;
+    return -1;
+}
+
+void new_fighters_voice(void)
+{
+    static uint32_t s_logged[4];
+    uint32_t gd = game_data();
+    int s, fe, voice;
+    if (gd < 0x10000u) return;
+    for (s = 0; s < 4; s++) {
+        uint32_t row = SPEECH_ROWS + SPEECH_ROW_SIZE * (uint32_t)s, was = MEM32(row + SPEECH_VOICE);
+        fe = (int)MEM8(gd + GD_FIGHTER + 5u * (uint32_t)s);
+        if (fe < NEW_FIGHTER_FIRST || fe > NEW_FIGHTER_LAST || MEM32(row) == 0xFFFFFFFFu) continue;
+        voice = new_fighter_voice(fe);
+        if (voice < 0 || (int)was == voice) continue;
+        if ((int)MEM32(row) != new_fighter_core(fe)) {
+            /* not the row's slot as the stock path set it up (a created fighter's voice): leave it */
+            fprintf(stderr, "[VOICE] slot %d feID %d: speech row core %u is not the fighter's; voice left\n", s, fe,
+                    MEM32(row));
+            continue;
+        }
+        if (!voice_files_present(voice)) {
+            if (s_logged[s] != (uint32_t)(voice << 16 | was))
+                fprintf(stderr, "[VOICE] slot %d feID %d: own voice %03d has no files; the template's voice %03u\n",
+                        s, fe, voice, was);
+            s_logged[s] = (uint32_t)(voice << 16 | was);
+            continue;
+        }
+        MEM32(row + SPEECH_VOICE) = (uint32_t)voice;
+        fprintf(stderr, "[VOICE] slot %d feID %d: own voice %03d (the template's was %03u)\n", s, fe, voice, was);
+    }
+}
+
+/* RECOMP_SPEECH_LOG=1: every bank line the game looks up (sub_001393F0: cdecl (bank header, entry index, ...);
+ * the header holds the bank's family and voice number), and always for an own voice (40..99): which line plays
+ * when. A measurement for docs/research/new-fighter-voice.md. */
+void new_fighters_speech_line(uint32_t hdr, uint32_t index)
+{
+    static int s_all = -1;
+    uint32_t family, voice;
+    if (hdr < 0x10000u) return;
+    if (s_all < 0) s_all = getenv("RECOMP_SPEECH_LOG") && *getenv("RECOMP_SPEECH_LOG") == '1';
+    family = MEM16(hdr);
+    voice = MEM16(hdr + 2);
+    if (s_all || (voice >= FV_FIRST_VOICE && voice < 100))
+        fprintf(stderr, "[SPEECH] line: %s voice %03u entry %u of %u (fields %u %u %u)\n",
+                family <= 1 ? "Character" : (family & 0xFFFEu) == 16624u ? "Taunts" : (family & 0xFFFEu) == 40962u ?
+                "Enviro" : "bank", voice, index, MEM8(hdr + 5),
+                index < MEM8(hdr + 5) ? MEM8(hdr + 12 + ((MEM8(hdr + 4) & 0x7Fu) + 2u) * index + 2) : 0u,
+                index < MEM8(hdr + 5) ? MEM8(hdr + 12 + ((MEM8(hdr + 4) & 0x7Fu) + 2u) * index + 3) : 0u,
+                index < MEM8(hdr + 5) && (MEM8(hdr + 4) & 0x7Fu) > 2 ?
+                    MEM8(hdr + 12 + ((MEM8(hdr + 4) & 0x7Fu) + 2u) * index + 4) : 0u);
 }
 
 int new_fighters_list(const NewFighter **out)

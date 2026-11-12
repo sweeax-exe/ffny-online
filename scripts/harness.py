@@ -202,6 +202,10 @@ def build_pad_script(stages, raw_tail=""):
 FIGHT_END = os.environ.get("HARNESS_FIGHT_SECS", "1200")
 FIGHT_TAIL = (f"@game.startgame(,right:8:{FIGHT_END}:4:1.2,x:10:{FIGHT_END}:0.8:0.15,y:10.2:{FIGHT_END}:0.8:0.15,"
               f"a:10.4:{FIGHT_END}:0.8:0.15,b:10.6:{FIGHT_END}:0.8:0.15")
+# HARNESS_FIGHT_EXTRA=<entries>: more presses in the fight, in the runtime's syntax after the same anchor (seconds
+# from the match's start), e.g. right-stick taunts "rup:14:14.3,rdown:22:22.3"
+if os.environ.get("HARNESS_FIGHT_EXTRA"):
+    FIGHT_TAIL += "," + os.environ["HARNESS_FIGHT_EXTRA"]
 
 # Typing "AAA" on the user-ID screen and taking DONE.
 NEW_ID_KEYS = "a@5;a@7;a@8;a@9;down@11+0.6x9;right@17.5;a@19;a@23+3x6"

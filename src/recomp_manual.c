@@ -142,6 +142,13 @@ void sub_001A4D90_enter(void)
 /* The fight's Blazins (sub_001A4D90 tail-jumps here once the records spawned): a new fighter on its template's
  * moves gets its own four Blazins in its record before the body registers them (src/hooks/new_fighters.c). */
 void sub_001A8180_enter(void) { new_fighters_blazins(); }
+/* The match's speech set-up queues each slot's voice banks here (from sub_0003E170 once its per-slot speech rows
+ * are written, and from 0x3DE08 / 0x3E0AD): a new fighter's own voice number goes into its row first, so the
+ * banks, the intro and the extro are its own (src/hooks/new_fighters.c, fighter_voice.h). Audio only. */
+void sub_0003DB00_enter(void) { new_fighters_voice(); }
+/* A bank line's place in its .dat (cdecl: bank header, entry index, out offset, out size): which line of which
+ * voice plays (RECOMP_SPEECH_LOG=1; always for a new fighter's own voice). */
+void sub_001393F0_enter(void) { new_fighters_speech_line(MEM32(g_esp + 4), MEM32(g_esp + 8)); }
 /* Combo log (RECOMP_COMBO_LOG=1, src/hooks/combo_log.c): one hit, cdecl (attacker, defender,
  * hit flags) at g_esp+4/+8/+12, before the body copies the move to the defender's +0xFB8. */
 void sub_001C6CD0_enter(void)
