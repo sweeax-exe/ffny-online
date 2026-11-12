@@ -121,8 +121,9 @@ def test_every_milestone_with_the_games_thresholds(out):
     assert all(x[9] == '0' for x in r)                      # a fresh profile reaches nothing
     assert rows(out, 'empty-count')[0][1:] == ['19', '0']
     assert r[9][8] == '500'                                 # Health 2: two conditions, 100 and 500
-    # the counters whose meaning is confirmed are marked sure; the inferred ones are not
-    assert [x[10] for x in r[:15]] == ['1', '1', '1', '1', '0', '0', '1', '0', '1', '0', '0', '0', '0', '0', '0']
+    # the counters whose meaning is confirmed are marked sure (Speed, Health 2 and two Charisma rows confirmed by
+    # players who know the retail rules, build 80); the inferred ones are not
+    assert [x[10] for x in r[:15]] == ['1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '1', '0']
 
 
 def test_progress_and_reached(out):

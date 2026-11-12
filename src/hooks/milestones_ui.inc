@@ -108,7 +108,7 @@ void ms_detail(const MilestoneRow &r, char *line1, int n1, char *line2, int n2)
         char c2[24], t2[24];
         milestones_count_text(r.count2, c2, sizeof(c2));
         milestones_count_text(r.target2, t2, sizeof(t2));
-        snprintf(line1, n1, "Two counts, both needed: %s of %s and %s of %s. Gives %s.", count, target, c2, t2, r.reward);
+        snprintf(line1, n1, "Both needed: counters %s of %s and blocks %s of %s. Gives %s.", count, target, c2, t2, r.reward);
     } else
         snprintf(line1, n1, "%s: %s, needs %s. %s %s%s", r.what, count, target, r.reached ? "Reached:" : "Gives",
                  r.reward, r.note == MS_NOTE_REPLACES ? " (in place of the +1 at 100)." : ".");
