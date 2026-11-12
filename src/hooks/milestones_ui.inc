@@ -109,7 +109,10 @@ void ms_detail(const MilestoneRow &r, char *line1, int n1, char *line2, int n2)
         milestones_count_text(r.count2, c2, sizeof(c2));
         milestones_count_text(r.target2, t2, sizeof(t2));
         snprintf(line1, n1, "Both needed: counters %s of %s and blocks %s of %s. Gives %s.", count, target, c2, t2, r.reward);
-    } else
+    } else if (r.note == MS_NOTE_COMEBACK)
+        snprintf(line1, n1, "Big comeback: %s%% of %s%% health won back after being in danger. %s %s.", count, target,
+                 r.reached ? "Reached:" : "Gives", r.reward);
+    else
         snprintf(line1, n1, "%s: %s, needs %s. %s %s%s", r.what, count, target, r.reached ? "Reached:" : "Gives",
                  r.reward, r.note == MS_NOTE_REPLACES ? " (in place of the +1 at 100)." : ".");
     if (r.note == MS_NOTE_TOUGHNESS_FIX)
@@ -122,6 +125,8 @@ void ms_detail(const MilestoneRow &r, char *line1, int n1, char *line2, int n2)
         snprintf(line2, n2, "* What the game counts here is read from its code, not confirmed: the name may be off.");
     else if (r.note == MS_NOTE_REPLACES)
         snprintf(line2, n2, "One bonus point over the +1: about half the time the stat shown goes up by one.");
+    else if (r.note == MS_NOTE_COMEBACK)
+        snprintf(line2, n2, "One big comeback is usually enough: get into danger, win back health and win the fight.");
     else
         snprintf(line2, n2, "Counts across all fights since the fighter was made.");
 }

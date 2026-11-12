@@ -82,8 +82,8 @@ int milestones_rows(const uint8_t *p, uint32_t size, int toughness_fix, Mileston
     put(out, max, &n, MS_SPEED, "Time running", "+1 Speed", rd16(p, size, 0x72), 250, 1, MS_NOTE_NONE);
     put(out, max, &n, MS_TOUGHNESS, "Wins in fights with 3+ fighters", "+1 Toughness", rd16(p, size, 0x74), 10, 1,
         toughness_fix ? MS_NOTE_TOUGHNESS_FIX : MS_NOTE_TOUGHNESS_RETAIL);
-    put(out, max, &n, MS_TOUGHNESS, "Wins after being in danger", "+1 Toughness", rd16(p, size, 0x76), 25, 1,
-        MS_NOTE_NONE);
+    put(out, max, &n, MS_TOUGHNESS, "Big comeback", "+1 Toughness", rd16(p, size, 0x76), 25, 1,
+        MS_NOTE_COMEBACK);
     put(out, max, &n, MS_HEALTH, "Fights ended at full health", "+1 Health", rd16(p, size, 0x80), 5, 1, MS_NOTE_NONE);
     put(out, max, &n, MS_HEALTH, "Counters and blocks", "+1 Health", rd32(p, size, 0x7C), 100, 1, MS_NOTE_NONE);
     if (n > 0 && out[n - 1].group == MS_HEALTH && out[n - 1].target == 100) {
@@ -158,7 +158,10 @@ void milestones_progress_text(const MilestoneRow *row, char *out, int size)
     milestones_count_text(row->count, a, sizeof(a));
     milestones_count_text(row->target, b, sizeof(b));
     if (!row->target2) {
-        snprintf(out, (size_t)size, "%s / %s", a, b);
+        if (row->note == MS_NOTE_COMEBACK)          /* health won back, in percent (Big comeback) */
+            snprintf(out, (size_t)size, "%s%% / %s%%", a, b);
+        else
+            snprintf(out, (size_t)size, "%s / %s", a, b);
         return;
     }
     milestones_count_text(row->count2, c, sizeof(c));
