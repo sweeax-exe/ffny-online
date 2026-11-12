@@ -28,6 +28,7 @@
 
 #include "host.h"
 #include "recomp/gen/recomp_types.h"
+#include "guest_window.h"
 #include "dynload_guard.h"
 
 #define LIST_HEAD       0x003A52A8u     /* the loaded objects: +0 next, +4 prev */
@@ -56,7 +57,7 @@ unsigned dynload_guard_refused(void) { return g_refused; }
 static int readable(uint32_t a, uint32_t len)
 {
     uint64_t end = (uint64_t)a + len;
-    return (a >= 0x1000u && end <= 0x04000000u) || (a >= 0x80000000u && end <= 0x84000000u);
+    return (a >= 0x1000u && end <= 0x04000000u) || (a >= GUEST_WINDOW_LO && end <= GUEST_WINDOW_HI);
 }
 
 static const char *bad(uint32_t at, const char *what, const char *format, uint32_t a, uint32_t b)
