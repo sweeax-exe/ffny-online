@@ -108,9 +108,9 @@ modules (`voiceaudio.make_clip`, `contentinstall.write_new_fighter_pack`) and co
 
 | Run (logs/dj/...) | What | Result |
 |---|---|---|
-| `20261112-182041-offline` | "Voice Test" (feID 100, on Doc, voice-only block) vs CPU Xzibit | `[VOICE] voice 040: files all present in audio\speech2.viv (pack copy)`, `slot 0 feID 100: own voice 040 (the template's was 025)`; the game reads `intro .asf` and, after the KO, `extro .asf`; the CPU's taunts come from `Taunts voice 002` (fields 4 0 1 / 4 0 0) |
+| `20261112-182041-offline` | "Voice Test" (feID 100, on Doc, voice-only block) vs CPU Xzibit | `[VOICE] voice 040: files all present in audio\speech2.viv (pack copy)`, `slot 0 feID 100: own voice 040 (the template's was 025)`; the game reads `intro\040.asf` and, after the KO, `extro\040.asf`; the CPU's taunts come from `Taunts voice 002` (fields 4 0 1 / 4 0 0) |
 | `20261112-184643-offline` | our encoded intro put in place of Xzibit's `002.asf` | **heard**: 14 of 15 chunks at one start, correlation 0.96 (the codec plays in the game) |
-| `20261112-183659-offline`, `-184826-offline` | voiced fighter in slot 0 / slot 1 | `intro .asf` read whole (88,308 bytes), **not heard**; Xzibit's stock intro heard (0.95); the own **crowd line** from the 040 Enviro bank (`[SPEECH] line: Enviro voice 040 entry 7 of 9`) **heard** (11/11 chunks, 0.95) |
+| `20261112-183659-offline`, `-184826-offline` | voiced fighter in slot 0 / slot 1 | `intro\040.asf` read whole (88,308 bytes), **not heard**; Xzibit's stock intro heard (0.95); the own **crowd line** from the 040 Enviro bank (`[SPEECH] line: Enviro voice 040 entry 7 of 9`) **heard** (11/11 chunks, 0.95) |
 | | cause | the new model's camera banks had no speech tags in `audio/animtags.dat` (section 2); fixed by `add_anim_tags` |
 | `20261112-191729-offline` | stock Doc vs voiced fighter, with the tags | Doc's intro heard at 38.5 s (31/32, 0.95), **the own intro heard** at 42.1 s (20/28, 0.92); HUD `VOICE TEST` |
 | `20261112-192533-offline` | voiced fighter wins by KO | **own intro heard** (21/28, 0.94), **own win line heard** at 63.0 s (18/35, 0.85); Xzibit's extro not played (0 agree) |
