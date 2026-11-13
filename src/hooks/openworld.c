@@ -18,6 +18,7 @@
  * RECOMP_OW_REVIVE=<steps>  tests, never online: a fighter that has been "ended" (+0x932 bit 0x200) for <steps>
  *                           steps stands up again: health from sub_001A4F30 (the match set-up's health init), the
  *                           defeat bits cleared, state 1 (free) through sub_001B5420, put at a spawn point.
+ * RECOMP_OW_PUPPET=<slot>[,out] tests, never online: a host-driven slot (puppet_step).
  * RECOMP_OW_FOLLOWCAM=mode[,dist,height[,slot]]
  *                           a per-PC follow camera on the local fighter (online: netplay_local_slot(), offline: the
  *                           given slot, default 0). mode "fixed": the stock heading (looks along -Z), the eye dist
@@ -116,8 +117,8 @@ static void track_line(void)
 {
     char line[1200];
     int n = 0, s;
-    n += snprintf(line + n, sizeof line - (size_t)n, "[OWTRACK] step %lld planes %u floor0 %.2f |", s_fight_step,
-                  MEM32(PLANES_N), (double)MEMF(0x003BF1CCu));
+    n += snprintf(line + n, sizeof line - (size_t)n, "[OWTRACK] step %lld planes %u arena kind %u floor0 %.2f |", s_fight_step,
+                  MEM32(PLANES_N), MEM32(0x003B9084u), (double)MEMF(0x003BF1CCu));
     for (s = 0; s < 4 && n > 0 && n < (int)sizeof line; s++) {
         uint32_t r = rec(s), t;
         int ts = -1;
@@ -262,7 +263,7 @@ static void help_cards_seen(void)
     uint32_t gs, sd;
     if (on < 0) {
         on = getenv("RECOMP_OW_PROF") || getenv("RECOMP_OW_TRACK") || getenv("RECOMP_OW_TELEPORT") ||
-             getenv("RECOMP_OW_KO") || getenv("RECOMP_OW_FOLLOWCAM");
+             getenv("RECOMP_OW_KO") || getenv("RECOMP_OW_FOLLOWCAM") || getenv("RECOMP_OW_PUPPET");
     }
     if (!on || ffny_online_locked()) return;
     gs = MEM32(0x2FB148u + 4u * 0x18u);
@@ -272,6 +273,33 @@ static void help_cards_seen(void)
     if (MEM8(sd + 0x60u) && MEM8(sd + 0x61u) && MEM8(sd + 0x62u)) return;
     MEM8(sd + 0x60u) = MEM8(sd + 0x61u) = MEM8(sd + 0x62u) = 1;
     fprintf(stderr, "[OWTEST] first-time help cards marked as seen (tests)\n");
+}
+
+/* RECOMP_OW_PUPPET=<slot>[,<mode>] tests, never online: that fighter becomes a "puppet" from the given fight step 200
+ * on: every step our code writes its position (a circle of radius 70 around the origin, 0.6 units a step) and
+ * facing, and mode "out" also sets the "ended" bit +0x932 0x200 (not targetable or hittable, wall-stagger.md /
+ * the RE study), so the run shows what a host-driven slot looks like and what the bit does to the others. */
+static void puppet_step(void)
+{
+    static int parsed, slot = -1, out;
+    uint32_t r;
+    float a;
+    if (!parsed) {
+        const char *v = getenv("RECOMP_OW_PUPPET");
+        parsed = 1;
+        if (v) { slot = atoi(v); out = strstr(v, "out") != NULL; }
+    }
+    if (slot < 0 || slot > 3 || ffny_online_locked() || !present(slot) || s_fight_step < 200) return;
+    r = rec(slot);
+    a = (float)(s_fight_step - 200) * 0.6f / 70.0f;
+    MEMF(r + 0x44u) = 70.0f * cosf(a);
+    MEMF(r + 0x4Cu) = 70.0f * sinf(a);
+    MEMF(r + 0x54u) = -a * 57.29578f;           /* tangent, in the game's degrees */
+    if (out) MEM16(r + 0x932u) |= 0x200u;
+    if (s_fight_step == 200 || s_fight_step % 300 == 0)
+        fprintf(stderr, "[OWPUPPET] step %lld: slot %d at %.1f,%.1f state %u flags %04X hp %.1f\n", s_fight_step, slot,
+                (double)MEMF(r + 0x44u), (double)MEMF(r + 0x4Cu), MEM32(r + 0x30u), MEM16(r + 0x932u),
+                (double)MEMF(r + 0x350u));
 }
 
 /* ---------------------------------------------------------------- the wrapped functions */
@@ -290,6 +318,7 @@ void ow_step(void (*gen)(void))
         if (s_fight_step == 1) help_cards_seen();
         teleport_step();
         ko_revive_step();
+        puppet_step();
     }
     if (!prof_on()) {
         gen();
