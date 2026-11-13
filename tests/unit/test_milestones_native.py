@@ -137,6 +137,7 @@ def test_progress_and_reached(out):
     assert get[9][9] == '0' and get[9][13] == '99 / 100  +  500 / 500'             # Health 2: 99 of 100 holds it back
     assert abs(float(get[9][12]) - 0.99) < 0.001
     assert get[8][9] == '1' and get[10][9] == '1' and get[11][9] == '1'
+    assert get[7][3] == 'Big comeback' and get[7][13].endswith('% / 25%')                  # health won back, in %
     assert get[12][9] == '0' and get[13][9] == '1' and get[14][9] == '1'
     # base stats: 60 counts as 50, -5 as 0: 50+50+50+50+40+0 = 240 of 250
     assert get[15][5] == '240' and get[15][9] == '0'

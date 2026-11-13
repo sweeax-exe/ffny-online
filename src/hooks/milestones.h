@@ -44,7 +44,7 @@ typedef struct MilestoneRow {
     int note;               /* MS_NOTE_* */
 } MilestoneRow;
 
-enum { MS_NOTE_NONE, MS_NOTE_REPLACES, MS_NOTE_TOUGHNESS_FIX, MS_NOTE_TOUGHNESS_RETAIL };
+enum { MS_NOTE_NONE, MS_NOTE_REPLACES, MS_NOTE_TOUGHNESS_FIX, MS_NOTE_TOUGHNESS_RETAIL, MS_NOTE_COMEBACK };
 
 /* The group's heading ("UPPER BODY", ..., "ID CARD"). */
 const char *milestones_group_name(int group);
