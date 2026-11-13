@@ -348,6 +348,18 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define HASH_EVERY    60
 #define P_REMATCH     8             /* u32 START seed, u32 match number: Rematch chosen; 0xFFFFFFFF: back to the room */
 #define REMATCH_NO    0xFFFFFFFFu
+/* P_REMATCH byte 9 (builds before 55 send 9 bytes, 55-80 only bit 0): bit 0 this PC fell back (chain_ask);
+ * build 81: bit 2 this PC answers a resent choice, bit 1 this is a resent choice (the fight's first-step
+ * wait), bit 3 the answer: that rematch runs here already. Older builds read bit 0 only. */
+#define REMATCH_F_RESEND  2u
+#define REMATCH_F_ACKS    4u
+#define REMATCH_F_RUNNING 8u
+#define REMATCH_RESEND_MS 500       /* a rematch's first step: this PC's choice again, this often */
+/* A rematch's first step and a player of build 81+ that has not said the rematch runs there (it answers a
+ * resent choice at once, also while it loads): it is still on the last fight's results, or gone. The fight
+ * waited START_LIMIT_MS (90 s) for it: F9 13ca19 (build 79), 53 s on a frozen picture until that player
+ * went back to the room, its own choice repeated all along (this PC's had not reached it). */
+#define REMATCH_START_LIMIT_MS 10000
 #define P_PINGINFO    9             /* in a room, every PINGINFO_MS: u16 this PC's ping to the relay (builds from 30);
                                      * since build 46 u8 rollback (bit 0: rolls back in the next match, bit 1: the
                                      * setting is on but this session runs without it) */
@@ -594,6 +606,13 @@ static struct {
     uint32_t rematch_want[MAXP];    /* the match number each player chose Rematch after, REMATCH_NO: went back */
     volatile LONG rematch_held;     /* this PC chose Rematch and waits for the others (its call was held) */
     volatile LONG rematch_go;       /* ... and they all have now: the game thread starts the rematch */
+    /* Build 81: a choice lost on the way left the other PC on its results, waiting for this one, while this
+     * one waited at the rematch's first step (rematch_wait_tick). rematch_acks: that player's choices say it
+     * answers a resent one (REMATCH_F_ACKS); rematch_ack: the match number it said runs there (its answer,
+     * REMATCH_F_RUNNING); rematch_resent / rematch_answered: when this PC last sent either. */
+    int rematch_acks[MAXP];
+    uint32_t rematch_ack[MAXP];
+    ULONGLONG rematch_resent, rematch_answered[MAXP];
     /* players gone mid-fight while two or more stay (P_GONE): the others go on in lockstep, the gone
      * player's port at rest from an agreed step on; cleared at every START */
     uint32_t gone_mask;             /* positions gone */
@@ -975,9 +994,33 @@ static void rematch_rearm(void)
     InterlockedExchange(&N.lockstep, 1);
 }
 
-int netplay_rematch_request(void)
+/* This PC's Rematch choice after match `after` (P_REMATCH), with byte 9's flags. */
+static void rematch_send(uint32_t after, uint8_t flags)
 {
     uint8_t p[10];
+    /* RECOMP_TEST_REMATCH_DROP=<n> (tests): this PC's first n choices (not resent) get lost; 100 or more: every
+     * choice, resent ones and answers too (a PC whose choices never arrive) */
+    static int drop = -1;
+    if (drop < 0) drop = getenv("RECOMP_TEST_REMATCH_DROP") ? atoi(getenv("RECOMP_TEST_REMATCH_DROP")) : 0;
+    if (drop >= 100) {
+        static int told;
+        if (!told++) fprintf(stderr, "[NETPLAY] tests: none of this PC's Rematch choices are sent (RECOMP_TEST_REMATCH_DROP)\n");
+        return;
+    }
+    if (!flags && drop > 0) {
+        drop--;
+        fprintf(stderr, "[NETPLAY] tests: this PC's Rematch choice after match %u is not sent (RECOMP_TEST_REMATCH_DROP)\n", after);
+        return;
+    }
+    p[0] = P_REMATCH;
+    put32(p + 1, N.start_seed);
+    put32(p + 5, after);
+    p[9] = (uint8_t)((N.chain_ask ? 1u : 0u) | REMATCH_F_ACKS | flags);
+    send_data(p, 10);
+}
+
+int netplay_rematch_request(void)
+{
     int i, all = 1, gone = -1;
     uint32_t after;
     if (!N.lobby) return 0;
@@ -1025,11 +1068,7 @@ int netplay_rematch_request(void)
         if (N.rematch_want[i] != after) all = 0;
     }
     LeaveCriticalSection(&g_cs);
-    p[0] = P_REMATCH;
-    put32(p + 1, N.start_seed);
-    put32(p + 5, after);
-    p[9] = N.chain_ask ? 1u : 0u;   /* build 55: this PC fell back in a fight of this START (chain_decide) */
-    send_data(p, 10);
+    rematch_send(after, 0);     /* byte 9 bit 0 (build 55): this PC fell back in a fight of this START (chain_decide) */
     if (gone >= 0) {
         toast(8000, "%s went back to the room: choose No to join them.", player_name(gone));
         return 1;
@@ -2652,32 +2691,61 @@ static void on_data(int from, const uint8_t *p, int len)
                     after == REMATCH_NO ? "went back to the room" : "chose Rematch");
         } else if (N.lobby && len >= 9 && get32(p + 1) == N.start_seed && N.start_seed && !SPECTATOR_HERE()) {
             uint32_t after = get32(p + 5);
-            int mine, all = 1, i;
+            uint8_t flags = len >= 10 ? p[9] : 0;
+            int mine, all = 1, i, again;
+            ULONGLONG now = GetTickCount64();
             EnterCriticalSection(&g_cs);
+            again = N.rematch_want[from] == after;
             N.rematch_want[from] = after;
             N.rematch_flags[from] = len >= 10 ? (uint8_t)(0x80u | (p[9] & 1u)) : 0;
+            if (flags & REMATCH_F_ACKS) N.rematch_acks[from] = 1;
+            if ((flags & REMATCH_F_RUNNING) && after != REMATCH_NO) N.rematch_ack[from] = after + 1u;
             mine = N.rematch_want[N.pos] == after;
             for (i = 0; i < N.players; i++) if (N.rematch_want[i] != after) all = 0;
             LeaveCriticalSection(&g_cs);
-            fprintf(stderr, "[NETPLAY] rematch: player %d %s\n", from + 1,
-                    after == REMATCH_NO ? "went back to the room" : "chose Rematch");
-            if (N.set_match && !N.koth_match) {
+            /* build 81: resends and answers come every REMATCH_RESEND_MS; only the first is told */
+            if (!again || !(flags & (REMATCH_F_RESEND | REMATCH_F_RUNNING)))
+                fprintf(stderr, "[NETPLAY] rematch: player %d %s%s\n", from + 1,
+                        after == REMATCH_NO ? "went back to the room" : "chose Rematch",
+                        flags & REMATCH_F_RUNNING ? " (it runs there)" : flags & REMATCH_F_RESEND ? " (sent again)" : "");
+            if ((flags & REMATCH_F_RUNNING) && after != REMATCH_NO && after < N.match_count) {
+                /* the answer to this PC's resent choice: that rematch runs there (loading, or under way) */
+                SetEvent(N.arrived);
+            } else if (N.set_match && !N.koth_match) {
                 /* a ranked set's game: no rematch between its games (netplay_rematch_request), so no
                  * "wants a rematch" prompt; the next game starts from the room */
                 if (after == REMATCH_NO) SetEvent(N.arrived);
             } else if (after != REMATCH_NO && after < N.match_count) {
-                /* that rematch runs already (the choice that started it on that PC, sent again) */
+                /* that rematch runs already (the choice that started it on that PC, sent again). Build 81: a
+                 * resent choice is from a PC waiting at that rematch's first step for this one: say it runs
+                 * here (that PC gives up on a player that never says so). A choice not resent (an older
+                 * build, or its player pressing Rematch again on its results) gets this PC's own choice
+                 * again: the one that started it here may never have reached that PC. */
+                if (after + 1u == N.match_count && N.rematch_want[N.pos] == after && !N.watching &&
+                    now - N.rematch_answered[from] >= REMATCH_RESEND_MS / 2) {
+                    N.rematch_answered[from] = now;
+                    rematch_send(after, (flags & REMATCH_F_RESEND) ? REMATCH_F_RUNNING : REMATCH_F_RESEND);
+                }
             } else if (after == REMATCH_NO) {
                 InterlockedExchange(&N.rematch_go, 0);
                 SetEvent(N.arrived);    /* a fight that waits for its first entries stops waiting (below) */
                 toast(8000, "%s went back to the room: choose No to join them.", player_name(from));
             } else if (mine && all && N.rematch_held == (LONG)(after + 1u)) {
                 InterlockedExchange(&N.rematch_go, 1);      /* netplay_rematch_tick starts it */
+                /* build 81: no longer held, so that the same choice again (resent) cannot start it twice */
+                InterlockedExchange(&N.rematch_held, 0);
                 toast(6000, "%s accepted the rematch: it starts now.", player_name(from));
-            } else if (mine)
-                toast(6000, "%s accepted the rematch.", player_name(from));
-            else
+            } else if (mine) {
+                if (!again) toast(6000, "%s accepted the rematch.", player_name(from));
+            } else
                 toast(8000, "%s wants a rematch! Choose Rematch to accept.", player_name(from));
+            /* build 81: a resent choice for the rematch this PC starts now (every player chose it; its
+             * match not set up yet): it runs here, as far as the PC waiting for it is concerned */
+            if ((flags & REMATCH_F_RESEND) && after != REMATCH_NO && after == N.match_count && mine && all &&
+                !(N.set_match && !N.koth_match) && now - N.rematch_answered[from] >= REMATCH_RESEND_MS / 2) {
+                N.rematch_answered[from] = now;
+                rematch_send(after, REMATCH_F_RUNNING);
+            }
         }
         break;
     case P_HASH: {
@@ -3740,6 +3808,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     }
     EnterCriticalSection(&g_cs);
     memset(N.rematch_want, 0, sizeof(N.rematch_want));
+    memset(N.rematch_acks, 0, sizeof(N.rematch_acks));
+    memset(N.rematch_ack, 0, sizeof(N.rematch_ack));
     N.gone_mask = 0;                /* every player of this START is here */
     memset(N.gone_from, 0, sizeof(N.gone_from));
     memset(N.gone_heard, 0, sizeof(N.gone_heard));
@@ -8409,7 +8479,28 @@ static void step_run(void)
              * STALL_LIMIT_MS is enough. */
             int unheard = N.lobby && !N.watching && late >= 0 && late < MAXP && N.peer_rtt[late] < 0 &&
                           g_steps_match[late] != N.match && N.match_count == 1;
-            if (now - waited_since > (decided ? DECIDED_LIMIT_MS :
+            /* Build 81: a rematch's first step, and the late player chose this rematch too but nothing of it
+             * came from that PC yet. Its choice reached this PC, this PC's may not have reached it: then it
+             * still waits on its results for this one (F9 13ca19, build 79: 53 s frozen here, its choice
+             * repeated all along). This PC's choice goes again every REMATCH_RESEND_MS: that PC starts the
+             * rematch on it (any build since 45), and a build-81 one answers that it runs (also while it
+             * loads). A build-81 player with no such answer after REMATCH_START_LIMIT_MS is not coming:
+             * this fight goes on offline (it never ran there, so nobody left it: no leave is reported). */
+            int rematch_start = N.lobby && !N.watching && N.match_count > 1 && need <= (uint32_t)N.delay + 1 &&
+                                late >= 0 && late < MAXP && g_steps_match[late] != N.match &&
+                                N.rematch_want[N.pos] == N.match_count - 1u && N.rematch_want[late] == N.match_count - 1u;
+            int rematch_lost = rematch_start && N.rematch_acks[late] && N.rematch_ack[late] != N.match_count &&
+                               now - waited_since > REMATCH_START_LIMIT_MS;
+            /* only to a build-81 PC: an older one, between starting the rematch and setting its match up
+             * (the load), took the same choice again as a new go and could call Game.Rematch() twice */
+            if (rematch_start && N.rematch_acks[late] && now - N.rematch_resent >= REMATCH_RESEND_MS) {
+                if (!N.rematch_resent || now - N.rematch_resent > 5000)
+                    fprintf(stderr, "[NETPLAY] rematch: nothing from player %d at its first step: this PC's choice again "
+                            "(step %u)\n", late + 1, s);
+                N.rematch_resent = now;
+                rematch_send(N.match_count - 1u, REMATCH_F_RESEND);
+            }
+            if (rematch_lost || now - waited_since > (decided ? DECIDED_LIMIT_MS :
                                       need <= (uint32_t)N.delay + 1 && !unheard ? START_LIMIT_MS : STALL_LIMIT_MS)) {
                 uint32_t u;
                 if (decided) {
@@ -8477,6 +8568,14 @@ static void step_run(void)
                               "a drop on your side can count as your loss. START quits.", (quiet + 500) / 1000);
                         break;
                     }
+                }
+                if (rematch_lost) {
+                    fprintf(stderr, "[NETPLAY] player %d never started the rematch (no answer in %.1f s): it runs offline\n",
+                            late + 1, (now - waited_since) / 1000.0);
+                    set_status("A player never started the rematch; it runs offline.");
+                    toast(10000, "%s didn't start the rematch: it goes on offline and won't count. START quits.",
+                          player_name(late));
+                    break;
                 }
                 if (unheard) {
                     fprintf(stderr, "[NETPLAY] player %d sent nothing since the START: it is not in this match\n", late + 1);
@@ -9697,8 +9796,12 @@ void netplay_on_update(void)
         if (N.lockstep && N.desync)
             fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks): out of sync since step %u\n",
                     N.step, N.rb_count, N.desync_step);
-        else
-            fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks)\n", N.step, N.rb_count);
+        else if (!N.lockstep)
+            fprintf(stderr, "[ROLLBACK] off for the rest of this match (step %u, %u rollbacks this session): it went on offline\n",
+                    N.step, N.rb_count);
+        else    /* build 81: the normal end of every rollback fight, read as a fallback more than once (F9 8015d8) */
+            fprintf(stderr, "[ROLLBACK] the match is decided and every step is final: rollback ends with it, as in every "
+                    "fight, not a fallback (step %u, %u rollbacks this session)\n", N.step, N.rb_count);
         rbm_summary(!N.lockstep ? "went on offline" : N.desync ? "went out of sync" : "decided");
         return;
     }
