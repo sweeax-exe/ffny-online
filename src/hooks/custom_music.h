@@ -28,7 +28,11 @@
  *    gives way, and after the game's track a song comes. Host only, like the rest.
  *  - Each song is brought to about the level of the game's music (musiclib::LevelMeter, measured once on
  *    the player thread), then follows the game's MUSIC volume.
- * Settings: [music] mode (auto, mine, mix, original), shuffle and new_song_per_match; RECOMP_MUSIC_DIR points at another
+ *  - The order: shuffle off, the songs play in the list's order ([music] sort: the player's own order in
+ *    <music>/order.txt, by name, by artist or newest added first; musiclib::sort_songs); shuffle on, at random
+ *    as before. A change in the launcher's or the game's MY MUSIC list reaches the player at once
+ *    (custom_music_order_changed): the next song is the one after the current one in the new order.
+ * Settings: [music] mode (auto, mine, mix, original), shuffle, sort and new_song_per_match; RECOMP_MUSIC_DIR points at another
  * folder (tests), RECOMP_MUSIC_GAIN (percent, default 100) trims how loud the songs are against the game. */
 #ifndef DEFJAM_CUSTOM_MUSIC_H
 #define DEFJAM_CUSTOM_MUSIC_H
@@ -57,6 +61,8 @@ void custom_music_set_in_fight(int in_fight);
 void custom_music_note(int playing);        /* the game's stream opened (1) or stopped (0) */
 void custom_music_note_track_change(void);
 void custom_music_note_phase(int phase);   /* the match phase [0x3B8F30], once per game update */
+/* The list's order, [music] sort or [music] shuffle changed (the launcher's or the game's MY MUSIC page). */
+void custom_music_order_changed(void);
 
 #ifdef __cplusplus
 }

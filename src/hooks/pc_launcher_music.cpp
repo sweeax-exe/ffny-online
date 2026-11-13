@@ -11,6 +11,12 @@
 
 #include "pc_ui_actions.h"
 
+extern "C" {
+#include "custom_music.h"
+#include "pc_settings.h"
+#include "recomp_settings.h"
+}
+
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -89,6 +95,8 @@ void work(std::vector<std::string> adding)
                 }
             }
             if (todo) musiclib::save_index(dir, songs);
+            if (!songs.empty()) set_progress("Reading your songs' artists...");
+            for (auto &s : songs) musiclib::read_artist(s);
             if (bad && summary.empty()) {
                 summary = bad == 1 ? "1 file cannot be played; the game skips it." :
                                      std::to_string(bad) + " files cannot be played; the game skips them.";
@@ -99,6 +107,12 @@ void work(std::vector<std::string> adding)
             tone = 2;
         }
         std::lock_guard<std::mutex> lock(g_mutex);
+        // the player's own order, and when each song was added; under the lock, like move(), so a song
+        // moved while this ran is not undone
+        try {
+            musiclib::apply_order(dir, songs);
+        } catch (...) {
+        }
         g_view.songs = std::move(songs);
         g_view.more = more;
         g_view.loaded = true;
@@ -160,6 +174,63 @@ void remove(const musiclib::Song &song)
         say(song.name + " " + why, 2);
     }
     refresh();
+}
+
+int sort_setting()
+{
+    int sort = recomp_settings_get("music", "sort", musiclib::SORT_CUSTOM);
+    return sort >= 0 && sort < musiclib::SORT_COUNT ? sort : musiclib::SORT_CUSTOM;
+}
+
+void set_sort(int sort)
+{
+    if (sort < 0 || sort >= musiclib::SORT_COUNT) return;
+    if (recomp_settings_set("music", "sort", sort) > 0) {
+        pc_settings_save();
+        static const char *const names[] = {"custom", "name", "artist", "added"};
+        log_line(std::string("sort ") + names[sort]);
+    }
+    custom_music_order_changed();
+}
+
+void set_shuffle(bool on)
+{
+    if (recomp_settings_set("music", "shuffle", on ? 1 : 0) > 0) {
+        pc_settings_save();
+        log_line(std::string("shuffle ") + (on ? "on" : "off"));
+    }
+    custom_music_order_changed();
+}
+
+std::vector<musiclib::Song> sorted(const View &v)
+{
+    std::vector<musiclib::Song> out = v.songs;
+    musiclib::sort_songs(out, sort_setting());
+    return out;
+}
+
+bool move(const std::string &rel, int delta)
+{
+    std::vector<musiclib::Song> list;
+    size_t at = 0, to = 0;
+    bool saved = false;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        list = g_view.songs;
+        musiclib::sort_songs(list, sort_setting());
+        for (at = 0; at < list.size() && list[at].rel != rel; at++) {}
+        if (at >= list.size()) return false;
+        to = musiclib::move_song(list, at, delta);
+        if (to == at) return false;
+        g_view.songs = list;
+        g_view.generation++;
+        saved = musiclib::save_order(folder(), musiclib::order_of(list));
+    }
+    log_line("moved " + rel + " from " + std::to_string(at + 1) + " to " + std::to_string(to + 1) +
+             (saved ? "" : " (the order could not be saved)"));
+    if (sort_setting() != musiclib::SORT_CUSTOM) set_sort(musiclib::SORT_CUSTOM);
+    else custom_music_order_changed();
+    return true;
 }
 
 static void picked(std::vector<std::string> paths)
