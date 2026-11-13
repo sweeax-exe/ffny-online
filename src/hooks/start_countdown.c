@@ -21,6 +21,7 @@
 #include "host.h"
 #include "recomp/gen/recomp_types.h"
 #include "start_countdown.h"
+#include "recomp_settings.h"
 
 #define ACTORS          0x003B92E0u
 #define STRIDE          0x12E8u
@@ -33,6 +34,7 @@
 
 static int s_enabled = -1;
 static uint32_t s_steps, s_told, s_logic, s_match;
+static int s_offline_on, s_online, s_said;   /* [gameplay] offline_countdown at the setup; the fight went online */
 
 int start_countdown_enabled(void)
 {
@@ -56,6 +58,15 @@ void start_countdown_match_start(void)
     s_told = 0;
     s_logic = 0xFFFFFFFFu;
     s_match++;
+    s_offline_on = recomp_settings_get("gameplay", "offline_countdown", 0) != 0;
+    s_online = 0;
+    s_said = 0;
+}
+
+int start_countdown_active(int online)
+{
+    if (online) s_online = 1;
+    return start_countdown_applies(start_countdown_enabled(), s_online, s_offline_on);
 }
 
 void start_countdown_step(int rerun)
@@ -74,10 +85,17 @@ void start_countdown_step(int rerun)
 
 uint32_t start_countdown_offline_step(void) { return s_steps; }
 
-void start_countdown_hold(uint32_t actor, uint32_t step)
+void start_countdown_hold(uint32_t actor, uint32_t step, int online)
 {
     uint32_t slot, pad, base, i;
-    if (!start_countdown_enabled()) return;
+    if (!start_countdown_active(online)) {
+        if (!s_said && start_countdown_enabled() && step >= 1u) {
+            s_said = 1;
+            fprintf(stderr, "[COUNTDOWN] fight %u: offline, no countdown ([gameplay] offline_countdown off)\n",
+                    (unsigned)s_match);
+        }
+        return;
+    }
     if (actor < ACTORS || (actor - ACTORS) % STRIDE) return;
     if (!start_countdown_held_at(1, step)) {
         if (s_told == 1u && step > START_COUNTDOWN_STEPS) {

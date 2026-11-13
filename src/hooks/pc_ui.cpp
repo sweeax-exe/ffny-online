@@ -254,6 +254,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "input_delay", "Input delay (steps)"},
         {"online", "rollback", "Rollback netcode (beta)"},
         {"online", "crossplay_android", "Play with Android players"},
+        {"gameplay", "offline_countdown", "Start countdown in offline fights"},
         {"online", "voice", "Voice chat"},
         {"online", "voice_key", "Push-to-talk key"},
         {"online", "voice_pad", "Push-to-talk on the controller"},
@@ -871,6 +872,14 @@ static void settings_group(const char *section, std::initializer_list<const char
 // Build 80: cross-play with the community Android port, the PC player's own opt-in (off by default;
 // docs/research/crossplay-optin.md). The relay pairs an opted-in PC with Android players only in builds
 // it has cleared for cross-play.
+// Build 81: the start countdown is online only by default; offline fights have it only with this on (a
+// speedrunner's request). Online matches always have it (src/hooks/start_countdown.h).
+static void offline_countdown_setting()
+{
+    settings_group("gameplay", { "offline_countdown" });
+    ImGui::TextDisabled("Online matches always have the countdown. Applies from the next fight.");
+}
+
 static void crossplay_setting()
 {
     settings_group("online", { "crossplay_android" });
@@ -2039,6 +2048,8 @@ static void page_general(UiMode mode)
                            "example left_stick_click+right_stick_click) is held for half a second. While it is open the game "
                            "sees no input and keeps running.");
     }
+    ImGui::SeparatorText("Gameplay");
+    offline_countdown_setting();
     ImGui::SeparatorText("Language and subtitles");
     game_language_combo();
     settings_group("language", { "story_subtitles" });
@@ -2794,6 +2805,8 @@ static void page_basics()
         ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
     }
     crossplay_setting();
+    ImGui::SeparatorText("Gameplay");
+    offline_countdown_setting();
     ImGui::SeparatorText("HD textures");
     settings_group("textures", { "enabled" });
     ImGui::TextDisabled("Experimental: they can cause white screens or wrong pictures. Make them under Advanced, Textures.");

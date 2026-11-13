@@ -87,6 +87,7 @@ line turns it on for one run. Every key here is read at start-up.
 | Key | Default | Meaning |
 |---|---|---|
 | `toughness_fix` | `true` | Fixes a bug of the original game: a profile fighter's first Toughness milestone (win 10 matches with more than two fighters, +1 bonus Toughness) could never be reached, because the game overwrote the win count with 0 or 1 after every match instead of adding to it. On, the wins count and the point is earned at the tenth; nothing is granted for earlier matches. Off is the original game (a count above 1 is then lost again at the next match). Only the profile's save changes; fights and online matches are unaffected. Applies at once. Env `RECOMP_TOUGHNESS_FIX` (`1` on, `0` off). |
+| `offline_countdown` | `false` | The start countdown (3 - 2 - 1 - FIGHT!, the fighters held until FIGHT) in offline fights too. Online matches (lockstep or rollback, spectators) always have it, whatever this says, so every PC holds the same steps. Off (build 81 on): offline fights start at the first step with the game's own grey FIGHT! lettering, as in the original game. Read when each fight is set up. Launcher: Basics and Advanced, General ("Start countdown in offline fights"). `RECOMP_START_COUNTDOWN=0` turns the countdown off everywhere. Env `RECOMP_OFFLINE_COUNTDOWN` (`1` on, `0` off). |
 
 ## [language]
 

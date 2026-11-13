@@ -483,6 +483,7 @@ int netplay_delay_info(NetDelayInfo *o);    /* 1 while rollback runs steps again
 /* For diagnostics: one line on the online fight's step, rollback state and counters. */
 int netplay_rollback_brief(char *out, int size);
 int netplay_local_slot(void);   /* tests: this PC's fighter slot in a lockstep fight, -1 otherwise */
+int netplay_countdown_active(void);  /* this fight has the start countdown (online always; offline per [gameplay] offline_countdown) */
 
 /* Voice chat (voice.c): 1 while this PC is in a room of the online hub (its lobby or its match); a
  * voice packet to every other member; the name of the member in relay slot `slot` (0 if none). */

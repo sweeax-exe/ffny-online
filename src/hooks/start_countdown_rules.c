@@ -10,6 +10,11 @@ int start_countdown_parse(const char *value)
     return strcmp(value, "0") && strcmp(value, "off") && strcmp(value, "false") && strcmp(value, "no");
 }
 
+int start_countdown_applies(int enabled, int online, int offline_setting)
+{
+    return enabled && (online || offline_setting);
+}
+
 int start_countdown_held_at(int enabled, uint32_t step)
 {
     return enabled && step >= 1u && step <= START_COUNTDOWN_STEPS;

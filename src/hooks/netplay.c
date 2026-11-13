@@ -157,7 +157,8 @@ void netplay_on_update(void) {}
 extern void sub_00137010(void);
 void netplay_sound_command(void) { sub_00137010(); }
 void *netplay_sound_handler(uint32_t va) { (void)va; return NULL; }
-void netplay_on_pad_read(uint32_t a) { start_countdown_hold(a, start_countdown_offline_step()); }
+void netplay_on_pad_read(uint32_t a) { start_countdown_hold(a, start_countdown_offline_step(), 0); }
+int netplay_countdown_active(void) { return start_countdown_active(0); }
 int netplay_local_slot(void) { return -1; }
 int netplay_delay_info(NetDelayInfo *o) { if (o) memset(o, 0, sizeof(*o)); return 0; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
@@ -8637,13 +8638,22 @@ static uint32_t round_step(void)
     return N.lockstep || soak_depth() ? N.step : start_countdown_offline_step();
 }
 
+/* build 81: an online fight (lockstep or rollback, a spectator's, the rollback soak) always has the start
+ * countdown, whatever [gameplay] offline_countdown says, so every PC holds the same steps */
+static int fight_online(void)
+{
+    return N.lockstep || soak_depth();
+}
+
+int netplay_countdown_active(void) { return start_countdown_active(fight_online()); }
+
 static void pad_read_body(uint32_t actor);
 void netplay_on_pad_read(uint32_t actor)
 {
     pad_read_body(actor);
     /* build 77: the start countdown holds every fighter at rest once the entry is in place, by the
      * step number every PC shares (start_countdown.h) */
-    start_countdown_hold(actor, round_step());
+    start_countdown_hold(actor, round_step(), fight_online());
 }
 
 static void pad_read_body(uint32_t actor)

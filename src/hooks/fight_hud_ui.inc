@@ -299,7 +299,7 @@ bool fight_hud_wanted()
     bool hud_up = FH.view.live && FH.beat_at && now - FH.beat_at < FH_HUD_STALE_MS;
     // the start countdown, while the round's first steps run (the phase word may still say "start" at step 1)
     bool steps_run = FH.beat_at && now - FH.beat_at < FH_HUD_STALE_MS;
-    FH.count = steps_run ? start_countdown_shown(start_countdown_enabled(), FH.view.step, &FH.count_t) : -1;    if (FH.count >= 0) {
+    FH.count = steps_run ? start_countdown_shown(netplay_countdown_active(), FH.view.step, &FH.count_t) : -1;    if (FH.count >= 0) {
         static uint32_t logged_round;
         if (logged_round != FH.view.round) {
             logged_round = FH.view.round;
