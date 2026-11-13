@@ -38,6 +38,7 @@
 #include <string.h>
 #include <time.h>
 #include "recomp/gen/recomp_types.h"
+#include "guest_window.h"
 #include "netplay.h"
 #include "netplay_delay_rules.h"
 #include "recomp_settings.h"
@@ -7387,7 +7388,7 @@ static void cp_collect(void)
     if (g_cp_ctrls) {
         uint32_t m = MEM32(g_cp_ctrl[0] + CP_CTRL_MODEL);
         fprintf(stderr, "[NETPLAY] created fighters: %d skeleton(s) posed in the step (match %08X; model %08X, %u parts, "
-                "drawn in the step: %s)\n", g_cp_ctrls, N.match, m, m >= 0x80000000u && m < 0x84000000u ? MEM32(m + 4u) : 0u,
+                "drawn in the step: %s)\n", g_cp_ctrls, N.match, m, m >= GUEST_WINDOW_LO && m < GUEST_WINDOW_HI ? MEM32(m + 4u) : 0u,
                 cp_draw_in_step() ? "yes" : "no");
     }
 }
@@ -7422,7 +7423,7 @@ static void cp_pose_in_step(void)
          * the part count at 0 for its duration: the same pass, every matrix the same, no part drawn.
          * RECOMP_NETPLAY_CP_DRAW=on (tests): the parts drawn in the step as before. */
         uint32_t ctrl = g_cp_ctrl[i], model = MEM32(ctrl + CP_CTRL_MODEL), parts = 0;
-        int hide = cp_draw_in_step() == 0 && model >= 0x80000000u && model < 0x84000000u;
+        int hide = cp_draw_in_step() == 0 && model >= GUEST_WINDOW_LO && model < GUEST_WINDOW_HI;
         if (hide) { parts = MEM32(model + 4u); MEM32(model + 4u) = 0; }
         guest_call(sub_00097F90, ctrl, 0, NULL);
         if (hide) MEM32(model + 4u) = parts;
@@ -7463,7 +7464,7 @@ void netplay_crowd_update(void)
  * bookkeeping only (read by the renderers at draw time, not by the crowd's update), so taking the
  * members out before the restart puts them back exactly once and leaves the simulation alone. */
 #define CROWD_DRAW_CAP  60u     /* entries of either array (0x130..0x220, 0x440..0x530) */
-static int crowd_list_ok(uint32_t a) { return a >= 0x80000000u && a < 0x84000000u; }
+static int crowd_list_ok(uint32_t a) { return a >= GUEST_WINDOW_LO && a < GUEST_WINDOW_HI; }
 
 /* Takes every listed spectator out of (drop != 0), or counts them and their repeats in, both lists. */
 static void crowd_draw_lists(uint32_t mgr, uint32_t n, int drop, unsigned *entries, unsigned *repeats)

@@ -29,6 +29,7 @@
  * the image's TLS template rather than the running thread's copy, so an
  * override would read zeroes for every register. */
 #include "recomp/gen/recomp_types.h"
+#include "hooks/guest_window.h"
 #include "hooks/save_compat.h"
 #include "hooks/pc_launcher_saves.h"
 #include "hooks/test_observations.h"
@@ -387,7 +388,7 @@ static struct {
     int frame_max;
 } s_cg;
 
-static int crowd_guest_ok(uint32_t a, uint32_t len) { return a >= 0x80000000u && a + len >= a && a + len <= 0x84000000u; }
+static int crowd_guest_ok(uint32_t a, uint32_t len) { return a >= GUEST_WINDOW_LO && a + len >= a && a + len <= GUEST_WINDOW_HI; }
 
 static void crowd_guard_match_start(void)
 {
@@ -1976,11 +1977,11 @@ extern void sub_0011EC80(void);
 static void stream_retire_guard(void)
 {
     uint32_t p = MEM32(g_esp + 4u), chunk = 0, head = 0, id = 0;
-    int ok = p >= 0x80000004u && p < 0x84000000u;
+    int ok = p >= 0x80000004u && p < GUEST_WINDOW_HI;
     /* the payload, its chunk and the chunk's channel must all be real: a junk chunk pointer at [p - 4]
      * crashed inside this callback too (five-match run, 2026-10-25) */
     if (ok) chunk = MEM32(p - 4u);
-    ok = ok && chunk >= 0x80000000u && chunk < 0x84000000u;
+    ok = ok && chunk >= GUEST_WINDOW_LO && chunk < GUEST_WINDOW_HI;
     if (ok) head = MEM32(chunk), id = head & 0xFFu;
     ok = ok && head != 0xFFFFFFFEu && id < MEM8(0x003A9386u) && MEM32(0x003A92A0u + id * 4u);
     if (!ok) {
@@ -2252,7 +2253,7 @@ void recomp_icall_not_code_log(uint32_t va)
                 }
             }
         }
-        if (g_ecx >= 0x1000u && g_ecx < 0x84000000u) {
+        if (g_ecx >= 0x1000u && g_ecx < GUEST_WINDOW_HI) {
             uint32_t vt = *(volatile uint32_t *)((uintptr_t)g_ecx
                                                + (uintptr_t)g_xbox_mem_offset);
             fprintf(stderr, "  this 0x%08X vtable 0x%08X\n", g_ecx, vt);

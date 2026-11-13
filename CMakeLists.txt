@@ -130,6 +130,14 @@ if(WIN32 AND DEFJAM_BUILD_APP)
     FetchContent_MakeAvailable(sdl3)
 endif()
 
+# Guest memory, fixed per build (D-new, feat/guest-ram-128): the game sizes its one arena from the
+# free memory MmQueryStatistics reports less 14 MB and takes it from the contiguous window
+# (docs/research/rollback-state.md 1.3), and venues, fighters, crowd and HUD all load into it. The
+# console's 64 MB gave a 42 MB arena; 128 MB reported gives about 106 MB, in a 192 MB window so the
+# game's D3D and sound buffers keep the slack they had (rollback sessions reached 62-64 of 64 MB).
+# Both copies of an online match must run the same values (the build number already refuses others).
+set(XBOXRECOMP_CONTIG_MB 192 CACHE STRING "Contiguous window (MB)" FORCE)
+set(XBOXRECOMP_RAM_REPORT_MB 128 CACHE STRING "RAM the game is told it has (MB)" FORCE)
 # Builds all runtime libraries and provides the 'xboxrecomp' umbrella target.
 add_subdirectory(${XBOXRECOMP_DIR} ${CMAKE_BINARY_DIR}/xboxrecomp)
 

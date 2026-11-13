@@ -97,6 +97,7 @@ Full table with source references: `docs/research/toolkit-bringup-notes.md`. Eve
 | Variable | Use |
 |---|---|
 | `RECOMP_WATCHDOG_SECS=10` | dump the guest call stack when the title stops making progress (main.c calls `xbox_WatchdogStart()`) |
+| `RECOMP_MEMSTAT=1` | a `[MEMSTAT]` line every N s: the game's pool (used, free, largest free, low-water marks), the contiguous window in use and its peak (`src/hooks/memstat.c`) |
 | `RECOMP_INPUT_HOST=1`, `RECOMP_INPUT_NO_PADS=1`, `RECOMP_INPUT_IGNORE_FOCUS=1`, `RECOMP_PAD_SCRIPT_KEYS=1`, `RECOMP_RUMBLE_LOG=1` | host input diagnostics for unattended runs (start the input layer in a harness run, open no pad, ignore window focus, turn the scripted pad into keyboard presses, log rumble); see [Controllers, keyboard and mouse](10-input.md#diagnostics-maintainers) |
 | `RECOMP_WORKERS=inline` | run PsCreateSystemThreadEx workers inline: tells a threading bug from a logic bug |
 | `RECOMP_KERNEL_LOG_BUDGET=N` | cap kernel-call log volume (the first run produced 1.26M calls) |

@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "recomp/gen/recomp_types.h"
+#include "guest_window.h"
 
 #define PAGE        4096u
 /* The game's heap: the one big block it takes from the contiguous window at start (all that
@@ -44,7 +45,7 @@ static int s_heap_found;
 #define HEAP_LO     s_heap_lo
 #define HEAP_HI     s_heap_hi
 #define HEAP_PAGES  ((HEAP_HI - HEAP_LO) / PAGE)
-#define HEAP_PAGES_MAX (0x04000000u / PAGE)     /* the whole 64 MB window */
+#define HEAP_PAGES_MAX (GUEST_WINDOW_BYTES / PAGE)  /* the whole contiguous window */
 #define AUDIO_RAM   0x0033E9E4u     /* AudioManagedRAM, the sound engine's first block */
 #define FRAME_QUEUE 0x003A017Cu     /* the frame-record queue object (registry 0x27) */
 #define QUEUE_BYTES 0x1AA0u
@@ -404,7 +405,7 @@ static void find_heap(void)
 {
     uint32_t va = 0x80000000u + PAGE, best = 0, best_size = 0;
     if (s_heap_found) return;
-    while (va < 0x84000000u) {
+    while (va < GUEST_WINDOW_HI) {
         uint32_t s = xbox_ContiguousBlockSize(va);
         if (!s) { va += PAGE; continue; }
         if (s > best_size) { best = va; best_size = s; }
@@ -1423,7 +1424,7 @@ static void release_kept_arena(void)
             if (s_blk[i].addr > at) mark_range(at, s_blk[i].addr);
             if (s_blk[i].addr + s_blk[i].size > at) at = s_blk[i].addr + s_blk[i].size;
         }
-        mark_range(at, 0x84000000u);
+        mark_range(at, GUEST_WINDOW_HI);
     }
     LeaveCriticalSection(&s_arena_cs);
     for (k = 0; k < n; k++)
@@ -1528,7 +1529,7 @@ int rollback_reference(void)
         s_game_thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentThreadId());
     if (!s_ref || !s_ndseg) {
         fprintf(stderr, "[ROLLBACK] off for this match: no reference copy (%s)\n",
-                !s_ref ? "no memory for the 42 MB copy" : "no .data segments were built");
+                !s_ref ? "no memory for the heap copy" : "no .data segments were built");
         return -1;
     }
     memcpy(s_ref, XBOX_PTR(HEAP_LO), (size_t)HEAP_PAGES * PAGE);
@@ -2868,7 +2869,7 @@ void rollback_check_emitters(const char *where)
         last_state = st;
     }
     mgr = MEM32(0x002FB148u + 0x21u * 4u);
-    if (!mgr || mgr >= 0x84000000u) return;
+    if (!mgr || mgr >= GUEST_WINDOW_HI) return;
     for (k = 0, g = MEM32(mgr); g && k < 512; k++, prev = g, g = MEM32(g + 4u)) {
         if (!((g >= HEAP_LO && g < HEAP_HI) || in_arena(g))) {
             fprintf(stderr, "[EMITTERS] %s (%ld saves, %s): group %u at %08X after %08X (%s) is no block; list head %08X\n",

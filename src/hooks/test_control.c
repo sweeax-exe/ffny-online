@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "recomp/gen/recomp_types.h"
+#include "guest_window.h"
 #include "netplay.h"
 #include "automatch.h"
 #include "test_observations.h"
@@ -289,8 +290,8 @@ static void command(char *line, char *out, size_t size)
         unsigned addr = (unsigned)strtoul(a1, NULL, 0), count = a2[0] ? (unsigned)strtoul(a2, NULL, 0) : 64, k;
         size_t len = 0;
         if (count > 512) count = 512;
-        if ((addr < 0x10000u || addr + count > 0x04000000u) && (addr < 0x80000000u || addr + count > 0x84000000u)) {
-            snprintf(out, size, "{\"ok\":false,\"error\":\"guest RAM is 0x10000..0x4000000 and 0x80000000..0x84000000\"}");
+        if ((addr < 0x10000u || addr + count > 0x04000000u) && (addr < GUEST_WINDOW_LO || addr + count > GUEST_WINDOW_HI)) {
+            snprintf(out, size, "{\"ok\":false,\"error\":\"guest RAM is 0x10000..0x4000000 and the contiguous window from 0x80000000\"}");
             return;
         }
         len = (size_t)snprintf(out, size, "{\"ok\":true,\"addr\":\"0x%08X\",\"hex\":\"", addr);

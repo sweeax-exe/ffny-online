@@ -43,6 +43,7 @@
  */
 
 #include "host.h"
+#include "guest_window.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,7 +53,7 @@ extern ptrdiff_t g_xbox_mem_offset;
 
 /* The front end's command pointer, and where to build a command. */
 #define FE_COMMAND_PTR   0x002EB73Cu
-#define FE_COMMAND_SCRAP 0x83F00000u
+#define FE_COMMAND_SCRAP (GUEST_WINDOW_HI - 0x100000u)   /* the window's last MB */
 #define FE_RESULT_PTR    0x003B8090u
 #define FE_COMMAND_MAX   31
 
