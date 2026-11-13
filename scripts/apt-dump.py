@@ -252,7 +252,7 @@ CONFIRMED = {
     "EA_CallNamedFunc", "EA_CallNamedMethodPop", "EA_PushFloat",
     "EA_PushByte", "EA_PushShort", "EA_CallNamedMethod", "EA_PushRegister",
     "EA_PushConstantWord", "EA_CallFuncPop", "StrictEqual", "Extends",
-    "InstanceOf", "EA_CallMethod",
+    "InstanceOf", "EA_CallMethod", "EA_PushLong",
 }
 
 
@@ -423,6 +423,12 @@ def parse_instruction(buf, pos, const_entries, local_pool):
     elif name == "EA_PushShort":
         val = struct.unpack_from("<H", buf, pos)[0]
         pos += 2
+        operands.append("value=%d" % val)
+    elif name == "EA_PushLong":
+        # an unaligned int32 (scripts/apt-patch.py's SPEC, checked on 2,485 function bodies; chooseF2's
+        # colour constants cP2..cP4 were the first ones this dump met)
+        val = struct.unpack_from("<i", buf, pos)[0]
+        pos += 4
         operands.append("value=%d" % val)
     elif name == "EA_PushRegister":
         reg = buf[pos]
