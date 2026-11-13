@@ -3316,13 +3316,15 @@ static UiResult draw_launcher(float x, float y, float width, float height)
                                 : nullptr;
         char buf[300];
         if (!note && !restart.empty()) { snprintf(buf, sizeof(buf), "Applies at the next start: %s", restart.c_str()); note = buf; }
+        if (!note) note = content_play_note();     // build 82: PLAY waits for new community content
         if (note) dl->AddText(ImGui::GetFont(), 13 * s, at(48, 472), col(k_gold), note, nullptr, 270 * s);
     }
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     content_sync_tick();
     {
-        bool pressed = glass_button("##play", g_content_play_waiting ? "WAIT" : "PLAY", at(48, 498), ImVec2(270 * s, 64 * s), s,
-                                    GLASS_RED, display_font(), 36 * s, !busy && !g_content_play_waiting);
+        bool pressed = glass_button("##play", g_content_play_waiting ? (g_content_play_skip ? "WAIT" : "PLAY NOW") : "PLAY",
+                                    at(48, 498), ImVec2(270 * s, 64 * s), s, GLASS_RED, display_font(), 36 * s,
+                                    !busy && !g_content_play_skip);
         if (content_play_gate(pressed)) result.play = true;
     }
     // Four small buttons under PLAY (61.5 wide, 8 apart).

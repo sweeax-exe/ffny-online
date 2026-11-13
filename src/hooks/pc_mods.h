@@ -31,6 +31,10 @@ extern "C" {
  * incomplete transaction or an active installer, including --no-launcher. */
 int pc_mods_game_lock(void);
 int pc_mods_needs_recovery(void);
+/* Build 82, the running game: start `mods.py check` (is new community content out? it writes
+ * <data>/mod-manager/news.ini, pc_content_news) unless one runs; 1 when started. busy: 1 while it runs. */
+int pc_mods_check_start(void);
+int pc_mods_check_busy(void);
 #ifdef __cplusplus
 }
 #endif

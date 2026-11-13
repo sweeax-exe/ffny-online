@@ -503,6 +503,7 @@ static void list_round(void)
         memcpy(req + 10, print, 8);     /* rooms of this build only: the others cannot be joined */
         req[18] = 0xFF;                 /* every match type */
         req[19] = 1;                    /* caps: King of the Hill rooms too */
+        req[21] = 1;                    /* caps bit 16 (room rules): build 82 relays add each room's rules bits */
         sendto(s, (const char *)req, (int)sizeof(req), 0, (const struct sockaddr *)&addr[i], sizeof(addr[i]));
         open++;
     }
@@ -537,9 +538,12 @@ static void list_round(void)
             list[k].max = b[at + 2];
             list[k].phase = b[at + 3];
             ages[k] = rd16(b + at + 4);
+            list[k].rules = -1;
             at += 6;
         }
         if (bad) continue;
+        if (at + count <= n)            /* build 82 relays: each room's FIGHTER RULES bits (the STANDARD tag) */
+            for (k = 0; k < count; k++) list[k].rules = b[at + k] & NETPLAY_RULES_MASK;
         want[who] = 0;
         open--;
         EnterCriticalSection(&g_cs);

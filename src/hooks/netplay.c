@@ -55,6 +55,7 @@
 #include "created_fighter.h"
 #include "pc_input.h"
 #include "pc_content.h"
+#include "pc_mods.h"
 #include "fight_hud.h"
 #include "start_countdown.h"
 #include "detmath/detmath.h"
@@ -2843,7 +2844,7 @@ static int put_settings(uint8_t *b, const NetRoomSettings *s)
     /* build 68: FIGHTER RULES and MAX PING (u16 ms, 0 off), after the CPU level, to a relay that takes them */
     if (relay_has(CAPS_ROOMRULES)) {
         int mp = s->max_ping < 50 ? 0 : s->max_ping > 1000 ? 1000 : s->max_ping;
-        b[n++] = (uint8_t)(s->fighter_rules >= 0 && s->fighter_rules <= NETPLAY_RULES_STOCK ? s->fighter_rules : 0);
+        b[n++] = (uint8_t)(s->fighter_rules >= 0 && s->fighter_rules <= NETPLAY_RULES_MASK ? s->fighter_rules : 0);
         b[n++] = (uint8_t)mp;
         b[n++] = (uint8_t)(mp >> 8);
     }
@@ -2875,8 +2876,11 @@ static void on_rooms(const uint8_t *b, int len)
         list[i].players = rd8(&r);
         list[i].max = rd8(&r);
         list[i].phase = rd8(&r);
+        list[i].rules = -1;
     }
     if (r.bad) return;
+    if (r.i + count <= r.n)     /* build 82 relays: each listed room's FIGHTER RULES bits after the list */
+        for (i = 0; i < count; i++) list[i].rules = rd8(&r) & NETPLAY_RULES_MASK;
     EnterCriticalSection(&g_cs);
     memcpy(N.rooms, list, sizeof(list[0]) * (size_t)count);
     N.room_count = count;
@@ -3182,7 +3186,7 @@ static void on_room(const uint8_t *b, int len)
         v.settings.max_ping = rd8(&r);
         v.settings.max_ping |= rd8(&r) << 8;
         v.blocked_count = rd8(&r);
-        if (r.bad || v.settings.fighter_rules > NETPLAY_RULES_STOCK || v.blocked_count > NETPLAY_MAX_BLOCKED) return;
+        if (r.bad || v.settings.fighter_rules > NETPLAY_RULES_MASK || v.blocked_count > NETPLAY_MAX_BLOCKED) return;
         rdbytes(&r, v.blocked, v.blocked_count);
         if (r.bad) return;
     }
@@ -4291,6 +4295,11 @@ static void on_packet(const uint8_t *b, int len)
                 text = ping_why;
             }
             if (code == 8 && N.pend_len && N.pend[5] == T_TPICK) text = "That stage can't be picked now.";
+            if (code == 15) {   /* build 82: the room has other community packs; most often new ones are out */
+                text = pc_content_news(NULL, 0) > 0 ? NETPLAY_CONTENT_NEWS_LINE "."
+                     : NETPLAY_CONTENT_NEWS_LINE " (that room has other community packs than yours).";
+                if (N.lobby) pc_mods_check_start();     /* look again: the hub shows the news once it is known */
+            }
             if (N.lobby && code == 12) {
                 /* build 46 relays: this player's created fighter has stats Story mode never gives (a
                  * converted or edited save); the relay did not keep it (its empty RECORD already stopped
@@ -4310,7 +4319,8 @@ static void on_packet(const uint8_t *b, int len)
                     fprintf(stderr, "[NETPLAY] refused: %s (a created fighter's record, RECGET)\n", text);
                 break;
             }
-            if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9 || code == 10 || code == 13)) {
+            if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9 || code == 10 || code == 13 ||
+                            code == 15)) {
                 /* refused, but the session goes on */
                 EnterCriticalSection(&g_cs);
                 /* "not in a room" to a room action (a vote, ready, settings) while this side still
@@ -6776,12 +6786,13 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     continue;
                 }
             }
-            {   /* RECOMP_TEST_FIGHTER_RULES=all|nobanned|nocreated|stock and RECOMP_TEST_MAX_PING=MS (tests, build 68):
-                 * the host sets its room's rules */
+            {   /* RECOMP_TEST_FIGHTER_RULES=all|nobanned|nocreated|stock[+standard]|standard and RECOMP_TEST_MAX_PING=MS
+                 * (tests, build 68; "standard": STANDARD ONLY, build 82): the host sets its room's rules */
                 const char *tr = getenv("RECOMP_TEST_FIGHTER_RULES"), *tp = getenv("RECOMP_TEST_MAX_PING");
-                int want_rules = !tr || !*tr ? -1 : !strcmp(tr, "nobanned") ? NETPLAY_RULES_NO_BANNED
-                               : !strcmp(tr, "nocreated") ? NETPLAY_RULES_NO_CREATED : !strcmp(tr, "stock") ? NETPLAY_RULES_STOCK
+                int want_rules = !tr || !*tr ? -1 : !strncmp(tr, "nobanned", 8) ? NETPLAY_RULES_NO_BANNED
+                               : !strncmp(tr, "nocreated", 9) ? NETPLAY_RULES_NO_CREATED : !strncmp(tr, "stock", 5) ? NETPLAY_RULES_STOCK
                                : NETPLAY_RULES_ALL;
+                if (want_rules >= 0 && strstr(tr, "standard")) want_rules |= NETPLAY_RULES_STANDARD;
                 int want_ping = tp && *tp ? atoi(tp) : -1;
                 if ((want_rules >= 0 || want_ping >= 0) && r.in_room && r.phase == 0 && r.you == r.host && !N.match_live &&
                     relay_has(CAPS_ROOMRULES) &&

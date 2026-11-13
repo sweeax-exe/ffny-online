@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <sstream>
 #if defined(_WIN32)
 #include <windows.h>
@@ -95,15 +96,9 @@ void mod_cancel() {
     std::ofstream cancel(job_root / "cancel"); cancel << "cancel\n";
     status = "Cancelling; the previous installation will be kept.";
 }
-bool mod_start(const std::string &command, const std::string &id) {
-    if (running) return false;
-    if (command != "status" && command != "refresh" && command != "install" && command != "remove" && command != "rollback" && command != "recover" && command != "sync" && command != "compose") return false;
-    if (!id.empty() && !pack_name(id)) return false;
-    const char *override_root = getenv("RECOMP_TEXTURE_ROOT");
-    if (override_root && *override_root && command != "status" && command != "refresh") {
-        if (command == "sync" || command == "compose") return false;     // a test root of its own: nothing to sync into
-        status = "Managed installs use the data folder's mods directory; unset RECOMP_TEXTURE_ROOT first."; return false;
-    }
+// The helper's command line for `command` (mods.py and its interpreter, the data folder, the runtime and its
+// capabilities, the dump), or false with `why` set.
+static bool helper_args(const std::string &command, const std::string &id, std::vector<std::string> &args, std::string &why) {
     std::error_code error;
     auto source = fs::current_path();
     if (!fs::is_regular_file(source / "setup/mods.py", error)) source = fs::u8path(DEFJAM_MOD_SOURCE_DIR);
@@ -114,13 +109,13 @@ bool mod_start(const std::string &command, const std::string &id) {
 #else
         "python/bin/python3";
 #endif
-    if (!fs::is_regular_file(script, error)) { status = "This installation has no mod helper; local mods still work."; return false; }
+    if (!fs::is_regular_file(script, error)) { why = "This installation has no mod helper; local mods still work."; return false; }
     std::string interpreter;
     if (fs::is_regular_file(python,error)) interpreter = path_utf8(python);
     else {
         const char *dev = getenv("DEFJAM_MOD_PYTHON");
         if (dev && *dev) interpreter = dev;
-        else if (getenv("DEFJAM_INSTALL_DIR")) { status = "Bundled Python is missing; repair this installation to use catalogue downloads."; return false; }
+        else if (getenv("DEFJAM_INSTALL_DIR")) { why = "Bundled Python is missing; repair this installation to use catalogue downloads."; return false; }
         else interpreter =
 #if defined(_WIN32)
             "python.exe";
@@ -128,14 +123,12 @@ bool mod_start(const std::string &command, const std::string &id) {
             "python3";
 #endif
     }
-    job_root = root();
-    if (fs::is_symlink(job_root,error)) { status = "Refusing a symlinked manager directory."; return false; }
-    fs::create_directories(job_root,error);
-    if (error) { status = "Could not create mod-manager state directory."; return false; }
-    fs::remove(job_root / "cancel",error);
-    fs::remove(job_root / "progress.ini",error);
-    std::vector<std::string> args = {interpreter, path_utf8(script), command, "--data-dir", folder_path(Folder::Data), "--runtime", DEFJAM_VERSION,
-                                   "--cancel-file", path_utf8(job_root / "cancel")};
+    auto state = root();
+    if (fs::is_symlink(state,error)) { why = "Refusing a symlinked manager directory."; return false; }
+    fs::create_directories(state,error);
+    if (error) { why = "Could not create mod-manager state directory."; return false; }
+    args = {interpreter, path_utf8(script), command, "--data-dir", folder_path(Folder::Data), "--runtime", DEFJAM_VERSION,
+            "--cancel-file", path_utf8(state / "cancel")};
 #if defined(DEFJAM_MOD_WIDE)
     args.insert(args.end(), {"--capability", "wide-v1"});
 #endif
@@ -153,16 +146,23 @@ bool mod_start(const std::string &command, const std::string &id) {
     }
     if (testing_versions) args.push_back("--prerelease");
     if (!id.empty()) args.insert(args.end(), {"--id",id});
+    return true;
+}
+
 #if defined(_WIN32)
+static HANDLE spawn(std::vector<std::string> &args, DWORD flags, std::string &why) {
     std::wstring cmd;
     for (auto &arg : args) { if (!cmd.empty()) cmd += L' '; cmd += quote(wide(arg)); }
     STARTUPINFOW startup = {}; startup.cb = sizeof startup;
     PROCESS_INFORMATION child = {};
-    if (!CreateProcessW(nullptr,cmd.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&startup,&child)) {
-        status = "Could not start mod helper."; return false;
+    if (!CreateProcessW(nullptr,cmd.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW | flags,nullptr,nullptr,&startup,&child)) {
+        why = "Could not start mod helper."; return nullptr;
     }
-    CloseHandle(child.hThread); process = child.hProcess;
+    CloseHandle(child.hThread);
+    return child.hProcess;
+}
 #else
+static pid_t spawn(std::vector<std::string> &args, int, std::string &why) {
     std::vector<char *> argv;
     for (auto &arg : args) argv.push_back(arg.data()); argv.push_back(nullptr);
     posix_spawnattr_t attr; posix_spawnattr_init(&attr);
@@ -175,9 +175,35 @@ bool mod_start(const std::string &command, const std::string &id) {
     long limit = sysconf(_SC_OPEN_MAX); if (limit < 0) limit = 1024;
     for (int fd=3;fd<limit;fd++) if (fcntl(fd,F_GETFD)>=0) posix_spawn_file_actions_addclose(&files,fd);
 #endif
-    int result = posix_spawnp(&process,interpreter.c_str(),&files,&attr,argv.data(),environ);
+    pid_t pid = -1;
+    int result = posix_spawnp(&pid,args[0].c_str(),&files,&attr,argv.data(),environ);
     posix_spawn_file_actions_destroy(&files); posix_spawnattr_destroy(&attr);
-    if (result) { status = "Could not start mod helper: " + std::to_string(result); return false; }
+    if (result) { why = "Could not start mod helper: " + std::to_string(result); return -1; }
+    return pid;
+}
+#endif
+
+bool mod_start(const std::string &command, const std::string &id) {
+    if (running) return false;
+    if (command != "status" && command != "refresh" && command != "install" && command != "remove" && command != "rollback" && command != "recover" && command != "sync" && command != "compose") return false;
+    if (!id.empty() && !pack_name(id)) return false;
+    const char *override_root = getenv("RECOMP_TEXTURE_ROOT");
+    if (override_root && *override_root && command != "status" && command != "refresh") {
+        if (command == "sync" || command == "compose") return false;     // a test root of its own: nothing to sync into
+        status = "Managed installs use the data folder's mods directory; unset RECOMP_TEXTURE_ROOT first."; return false;
+    }
+    std::error_code error;
+    std::vector<std::string> args;
+    if (!helper_args(command, id, args, status)) return false;
+    job_root = root();
+    fs::remove(job_root / "cancel",error);
+    fs::remove(job_root / "progress.ini",error);
+#if defined(_WIN32)
+    process = spawn(args, 0, status);
+    if (!process) return false;
+#else
+    process = spawn(args, 0, status);
+    if (process < 0) return false;
 #endif
     running = true; status = "Working on mods..."; return true;
 }
@@ -204,6 +230,47 @@ bool mod_poll() {
     return true;
 }
 } // namespace pcui
+
+// Build 82: the running game asks whether new community content is out (mods.py check: the signed
+// catalogue against the installed packs; it writes <data>/mod-manager/news.ini, pc_content_news reads it).
+// One check at a time, at a lower priority; nothing else of the launcher's state is touched.
+#if defined(_WIN32)
+static HANDLE g_check = nullptr;
+#else
+static pid_t g_check = -1;
+#endif
+extern "C" int pc_mods_check_busy(void) {
+#if defined(_WIN32)
+    if (!g_check) return 0;
+    DWORD code;
+    if (GetExitCodeProcess(g_check,&code) && code == STILL_ACTIVE) return 1;
+    CloseHandle(g_check); g_check = nullptr;
+#else
+    if (g_check < 0) return 0;
+    int code = 0;
+    if (waitpid(g_check,&code,WNOHANG) == 0) return 1;
+    g_check = -1;
+#endif
+    return 0;
+}
+extern "C" int pc_mods_check_start(void) {
+    if (pc_mods_check_busy()) return 0;
+    const char *off = getenv("RECOMP_CONTENT");
+    const char *root = getenv("RECOMP_TEXTURE_ROOT");
+    if ((off && !strcmp(off, "0")) || (root && *root)) return 0;      // tests with packs of their own
+    std::vector<std::string> args;
+    std::string why;
+    if (!pcui::helper_args("check", "", args, why)) { fprintf(stderr, "[CONTENT] news check not started: %s\n", why.c_str()); return 0; }
+#if defined(_WIN32)
+    g_check = pcui::spawn(args, BELOW_NORMAL_PRIORITY_CLASS, why);
+    if (!g_check) { fprintf(stderr, "[CONTENT] news check not started: %s\n", why.c_str()); return 0; }
+#else
+    g_check = pcui::spawn(args, 0, why);
+    if (g_check < 0) { fprintf(stderr, "[CONTENT] news check not started: %s\n", why.c_str()); return 0; }
+#endif
+    fprintf(stderr, "[CONTENT] checking the catalogue for new community content\n");
+    return 1;
+}
 
 extern "C" int pc_mods_needs_recovery(void) { return pcui::mod_recovery_needed() ? 1 : 0; }
 

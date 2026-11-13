@@ -9,6 +9,7 @@
 #include <time.h>
 #include "online_data.h"
 #include "new_fighters.h"
+#include "pc_content.h"
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -163,7 +164,10 @@ static void load_fighters(void)
 /* The arenas: a "NNx Name" display name with a front-end ID, not cut, not cinema only. */
 static void load_venues(void)
 {
-    char *text = read_file("game/venue.xml"), *p;
+    /* build 82: the venue.xml the game reads, with the new venues of community packs in it (pc_content.c serves
+     * the launcher's composed copy), else the dump's */
+    char composed[1024], *text = pc_content_file("venue.xml", composed, sizeof composed) ? read_file(composed) : NULL, *p;
+    if (!text) text = read_file("game/venue.xml");
     if (!text) return;
     for (p = strstr(text, "<venue>"); p && g_venue_count < MAX_VENUES; p = strstr(p + 1, "<venue>")) {
         char *end = strstr(p, "</venue>"), disp[80], fe[16], *name, *paren;
