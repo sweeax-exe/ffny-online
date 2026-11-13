@@ -75,6 +75,7 @@ int main(void)
     printf("toast3|%d|%s\n", k, text);
     k = milestones_newly_reached(a, na, a, na, text, sizeof(text));
     printf("toast0|%d|%s\n", k, text);
+    printf("hint|%s\n", milestones_stat_hint());
     return 0;
 }
 '''
@@ -160,6 +161,13 @@ def test_the_toast_names_what_this_match_reached(out):
     assert t3[1] == '3' and t3[2] == 'MILESTONE: Punches landed 100 - +1 Upper Body  (+ 2 more)'
     t0 = rows(out, 'toast0')[0]
     assert t0[1] == '0' and t0[2] == ''                     # nothing new: no toast (and the ID card's badges never toast)
+
+
+def test_the_page_explains_what_the_bonus_is_worth(out):
+    assert rows(out, 'hint') == [['hint', 'Your fighting styles set how high each stat can go. Milestones add a small '
+                                          'bonus on top, and about half of it is lost to rounding.']]
+    ui = (ROOT / 'src/hooks/milestones_ui.inc').read_text(encoding='utf-8')
+    assert 'milestones_stat_hint()' in ui
 
 
 def test_the_game_side_only_reads():
