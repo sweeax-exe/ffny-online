@@ -136,6 +136,8 @@ static bool helper_args(const std::string &command, const std::string &id, std::
     args.insert(args.end(), {"--capability", "language-v1"});
     // Fighter bodies, clothing, venues: mods.py composes them from the player's dump (pc_content.c serves them).
     args.insert(args.end(), {"--capability", "content-v1"});
+    // A new venue's breakable objects (the new-venue op's "models", setup/ffnycontent/newvenue.py), build 83.
+    args.insert(args.end(), {"--capability", "venue-models-v1"});
     {
         auto game = fs::current_path(error) / "game";
         if (!error && fs::is_directory(game, error)) {

@@ -687,3 +687,94 @@ def test_singles_compose_as_before_beside_packs(game, data):
     result = compose(data, game, [first, stale])
     assert result["applied"] == ["body-one"] and [i for i, _ in result["skipped"]] == ["stale"]
     assert "another mod" not in dict(result["skipped"])["stale"]
+
+
+BREAKABLE = b"\x7fELF" + b"__Model:::V2BG_13A_J_branch " * 40       # a stand-in for The Pit's breakable model
+MODELS_OP = dict(CROWD_OP, drop_objects=True, models=["V2BG_28A_Z"])
+del MODELS_OP["crowd_locator"]
+
+
+def breakable_game(game, monkeypatch):
+    """The test game with a retail breakable model V2BG_13A_J.o (synthetic bytes, made the retail ones)."""
+    a = viv.Archive(game / "assets" / "v2bg.viv")
+    rows = [(n, viv.refpack_store(a.read(n))) for n in a.names()] + [("V2BG_13A_J.o", viv.refpack_store(BREAKABLE))]
+    (game / "assets" / "v2bg.viv").write_bytes(viv.build_archive(rows, align=128))
+    monkeypatch.setattr(newvenue, "BREAKABLE_MODELS",
+                        {"V2BG_13A_J.o": (len(BREAKABLE), hashlib.sha256(BREAKABLE).hexdigest())})
+    return game
+
+
+def model_entry(entry="V2BG_28A_Z.o", base_entry="V2BG_13A_J.o", base=BREAKABLE, result=None):
+    made = BREAKABLE.replace(b"V2BG_13A_J", entry[:-2].encode()) + b"crate"
+    return ("assets/v2bg.viv", entry, "add", "assets/v2bg.viv", base_entry, base, made if result is None else result)
+
+
+def test_new_venue_with_a_breakable(game, data, monkeypatch):
+    breakable_game(game, monkeypatch)
+    pack = make_pack(data, "crate", "venue", [model_entry()], [MODELS_OP])
+    result = compose(data, game, [pack])
+    assert result["applied"] == ["crate"], result
+    assert viv.Archive(out(data, "assets/v2bg.viv")).read("V2BG_28A_Z.o") == model_entry()[6]
+    entity = out(data, "assets/entity.xml").read_bytes().decode("latin-1")
+    template, new = entity.split("<name>V2BG_28A</name>", 1)
+    assert "V2BG_28A_Z" not in template
+    # the line FFNY Studio's breakables.add_entity_models writes, before the entity's end
+    assert "\t\t<model>\r\n\t\t\t<name>V2BG_28A_Z</name>\r\n\t\t</model>\r\n\t</entity>" in new
+    assert new.count("<model>") == 2                                 # drop_objects: the main model and the crate
+    assert cc.COMPOSER >= 5
+
+
+def test_new_venue_breakables_are_refused_unless_they_are_its_own_adds(game, data, monkeypatch):
+    breakable_game(game, monkeypatch)
+    plain = {k: v for k, v in MODELS_OP.items() if k != "models"}
+    cases = {
+        "unnamed": ([model_entry()], plain),                                           # added, not named
+        "missing": ([], MODELS_OP),                                                    # named, not added
+        "other": ([model_entry()], dict(MODELS_OP, models=["V2BG_29A_Z"])),           # not its own code
+        "letter": ([model_entry("V2BG_28A_J.o")], dict(MODELS_OP, models=["V2BG_28A_J"])),   # a retail letter
+        "twice": ([model_entry()], dict(MODELS_OP, models=["V2BG_28A_Z", "V2BG_28A_Z"])),
+        "many": ([model_entry()], dict(MODELS_OP, models=["V2BG_28A_%s" % c for c in "OPQRSTUVWXYZ"] + ["V2BG_28A_Z"])),
+        "text": ([model_entry()], dict(MODELS_OP, models="V2BG_28A_Z")),
+        "case": ([model_entry(), model_entry("v2bg_28a_y.o")], MODELS_OP),             # unnamed, another case
+        "base": ([model_entry(base_entry="V2BG_03A.o", base=viv.Archive(game / "assets" / "v2bg.viv").read("V2BG_03A.o"))],
+                 MODELS_OP),                                                           # not from a breakable model
+        "template": ([model_entry()], dict(MODELS_OP, template="V2BG_05A", template_code="05A")),  # 05A has a Z
+        "notelf": ([model_entry(result=b"<xml/>V2BG_28A_Z")], MODELS_OP),
+        "notrenamed": ([model_entry(result=BREAKABLE + b"V2BG_28A_Z")], MODELS_OP),
+    }
+    for order, (pack_id, (entries, op)) in enumerate(sorted(cases.items()), 1):
+        pack = make_pack(data, pack_id, "venue", entries, [op], order=order)
+        result = compose(data, game, [pack])
+        assert result["applied"] == [] and result["skipped"][0][0] == pack_id, (pack_id, result)
+    # not the game's own V2BG_13A_J.o: the retail hash does not match
+    monkeypatch.setattr(newvenue, "BREAKABLE_MODELS", {"V2BG_13A_J.o": (35872, "ab" * 32)})
+    pack = make_pack(data, "notretail", "venue", [model_entry()], [MODELS_OP], order=30)
+    result = compose(data, game, [pack])
+    assert result["applied"] == [] and "game's own breakable model" in result["skipped"][0][1]
+
+
+def test_template_stage_model_copy_is_not_a_breakable(game, data, monkeypatch):
+    """A copy of a venue with its own stage model Z (The Dragon House's V2BG_05A_Z.o) adds V2BG_28A_Z.o from it
+    without naming it in models."""
+    breakable_game(game, monkeypatch)
+    op = {k: v for k, v in MODELS_OP.items() if k != "models"}
+    entries = [model_entry(base_entry="V2BG_05A_Z.o")]
+    assert newvenue.check_models(dict(op, template="V2BG_05A", template_code="05A"),
+                                 [dict(archive=e[0], entry=e[1], mode=e[2], base_archive=e[3], base_entry=e[4])
+                                  for e in entries]) == {}
+
+
+def test_validate_install_asks_for_venue_models_v1(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import test_mod_manager  # noqa: E402  (the loaded mods module)
+    sys.path.pop(0)
+    mods = test_mod_manager.mods
+    folder = tmp_path / "pack"
+    (folder / "deltas").mkdir(parents=True)
+    (folder / "install.json").write_text(json.dumps({"schema": 1, "type": "venue", "entries": [],
+                                                     "ops": [MODELS_OP]}), encoding="utf-8")
+    assert mods.validate_install(folder)["capabilities"] == ["content-v1", "venue-models-v1"]
+    (folder / "install.json").write_text(json.dumps({"schema": 1, "type": "venue", "entries": [],
+                                                     "ops": [{k: v for k, v in MODELS_OP.items() if k != "models"}]}),
+                                         encoding="utf-8")
+    assert mods.validate_install(folder)["capabilities"] == ["content-v1"]
