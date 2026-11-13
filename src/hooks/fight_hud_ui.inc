@@ -5,6 +5,12 @@
 //
 //   PERFECT   a round won without losing any health, offline against the CPU and online: a banner in the
 //             game's stencil lettering for a few seconds from the decision ([online] perfect_banner).
+//
+//   The look (build 81): the game's own fight call-outs, white distressed letters on a dark worn plate.
+//             FIGHT! is the game's own lettering (ui/hud_fight.png: the fight HUD's call-out texture in
+//             assets/misc.viv); the numbers and PERFECT are the game's TeaChest stencil in the same off-white,
+//             worn with ui/hud_grain.png (the call-outs' specks and scratches, scripts/online-art.py). Without
+//             that art (online art older than 7) the gold-on-red look of builds 76..80 stays.
 //             fight_hud.c tracks the round; the banner waits a moment, so a decision that rollback takes
 //             back never shows.
 //   Name tags in an online fight each player's online name on the line over the fighter's name on the
@@ -59,6 +65,71 @@ void fh_test_names()
     fprintf(stderr, "[FIGHTHUD] RECOMP_TEST_NAME_TAGS (tests): %d names for the fighters of any fight\n", (int)FH.test_names.size());
 }
 
+// The game's look, when the player's online art has it (version 7): its FIGHT! lettering, the wear tile
+// and the stencil the numbers and PERFECT are set in (TeaChest; the page titles' stencil without it).
+struct HudArt {
+    const Tex *fight = nullptr, *grain = nullptr;
+    ImFont *font = nullptr;
+};
+const ImU32 WORN_WHITE = IM_COL32(236, 234, 228, 255), WORN_RULE = IM_COL32(150, 146, 138, 255),
+            WORN_GRIT = IM_COL32(120, 118, 112, 255);
+
+bool fh_game_look(HudArt &a)
+{
+    const Tex &fight = tex("ui/hud_fight.png"), &grain = tex("ui/hud_grain.png");
+    if (!fight.srv || !grain.srv || fight.w <= 0 || fight.h <= 0) return false;
+    a.fight = &fight;
+    a.grain = &grain;
+    a.font = g_worn ? g_worn : g_stencil;
+    static bool told;
+    if (!told) {
+        told = true;
+        fprintf(stderr, "[FIGHTHUD] the game's look: FIGHT! %dx%d, wear tile, %s\n", (int)fight.w, (int)fight.h,
+                g_worn ? "TeaChest" : "the page titles' stencil");
+    }
+    return true;
+}
+
+// The wear tile over a box of the screen (tiled from `origin`, the box's corner by default, clipped to the
+// box): tinted black over white lettering it is the call-outs' specks; over the dark plate a black tint
+// does not show.
+void fh_grain(ImDrawList *dl, const Frame &f, const Tex &g, ImVec2 a, ImVec2 b, ImU32 tint, float texel = 1.3f,
+              const ImVec2 *origin = nullptr)
+{
+    float step = 256.0f * texel * f.s();
+    if (step < 1.0f || b.x <= a.x || b.y <= a.y) return;
+    ImVec2 o = origin ? *origin : a;
+    float x0 = o.x + floorf((a.x - o.x) / step) * step, y0 = o.y + floorf((a.y - o.y) / step) * step;
+    dl->PushClipRect(a, b, true);
+    for (float y = y0; y < b.y; y += step)
+        for (float x = x0; x < b.x; x += step)
+            dl->AddImage((ImTextureID)(intptr_t)g.srv, ImVec2(x, y), ImVec2(x + step, y + step), ImVec2(0, 0), ImVec2(1, 1), tint);
+    dl->PopClipRect();
+}
+
+// Worn lettering, centred on cx with its top at y: a dark drop shadow, the off-white letters, the wear.
+void fh_worn_text(ImDrawList *dl, const Frame &f, const HudArt &a, float size, float cx, float y, float alpha, const char *s)
+{
+    ImFont *font = font_or_default(a.font);
+    float k = size / 100.0f;
+    text(dl, f, font, size, cx + 3.0f * k, y + 4.0f * k, with_alpha(BLACK, alpha * 0.85f), s, CENTER, 0);
+    text(dl, f, font, size, cx, y, with_alpha(WORN_WHITE, alpha), s, CENTER, 0);
+    ImVec2 sz = font->CalcTextSizeA(size * f.s(), FLT_MAX, 0, s), at = f.p(cx, y);
+    at.x -= sz.x / 2;
+    fh_grain(dl, f, *a.grain, at, ImVec2(at.x + sz.x, at.y + sz.y), with_alpha(BLACK, alpha * 0.95f));
+}
+
+// The game's FIGHT! lettering, `h` high, centred on (cx, cy), with the same drop shadow.
+void fh_fight_art(ImDrawList *dl, const Frame &f, const HudArt &a, float h, float cx, float cy, float alpha)
+{
+    float w = h * a.fight->w / a.fight->h, k = h / 100.0f;
+    image(dl, f, *a.fight, cx - w / 2 + 3.0f * k, cy - h / 2 + 4.0f * k, w, h, with_alpha(BLACK, alpha * 0.85f));
+    image(dl, f, *a.fight, cx - w / 2, cy - h / 2, w, h, with_alpha(IM_COL32_WHITE, alpha));
+}
+
+void fh_band(ImDrawList *dl, const Frame &f, float cy, float alpha, float dense, const HudArt *worn = nullptr,
+             float solid = 160);
+
 void fh_banner(ImDrawList *dl, const Frame &f, unsigned long long age, const char *who)
 {
     // slammed in (large to its size in 160 ms), held, faded out
@@ -68,6 +139,18 @@ void fh_banner(ImDrawList *dl, const Frame &f, unsigned long long age, const cha
     float size = 78.0f * (1.0f + (1.0f - in) * (1.0f - in) * 1.3f);
     float glow = 0.75f + 0.25f * sinf((float)(age % 700) / 700.0f * 6.2832f);
     const float cy = 142;      // over the game's own KO lettering, which sits in the middle
+    HudArt art;
+    if (fh_game_look(art)) {
+        // the call-outs' look: a dark worn plate, PERFECT in the worn stencil (a size up: it is narrower),
+        // the winner under it
+        size *= 1.2f;
+        fh_band(dl, f, cy, std::max(0.0f, std::min(1.0f, in * 1.4f)) * std::max(0.0f, out), 0.95f, &art, 200);
+        float ty = cy - size * 0.5f - (who && *who ? 8 : 0);
+        fh_worn_text(dl, f, art, size, 320, ty, alpha, "PERFECT");
+        if (who && *who && in >= 1.0f)
+            text(dl, f, g_title, 15, 320, cy + 30, with_alpha(WORN_WHITE, alpha), who, CENTER, 1.2f);
+        return;
+    }
     // a dark band across the picture, the lettering over it, a gold rule above and below
     float bh = 96, half = 330;
     ImVec2 a = f.p(320 - half, cy - bh / 2), b = f.p(320 + half, cy + bh / 2), mid = f.p(320, cy);
@@ -88,17 +171,31 @@ void fh_banner(ImDrawList *dl, const Frame &f, unsigned long long age, const cha
 }
 
 // A dark band across the picture with gold rules (the PERFECT banner's look), opaque in the middle:
-// it covers the game's own grey FIGHT! lettering, which is up under the first numbers.
-void fh_band(ImDrawList *dl, const Frame &f, float cy, float alpha, float dense)
+// it covers the game's own grey FIGHT! lettering, which is up under the first numbers. With the game's
+// look (`worn`) the rules are worn grey and the plate gets the call-outs' grit.
+void fh_band(ImDrawList *dl, const Frame &f, float cy, float alpha, float dense, const HudArt *worn, float solid)
 {
-    const float bh = 104, half = 330, solid = 160;
+    const float bh = 104, half = 330;
     ImU32 dark = with_alpha(IM_COL32(6, 6, 8, 255), dense * alpha), none = with_alpha(IM_COL32(6, 6, 8, 255), 0);
     ImVec2 a = f.p(320 - half, cy - bh / 2), b = f.p(320 + half, cy + bh / 2);
     ImVec2 sa = f.p(320 - solid, cy - bh / 2), sb = f.p(320 + solid, cy + bh / 2);
     dl->AddRectFilledMultiColor(a, ImVec2(sa.x, b.y), none, dark, dark, none);
     dl->AddRectFilled(sa, sb, dark);
     dl->AddRectFilledMultiColor(ImVec2(sb.x, a.y), b, dark, none, none, dark);
-    ImU32 gold = with_alpha(GOLD, alpha), gold0 = with_alpha(GOLD, 0);
+    if (worn) {
+        // the grit, fading out with the plate towards its ends
+        float grit = alpha * dense * 0.22f;
+        fh_grain(dl, f, *worn->grain, sa, sb, with_alpha(WORN_GRIT, grit), 1.0f, &a);
+        const int strips = 8;
+        for (int i = 0; i < strips; i++) {
+            float x0 = (sa.x - a.x) * i / strips, x1 = (sa.x - a.x) * (i + 1) / strips;
+            ImU32 c = with_alpha(WORN_GRIT, grit * (i + 0.5f) / strips);
+            fh_grain(dl, f, *worn->grain, ImVec2(a.x + x0, a.y), ImVec2(a.x + x1, b.y), c, 1.0f, &a);
+            fh_grain(dl, f, *worn->grain, ImVec2(b.x - x1, a.y), ImVec2(b.x - x0, b.y), c, 1.0f, &a);
+        }
+    }
+    ImU32 rule = worn ? WORN_RULE : GOLD;
+    ImU32 gold = with_alpha(rule, alpha * (worn ? 0.6f : 1.0f)), gold0 = with_alpha(rule, 0);
     for (int k = 0; k < 2; k++) {
         float y = k ? b.y : a.y - 2 * f.s();
         dl->AddRectFilledMultiColor(ImVec2(a.x, y), ImVec2(sa.x, y + 2 * f.s()), gold0, gold, gold, gold0);
@@ -114,6 +211,25 @@ void fh_countdown(ImDrawList *dl, const Frame &f, int n, float t)
     const float cy = 228;      // where the game's own FIGHT! lettering stands
     float in = t < 0.16f ? t / 0.16f : 1.0f;
     float pop = (1.0f - in) * (1.0f - in);
+    HudArt art;
+    if (fh_game_look(art)) {
+        // the game's look: the same slams and fades, worn off-white on the worn plate, FIGHT! the game's own
+        if (n > 0) {
+            fh_band(dl, f, cy, n == 3 ? std::min(1.0f, t * 30.0f) : 1.0f, 0.97f, &art);
+            float out = t > 0.82f ? (1.0f - t) / 0.18f : 1.0f;
+            float alpha = std::max(0.0f, std::min(1.0f, in * 1.6f)) * std::max(0.0f, out);
+            float size = 136.0f * (1.0f + pop * 1.4f) * (0.92f + 0.08f * out);
+            char numeral[2] = { (char)('0' + n), 0 };
+            fh_worn_text(dl, f, art, size, 320, cy - size * 0.5f, alpha, numeral);
+            return;
+        }
+        float out = t > 0.7f ? (1.0f - t) / 0.3f : 1.0f;
+        float alpha = std::max(0.0f, std::min(1.0f, in * 1.4f)) * std::max(0.0f, out);
+        float h = 84.0f * (1.0f + pop * 1.3f) * (1.0f + (1.0f - out) * 0.15f);
+        fh_band(dl, f, cy, std::max(0.0f, out), 0.7f, &art);
+        fh_fight_art(dl, f, art, h, 320, cy, alpha);
+        return;
+    }
     if (n > 0) {
         // the band stays through the numbers (up within the first steps of the 3)
         fh_band(dl, f, cy, n == 3 ? std::min(1.0f, t * 30.0f) : 1.0f, 0.97f);

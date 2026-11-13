@@ -230,6 +230,7 @@ const char *mode_logo(int type)
 ImFont *g_title = nullptr, *g_hand = nullptr, *g_body = nullptr, *g_cond = nullptr, *g_stencil = nullptr;
 ImFont *g_serif = nullptr;     // the game's own AachenStd-Bold: Turf War's titles (the stencil without it)
 ImFont *g_numbers = nullptr;   // Anton (SIL OFL, ffny-branding/fonts): Turf War's countdown (TradeBld without it)
+ImFont *g_worn = nullptr;      // the game's own TeaChest stencil: the start countdown's numbers and PERFECT (fight_hud_ui.inc)
 bool g_fonts_tried = false;
 
 ImFont *add_font(const char *file)
@@ -5140,6 +5141,7 @@ void prepare(void *device)
         g_stencil = add_font("FERRO___.TTF");           // page titles, like MAIN MENU
         if (!g_stencil) g_stencil = g_title;
         g_serif = add_font("AachenStd-Bold.ttf");
+        g_worn = add_font("TeaChest.ttf");             // online art 7 on (scripts/online-art.py)
         std::wstring anton;
         if (find_ffny_branding(L"fonts\\Anton-Regular.ttf", anton)) {
             char path[MAX_PATH * 3];
