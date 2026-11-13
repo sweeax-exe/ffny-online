@@ -29,8 +29,8 @@ int new_fighters_list(const NewFighter **out);
 int new_fighter_template(int fe_id);        /* -1 when fe_id is not a new fighter */
 
 /* After a front-end call the game ran (the FuncCall hook, recomp_manual.c), and Game.GetNextFighter's
- * wrapper: the select screens show each new fighter as one more outfit of its template's cell (as Blaze 2/3
- * are Blaze's), unlocked. */
+ * wrapper: the select screens show each new fighter as a cell of its own after the stock cells (the community
+ * row), unlocked, by place. */
 void new_fighters_after_funccall(const char *text);
 void new_fighters_get_next(void);           /* recomp_lookup_manual: Game.GetNextFighter, 0x000480E0 */
 
