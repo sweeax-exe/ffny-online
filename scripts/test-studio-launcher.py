@@ -17,6 +17,8 @@ RECOMP_STUDIO_SERVER / RECOMP_STUDIO_TEST_KEY and RECOMP_TEST_STUDIO steps, one 
 2. downloading    press, slow server: the picture shows the progress (the launcher quits mid-download; .part stays)
 3. installed      press again: the download resumes (Range), is checked and installed; versions/<v>, current.txt
 4. open           press: the fake Studio starts with --data-root and --account-file (no --install-dir: a checkout)
+4b. single-start  four presses while the started (fake) Studio shows its window: one start; the window comes to
+                 the front
 5. update         a newer build is published: "Update Studio"
 6. updated        press: the new version is installed beside the old one, current.txt switches
 7. open-install   DEFJAM_INSTALL_DIR names a folder with installed.ini: --install-dir is passed
@@ -80,6 +82,16 @@ class FakeStudio {
         File.AppendAllText(o, "{\"argv\": [" + string.Join(", ", q) + "], \"cwd\": " + Q(Environment.CurrentDirectory) +
             ", \"cmdline\": " + Q(Environment.CommandLine) + ", \"exe\": " +
             Q(System.Reflection.Assembly.GetEntryAssembly().Location) + "}\n");
+        string stay = Environment.GetEnvironmentVariable("FAKE_STUDIO_WINDOW");
+        if (stay != null) {     // a Studio window that stays open this many seconds (the single-start step)
+            var f = new System.Windows.Forms.Form();
+            f.Text = "Fake FFNY Studio";
+            var t = new System.Windows.Forms.Timer();
+            t.Interval = int.Parse(stay) * 1000;
+            t.Tick += delegate { f.Close(); };
+            t.Start();
+            System.Windows.Forms.Application.Run(f);
+        }
     }
 }
 '''
@@ -325,6 +337,15 @@ def main():
         want = ['--data-root', str(data), '--account-file', str(data / 'account.dat')]
         step('open', argv == want and Path(got[-1]['cwd']).resolve() == exe.parent.resolve(), png, argv=argv,
              cwd=got[-1]['cwd'] if got else None)
+
+        # one Studio per install: presses while the started Studio is starting or shows its window start no other
+        n = len(started())
+        code, log, png = launcher(run, env, '4b-single-start', 400, '60:press;75:press;240:press;300:press',
+                                  {'FAKE_STUDIO_WINDOW': '10'})
+        time.sleep(2)
+        step('single-start', len(started()) - n == 1 and any('open already' in l for l in log), png,
+             starts=len(started()) - n, log=[l for l in log if 'button' in l or 'started' in l])
+        time.sleep(9)               # the fake Studio's window closes
 
         size2 = package(fake_exe, served, '0.1.0-test.2', 102, key)
         code, log, png = launcher(run, env, '5-update', 300)

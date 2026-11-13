@@ -269,7 +269,7 @@ void launcher_main(void *arg)
         float density = SDL_GetWindowPixelDensity(window);
         ui_lock();
         ui_apply_scale(window);
-        ui_feed_gamepad();
+        ui_feed_gamepad((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);   // not another window's presses
         ImGui_ImplSDLRenderer3_NewFrame();
         ui_sdl_frame((float)w, (float)h, density);
         ImGui::NewFrame();

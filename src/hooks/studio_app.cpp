@@ -884,6 +884,77 @@ void check()
 #endif
 }
 
+#if defined(_WIN32)
+namespace {
+// One Studio per install: a press while a Studio from this install shows its window brings that window to the
+// front instead of starting another (FFNY Studio 0.1 had no guard of its own, and every press started one).
+struct FindStudio { std::wstring versions; HWND found; };
+
+bool under(const std::wstring &path, const std::wstring &folder)
+{
+    if (folder.empty() || path.size() <= folder.size()) return false;
+    return CompareStringOrdinal(path.c_str(), (int)folder.size(), folder.c_str(), (int)folder.size(), TRUE) == CSTR_EQUAL &&
+           (path[folder.size()] == L'\\' || path[folder.size()] == L'/');
+}
+
+BOOL CALLBACK find_studio_window(HWND h, LPARAM lp)
+{
+    FindStudio *f = (FindStudio *)lp;
+    if (!IsWindowVisible(h) || GetWindow(h, GW_OWNER)) return TRUE;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    if (!pid || pid == GetCurrentProcessId()) return TRUE;
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return TRUE;
+    wchar_t image[32768];
+    DWORD n = 32768;
+    bool ok = QueryFullProcessImageNameW(p, 0, image, &n) != 0;
+    CloseHandle(p);
+    if (!ok) return TRUE;
+    std::wstring path(image, n);
+    size_t slash = path.find_last_of(L"\\/");
+    std::wstring name = slash == std::wstring::npos ? path : path.substr(slash + 1);
+    if (_wcsicmp(name.c_str(), L"FFNYStudio.exe") != 0 || !under(path, f->versions)) return TRUE;
+    f->found = h;
+    return FALSE;
+}
+
+HANDLE g_launched;                                      // the Studio process the last press started
+std::chrono::steady_clock::time_point g_launched_at;
+} // namespace
+
+// True when a Studio from this install has a window open: it is brought to the front.
+bool focus_running()
+{
+    std::error_code ec;
+    fs::path versions = fs::absolute(root_path() / "versions", ec).lexically_normal();
+    FindStudio f = { versions.native(), nullptr };
+    while (!f.versions.empty() && (f.versions.back() == L'\\' || f.versions.back() == L'/')) f.versions.pop_back();
+    EnumWindows(find_studio_window, (LPARAM)&f);
+    if (!f.found) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(f.found, &pid);
+    AllowSetForegroundWindow(pid);
+    if (IsIconic(f.found)) ShowWindow(f.found, SW_RESTORE);
+    SetForegroundWindow(f.found);
+    log_line("button: FFNY Studio is open already (pid " + std::to_string(pid) + "); brought to the front");
+    return true;
+}
+
+// True while the Studio the last press started is still starting (alive, no window yet, under a minute).
+bool still_starting()
+{
+    if (!g_launched) return false;
+    if (WaitForSingleObject(g_launched, 0) != WAIT_TIMEOUT ||
+        std::chrono::steady_clock::now() - g_launched_at > std::chrono::seconds(60)) {
+        CloseHandle(g_launched);
+        g_launched = nullptr;
+        return false;
+    }
+    return true;
+}
+#endif
+
 bool launch(std::string *error)
 {
 #if defined(_WIN32)
@@ -913,7 +984,9 @@ bool launch(std::string *error)
                         nullptr, dir.c_str(), &si, &pi))
         return fail(error, "FFNY Studio could not be started (error " + std::to_string(GetLastError()) + ").");
     CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
+    if (g_launched) CloseHandle(g_launched);
+    g_launched = pi.hProcess;
+    g_launched_at = std::chrono::steady_clock::now();
     log_line("started " + c.version + " (pid " + std::to_string(pi.dwProcessId) + "): " + utf8(fs::path(cmd)));
     return true;
 #else
@@ -932,6 +1005,14 @@ void press()
     }
     log_line(std::string("button: ") + (v.update ? "update" : v.installed ? "open" : "get"));
     if (v.installed && !v.update) {
+        bool open = focus_running(), starting = !open && still_starting();
+        if (open || starting) {
+            if (starting) log_line("button: FFNY Studio is starting already; not starting another");
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_view.error.clear();
+            g_view.message = open ? "FFNY Studio is open." : "FFNY Studio is starting.";
+            return;
+        }
         std::string error;
         bool ok = launch(&error);
         std::lock_guard<std::mutex> lock(g_mutex);
