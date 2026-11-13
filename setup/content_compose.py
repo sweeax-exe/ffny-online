@@ -55,7 +55,8 @@ LANG_MAX = 8                    # language packs composed with (each costs a cop
 LANG_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
 STATE = 'content-compose.json'
 MAX_RESULT = 64 * 1024**2
-MAX_DELTA = 32 * 1024**2
+MAX_DELTA = 40 * 1024**2     # one delta file: the account service's PackMaxFile (40 MiB from build 82; a venue with 32 MB of
+#                               textures packs its texture file at 33-35 MiB)
 CLOTHING_OPS = ('colour', 'item')
 VENUE_OPS = ('new-venue',)
 FIGHTER_OPS = ('new-fighter',)

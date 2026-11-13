@@ -100,3 +100,19 @@ def test_new_venue_fe_id_reads_only_the_new_venue_range(tmp_path):
     path.write_text('not json')
     assert mods.new_venue_fe_id(path) == 0
     assert mods.new_venue_fe_id(tmp_path / 'missing.json') == 0
+
+
+def test_launcher_takes_the_account_services_40_mib_files():
+    """Build 82: one pack file may be 40 MiB (the account service's PackMaxFile); the composer's delta cap and the
+    installer's archive-file cap take it."""
+    import importlib.util
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location('content_compose_t', root / 'setup/content_compose.py')
+    sys.path.insert(0, str(root / 'setup'))
+    try:
+        compose = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(compose)
+    finally:
+        sys.path.pop(0)
+    assert compose.MAX_DELTA == 40 * 1024**2 and compose.MAX_RESULT >= compose.MAX_DELTA
+    assert mods.MAX_FILE >= 40 * 1024**2
