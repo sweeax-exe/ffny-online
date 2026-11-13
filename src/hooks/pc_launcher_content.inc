@@ -95,6 +95,73 @@ static float content_tag(ImDrawList *dl, ImVec2 at, const char *text, float s, c
 
 #include "pc_launcher_community.inc"   // the Community tab: every submitted pack's page, votes
 
+// MY PACKS: the player's own packs (FFNY Studio's "Use in my game": <data>/mods/<id> with local.json, content.ini
+// local=1). Each has a switch. One that adds or changes more than textures (clothing, venues, fighters, props)
+// works offline only: while one is on the game refuses online (PC_CONTENT_LOCAL_LINE), so a line here says so,
+// with one button that turns those off. Returns the y below the section.
+template <typename Toggle>
+static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, float lx, float y, float inner, float s,
+                           bool busy, Toggle &toggle)
+{
+    y += 8 * s;
+    ld->AddText(display_font(), 22 * s, ImVec2(lx + 4 * s, y), col(k_white), "MY PACKS");
+    ld->AddText(ImGui::GetFont(), 13 * s, ImVec2(lx + 120 * s, y + 7 * s), col(k_white, 0.6f),
+                "Made by you in FFNY Studio (Use in my game). Only on this PC.");
+    y += 34 * s;
+    int blocking = 0;
+    for (int i = 0; i < count; i++)
+        blocking += packs[i].local && !packs[i].online_ok && !pc_content_is_off(packs[i].id);
+    if (blocking) {
+        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 52 * s);
+        ld->AddRectFilled(ra, rb, col(k_gold, 0.12f), 12 * s);
+        ld->AddRect(ra, rb, col(k_gold, 0.45f), 12 * s);
+        ld->AddText(ImGui::GetFont(), 13.5f * s, ImVec2(ra.x + 16 * s, ra.y + 9 * s), col(k_gold),
+                    PC_CONTENT_LOCAL_LINE, nullptr, inner - 230 * s);
+        if (glass_button("##content_mine_off", "Turn them off", ImVec2(rb.x - 176 * s, ra.y + 9 * s), ImVec2(160 * s, 34 * s), s,
+                         GLASS_RED, bold_font(), 14 * s, !busy)) {
+            for (int i = 0; i < count; i++)
+                if (packs[i].local && !packs[i].online_ok && !pc_content_is_off(packs[i].id))
+                    pc_content_set_off(packs[i].id, 1);
+            PcContentPack none{};
+            snprintf(none.id, sizeof none.id, "%s", "-");
+            toggle(none, false);        // saves the settings and composes again ("-" is no pack: switched on, a no-op)
+        }
+        y += 62 * s;
+    }
+    for (int i = 0; i < count; i++) {
+        PcContentPack &p = packs[i];
+        if (!p.local) continue;
+        bool on = !pc_content_is_off(p.id);
+        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 76 * s);
+        ld->AddRectFilled(ra, rb, col(k_white, on ? 0.05f : 0.025f), 12 * s);
+        ld->AddRect(ra, rb, col(k_white, 0.06f), 12 * s);
+        ImVec4 ink = on ? k_white : ImVec4(1, 1, 1, 0.55f);
+        const char *title = p.name[0] ? p.name : p.id;
+        ld->PushClipRect(ra, ImVec2(rb.x - 150 * s, rb.y), true);
+        ld->AddText(bold_font(), 17 * s, ImVec2(ra.x + 18 * s, ra.y + 10 * s), col(ink), title);
+        content_tag(ld, ImVec2(ra.x + 18 * s + text_size(bold_font(), 17 * s, title).x + 10 * s, ra.y + 11 * s),
+                    p.online_ok ? "Online too" : "Offline only", s, p.online_ok ? k_green : k_gold);
+        char line[400];
+        snprintf(line, sizeof line, "%s  \xC2\xB7  v%s  \xC2\xB7  %s", content_type_label(p.type), p.version,
+                 p.online_ok ? "only changes how things look, so it can stay on online"
+                             : "adds or changes more than looks: online is off while it is on");
+        ld->AddText(ImGui::GetFont(), 13 * s, ImVec2(ra.x + 18 * s, ra.y + 34 * s), col(ImVec4(0.80f, 0.80f, 0.82f, 1)), line);
+        if (p.composed && !p.applied && on)
+            ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 53 * s), col(k_gold),
+                        "Not applied to your game files (it does not fit them, or the launcher has not prepared it yet).");
+        ld->PopClipRect();
+        char id[128];
+        snprintf(id, sizeof id, "##content_mine_%s", p.id);
+        if (glass_button(id, on ? "On" : "Off", ImVec2(rb.x - 136 * s, ra.y + 20 * s), ImVec2(118 * s, 36 * s), s,
+                         on ? GLASS_RED : GLASS_PLAIN, bold_font(), 14.5f * s, !busy))
+            toggle(p, on);
+        y += 86 * s;
+        ImGui::SetCursorScreenPos(ImVec2(lx, y));
+        ImGui::Dummy(ImVec2(1, 1));
+    }
+    return y;
+}
+
 static void content_dialog(ImVec2 o, float w, float h, float s)
 {
     static PcContentPack packs[PC_CONTENT_MAX];
@@ -156,7 +223,9 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
     ImGui::BeginChild("##content_list", ImVec2(inner, b.y - foot - top - 8 * s), ImGuiChildFlags_None);
     ImDrawList *ld = ImGui::GetWindowDrawList();
     float y = ImGui::GetCursorScreenPos().y;
-    if (count == 0) {
+    int community = 0, mine = 0;
+    for (int i = 0; i < count; i++) (packs[i].local ? mine : community)++;
+    if (community == 0) {
         ld->AddText(ImGui::GetFont(), 14 * s, ImVec2(lx + 4 * s, y + 8 * s), col(k_white, 0.7f),
                     busy ? "Checking the catalogue..." : "No community packs yet. They arrive here by themselves once the team "
                                                          "accepts them.", nullptr, inner - 20 * s);
@@ -172,6 +241,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
     };
     for (int i = 0; i < count; i++) {
         PcContentPack &p = packs[i];
+        if (p.local) continue;          // MY PACKS, below
         if (p.bundle[0]) {
             // a pack of several mods: one card where its first mod comes, its mods listed inside
             bool first = true;
@@ -276,6 +346,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
         ImGui::SetCursorScreenPos(ImVec2(lx, y));
         ImGui::Dummy(ImVec2(1, 1));
     }
+    if (mine) y = my_packs_view(ld, packs, count, lx, y, inner, s, busy, toggle);
     ImGui::EndChild();
     ImGui::PopStyleColor();
     }

@@ -191,6 +191,8 @@ int pc_content_list(PcContentPack *out, int max)
             else if (!strcmp(k, "bytes")) p->bytes = atoll(v);
             else if (!strcmp(k, "fighter_fe_id")) p->fighter_fe_id = atoi(v);
             else if (!strcmp(k, "venue_fe_id")) p->venue_fe_id = atoi(v);
+            else if (!strcmp(k, "local")) p->local = atoi(v) == 1;
+            else if (!strcmp(k, "online_ok")) p->online_ok = atoi(v) == 1;
             CONTENT_TEXT(reviewed);
 #undef CONTENT_TEXT
         }
@@ -205,7 +207,7 @@ int pc_content_list(PcContentPack *out, int max)
             snprintf(dir, sizeof dir, "%s" HOST_SEP "mods" HOST_SEP "%s", root, out[i].id);
             out[i].installed = folder_exists(dir);
             if (strcmp(out[i].kind, "content")) strcpy(out[i].kind, "replacement");
-            out[i].off = !strcmp(out[i].kind, "replacement") && pc_content_is_off(out[i].id);
+            out[i].off = (out[i].local || !strcmp(out[i].kind, "replacement")) && pc_content_is_off(out[i].id);
             out[i].applied = out[i].composed && in_list(applied, out[i].id);
             if (out[i].installed) out[m++] = out[i];
         }
@@ -227,6 +229,7 @@ uint32_t pc_content_print(void)
         const char *parts[3];
         int k;
         if (strcmp(packs[i].kind, "content")) continue;
+        if (packs[i].local) continue;       /* the player's own: offline only (pc_content_local_offline) */
         if (packs[i].composed && !packs[i].applied) continue;     /* not in this PC's game files */
         parts[0] = packs[i].id; parts[1] = packs[i].version; parts[2] = packs[i].content_sha256;
         for (k = 0; k < 3; k++) {
@@ -401,6 +404,20 @@ int pc_content_offline_only(void)
 {
     const char *v = getenv("RECOMP_OFFLINE_ONLY");
     return v && *v && strcmp(v, "0");
+}
+
+int pc_content_local_offline(char *names, int size)
+{
+    static PcContentPack packs[PC_CONTENT_MAX];
+    int n = pc_content_list(packs, PC_CONTENT_MAX), i, count = 0, o = 0;
+    if (names && size > 0) names[0] = 0;
+    for (i = 0; i < n; i++) {
+        if (!packs[i].local || packs[i].off || packs[i].online_ok) continue;
+        if (names && size > 0 && o < size)
+            o += snprintf(names + o, (size_t)(size - o), "%s%s", count ? ", " : "", packs[i].name[0] ? packs[i].name : packs[i].id);
+        count++;
+    }
+    return count;
 }
 
 #if !defined(DEFJAM_APP)

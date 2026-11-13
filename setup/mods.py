@@ -771,6 +771,7 @@ class Manager:
             index = self.trusted(fresh=True)
         except (ValueError, OSError) as error:
             self.write_content()
+            self.compose_quietly(problems)      # the player's own packs work without a catalogue too
             raise ModError('; '.join(problems) or str(error)) from error
         try:
             done = self.sync_packs(index, problems)
@@ -892,13 +893,45 @@ class Manager:
                 out.append(pack)
         return out
 
+    def local_packs(self):
+        """The player's own packs (FFNY Studio's "Use in my game"): every folder <data>/mods/<id> with a
+        local.json that the mod manager does not own, by id. They apply after the community packs, can be switched
+        off like a replacement (settings.ini [content] off), never count in the online content print, and those
+        that are not online-safe (local_online_safe) keep the game offline while they are on."""
+        installed = self.state()['installed']
+        out = []
+        for folder in sorted(self.mods.iterdir(), key=lambda p: p.name):
+            if not folder.is_dir() or linked(folder) or folder.name in installed:
+                continue
+            try:
+                contract.slug(folder.name)
+                info = read_json(folder / LOCAL_FILE, None, 64 * 1024)
+            except (ValueError, OSError):
+                continue
+            if not isinstance(info, dict):
+                continue
+            files = {}
+            for path in sorted(folder.rglob('*')):
+                if path.is_file() and not linked(path) and path.name != LOCAL_FILE:
+                    files[path.relative_to(folder).as_posix()] = sha(path)
+            text = lambda key, limit=80: str(info.get(key, '')).replace('\n', ' ').replace('\r', ' ')[:limit]
+            place = info.get('fighter_fe_id', 0)
+            out.append(dict(id=folder.name, name=text('name') or folder.name, kind=text('kind') or 'replacement',
+                            type=text('type'), version=text('version') or '0.0.0', authors=text('author'),
+                            description=text('description', 500), content_sha256=content_hash(files),
+                            order=LOCAL_ORDER + len(out), folder=folder, local=True,
+                            fighter_fe_id=place if isinstance(place, int) and not isinstance(place, bool) else 0,
+                            composed=(folder / 'install.json').is_file(), online_ok=local_online_safe(folder)))
+        return out
+
     def compose(self):
         """Compose the fighter-body, clothing and venue packs into <data>/mod-manager/content-files (the game
         serves them). Holds the runtime lock, so never while the game runs."""
         with file_lock(self.root / 'runtime.lock'):
             self.progress('Preparing community content')
-            result = content_compose.compose(self.data, self.game, self.composed_packs(), root=self.root,
-                                             log=lambda text: None)
+            off = content_compose.read_off(self.data)
+            packs = self.composed_packs() + [p for p in self.local_packs() if p['composed'] and p['id'] not in off]
+            result = content_compose.compose(self.data, self.game, packs, root=self.root, log=lambda text: None)
         skipped = '; '.join('%s: %s' % s for s in result['skipped'] + result.get('lang_skipped', []))
         languages = sorted({i for i, _ in result.get('lang_files', [])})
         with_lang = ' (also with %s)' % ', '.join(languages) if languages else ''
@@ -935,6 +968,19 @@ class Manager:
             if (self.mods / mod_id / 'install.json').is_file():
                 lines.append('composed=1')     # pc_content.c counts it online only when content-files applied it
                 venue = new_venue_fe_id(self.mods / mod_id / 'install.json')
+                if venue:
+                    lines.append('venue_fe_id=%d' % venue)
+        for p in self.local_packs():
+            # the player's own packs (FFNY Studio, "Use in my game"): local=1, never in the online content print;
+            # online_ok=0 keeps the game offline while the pack is on (pc_content.c)
+            lines.append('[pack.' + p['id'] + ']')
+            for key in ('name', 'authors', 'kind', 'type', 'version', 'content_sha256', 'order', 'description',
+                        'fighter_fe_id'):
+                lines.append(key + '=' + str(p[key]))
+            lines += ['local=1', 'online_ok=%d' % p['online_ok']]
+            if p['composed']:
+                lines.append('composed=1')
+                venue = new_venue_fe_id(p['folder'] / 'install.json')
                 if venue:
                     lines.append('venue_fe_id=%d' % venue)
         atomic_bytes(self.root / 'content.ini', ('\n'.join(lines) + '\n').encode('utf-8'))
@@ -1041,6 +1087,30 @@ def new_venue_fe_id(install_json):
     return 0
 
 
+LOCAL_FILE = 'local.json'          # FFNY Studio's "Use in my game" marks the player's own pack folders with it
+LOCAL_ORDER = 1 << 20              # the player's own packs apply after every community pack
+_TEXTURE_ENTRY = re.compile(r'^[A-Za-z0-9_]+\.xsh$')
+
+
+def local_online_safe(folder):
+    """Whether one of the player's own packs may stay on online: it changes only how things look. A texture or
+    language pack (no install.json: textures go through the texture loader, and a language pack that rebuilt a
+    file a fight reads changes the fight-files print, which keeps different PCs apart) is; a composed pack only
+    when it has no ops and every entry replaces a texture file (``*.xsh``) of the game. Models, collision,
+    placements, lights, new items, venues and fighters are offline only."""
+    path = Path(folder) / 'install.json'
+    if not path.is_file():
+        return True
+    try:
+        info = content_compose.read_install(folder)
+    except (ValueError, OSError):
+        return False
+    return not info.get('ops') and all(
+        e['mode'] == 'replace' and e['archive'] == e['base_archive'] and e['entry'] == e['base_entry']
+        and e['archive'].lower().endswith('.viv') and _TEXTURE_ENTRY.fullmatch(e['entry'])
+        for e in info.get('entries', []))
+
+
 def content_hash(files):
     """The pack's content hash: SHA-256 over "path\\0sha256\\n" of every file, sorted by path (Studio's
     contentpack and the account service compute the same)."""
@@ -1102,6 +1172,9 @@ def main():
                 elif args.command == 'sync':
                     manager.sync()
                 elif args.command == 'compose':
+                    # also the player's own packs (FFNY Studio's "Use in my game", a switch on the Content page):
+                    # content.ini lists them for the game and the launcher
+                    manager.write_content(manager.content_revision())
                     manager.compose()
                 elif args.command == 'install':
                     manager.install(args.id, args.version, args.prerelease)
