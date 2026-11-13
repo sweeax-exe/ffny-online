@@ -14,6 +14,8 @@ Layout of the output: fighters/<id>.png (the choose-character portrait without i
 Battle-mode ID, the front-end ID of the fighter's record in assets/djv2.sod: the fighter.xml ID except
 for Teck 85, Santos 93, O.E 92 and Eric Sermon 91), venues/<feID>.png (venue.xml feID: its photo with
 its sign, 256x256) and venues/<feID>_name.png (the gold name banner), ui/<name>.png, fonts/<file>.ttf,
+ui/hud_fight.png and ui/hud_grain.png (the fight HUD's FIGHT! lettering from assets/misc.viv and a tile of its
+wear, for the start countdown and the PERFECT banner),
 and manifest.json. ui/ps_cross.png, ps_circle.png, ps_square.png and ps_triangle.png are not from the
 dump: this script draws them (PlayStation-style glyphs for the "Button icons" setting). ranks/em<N>-256.png and
 em<N>-64.png are not from the dump either: the port's own rank emblems, rendered by scripts/rank-emblems.py. Needs Pillow (the installed Python has it for the HD textures).
@@ -28,7 +30,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hd_assets  # noqa: E402
 
-VERSION = 6       # 5: the PlayStation-style glyphs ui/ps_*.png; 6: the rank emblems ranks/*.png
+VERSION = 7       # 5: the PlayStation-style glyphs ui/ps_*.png; 6: the rank emblems ranks/*.png;
+                  # 7: the fight HUD's FIGHT! lettering and its grain (ui/hud_fight.png, ui/hud_grain.png), TeaChest.ttf
 
 # (output name, screens.viv entry, SHPX image name). See docs/research/frontend-menu-integration.md §6.
 UI_IMAGES = [
@@ -50,7 +53,12 @@ UI_IMAGES = [
 ]
 MATCH_LOGO = "screens/match/2_type/mTypeLogo_%s_e.big"
 FONTS = ["TradeBld.ttf", "TradeCon.ttf", "SchwartzHand_Bold2.ttf", "FERRO___.TTF",
-         "TradeGothicLTStd-BoldExt.ttf", "AachenStd-Bold.ttf"]
+         "TradeGothicLTStd-BoldExt.ttf", "AachenStd-Bold.ttf", "TeaChest.ttf"]
+# The fight HUD's call-outs (assets/misc.viv, hud.xsh): one 512x256 texture "Over" with the words the game
+# shows over a fight in white distressed lettering (DOUBLE, OVERTIME, SUBMIT, TOTALED!, KO, OUT, RING,
+# FIGHT!). FIGHT! is the last word of its bottom row; the box is cut down to the lettering's own edges.
+HUD_ENTRY, HUD_CALLOUTS = "hud.xsh", "Over"
+HUD_FIGHT_BOX = (333, 176, 512, 256)
 
 
 def default_data():
@@ -150,6 +158,75 @@ def write_ps_glyphs(ui_dir):
     return [name for name, _, _ in PS_GLYPHS]
 
 
+def hud_callouts(misc_viv):
+    """The fight HUD's call-out texture (RGBA, 512x256) from assets/misc.viv, or None."""
+    for label, blob in hd_assets.walk(Path(misc_viv).read_bytes(), "misc.viv"):
+        if label.lower().endswith("::" + HUD_ENTRY) and blob[:4] == b"SHPX":
+            for record, image in hd_assets.shpx_images(blob):
+                if record["name"].strip() == HUD_CALLOUTS and image is not None and image.size == (512, 256):
+                    return image.convert("RGBA")
+    return None
+
+
+def hud_fight(callouts):
+    """The game's FIGHT! lettering, cut to its edges, or None when the texture is not the one expected."""
+    word = callouts.crop(HUD_FIGHT_BOX)
+    box = word.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+    if not box:
+        return None
+    word = word.crop(box)
+    w, h = word.size
+    return word if 140 <= w <= 180 and 60 <= h <= 80 else None
+
+
+def hud_grain(callouts, size=256):
+    """A tile of the call-outs' wear: the dark specks and scratches inside their white letters, as
+    white with the darkness for alpha, gathered from shifted copies of the texture until the tile is
+    covered (the letters leave gaps between them). The port tints it black over its own lettering
+    (the countdown's numbers, PERFECT) so they wear the same way, and grey over the plate behind."""
+    from PIL import Image, ImageChops, ImageFilter
+    w, h = callouts.size
+    wrapped = Image.new("RGBA", (w * 2, h * 2))
+    for x in (0, w):
+        for y in (0, h):
+            wrapped.paste(callouts, (x, y))
+    # well inside the letters: their shaded edges would draw the letters' outlines into the tile
+    inside = wrapped.getchannel("A").point(lambda v: 255 if v > 230 else 0).filter(ImageFilter.MinFilter(9))
+    dark = wrapped.convert("L").point(lambda v: max(0, min(255, (205 - v) * 3)))
+    grain = Image.new("L", (size, size), 0)
+    covered = Image.new("L", (size, size), 0)
+    for k in range(48):
+        x, y = (k * 197) % w, (k * 89) % h
+        part = inside.crop((x, y, x + size, y + size))
+        free = ImageChops.multiply(part, ImageChops.invert(covered))
+        grain.paste(dark.crop((x, y, x + size, y + size)), (0, 0), free)
+        covered = ImageChops.lighter(covered, part)
+    tile = Image.new("RGBA", (size, size), (255, 255, 255, 0))
+    tile.putalpha(grain)
+    return tile
+
+
+def write_hud_art(data, ui_dir):
+    """ui/hud_fight.png and ui/hud_grain.png from the player's assets/misc.viv; returns the names written
+    and the ones missing."""
+    misc = Path(data) / "extracted" / "assets" / "misc.viv"
+    if not misc.is_file():
+        return [], ["assets/misc.viv"]
+    callouts = hud_callouts(misc)
+    if callouts is None:
+        return [], ["assets/misc.viv#%s/%s" % (HUD_ENTRY, HUD_CALLOUTS)]
+    done, missing = [], []
+    fight = hud_fight(callouts)
+    if fight is None:
+        missing.append("hud_fight")
+    else:
+        fight.save(Path(ui_dir) / "hud_fight.png")
+        done.append("hud_fight")
+    hud_grain(callouts).save(Path(ui_dir) / "hud_grain.png")
+    done.append("hud_grain")
+    return done, missing
+
+
 def maybe_refpack(blob):
     return hd_assets.unpack_refpack(blob) if blob[:2] in (b"\x10\xfb", b"\x11\xfb", b"\x90\xfb", b"\x91\xfb") else blob
 
@@ -201,6 +278,12 @@ def build(data, out):
         image.save(tmp / "ui" / (out_name + ".png"))
         manifest["ui"].append(out_name)
     manifest["ui"] += write_ps_glyphs(tmp / "ui")
+    try:        # the fight overlays' lettering; without it they keep the port's own look
+        done, missing = write_hud_art(data, tmp / "ui")
+        manifest["ui"] += done
+        manifest["missing"] += missing
+    except (ValueError, IndexError, OSError) as error:
+        manifest["missing"].append("hud art (%s)" % error)
 
     for name in entries:
         m = re.fullmatch(MATCH_LOGO.replace(".", r"\.").replace("%s", r"(\w+?)"), name)
