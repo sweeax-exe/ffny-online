@@ -351,6 +351,8 @@ typedef struct {
     /* the fight's rules, set at its start (from START online, the settings offline) */
     uint16_t score_limit, respawn_steps;
     uint32_t time_limit_steps;
+    float spawn_scale;              /* the spawn ring for this venue's walls (1: the Big Arena template's) */
+    uint32_t blazin;                /* BLAZIN' moves allowed (else the meter stops short of full) */
 } BigArena;
 static BigArena BA;
 typedef char ow_state_fits[sizeof(BigArena) <= OW_STATE_BYTES ? 1 : -1];
@@ -403,6 +405,7 @@ void ow_match_start(void)
     BA.respawn_steps = (uint16_t)(60 * recomp_settings_get("openworld", "respawn_seconds", 3));
     BA.time_limit_steps = 60u * (uint32_t)recomp_settings_get("openworld", "time_limit", 300);
     BA.winner = 0xFF;
+    BA.blazin = recomp_settings_get("openworld", "blazin", 0) != 0;
     fprintf(stderr, "[BIGARENA] on: first to %u knockouts, back after %u steps, time limit %u steps, camera %s%s\n",
             BA.score_limit, BA.respawn_steps, BA.time_limit_steps, k_ba_camera[BAcfg.camera % 3],
             online ? " (online test)" : "");
@@ -438,9 +441,10 @@ static void ba_revive(int s, int pick_spawn)
         OwSpawnCtx c;
         int k, i;
         memset(&c, 0, sizeof c);
-        for (i = 0; i < 8; i++) { c.spawn_x[i] = k_spawn[i][0]; c.spawn_z[i] = k_spawn[i][1]; }
+        float sc = BA.spawn_scale > 0.0f ? BA.spawn_scale : 1.0f;
+        for (i = 0; i < 8; i++) { c.spawn_x[i] = k_spawn[i][0] * sc; c.spawn_z[i] = k_spawn[i][1] * sc; }
         c.spawns = 8;
-        c.safe = 140.0f;
+        c.safe = 140.0f * sc;
         for (k = 0; k < 4; k++) {
             if (k == s || !present(k) || (MEM16(rec(k) + 0x932u) & ENDED)) continue;
             c.live_x[c.lives] = MEMF(rec(k) + 0x44u);
@@ -449,10 +453,10 @@ static void ba_revive(int s, int pick_spawn)
         }
         i = ow_rules_pick_spawn(&c);
         if (i >= 0) {
-            MEMF(r + 0x44u) = k_spawn[i][0];
+            MEMF(r + 0x44u) = c.spawn_x[i];
             MEMF(r + 0x48u) = 0.0f;
-            MEMF(r + 0x4Cu) = k_spawn[i][1];
-            MEMF(r + 0x54u) = ow_rules_yaw_to_centre(k_spawn[i][0], k_spawn[i][1]);
+            MEMF(r + 0x4Cu) = c.spawn_z[i];
+            MEMF(r + 0x54u) = ow_rules_yaw_to_centre(c.spawn_x[i], c.spawn_z[i]);
         }
     }
     h = MEM32(HUD_PLAYERS + 4u * (uint32_t)s);
@@ -493,6 +497,32 @@ static void ba_end_step(void)
         fprintf(stderr, "[BIGARENA] step %u: slot %d goes down (end, %u knockouts)\n", BA.step, s, BA.score[s]);
 }
 
+/* The spawn ring's size for this venue, at the fight's first step: the walls' extent (the corners of every upright
+ * collision plane, +0x04 four x/y/z corners, +0x34 the normal; the .cli layout of ffnystudio/collision.py), the
+ * ring at 0.6 of the smaller half-extent, at most the template's 260 and at least 25. The Big Arena template
+ * (walls at +-585) keeps 260; a retail ring (+-35..60) gets 25..36, so nobody comes back outside its walls. The
+ * same planes on every PC, so the same ring. */
+static float ba_spawn_scale(void)
+{
+    uint32_t base = MEM32(PLANES_PTR), n = MEM32(PLANES_N), i, k;
+    float hx = 0.0f, hz = 0.0f, r;
+    if (!base || !n || n > 100000u) return 1.0f;
+    for (i = 0; i < n; i++) {
+        uint32_t p = base + i * 0x48u;
+        if (fabsf(MEMF(p + 0x38u)) >= 0.7f) continue;          /* a floor or a ceiling */
+        for (k = 0; k < 4; k++) {
+            float x = fabsf(MEMF(p + 4u + 12u * k)), z = fabsf(MEMF(p + 12u + 12u * k));
+            if (x < 1e5f && x > hx) hx = x;
+            if (z < 1e5f && z > hz) hz = z;
+        }
+    }
+    if (hx <= 0.0f || hz <= 0.0f) return 1.0f;
+    r = 0.6f * (hx < hz ? hx : hz);
+    if (r > 260.0f) r = 260.0f;
+    if (r < 25.0f) r = 25.0f;
+    return r / 260.0f;
+}
+
 /* Once per step before the generated body, in normal and re-run steps alike. */
 static void bigarena_step(void)
 {
@@ -500,7 +530,23 @@ static void bigarena_step(void)
     uint32_t pres;
     if (!BA.on) return;
     BA.step++;
+    if (BA.step == 1) {
+        BA.spawn_scale = ba_spawn_scale();
+        if (!netplay_rerunning())
+            fprintf(stderr, "[BIGARENA] %u collision planes: spawn ring radius %.0f\n", MEM32(PLANES_N),
+                    (double)(260.0f * BA.spawn_scale));
+    }
     pres = ba_present();
+    /* BLAZIN' off (the default for now): every fight that ran a BLAZIN' on a Studio-built venue crashed in the
+     * heap allocator after the fight (sub_00029DE0+0x1E3; 7 of 7 in phase 0, and run 20261113-222856-offline on
+     * the 5-plane Big Arena template, so not the plane count). The meter (+0x364, full at 98..100 sets the ready
+     * bit +0x93E 0x01, docs/research/dizzy.md) stops at 97 until that is fixed. */
+    if (!BA.blazin)
+        for (s = 0; s < 4; s++)
+            if ((pres & (1u << s)) && MEMF(rec(s) + 0x364u) > 97.0f) {
+                MEMF(rec(s) + 0x364u) = 97.0f;
+                MEM8(rec(s) + 0x93Eu) &= (uint8_t)~1u;
+            }
     /* knockouts: a fighter that is out (ENDED) is counted once; the last fighter who hit it scores */
     for (s = 0; s < 4; s++) {
         uint32_t r = rec(s);

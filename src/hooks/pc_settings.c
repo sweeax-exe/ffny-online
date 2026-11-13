@@ -240,6 +240,9 @@ static RecompSetting g_display_settings[] = {
       "Big Arena: seconds before a knocked-out fighter comes back (then 2 seconds without damage)." },
     { "openworld", "time_limit", RECOMP_SETTING_INT, 300, 0, 3600, NULL, "RECOMP_OW_TIME_LIMIT", 0,
       "Big Arena: seconds of fighting before the leader wins (0: no time limit)." },
+    { "openworld", "blazin", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_OW_BLAZIN", 0,
+      "Big Arena: BLAZIN' moves. Off for now: a BLAZIN' on a map built with FFNY Studio crashes the game after the "
+      "fight (being fixed)." },
     { "openworld", "camera", RECOMP_SETTING_ENUM, 1, 0, 0, k_ow_camera, "RECOMP_OW_CAMERA", 0,
       "Big Arena camera: follow (your fighter, from above and behind; the stick works as always), behind (over the "
       "shoulder, turns with your fighter) or stock (the game's own fight camera, which loses fighters far apart). "
