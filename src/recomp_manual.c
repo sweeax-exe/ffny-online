@@ -131,9 +131,11 @@ void sub_000AC590(void) { ow_camera(sub_000AC590_gen); }
 /* The match's update (thiscall; the match at 0x349760, its state at +0x2D820).
  * Only states 5 and 8 run the simulation step above; any other state (intro,
  * special-move camera, match end) ends the live HUD. */
+void ow_match_update(uint32_t match);
 void sub_0008BE60_enter(void)
 {
     uint32_t state = MEM32(g_ecx + 0x2D820);
+    ow_match_update(g_ecx);
     if (state != 5 && state != 8)
         s_ws_hud_live = 0;
 }

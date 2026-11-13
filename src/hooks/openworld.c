@@ -252,6 +252,28 @@ static void ko_revive_step(void)
     }
 }
 
+/* Offline test runs with any RECOMP_OW_* switch: the three first-time help cards (weapon, BLAZIN', KO;
+ * docs/research/fight-tips.md) pause the fight until A is released, which no test presses. They are marked as seen
+ * in the loaded save data (GS = MEM32(0x2FB148 + 0x60), save data MEM32(GS + 4), bytes +0x60..+0x62) at the first
+ * step of a fight. Never online (netplay drops the cards itself). */
+static void help_cards_seen(void)
+{
+    static int on = -1;
+    uint32_t gs, sd;
+    if (on < 0) {
+        on = getenv("RECOMP_OW_PROF") || getenv("RECOMP_OW_TRACK") || getenv("RECOMP_OW_TELEPORT") ||
+             getenv("RECOMP_OW_KO") || getenv("RECOMP_OW_FOLLOWCAM");
+    }
+    if (!on || ffny_online_locked()) return;
+    gs = MEM32(0x2FB148u + 4u * 0x18u);
+    if (!gs) return;
+    sd = MEM32(gs + 4u);
+    if (!sd) return;
+    if (MEM8(sd + 0x60u) && MEM8(sd + 0x61u) && MEM8(sd + 0x62u)) return;
+    MEM8(sd + 0x60u) = MEM8(sd + 0x61u) = MEM8(sd + 0x62u) = 1;
+    fprintf(stderr, "[OWTEST] first-time help cards marked as seen (tests)\n");
+}
+
 /* ---------------------------------------------------------------- the wrapped functions */
 void ow_step(void (*gen)(void))
 {
@@ -265,6 +287,7 @@ void ow_step(void (*gen)(void))
         s_last_step_t = now;
         s_fight_step++;
         s_steps_total++;
+        if (s_fight_step == 1) help_cards_seen();
         teleport_step();
         ko_revive_step();
     }
@@ -361,4 +384,25 @@ void ow_camera(void (*gen)(void))
     MEMF(RCAM + 0x1Cu) = 1.0f;
     MEMF(RCAM + 0x2Cu) = 1.0f;
     guest_call(sub_000443D0, 0, 0, NULL);
+}
+
+/* ---------------------------------------------------------------- match state (diagnostics) */
+/* From the match update's entry hook (sub_0008BE60, this = the match at 0x349760): every change of its state
+ * (+0x2D820; 5 and 8 run the fight step), with the fight step, so a fight that stops stepping shows where.
+ * RECOMP_OW_PROF or RECOMP_OW_TRACK turns it on. */
+void ow_match_update(uint32_t match)
+{
+    static int on = -1;
+    static uint32_t last = 0xFFFFFFFFu;
+    static double since;
+    uint32_t st = MEM32(match + 0x2D820u);
+    if (on < 0) on = env_int("RECOMP_OW_PROF", 0) > 0 || env_int("RECOMP_OW_TRACK", 0) > 0;
+    if (!on) return;
+    if (st != last) {
+        double now = qpc_us();
+        fprintf(stderr, "[OWSTATE] match state %u -> %u at fight step %lld (%.1f s in the old state)\n", last, st,
+                s_fight_step, last == 0xFFFFFFFFu ? 0.0 : (now - since) / 1e6);
+        last = st;
+        since = now;
+    }
 }
