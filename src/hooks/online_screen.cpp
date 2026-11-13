@@ -208,8 +208,11 @@ const Tex &tex(const std::string &rel)
 }
 
 const Tex &fighter_tex(int id) { return tex("fighters/" + std::to_string(id) + ".png"); }
-const Tex &venue_tex(int fe) { return tex("venues/" + std::to_string(fe) + ".png"); }
-const Tex &venue_name_tex(int fe) { return tex("venues/" + std::to_string(fe) + "_name.png"); }
+// A new venue (feIDs 28..63, community packs) has no picture in the online art (whose 28.png and up are the game's
+// Story-only venues): its name is written instead (build 82).
+const Tex &no_tex() { static Tex none; return none; }
+const Tex &venue_tex(int fe) { return fe >= 28 && fe <= 63 ? no_tex() : tex("venues/" + std::to_string(fe) + ".png"); }
+const Tex &venue_name_tex(int fe) { return fe >= 28 && fe <= 63 ? no_tex() : tex("venues/" + std::to_string(fe) + "_name.png"); }
 
 const char *mode_logo(int type)
 {
