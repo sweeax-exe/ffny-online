@@ -113,6 +113,21 @@ void sub_00087700_enter(void)
     if (!ffny_online_locked())
         cheats_fight_step();    /* [cheats] fight cheats (src/patches/cheats.c); never online */
 }
+/* Open-world phase 0 (src/hooks/openworld.c, RECOMP_OW_*; each wrapper only calls the generated body
+ * unless its switch is set): the fight step and the collision sweep timed, the plane test counted,
+ * and the camera wrapper followed by the host-side follow camera. */
+void ow_step(void (*gen)(void));
+void ow_sweep(void (*gen)(void));
+void ow_plane_test(void (*gen)(void));
+void ow_camera(void (*gen)(void));
+extern void sub_00087700_gen(void);
+void sub_00087700(void) { ow_step(sub_00087700_gen); }
+extern void sub_001AC490_gen(void);
+void sub_001AC490(void) { ow_sweep(sub_001AC490_gen); }
+extern void sub_001ABFA0_gen(void);
+void sub_001ABFA0(void) { ow_plane_test(sub_001ABFA0_gen); }
+extern void sub_000AC590_gen(void);
+void sub_000AC590(void) { ow_camera(sub_000AC590_gen); }
 /* The match's update (thiscall; the match at 0x349760, its state at +0x2D820).
  * Only states 5 and 8 run the simulation step above; any other state (intro,
  * special-move camera, match end) ends the live HUD. */
