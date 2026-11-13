@@ -286,6 +286,31 @@ def test_digest_is_short_and_keeps_what_matters():
     assert "screens: mainMenu > cmtype" in text
 
 
+def test_dj_output_survives_a_cp1252_console(tmp_path):
+    """dj.py digest of a log with an emoji name on a cp1252 console: no UnicodeEncodeError."""
+    import io
+    import subprocess
+    log = tmp_path / "log.txt"
+    log.write_text("[NETPLAY] notice: \U0001f525Fire™ wants a rematch! Choose Rematch to accept.\n"
+                   "[NETPLAY] gave up at step 1300 waiting for the entries up to 1300\n", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONIOENCODING", "PYTHONUTF8")}
+    env["PYTHONIOENCODING"] = "cp1252"
+    dj = os.path.join(os.path.dirname(__file__), "..", "..", "tools", "defjam-mcp", "dj.py")
+    r = subprocess.run([sys.executable, dj, "digest", str(log), "--no-callers"], env=env, capture_output=True)
+    assert r.returncode == 0, r.stderr.decode("cp1252", "replace")
+    out = r.stdout.decode("cp1252")
+    assert "\\U0001f525Fire" in out and "gave up at step 1300" in out
+    # the helper itself: a UTF-8 stream is left alone, a cp1252 one escapes
+    sys.path.insert(0, os.path.dirname(dj))
+    import importlib
+    djmod = importlib.import_module("dj")
+    s = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    djmod.safe_output([s])
+    s.write("\U0001f525")
+    s.flush()
+    assert s.buffer.getvalue() == b"\\U0001f525"
+
+
 def test_fe_order_ok_menu_and_bad():
     seqs = logparse.fe_sequences(ONLINE.splitlines())
     assert [s["order"] for s in seqs] == ["menu", "ok"]

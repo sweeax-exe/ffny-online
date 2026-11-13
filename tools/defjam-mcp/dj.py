@@ -198,7 +198,22 @@ def cmd_cleanup(a):
     return cmd_roots(argparse.Namespace(action="clean"))
 
 
+def safe_output(streams=None):
+    """Logs carry player names with emoji and other scripts; a cp1252 console (or a pipe without
+    PYTHONIOENCODING) cannot encode them and print() raised UnicodeEncodeError halfway through a
+    digest. Such streams escape what they cannot encode (\\U0001f525) instead; UTF-8 ones stay as
+    they are."""
+    for s in streams or (sys.stdout, sys.stderr):
+        enc = (getattr(s, "encoding", None) or "").lower().replace("-", "").replace("_", "")
+        if enc != "utf8" and hasattr(s, "reconfigure"):
+            try:
+                s.reconfigure(errors="backslashreplace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv=None):
+    safe_output()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
