@@ -9,7 +9,8 @@
 //
 // Tests and pictures: RECOMP_LAUNCHER_PAGE=music opens it at start; RECOMP_TEST_MUSIC runs steps
 // "<frame>:<action>[:<argument>]" separated by ';': add:<path> (as if picked or dropped), mode:<auto|
-// mine|mix|original>, shuffle:<0|1>, permatch:<0|1>, remove:<row>, refresh.
+// mine|mix|original>, shuffle:<0|1>, permatch:<0|1>, remove:<row>, refresh, sort:<custom|name|artist|added>,
+// move:<row>,<delta> (the row as shown).
 
 #include "pc_launcher_music.h"
 
@@ -26,6 +27,7 @@ struct MusicDialog
 MusicDialog g_md;
 
 const char *const k_music_modes[] = {"auto", "mine", "mix", "original"};
+const char *const k_music_sorts[] = {"custom", "name", "artist", "added"};      // musiclib::Sort
 
 int music_mode_setting() { return recomp_settings_get("music", "mode", musiclib::MODE_AUTO); }
 
@@ -96,15 +98,21 @@ void music_test_steps()
         } else if (s.action == "mode") {
             for (int i = 0; i < 4; i++) if (s.arg == k_music_modes[i]) music_set_mode(i);
         } else if (s.action == "shuffle") {
-            if (recomp_settings_set("music", "shuffle", atoi(s.arg.c_str()) ? 1 : 0) > 0) commit();
+            pcmusic::set_shuffle(atoi(s.arg.c_str()) != 0);
         } else if (s.action == "permatch") {
             if (recomp_settings_set("music", "new_song_per_match", atoi(s.arg.c_str()) ? 1 : 0) > 0) commit();
         } else if (s.action == "remove") {
-            auto v = pcmusic::view();
+            auto list = pcmusic::sorted(pcmusic::view());
             int row = atoi(s.arg.c_str());
-            if (row >= 0 && row < (int)v.songs.size()) pcmusic::remove(v.songs[row]);
+            if (row >= 0 && row < (int)list.size()) pcmusic::remove(list[row]);
         } else if (s.action == "refresh") {
             pcmusic::refresh();
+        } else if (s.action == "sort") {
+            for (int i = 0; i < musiclib::SORT_COUNT; i++) if (s.arg == k_music_sorts[i]) pcmusic::set_sort(i);
+        } else if (s.action == "move") {
+            auto list = pcmusic::sorted(pcmusic::view());
+            int row = atoi(s.arg.c_str()), delta = s.arg.find(',') != std::string::npos ? atoi(s.arg.c_str() + s.arg.find(',') + 1) : 1;
+            if (row >= 0 && row < (int)list.size()) pcmusic::move(list[row].rel, delta);
         }
     }
 }
@@ -153,9 +161,22 @@ void music_add_from_picker()
     pcmusic::pick_start(window);
 }
 
-// One song: its name, the length and kind or why it cannot be played, and Remove.
+// An arrow button (up or down) of a song's row: a small glass button with a triangle on it.
+bool music_arrow(const char *id, ImVec2 a, float size, float s, bool up, bool enabled)
+{
+    bool pressed = glass_button(id, "", a, ImVec2(size, size), s, GLASS_PLAIN, bold_font(), 13 * s, enabled);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float cx = a.x + size / 2, cy = a.y + size / 2, r = size * 0.22f;
+    ImU32 c = col(k_white, enabled ? 0.92f : 0.25f);
+    if (up) dl->AddTriangleFilled(ImVec2(cx, cy - r), ImVec2(cx + r * 1.15f, cy + r * 0.8f), ImVec2(cx - r * 1.15f, cy + r * 0.8f), c);
+    else dl->AddTriangleFilled(ImVec2(cx - r * 1.15f, cy - r * 0.8f), ImVec2(cx + r * 1.15f, cy - r * 0.8f), ImVec2(cx, cy + r), c);
+    return pressed;
+}
+
+// One song: its name, the artist, length and kind or why it cannot be played, up and down, and Remove.
 void music_rows(float w, float h, float s, const pcmusic::View &v)
 {
+    const std::vector<musiclib::Song> list = pcmusic::sorted(v);       // as [music] sort says
     ImGui::BeginChild("##songs", ImVec2(w, h), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
     ImDrawList *dl = ImGui::GetWindowDrawList();
     float row_h = 50 * s, gap = 6 * s, rw = ImGui::GetContentRegionAvail().x;
@@ -186,10 +207,10 @@ void music_rows(float w, float h, float s, const pcmusic::View &v)
         return;
     }
     ImGuiListClipper clip;
-    clip.Begin((int)v.songs.size(), row_h + gap);
+    clip.Begin((int)list.size(), row_h + gap);
     while (clip.Step()) {
         for (int i = clip.DisplayStart; i < clip.DisplayEnd; i++) {
-            auto &song = v.songs[i];
+            auto &song = list[i];
             ImVec2 a = ImGui::GetCursorScreenPos(), z(a.x + rw, a.y + row_h);
             bool bad = song.state == musiclib::BAD;
             dl->AddRectFilled(a, z, col(k_white, 0.05f), 10 * s);
@@ -201,19 +222,26 @@ void music_rows(float w, float h, float s, const pcmusic::View &v)
             std::string detail;
             if (bad) detail = "Cannot be played: " + song.why;
             else {
-                detail = music_length(song.seconds);
+                detail = song.artist;
+                std::string length = music_length(song.seconds);
+                if (!length.empty()) detail += (detail.empty() ? "" : "  Â·  ") + length;
                 std::string kind = music_kind(song);
                 if (!kind.empty()) detail += (detail.empty() ? "" : "  \xC2\xB7  ") + kind;
                 if (song.rel.find('/') != std::string::npos)
                     detail += "  \xC2\xB7  " + song.rel.substr(0, song.rel.rfind('/'));
                 if (song.state == musiclib::UNCHECKED) detail += "  \xC2\xB7  checking...";
             }
-            dl->PushClipRect(a, ImVec2(z.x - 100 * s, z.y), true);
+            dl->PushClipRect(a, ImVec2(z.x - 172 * s, z.y), true);
             dl->AddText(bold_font(), 15.5f * s, ImVec2(a.x + 50 * s, a.y + 7 * s), col(k_white, bad ? 0.6f : 1.0f), song.name.c_str());
             dl->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(a.x + 50 * s, a.y + 28 * s), col(bad ? k_gold : ImVec4(0.80f, 0.80f, 0.82f, 1)),
                         detail.c_str());
             dl->PopClipRect();
             ImGui::PushID(i);
+            // up and down: in a sorted list the shown order becomes your own order first
+            if (music_arrow("##up", ImVec2(z.x - 164 * s, a.y + 11 * s), 28 * s, s, true, i > 0))
+                pcmusic::move(song.rel, -1);
+            if (music_arrow("##down", ImVec2(z.x - 132 * s, a.y + 11 * s), 28 * s, s, false, i + 1 < (int)list.size()))
+                pcmusic::move(song.rel, 1);
             if (glass_button("##remove", "Remove", ImVec2(z.x - 92 * s, a.y + 11 * s), ImVec2(80 * s, 28 * s), s, GLASS_PLAIN,
                              bold_font(), 13 * s))
                 pcmusic::remove(song);
@@ -292,7 +320,7 @@ static void music_dialog(ImVec2 o, float w, float h, float s)
         bool shuffle = recomp_settings_get("music", "shuffle", 1) != 0;
         if (glass_button("##music_shuffle", shuffle ? "Shuffle: on" : "Shuffle: off", ImVec2(lx + inner - tw, by),
                          ImVec2(tw, 36 * s), s, shuffle ? GLASS_RED : GLASS_PLAIN, bold_font(), 14 * s)) {
-            recomp_settings_set("music", "shuffle", shuffle ? 0 : 1);
+            pcmusic::set_shuffle(!shuffle);
             commit();
         }
         bool per_match = recomp_settings_get("music", "new_song_per_match", 1) != 0;
@@ -318,11 +346,25 @@ static void music_dialog(ImVec2 o, float w, float h, float s)
         else if (playable == v.songs.size()) snprintf(title, sizeof(title), "YOUR SONGS  \xC2\xB7  %zu", playable);
         else snprintf(title, sizeof(title), "YOUR SONGS  \xC2\xB7  %zu  (%zu cannot play)", playable, v.songs.size() - playable);
         dl->AddText(display_font(), 17 * s, ImVec2(lx, list_top), col(ImVec4(0.86f, 0.84f, 0.80f, 1)), title);
+        // the order of the list (and, shuffle off, of the songs): four small buttons on the right
+        static const char *const sort_labels[musiclib::SORT_COUNT] = {"Your order", "Name", "Artist", "Added"};
+        float sbw = 84 * s, sgap = 6 * s, sx = lx + inner - musiclib::SORT_COUNT * sbw - (musiclib::SORT_COUNT - 1) * sgap;
+        int sort = pcmusic::sort_setting();
+        for (int i = 0; i < musiclib::SORT_COUNT; i++) {
+            char id[24];
+            snprintf(id, sizeof(id), "##music_sort%d", i);
+            if (glass_button(id, sort_labels[i], ImVec2(sx + i * (sbw + sgap), list_top - 5 * s), ImVec2(sbw, 26 * s), s,
+                             sort == i ? GLASS_RED : GLASS_PLAIN, bold_font(), 12.5f * s))
+                pcmusic::set_sort(i);
+        }
+        const char *sort_word = "SORT";
+        float sw = text_size(ImGui::GetFont(), 12.5f * s, sort_word).x;
+        dl->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(sx - sw - 10 * s, list_top + 1 * s), col(k_white, 0.5f), sort_word);
         if (v.more) {
             char more[96];
             snprintf(more, sizeof(more), "The first %zu are used; %zu more are left out.", v.songs.size(), v.more);
             float mw = text_size(ImGui::GetFont(), 12.5f * s, more).x;
-            dl->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(lx + inner - mw, list_top + 4 * s), col(k_gold), more);
+            dl->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(sx - sw - 24 * s - mw, list_top + 4 * s), col(k_gold), more);
         }
     }
     float list_h = b.y - foot - button_h - 16 * s - (list_top + 28 * s);

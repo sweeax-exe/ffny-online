@@ -56,6 +56,31 @@ bool g_per_match = true;                    // [music] new_song_per_match: each 
 float g_gain = 1.0f;                        // RECOMP_MUSIC_GAIN (percent): a trim on top of the level match
 std::vector<Song> g_songs;
 musiclib::Playlist g_list;                  // the player thread's only (set up before it starts)
+musiclib::fs::path g_folder;
+std::atomic<unsigned> g_order_changes{0};   // custom_music_order_changed: the player thread re-reads the order
+std::atomic<int> g_want_sort{musiclib::SORT_CUSTOM};
+std::atomic<bool> g_want_shuffle{true};
+int g_sort = musiclib::SORT_CUSTOM;
+
+int sort_setting()
+{
+    int sort = recomp_settings_get("music", "sort", musiclib::SORT_CUSTOM);
+    return sort >= 0 && sort < musiclib::SORT_COUNT ? sort : musiclib::SORT_CUSTOM;
+}
+
+// The songs in the list's order: the player's own order (order.txt), then sorted as [music] sort says.
+void order_songs(std::vector<Song> &songs, int sort, bool save_order)
+{
+    try {
+        if (save_order) musiclib::apply_order(g_folder, songs);
+        else musiclib::merge_order(musiclib::load_order(g_folder), true, songs, 0);
+        if (sort == musiclib::SORT_ARTIST)
+            for (auto &s : songs)
+                if (s.artist.empty()) musiclib::read_artist(s);
+        musiclib::sort_songs(songs, sort);
+    } catch (...) {
+    }
+}
 
 void log(const char *fmt, ...)
 {
@@ -248,6 +273,32 @@ struct Player
             frames += (unsigned long long)n;
         }
     }
+    // The order, sort or shuffle changed (MY MUSIC). Shuffle off: the songs in the new order, and the next is
+    // the one after the current song there. Shuffle on and still on: nothing changes (random as before).
+    void reorder()
+    {
+        bool shuffle = g_want_shuffle.load();
+        int sort = g_want_sort.load();
+        if (shuffle && g_shuffle) return;
+        std::string current = songs_played && song_index < g_songs.size() ? g_songs[song_index].rel : "";
+        std::vector<Song> list = g_songs;
+        order_songs(list, sort, false);
+        if (list.size() != g_songs.size()) return;
+        g_songs.swap(list);
+        g_sort = sort;
+        size_t at = g_songs.size();
+        for (size_t i = 0; i < g_songs.size(); i++)
+            if (g_songs[i].rel == current) at = i;
+        if (at < g_songs.size()) song_index = at;
+        if (shuffle != g_shuffle) {
+            g_shuffle = shuffle;
+            g_list.reset(g_list.own, g_list.game, shuffle, host_seed());
+        }
+        if (at < g_songs.size()) g_list.continue_after(at);
+        else g_list.continue_after(g_songs.size());     // no song of ours playing: from the top
+        log("the list's order changed (sort %d, shuffle %s): next after %s", sort, shuffle ? "on" : "off",
+            at < g_songs.size() ? g_songs[at].rel.c_str() : "the start");
+    }
     void run()
     {
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -258,9 +309,15 @@ struct Player
         }
         unsigned seen_changes = g_track_changes.load();
         unsigned seen_begun = g_fights_begun.load();
+        unsigned seen_order = g_order_changes.load();
         float applied = -1;
         auto last_report = std::chrono::steady_clock::now();
         while (g_active) {
+            unsigned order_changes = g_order_changes.load();
+            if (order_changes != seen_order) {
+                seen_order = order_changes;
+                reorder();
+            }
             unsigned changes = g_track_changes.load();
             if (changes != seen_changes) {
                 seen_changes = changes;
@@ -343,10 +400,14 @@ extern "C" void custom_music_game_starts(const char *data_root)
     int mode = recomp_settings_get("music", "mode", 0);
     g_shuffle = recomp_settings_get("music", "shuffle", 1) != 0;
     g_per_match = recomp_settings_get("music", "new_song_per_match", 1) != 0;
+    g_sort = sort_setting();
+    g_want_sort = g_sort;
+    g_want_shuffle = g_shuffle;
     if (const char *gain = getenv("RECOMP_MUSIC_GAIN")) g_gain = std::max(0, std::min(200, atoi(gain))) / 100.0f;
     musiclib::fs::path folder;
     if (const char *dir = getenv("RECOMP_MUSIC_DIR")) folder = musiclib::from_utf8(dir);
     else if (data_root && *data_root) folder = musiclib::from_utf8(data_root) / "music";
+    g_folder = folder;
     if (folder.empty() || mode == musiclib::MODE_ORIGINAL) {
         if (mode == musiclib::MODE_ORIGINAL) log("mode original: the game's own soundtrack");
         return;
@@ -359,16 +420,20 @@ extern "C" void custom_music_game_starts(const char *data_root)
     } catch (...) {
         all.clear();
     }
+    order_songs(all, g_sort, true);     // shuffle off, they play in this order
     size_t bad = 0;
     for (auto &s : all) {
         if (s.state == musiclib::BAD) { bad++; continue; }
         g_songs.push_back(s);
     }
     g_mode = musiclib::effective_mode(mode, g_songs.size());
-    log("%zu song(s) in %s (%zu known bad, %zu over the limit), mode %s, shuffle %s, new song per match %s",
+    static const char *const sorts[] = {"own order", "name", "artist", "newest added"};
+    log("%zu song(s) in %s (%zu known bad, %zu over the limit), mode %s, shuffle %s, sort %s, new song per match %s",
         g_songs.size(), musiclib::utf8(folder).c_str(), bad, more,
         g_mode == musiclib::MODE_MINE ? "mine" : g_mode == musiclib::MODE_MIX ? "mix" : "original", g_shuffle ? "on" : "off",
-        g_per_match ? "on" : "off");
+        sorts[g_sort], g_per_match ? "on" : "off");
+    if (!g_shuffle)
+        for (size_t i = 0; i < g_songs.size() && i < 50; i++) log("order %zu: %s", i + 1, g_songs[i].rel.c_str());
     if (g_mode == musiclib::MODE_ORIGINAL) return;
     // mix: the game's soundtrack takes part in the list (and its shuffle) from the first track on
     size_t game_turns = g_mode == musiclib::MODE_MIX ? musiclib::Playlist::game_turns(g_songs.size()) : 0;
@@ -394,6 +459,13 @@ extern "C" void custom_music_note(int playing)
 }
 
 extern "C" void custom_music_note_track_change(void) { g_track_changes++; }
+
+extern "C" void custom_music_order_changed(void)
+{
+    g_want_sort = sort_setting();
+    g_want_shuffle = recomp_settings_get("music", "shuffle", 1) != 0;
+    g_order_changes++;
+}
 
 extern "C" void custom_music_note_phase(int phase)
 {

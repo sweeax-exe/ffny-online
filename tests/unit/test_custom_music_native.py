@@ -125,6 +125,47 @@ int main(int argc, char **argv)
         printf("%.4f %.4f\n", m.rms(), m.gain());
         return 0;
     }
+    if (cmd == "order") {         // folder [sort]: scan, own order (order.txt), artists, sorted: rel|artist|added
+        auto songs = scan(from_utf8(argv[2]));
+        apply_order(from_utf8(argv[2]), songs);
+        for (auto &s : songs) read_artist(s);
+        sort_songs(songs, argc > 3 ? atoi(argv[3]) : SORT_CUSTOM);
+        for (auto &s : songs) printf("%s|%s|%lld\n", s.rel.c_str(), s.artist.c_str(), (long long)s.added);
+        return 0;
+    }
+    if (cmd == "move") {          // folder sort rel delta: moves the song in the list as sorted, saves it as the own order
+        auto songs = scan(from_utf8(argv[2]));
+        apply_order(from_utf8(argv[2]), songs);
+        for (auto &s : songs) read_artist(s);
+        sort_songs(songs, atoi(argv[3]));
+        size_t at = 0;
+        while (at < songs.size() && songs[at].rel != argv[4]) at++;
+        size_t to = move_song(songs, at, atoi(argv[5]));
+        save_order(from_utf8(argv[2]), order_of(songs));
+        printf("%zu %zu\n", at, to);
+        return 0;
+    }
+    if (cmd == "artist") {        // path [name rel]
+        Song s;
+        s.path = from_utf8(argv[2]);
+        s.name = argc > 3 ? argv[3] : "";
+        s.rel = argc > 4 ? argv[4] : "";
+        read_artist(s);
+        printf("[%s]\n", s.artist.c_str());
+        return 0;
+    }
+    if (cmd == "continue") {      // own game shuffle after draws: continue_after(after), then `draws` items
+        size_t own = (size_t)atoi(argv[2]), game = (size_t)atoi(argv[3]);
+        Playlist p;
+        p.reset(own, game, atoi(argv[4]) != 0, 1);
+        p.continue_after((size_t)atoi(argv[5]));
+        for (int i = 0; i < atoi(argv[6]); i++) {
+            size_t item = p.next();
+            if (p.is_game(item)) printf("g%zu ", item - own); else printf("%zu ", item);
+        }
+        printf("\n");
+        return 0;
+    }
     if (cmd == "remove") {
         auto songs = scan(from_utf8(argv[2]));
         for (auto &s : songs) if (s.rel == argv[3]) { std::string why; printf("%s\n", remove(from_utf8(argv[2]), s, &why) ? "REMOVED" : why.c_str()); }
@@ -424,3 +465,148 @@ def test_level_meter_brings_loud_and_quiet_songs_to_one_level(tool, tmp_path):
 
 def test_playlist_seeds_differ(tool):
     assert run(tool, 'playlist', 20, 20, 1, 1, 40).split() != run(tool, 'playlist', 20, 20, 1, 2, 40).split()
+
+
+
+# ---- the order of the songs (build 82: sort and the player's own order) ----
+
+SORT_CUSTOM, SORT_NAME, SORT_ARTIST, SORT_ADDED = range(4)
+
+
+def rows(out):
+    return [line.split('|') for line in out.splitlines() if line]
+
+
+def id3_mp3(path, artist, frame_id=b'TPE1', encoding=3):
+    text = artist.encode('utf-8') if encoding == 3 else b'\xff\xfe' + artist.encode('utf-16-le')
+    body = bytes([encoding]) + text
+    frames = b'TIT2' + struct.pack('>I', 3) + b'\x00\x00' + b'\x03ab'      # a title first
+    frames += frame_id + struct.pack('>I', len(body)) + b'\x00\x00' + body
+    size = len(frames) + 20                                                  # and some padding
+    syncsafe = bytes([(size >> 21) & 0x7F, (size >> 14) & 0x7F, (size >> 7) & 0x7F, size & 0x7F])
+    path.write_bytes(b'ID3\x03\x00\x00' + syncsafe + frames + bytes(20) + b'\xFF\xFB\x90\x00' + bytes(413))
+
+
+def vorbis_comment(artist):
+    vendor = b'test'
+    entries = [b'TITLE=x', b'artist=' + artist.encode('utf-8')]
+    out = struct.pack('<I', len(vendor)) + vendor + struct.pack('<I', len(entries))
+    for e in entries:
+        out += struct.pack('<I', len(e)) + e
+    return out
+
+
+def tagged_flac(path, artist):
+    info = bytes(34)
+    vc = vorbis_comment(artist)
+    path.write_bytes(b'fLaC' + bytes([0x00]) + len(info).to_bytes(3, 'big') + info +
+                     bytes([0x84]) + len(vc).to_bytes(3, 'big') + vc)
+
+
+def tagged_ogg(path, artist):
+    path.write_bytes(b'OggS' + bytes(60) + b'\x01vorbis' + bytes(20) + b'OggS' + bytes(23) + b'\x03vorbis' +
+                     vorbis_comment(artist) + b'\x01')
+
+
+def tagged_wav(path, artist):
+    write_wav(path, 0.1)
+    data = bytearray(path.read_bytes())
+    iart = artist.encode('utf-8') + b'\x00'
+    if len(iart) % 2:
+        iart += b'\x00'
+    info = b'INFO' + b'IART' + struct.pack('<I', len(iart)) + iart
+    data += b'LIST' + struct.pack('<I', len(info)) + info
+    data[4:8] = struct.pack('<I', len(data) - 8)
+    path.write_bytes(bytes(data))
+
+
+def test_artist_from_tags_and_from_the_name(tool, tmp_path):
+    id3_mp3(tmp_path / 'a.mp3', 'Borough Kings')
+    assert run(tool, 'artist', tmp_path / 'a.mp3').strip() == '[Borough Kings]'
+    id3_mp3(tmp_path / 'b.mp3', 'Lady Brick', encoding=1)                   # UTF-16 with a BOM
+    assert run(tool, 'artist', tmp_path / 'b.mp3').strip() == '[Lady Brick]'
+    id3_mp3(tmp_path / 'c.mp3', 'Nine Avenue', frame_id=b'TPE2')            # album artist only
+    assert run(tool, 'artist', tmp_path / 'c.mp3').strip() == '[Nine Avenue]'
+    tagged_flac(tmp_path / 'd.flac', 'Delancey')
+    assert run(tool, 'artist', tmp_path / 'd.flac').strip() == '[Delancey]'
+    tagged_ogg(tmp_path / 'e.ogg', 'Quiet Storm')
+    assert run(tool, 'artist', tmp_path / 'e.ogg').strip() == '[Quiet Storm]'
+    tagged_wav(tmp_path / 'f.wav', 'MC Lockjaw')
+    assert run(tool, 'artist', tmp_path / 'f.wav').strip() == '[MC Lockjaw]'
+    # no tag: "Artist - Title", else the sub-folder; a track number is no artist
+    write_wav(tmp_path / 'g.wav', 0.1)
+    assert run(tool, 'artist', tmp_path / 'g.wav', 'Ferry Crew - Night Boat', 'Ferry Crew - Night Boat.wav').strip() == '[Ferry Crew]'
+    assert run(tool, 'artist', tmp_path / 'g.wav', '01 - Night Boat', 'Harbor/01 - Night Boat.wav').strip() == '[Harbor]'
+    assert run(tool, 'artist', tmp_path / 'g.wav', 'Night Boat', 'Night Boat.wav').strip() == '[]'
+    # damaged or foreign files give no artist and do not crash
+    (tmp_path / 'h.mp3').write_bytes(b'ID3\x04\x00\x00\x7f\x7f\x7f\x7fTPE1\xff\xff\xff\xff')
+    assert run(tool, 'artist', tmp_path / 'h.mp3').strip() == '[]'
+    (tmp_path / 'i.flac').write_bytes(b'fLaC\x84\xff\xff\xff\x01')
+    assert run(tool, 'artist', tmp_path / 'i.flac').strip() == '[]'
+
+
+def test_sort_by_name_artist_and_added(tool, tmp_path):
+    music = tmp_path / 'music'
+    music.mkdir()
+    for i, name in enumerate(['charlie', 'Alpha', 'bravo']):
+        write_wav(music / (name + '.wav'), 0.1)
+        os.utime(music / (name + '.wav'), (1700000000 + i * 100, 1700000000 + i * 100))
+    id3_mp3(music / 'zulu.mp3', 'Aardvark')
+    os.utime(music / 'zulu.mp3', (1700000500, 1700000500))
+    first = rows(run(tool, 'order', music))
+    assert [r[0] for r in first] == ['Alpha.wav', 'bravo.wav', 'charlie.wav', 'zulu.mp3']    # the folder's order
+    assert (music / 'order.txt').exists()
+    # no list before: each song "added" at its file time
+    assert {r[0]: int(r[2]) for r in first}['charlie.wav'] == 1700000000
+    assert [r[0] for r in rows(run(tool, 'order', music, SORT_NAME))] == ['Alpha.wav', 'bravo.wav', 'charlie.wav', 'zulu.mp3']
+    by_artist = rows(run(tool, 'order', music, SORT_ARTIST))
+    assert by_artist[0][:2] == ['zulu.mp3', 'Aardvark']                     # songs without an artist last
+    assert [r[0] for r in by_artist[1:]] == ['Alpha.wav', 'bravo.wav', 'charlie.wav']
+    assert [r[0] for r in rows(run(tool, 'order', music, SORT_ADDED))] == ['zulu.mp3', 'bravo.wav', 'Alpha.wav', 'charlie.wav']
+    # a song added later: at the end of the own order, newest by date added
+    write_wav(music / 'aaa.wav', 0.1)
+    own = rows(run(tool, 'order', music))
+    assert [r[0] for r in own] == ['Alpha.wav', 'bravo.wav', 'charlie.wav', 'zulu.mp3', 'aaa.wav']
+    assert int(own[-1][2]) > 1700000500
+    assert rows(run(tool, 'order', music, SORT_ADDED))[0][0] == 'aaa.wav'
+
+
+def test_own_order_moves_are_saved_and_survive_changes(tool, tmp_path):
+    music = tmp_path / 'music'
+    (music / 'sub').mkdir(parents=True)
+    for name in ['a.wav', 'b.wav', 'c.wav', 'sub/d.wav']:
+        write_wav(music / name, 0.1)
+    assert [r[0] for r in rows(run(tool, 'order', music))] == ['a.wav', 'b.wav', 'c.wav', 'sub/d.wav']
+    assert run(tool, 'move', music, SORT_CUSTOM, 'c.wav', -2).split() == ['2', '0']
+    assert run(tool, 'move', music, SORT_CUSTOM, 'a.wav', 5).split() == ['1', '3']     # clamped at the end
+    assert [r[0] for r in rows(run(tool, 'order', music))] == ['c.wav', 'b.wav', 'sub/d.wav', 'a.wav']
+    # a move in a sorted list (newest added: here all equal, so the own order) makes that order the own one
+    (music / 'b.wav').unlink()
+    write_wav(music / 'e.wav', 0.1)
+    assert [r[0] for r in rows(run(tool, 'order', music))] == ['c.wav', 'sub/d.wav', 'a.wav', 'e.wav']
+    run(tool, 'move', music, SORT_NAME, 'e.wav', -1)                        # by name: a c sub/d e -> a c e sub/d
+    assert [r[0] for r in rows(run(tool, 'order', music))] == ['a.wav', 'c.wav', 'e.wav', 'sub/d.wav']
+    # the file is plain text the player may edit; unknown and repeated lines do no harm
+    text = (music / 'order.txt').read_text(encoding='utf-8')
+    (music / 'order.txt').write_text(text + '5\tgone.wav\nbad line\n1\tsub/d.wav\n', encoding='utf-8')
+    assert [r[0] for r in rows(run(tool, 'order', music))] == ['a.wav', 'c.wav', 'e.wav', 'sub/d.wav']
+    assert 'gone.wav' not in (music / 'order.txt').read_text(encoding='utf-8')
+    # an empty or missing folder does not wipe the order
+    saved = (music / 'order.txt').read_text(encoding='utf-8')
+    for name in ['a.wav', 'c.wav', 'e.wav', 'sub/d.wav']:
+        (music / name).rename(tmp_path / name.replace('/', '_'))
+    assert run(tool, 'order', music).strip() == ''
+    assert (music / 'order.txt').read_text(encoding='utf-8') == saved
+
+
+def test_playlist_continues_after_the_current_song_in_the_new_order(tool):
+    # in order, no game turns: after song 2 come 3, then 0 1 2 3 again
+    assert run(tool, 'continue', 4, 0, 0, 2, 6).split() == ['3', '0', '1', '2', '3', '0']
+    # in order, mix: the game's turn after song 1, then song 2
+    assert run(tool, 'continue', 3, 3, 0, 1, 3).split() == ['g1', '2', 'g2']
+    # unknown song (none played yet): from the top
+    assert run(tool, 'continue', 3, 0, 0, 3, 3).split() == ['0', '1', '2']
+    # shuffled: a fresh round that does not start with the current song
+    for seed_song in range(3):
+        items = run(tool, 'continue', 3, 0, 1, seed_song, 3).split()
+        assert sorted(items) == ['0', '1', '2'] and items[0] != str(seed_song)

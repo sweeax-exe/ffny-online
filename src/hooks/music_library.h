@@ -34,6 +34,8 @@ struct Song
     double seconds = -1;
     std::string why;            // BAD: the reason
     double level_gain = -1;     // the game's player: LevelMeter::gain() once measured, -1 before
+    std::string artist;         // read_artist(): the tag, else from the file name; "" when unknown
+    int64_t added = 0;          // apply_order(): when the song came into the folder (seconds since 1970)
 };
 
 constexpr size_t kMaxFiles = 2000;      // a huge folder: the first 2000 songs by name, the rest is skipped
@@ -64,6 +66,40 @@ AddResult add(const fs::path &folder, const std::vector<fs::path> &sources,
               const std::function<void(int, int, const std::string &)> &progress = nullptr);
 // Takes a song out of the folder: to the Recycle Bin on Windows, elsewhere to .cache/removed/.
 bool remove(const fs::path &folder, const Song &song, std::string *why);
+
+// The player's order of the songs and when each was added: <folder>/order.txt, one "added<TAB>rel" line per
+// song in their order ("#" lines are comments). The launcher and the game write it; nothing else needs it.
+struct OrderEntry
+{
+    std::string rel;
+    int64_t added = 0;
+};
+fs::path order_path(const fs::path &folder);
+std::vector<OrderEntry> load_order(const fs::path &folder, bool *found = nullptr);
+bool save_order(const fs::path &folder, const std::vector<OrderEntry> &order);
+// Puts `songs` (as scanned) in the saved order and sets their `added`: songs in the list keep its order,
+// new ones follow in scan order, added `now` (their file time when there was no list yet: a folder from
+// before this list). Songs no longer there drop out. Returns the order to save (it equals `saved` when
+// nothing changed).
+std::vector<OrderEntry> merge_order(const std::vector<OrderEntry> &saved, bool had_list, std::vector<Song> &songs,
+                                    int64_t now);
+// The order of `songs` as they stand, for save_order.
+std::vector<OrderEntry> order_of(const std::vector<Song> &songs);
+// load_order + merge_order, and save_order when the list changed (never for an empty folder: a folder that
+// could not be read must not wipe the order).
+void apply_order(const fs::path &folder, std::vector<Song> &songs);
+
+// The artist: the file's tag (ID3v2 TPE1/TPE2 or ID3v1 in MP3, the ARTIST comment in FLAC and Ogg Vorbis,
+// IART in WAV), else the file name's "Artist - Title", else the song's sub-folder; "" when none says.
+std::string artist_from_name(const std::string &name, const std::string &rel);
+void read_artist(Song &song);
+
+// How the list is sorted ([music] sort): the player's own order (default; the folder's order until they
+// move a song), by name, by artist (then name), or newest added first. Stable, so ties keep the own order.
+enum Sort { SORT_CUSTOM, SORT_NAME, SORT_ARTIST, SORT_ADDED, SORT_COUNT };
+void sort_songs(std::vector<Song> &songs, int sort);
+// Moves songs[at] by `delta` places (clamped to the list); returns where it is now.
+size_t move_song(std::vector<Song> &songs, size_t at, int delta);
 
 // The [music] settings.
 enum Mode { MODE_AUTO, MODE_MINE, MODE_MIX, MODE_ORIGINAL };
@@ -127,6 +163,8 @@ struct Playlist
     // The next item. `avoid_game`: a song rather than a game turn when one is left (a new fight after the
     // game's music played through the last one, so the new fight does not keep the game's track).
     size_t next(bool avoid_game = false);
+    // In order: a fresh round that goes on after song `own_item` (the list's order changed while it played).
+    void continue_after(size_t own_item);
 
 private:
     void new_round();

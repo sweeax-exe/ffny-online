@@ -56,6 +56,7 @@ static const char *const k_anisotropy[] = { "off", "2x", "4x", "8x", "16x", NULL
 static const char *const k_voice[] = { "off", "push_to_talk", "open", NULL };
 static const char *const k_graphics_preset[] = { "performance", "quality", NULL };
 static const char *const k_music_mode[] = { "auto", "mine", "mix", "original", NULL };
+static const char *const k_music_sort[] = { "custom", "name", "artist", "added", NULL };   /* musiclib::Sort */
 static const char *const k_voice_pad[] = { "off", "back", "left_stick", "right_stick", "dpad_up", "dpad_down", NULL };
 static const char *const k_ws_hud[] = { "auto", "edges", "centered", NULL };
 static const char *const k_ws_cutscenes[] = { "authored", "fill", NULL };
@@ -228,7 +229,11 @@ static RecompSetting g_display_settings[] = {
       "yours), mix (yours between the game's own tracks), original (the game's soundtrack only) or auto (mix "
       "when there are songs). Only your PC hears it; online matches are unaffected." },
     { "music", "shuffle", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_MUSIC_SHUFFLE", 0,
-      "Play your songs in a random order; off plays them by name." },
+      "Play your songs in a random order; off plays them in the list's order (sort)." },
+    { "music", "sort", RECOMP_SETTING_ENUM, 0, 0, 0, k_music_sort, "RECOMP_MUSIC_SORT", 0,
+      "The order of your songs in the Music lists (the launcher's and the game's MY MUSIC), and the order they "
+      "play in with shuffle off: custom (your own order, music/order.txt; move songs up and down), name, artist "
+      "(from the file's tags, else its name) or added (newest first)." },
     { "music", "new_song_per_match", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_MUSIC_NEW_SONG_PER_MATCH", 0,
       "Each new fight (a rematch, the next match, the next fight of a rotation) starts the next of your songs; "
       "off keeps the song playing on from where it was." },

@@ -15,7 +15,7 @@ musiclib::fs::path folder();            // RECOMP_MUSIC_DIR, or <data>/music
 
 struct View
 {
-    std::vector<musiclib::Song> songs;
+    std::vector<musiclib::Song> songs;  // in the player's own order (musiclib::apply_order), artists read
     size_t more = 0;                    // songs over the limit, left out
     bool busy = false;
     bool loaded = false;
@@ -30,6 +30,15 @@ void refresh();                         // read the folder again and check new f
 void add(const std::vector<std::string> &paths);      // copy these in, then refresh (background)
 void remove(const musiclib::Song &song);
 void say(const std::string &text, int tone);
+
+// The order the lists show (and, shuffle off, the songs play in): [music] sort, musiclib::Sort.
+int sort_setting();
+void set_sort(int sort);                // saves the settings and tells the game's player
+std::vector<musiclib::Song> sorted(const View &v);
+// Moves the song `rel` by `delta` places in the list as shown. In a sorted list the shown order becomes the
+// player's own order first (and the sort "your order"). Saved to the music folder's order.txt at once.
+bool move(const std::string &rel, int delta);
+void set_shuffle(bool on);              // [music] shuffle, saved, and the game's player told
 
 // The picker (several files at once). Done when pick_poll returns true; empty when cancelled.
 void pick_start(void *window);

@@ -60,6 +60,8 @@
 #include "milestones.h"
 #include "pc_content.h"
 #include "pc_mods.h"
+#include "music_library.h"
+#include "pc_launcher_music.h"
 #include <time.h>
 
 namespace {
@@ -890,7 +892,7 @@ std::string upper(const char *s)
 // ---- the screens --------------------------------------------------------------------------------
 
 enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS,
-            QUICK, LOCKER, RANKED_BOARD, TURF };
+            QUICK, LOCKER, RANKED_BOARD, TURF, MUSIC };
 
 struct State {
     Page page = HUB;
@@ -4586,6 +4588,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "tset_ui.inc"
 #include "delay_hud_ui.inc"
 #include "milestones_ui.inc"
+#include "music_ui.inc"
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -4599,7 +4602,7 @@ void gallery_step()
                                          "room-special", "vote-team",
                                          // build 67: RANDOM in the grid and in the vote
                                          "fighters-random", "vote-random",
-                                         "ranked", "voice", "stats", "stats-1v1", "players", "fighters",
+                                         "ranked", "voice", "music", "music-own", "music-empty", "stats", "stats-1v1", "players", "fighters",
                                          // build 47: every server's players (All servers)
                                          "players-all",
                                          // build 33: the grid at Eric Sermon, O.E, Santos and Teck
@@ -4816,6 +4819,7 @@ void gallery_step()
         static const std::string base_stats = G.stats;
         G.stats = base_stats;
         ranked_stats_tab() = 0;
+        if (music_gallery(p)) return;
         if (milestones_gallery(p)) return;
         if (tset_gallery(p)) return;
         if (turf_gallery(p)) return;
@@ -5268,7 +5272,7 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     case STATS: case LOCKER: case RANKED_BOARD: case TURF: if (!room.in_room) return LOOK_STATS; break;
     case RANKED: case RANKED_MODES: if (!room.in_room) return LOOK_SEARCH; break;
     case RANKED_RESULTS: return LOOK_SEARCH;
-    case VOICE: case QUICK: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
+    case VOICE: case QUICK: case MUSIC: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
     default: break;
     }
     if (room.in_room) {
@@ -6076,6 +6080,8 @@ bool draw_pages(ImVec2 display)
         float hx = 54;
         hx += hint(dl, f, hx, 420, "b", "BACK");
         (void)hx;
+    } else if (S.page == MUSIC && !(room.in_room && room.phase != 0)) {
+        draw_music(dl, f, pad);
     } else if (S.page == QUICK && !(room.in_room && room.phase != 0)) {
         draw_quick_page(dl, f, pad, display);
     } else if (S.page == CODE) {
@@ -6097,10 +6103,14 @@ bool draw_pages(ImVec2 display)
         hint(dl, f, hx, 420, "b", "BACK");
     } else {
         draw_hub(dl, f, pad);      // the menu's own "A SELECT  B BACK" stays visible above while its door shows
-        if (!g_game_door) {
+        {
             float hx = 54;
-            hx += hint(dl, f, hx, 424, "a", "SELECT");
-            hint(dl, f, hx, 424, "b", "BACK");
+            if (!g_game_door) {
+                hx += hint(dl, f, hx, 424, "a", "SELECT");
+                hx += hint(dl, f, hx, 424, "b", "BACK");
+            }
+            hint(dl, f, hx, 424, "rb", "MY MUSIC");     // build 82: the player's songs, their order
+            if (pad.rb && S.page == HUB) open_music();
         }
         if ((pad.a && S.hub_sel == HUB_LEAVE) || pad.b) keep = false;
     }
