@@ -28,6 +28,14 @@
  *                           writes its own eye and target there and applies it again. The camera director
  *                           (0x3772A4), which the next step reads, is never touched; the smoothing state is host
  *                           memory and does not advance in re-run steps.
+ *
+ * Big Arena (phase 1, milestone 1; community/open-world-phase0-results.md section 8): a free-for-all on a big map
+ * where a knocked-out fighter comes back, the last fighter who hit a fighter gets the knockout, and the first to
+ * the score limit (or the leader at the time limit) wins. [openworld] big_arena turns it on for offline fights
+ * (not Story, not Team); online it stays off until the relay carries it in START (milestone 2), except in tests
+ * with RECOMP_OW_ONLINE_TEST=1 on every copy. Everything the simulation sees is decided inside the fight step from
+ * guest memory and the state below (BA), which rollback saves and loads with each save (ow_state_save/load) and
+ * the online checksum folds in (ow_state_hash), so every PC computes the same. See bigarena_* below.
  */
 #include "host.h"
 #include <math.h>
@@ -37,6 +45,9 @@
 #include "recomp/gen/recomp_types.h"
 #include "guest_call.h"
 #include "patches/online_guard.h"
+#include "patches/cheats.h"
+#include "recomp_settings.h"
+#include "openworld.h"
 
 #define ACTORS      0x003B92E0u
 #define STRIDE      0x12E8u
@@ -263,7 +274,9 @@ static void help_cards_seen(void)
     uint32_t gs, sd;
     if (on < 0) {
         on = getenv("RECOMP_OW_PROF") || getenv("RECOMP_OW_TRACK") || getenv("RECOMP_OW_TELEPORT") ||
-             getenv("RECOMP_OW_KO") || getenv("RECOMP_OW_FOLLOWCAM") || getenv("RECOMP_OW_PUPPET");
+             getenv("RECOMP_OW_KO") || getenv("RECOMP_OW_FOLLOWCAM") || getenv("RECOMP_OW_PUPPET") ||
+             getenv("RECOMP_OW_BIGARENA") || getenv("RECOMP_OW_TEST_DAMAGE") ||
+             (getenv("RECOMP_TEST_HELP_CARDS_SEEN") && *getenv("RECOMP_TEST_HELP_CARDS_SEEN") == '1');
     }
     if (!on || ffny_online_locked()) return;
     gs = MEM32(0x2FB148u + 4u * 0x18u);
@@ -302,6 +315,338 @@ static void puppet_step(void)
                 (double)MEMF(r + 0x350u));
 }
 
+extern void sub_000443D0(void);
+static struct { int on, behind, slot; float dist, height; int have; float eye[3], at[3], yaw; } C = { -1 };
+
+/* ---------------------------------------------------------------- Big Arena (phase 1) */
+#define MATCH_STATE 0x00349760u + 0x2D820u     /* the match's state: 5 and 8 fight, 7 the special-move camera */
+#define HUD_PLAYERS 0x0039C1C8u                 /* the fight HUD's per-player objects; +0x1104 latches "KO" */
+#define RESULT_COUNT 0x003BE624u                /* the result recorder's record count (3 records at 0x3BE130) */
+#define WINNER_A    0x003B8F3Cu                 /* the decisive knockout's winner slot (sub_001A7140) */
+#define WINNER_B    0x003B8F40u
+#define ENDED       0x0200u                     /* +0x932: out of the fight (sub_001A7140) */
+#define DEFEAT_BITS (0x01u | 0x04u | 0x10u | 0x20u | 0x80u | 0x200u | 0x400u)
+#define ARENA_PROTECT 120u                      /* steps of respawn protection (2 s) */
+#define ARENA_LOSER_GAP 20u                     /* steps between the losers going down at the end */
+
+/* The spawn ring of the Studio "Big Arena" template (studio: ffnystudio/mapbasics.py BIGARENA_SPAWNS, the same
+ * eight points): radius 260 around the centre (22 m), inside its walls at +-585. */
+static const float k_spawn[8][2] = {
+    { 0.0f, -260.0f }, { 183.85f, -183.85f }, { 260.0f, 0.0f }, { 183.85f, 183.85f },
+    { 0.0f, 260.0f }, { -183.85f, 183.85f }, { -260.0f, 0.0f }, { -183.85f, -183.85f },
+};
+
+/* The simulation's state of a Big Arena fight. Saved and loaded with every rollback save, folded into the online
+ * checksum; only changed inside the fight step (ow_step before the body, the hit and health hooks within it). */
+typedef struct {
+    uint32_t on;                    /* this fight is a Big Arena */
+    uint32_t step;                  /* steps since the fight's first, re-runs included */
+    int8_t last_hit[4];             /* who hit this slot last (-1 nobody since it came back) */
+    uint8_t score[4], deaths[4];
+    uint8_t down[4];                /* counted as knocked out (ENDED seen) */
+    uint32_t down_at[4];
+    uint32_t protect_until[4];
+    uint8_t ending, winner, losers_done, pad;
+    uint32_t next_loser_at;
+    /* the fight's rules, set at its start (from START online, the settings offline) */
+    uint16_t score_limit, respawn_steps;
+    uint32_t time_limit_steps;
+} BigArena;
+static BigArena BA;
+typedef char ow_state_fits[sizeof(BigArena) <= OW_STATE_BYTES ? 1 : -1];
+
+static struct { int camera; int camera_set; } BAcfg;    /* host only: the follow camera (0 stock, 1 follow, 2 behind) */
+static const char *const k_ba_camera[] = { "stock", "follow", "behind", NULL };
+
+void ow_state_save(uint8_t out[OW_STATE_BYTES]) { memset(out, 0, OW_STATE_BYTES); memcpy(out, &BA, sizeof BA); }
+void ow_state_load(const uint8_t in[OW_STATE_BYTES]) { memcpy(&BA, in, sizeof BA); }
+
+uint32_t ow_state_hash(void)
+{
+    const uint8_t *p = (const uint8_t *)&BA;
+    uint32_t h = 2166136261u;
+    size_t i;
+    if (!BA.on) return 0;
+    for (i = 0; i < sizeof BA; i++) h = (h ^ p[i]) * 16777619u;
+    return h ? h : 1;
+}
+
+static int ba_env_on(const char *name)
+{
+    const char *v = getenv(name);
+    return v && *v && *v != '0';
+}
+
+/* The match set-up (sub_001A4D90's entry): is this fight a Big Arena, and its rules. */
+void ow_match_start(void)
+{
+    int want = recomp_settings_get("openworld", "big_arena", 0) != 0;
+    int online = netplay_active();
+    memset(&BA, 0, sizeof BA);
+    memset(BA.last_hit, -1, sizeof BA.last_hit);
+    if (online && want && !ba_env_on("RECOMP_OW_ONLINE_TEST")) {
+        /* milestone 1: the mode is offline only; online needs the room option in START (milestone 2) */
+        fprintf(stderr, "[BIGARENA] online fight: Big Arena stays off (offline only until the room option)\n");
+        want = 0;
+    }
+    if (want && cheats_in_story()) want = 0;
+    if (want && (MEM8(0x003B907Eu) & 2u)) {
+        fprintf(stderr, "[BIGARENA] a team fight: Big Arena stays off (free for all only)\n");
+        want = 0;
+    }
+    BAcfg.camera = recomp_settings_get("openworld", "camera", 1);
+    BAcfg.camera_set = 1;
+    C.have = 0;
+    if (!want) return;
+    BA.on = 1;
+    BA.score_limit = (uint16_t)recomp_settings_get("openworld", "score_limit", 5);
+    BA.respawn_steps = (uint16_t)(60 * recomp_settings_get("openworld", "respawn_seconds", 3));
+    BA.time_limit_steps = 60u * (uint32_t)recomp_settings_get("openworld", "time_limit", 300);
+    BA.winner = 0xFF;
+    fprintf(stderr, "[BIGARENA] on: first to %u knockouts, back after %u steps, time limit %u steps, camera %s%s\n",
+            BA.score_limit, BA.respawn_steps, BA.time_limit_steps, k_ba_camera[BAcfg.camera % 3],
+            online ? " (online test)" : "");
+}
+
+static uint32_t ba_present(void)
+{
+    uint32_t m = 0;
+    int s;
+    for (s = 0; s < 4; s++) if (present(s)) m |= 1u << s;
+    return m;
+}
+
+static void ba_scores(int score[4], int deaths[4])
+{
+    int s;
+    for (s = 0; s < 4; s++) { score[s] = BA.score[s]; deaths[s] = BA.deaths[s]; }
+}
+
+/* A knocked-out fighter stands up again: the phase-0 revive (health as at the set-up, the defeat bits cleared,
+ * free state), put at a spawn point and facing the centre, protected for ARENA_PROTECT steps, and the fight HUD's
+ * "KO" latch for its player cleared (it is set only by a recorded result, which Big Arena skips, but a time-up
+ * result could have set it). */
+static void ba_revive(int s, int pick_spawn)
+{
+    uint32_t r = rec(s), h;
+    uint16_t before = MEM16(r + 0x932u);
+    MEM16(r + 0x932u) = (uint16_t)(before & ~DEFEAT_BITS);
+    MEM8(r + 0x943u) = 0;
+    call2(sub_001A4F30, 1, r, 0);
+    call2(sub_001B5420, 2, r, 1u);
+    if (pick_spawn) {
+        OwSpawnCtx c;
+        int k, i;
+        memset(&c, 0, sizeof c);
+        for (i = 0; i < 8; i++) { c.spawn_x[i] = k_spawn[i][0]; c.spawn_z[i] = k_spawn[i][1]; }
+        c.spawns = 8;
+        c.safe = 140.0f;
+        for (k = 0; k < 4; k++) {
+            if (k == s || !present(k) || (MEM16(rec(k) + 0x932u) & ENDED)) continue;
+            c.live_x[c.lives] = MEMF(rec(k) + 0x44u);
+            c.live_z[c.lives] = MEMF(rec(k) + 0x4Cu);
+            c.lives++;
+        }
+        i = ow_rules_pick_spawn(&c);
+        if (i >= 0) {
+            MEMF(r + 0x44u) = k_spawn[i][0];
+            MEMF(r + 0x48u) = 0.0f;
+            MEMF(r + 0x4Cu) = k_spawn[i][1];
+            MEMF(r + 0x54u) = ow_rules_yaw_to_centre(k_spawn[i][0], k_spawn[i][1]);
+        }
+    }
+    h = MEM32(HUD_PLAYERS + 4u * (uint32_t)s);
+    if (h >= 0x10000u && h < 0x84000000u) { MEM8(h + 0x1104u) = 0; MEMF(h + 0x1108u) = 0.0f; }
+    BA.down[s] = 0;
+    BA.last_hit[s] = -1;
+    BA.protect_until[s] = BA.step + ARENA_PROTECT;
+    if (!netplay_rerunning())
+        fprintf(stderr, "[BIGARENA] step %u: slot %d back at %.0f,%.0f (flags %04X->%04X, hp %.1f, state %u)\n",
+                BA.step, s, (double)MEMF(r + 0x44u), (double)MEMF(r + 0x4Cu), before, MEM16(r + 0x932u),
+                (double)MEMF(r + 0x350u), MEM32(r + 0x30u));
+}
+
+/* The end: the winner is decided; the losers go down one after another (the game's own knockout, as
+ * test_telemetry.c's ko_step), so the game's last knockout, slow motion, results and summary run as in any
+ * free-for-all, with our winner (ow_result_record). */
+static void ba_end_step(void)
+{
+    int score[4], deaths[4], s;
+    uint32_t pres = ba_present(), done = 0;
+    if (BA.winner < 4 && (MEM16(rec(BA.winner) + 0x932u) & ENDED)) ba_revive(BA.winner, 0);
+    if (BA.step < BA.next_loser_at) return;
+    for (s = 0; s < 4; s++)
+        if ((pres & (1u << s)) && ((MEM16(rec(s) + 0x932u) & ENDED) || MEMF(rec(s) + 0x350u) <= 0.0f)) done |= 1u << s;
+    ba_scores(score, deaths);
+    s = ow_rules_next_loser(score, deaths, pres, BA.winner, done);
+    if (s < 0) return;
+    {
+        uint32_t r = rec(s);
+        MEMF(r + 0x350u) = 0.0f;
+        MEMF(r + 0x35Cu) = 0.0f;
+        MEM8(r + 0x943u) = 1;
+        call2(sub_001B5420, 2, r, 0x18u);
+    }
+    BA.losers_done++;
+    BA.next_loser_at = BA.step + ARENA_LOSER_GAP;
+    if (!netplay_rerunning())
+        fprintf(stderr, "[BIGARENA] step %u: slot %d goes down (end, %u knockouts)\n", BA.step, s, BA.score[s]);
+}
+
+/* Once per step before the generated body, in normal and re-run steps alike. */
+static void bigarena_step(void)
+{
+    int s, score[4], deaths[4];
+    uint32_t pres;
+    if (!BA.on) return;
+    BA.step++;
+    pres = ba_present();
+    /* knockouts: a fighter that is out (ENDED) is counted once; the last fighter who hit it scores */
+    for (s = 0; s < 4; s++) {
+        uint32_t r = rec(s);
+        if (!(pres & (1u << s))) continue;
+        if ((MEM16(r + 0x932u) & ENDED) && !BA.down[s]) {
+            int by = BA.last_hit[s];
+            BA.down[s] = 1;
+            BA.down_at[s] = BA.step;
+            if (BA.ending) continue;            /* the end's own knockouts score nothing */
+            if (BA.deaths[s] < 255) BA.deaths[s]++;
+            if (by >= 0 && by < 4 && by != s && BA.score[by] < 255) BA.score[by]++;
+            if (!netplay_rerunning())
+                fprintf(stderr, "[BIGARENA] step %u: slot %d knocked out by %d | scores %u %u %u %u\n", BA.step, s, by,
+                        BA.score[0], BA.score[1], BA.score[2], BA.score[3]);
+        }
+    }
+    ba_scores(score, deaths);
+    if (!BA.ending) {
+        int w = ow_rules_winner(score, deaths, pres), limit = 0;
+        if (w >= 0 && BA.score_limit && score[w] >= BA.score_limit) limit = 1;
+        else if (BA.time_limit_steps && BA.step >= BA.time_limit_steps) limit = 2;
+        if (limit && w >= 0) {
+            BA.ending = 1;
+            BA.winner = (uint8_t)w;
+            BA.next_loser_at = BA.step + 30u;     /* half a second for the winning blow to land */
+            if (!netplay_rerunning())
+                fprintf(stderr, "[BIGARENA] step %u: %s, slot %d wins | scores %u %u %u %u | knocked out %u %u %u %u\n",
+                        BA.step, limit == 1 ? "score limit" : "time limit", w, BA.score[0], BA.score[1], BA.score[2],
+                        BA.score[3], BA.deaths[0], BA.deaths[1], BA.deaths[2], BA.deaths[3]);
+        }
+    }
+    if (BA.ending) { ba_end_step(); return; }
+    for (s = 0; s < 4; s++)
+        if ((pres & (1u << s)) && BA.down[s] && BA.step - BA.down_at[s] >= BA.respawn_steps &&
+            (MEM16(rec(s) + 0x932u) & ENDED))
+            ba_revive(s, 1);
+}
+
+static int slot_of_record(uint32_t r)
+{
+    if (r < ACTORS || r >= ACTORS + 4u * STRIDE || (r - ACTORS) % STRIDE) return -1;
+    return (int)((r - ACTORS) / STRIDE);
+}
+
+/* sub_001A5DD0's entry (attacker, defender): the knockout credit. */
+void ow_hit(uint32_t attacker, uint32_t defender)
+{
+    int a, d;
+    if (!BA.on) return;
+    a = slot_of_record(attacker);
+    d = slot_of_record(defender);
+    if (a >= 0 && d >= 0 && a != d) BA.last_hit[d] = (int8_t)a;
+}
+
+/* sub_001A50B0's entry (record, delta, ...): no damage in the respawn protection; tests offline:
+ * RECOMP_OW_TEST_DAMAGE=<x> multiplies damage, so a test reaches the score limit sooner. */
+void ow_health_change(void)
+{
+    static float mult = -1.0f;
+    int s;
+    float delta;
+    if (!BA.on) return;
+    s = slot_of_record(MEM32(g_esp + 4));
+    if (s < 0) return;
+    delta = MEMF(g_esp + 8);
+    if (delta >= 0.0f) return;
+    if (!BA.ending && BA.step < BA.protect_until[s]) { MEMF(g_esp + 8) = 0.0f; return; }
+    if (mult < 0.0f) { const char *v = getenv("RECOMP_OW_TEST_DAMAGE"); mult = v && *v ? (float)atof(v) : 0.0f; }
+    if (mult > 0.0f && !ffny_online_locked()) MEMF(g_esp + 8) = delta * mult;
+}
+
+/* sub_001A6750 (the match-end decision, eax 1 = over): a Big Arena goes on while a fighter is down, until the
+ * end (ba_end_step) has put the losers down. */
+void ow_match_end_check(void (*gen)(void))
+{
+    if (!BA.on || BA.ending) { gen(); return; }
+    g_eax = 0;
+    g_esp += 4;     /* ret */
+}
+
+/* sub_001A6A80 (cdecl winners list, losers list, code; lists of slots ending in -1): a knockout before the end is
+ * not recorded (the recorder holds 3 results and latches the HUD's "KO"; a fighter that comes back must not count
+ * as out). At the end every result names our winner. A time-up result of the game's own clock passes as it is
+ * and ends the respawns. */
+void ow_result_record(void (*gen)(void))
+{
+    uint32_t winners, code;
+    if (!BA.on) { gen(); return; }
+    winners = MEM32(g_esp + 4);
+    code = MEM32(g_esp + 12);
+    if (code & 0x40u) {         /* the game's time limit */
+        BA.ending = 1;
+        gen();
+        return;
+    }
+    if (!BA.ending) {
+        if (!netplay_rerunning())
+            fprintf(stderr, "[BIGARENA] step %u: knockout not recorded (code %04X)\n", BA.step, code & 0xFFFFu);
+        g_eax = 0;
+        g_esp += 4;
+        return;
+    }
+    if (BA.winner < 4 && winners) {
+        MEM32(winners) = BA.winner;
+        MEM32(winners + 4) = 0xFFFFFFFFu;
+        if (code & 1u) { MEM32(WINNER_A) = BA.winner; MEM32(WINNER_B) = BA.winner; }
+    }
+    if (MEM32(RESULT_COUNT) >= 3) {     /* never past the 3 records (the stats block follows) */
+        g_eax = 0;
+        g_esp += 4;
+        return;
+    }
+    gen();
+}
+
+int ow_hud_view(OwHudView *out)
+{
+    int s, score[4], deaths[4];
+    memset(out, 0, sizeof *out);
+    if (!BA.on) return 0;
+    out->on = 1;
+    out->score_limit = BA.score_limit;
+    out->present = ba_present();
+    for (s = 0; s < 4; s++) {
+        out->score[s] = BA.score[s];
+        out->deaths[s] = BA.deaths[s];
+        if (BA.down[s] && !BA.ending) {
+            int left = (int)BA.respawn_steps - (int)(BA.step - BA.down_at[s]);
+            out->down |= 1u << s;
+            out->back_in[s] = left > 0 ? left : 0;
+        }
+        if (BA.step < BA.protect_until[s]) out->protected_ |= 1u << s;
+    }
+    ba_scores(score, deaths);
+    out->leader = ow_rules_winner(score, deaths, out->present);
+    for (s = 0; s < 4 && out->leader >= 0; s++)
+        if (s != out->leader && (out->present & (1u << s)) && score[s] == score[out->leader]) out->leader = -1;
+    out->ending = BA.ending;
+    out->winner = BA.winner < 4 ? BA.winner : -1;
+    out->seconds_left = BA.time_limit_steps ? (int)((BA.time_limit_steps > BA.step ? BA.time_limit_steps - BA.step : 0) / 60u) : -1;
+    s = netplay_local_slot();
+    out->local = s >= 0 && s < 4 ? s : 0;
+    out->step = BA.step;
+    return 1;
+}
+
 /* ---------------------------------------------------------------- the wrapped functions */
 void ow_step(void (*gen)(void))
 {
@@ -317,9 +662,10 @@ void ow_step(void (*gen)(void))
         s_steps_total++;
         if (s_fight_step == 1) help_cards_seen();
         teleport_step();
-        ko_revive_step();
+        if (!BA.on) ko_revive_step();
         puppet_step();
     }
+    bigarena_step();
     if (!prof_on()) {
         gen();
     } else {
@@ -351,8 +697,6 @@ void ow_plane_test(void (*gen)(void))
 }
 
 /* ---------------------------------------------------------------- follow camera */
-extern void sub_000443D0(void);
-static struct { int on, behind, slot; float dist, height; int have; float eye[3], at[3], yaw; } C = { -1 };
 
 static void followcam_init(void)
 {
@@ -374,14 +718,33 @@ static void followcam_init(void)
 
 static float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 
+/* Big Arena's camera setting ([openworld] camera: stock, follow (default), behind) when no RECOMP_OW_FOLLOWCAM test
+ * switch says otherwise: the follow camera runs in a Big Arena fight only, and only while the fight's own steps run
+ * (match state 5 or 8): the intro, the special-move camera of a BLAZIN' (state 7), the knockout and the results keep
+ * the game's own cameras. */
+static int followcam_wanted(void)
+{
+    uint32_t st;
+    if (C.on < 0) followcam_init();
+    if (!C.on) {
+        if (!BA.on || !BAcfg.camera_set || BAcfg.camera <= 0) return 0;
+        C.behind = BAcfg.camera == 2;
+        C.dist = C.behind ? 90.0f : 140.0f;
+        C.height = C.behind ? 45.0f : 90.0f;
+        C.slot = 0;
+    }
+    st = MEM32(MATCH_STATE);
+    if (st != 5 && st != 8) { C.have = 0; return 0; }
+    return 1;
+}
+
 void ow_camera(void (*gen)(void))
 {
     int slot, i;
     uint32_t r;
     float at[3], eye[3];
     gen();
-    if (C.on < 0) followcam_init();
-    if (!C.on) return;
+    if (!followcam_wanted()) return;
     slot = netplay_local_slot();
     if (slot < 0 || slot > 3) slot = C.slot;
     if (!present(slot)) return;
@@ -403,8 +766,10 @@ void ow_camera(void (*gen)(void))
             eye[2] = at[2] + C.dist;
         }
         eye[1] = at[1] + C.height;
-        if (!C.have) {
-            memcpy(C.eye, eye, sizeof eye); memcpy(C.at, at, sizeof at); C.have = 1;
+        if (!C.have) {      /* from where the game's camera is: a swoop in, not a cut */
+            for (i = 0; i < 3; i++) { C.eye[i] = MEMF(RCAM + 0x10u + 4u * i); C.at[i] = MEMF(RCAM + 0x20u + 4u * i); }
+            if (!(fabsf(C.eye[0]) < 1e6f && fabsf(C.at[0]) < 1e6f)) { memcpy(C.eye, eye, sizeof eye); memcpy(C.at, at, sizeof at); }
+            C.have = 1;
         } else {
             for (i = 0; i < 3; i++) { C.eye[i] = lerpf(C.eye[i], eye[i], 0.12f); C.at[i] = lerpf(C.at[i], at[i], 0.2f); }
         }

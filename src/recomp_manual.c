@@ -67,8 +67,11 @@ void defjam_crowd_step(void);
 /* Read-only probes use the lifter's universal entry hooks. They do not alter
  * guest registers, stack, memory or the generated body. Off in normal play. */
 void sub_001A4A30_enter(void) { defjam_test_update(); }
+void ow_hit(uint32_t attacker, uint32_t defender);         /* Big Arena knockout credit (openworld.c) */
+void ow_health_change(void);                                /* Big Arena respawn protection (openworld.c) */
 void sub_001A5DD0_enter(void)
 {
+    ow_hit(MEM32(g_esp + 4), MEM32(g_esp + 8));
     if (defjam_test_observations_enabled())
         defjam_test_hit(MEM32(g_esp + 4), MEM32(g_esp + 8), MEM32(g_esp));
 }
@@ -78,6 +81,7 @@ void sub_001A50B0_enter(void)
         defjam_test_health_begin(MEM32(g_esp + 4), MEM32(g_esp));
     if (!ffny_online_locked())
         cheats_health_change(); /* [cheats] infinite_health, no_regen (src/patches/cheats.c); never online */
+    ow_health_change();
 }
 void sub_001A6870_enter(void)
 {
@@ -128,6 +132,16 @@ extern void sub_001ABFA0_gen(void);
 void sub_001ABFA0(void) { ow_plane_test(sub_001ABFA0_gen); }
 extern void sub_000AC590_gen(void);
 void sub_000AC590(void) { ow_camera(sub_000AC590_gen); }
+/* Big Arena (src/hooks/openworld.c): the match-end decision (sub_001A6750, no arguments, eax = 1 when the match is
+ * over) keeps a free-for-all going until the score or time limit, and the result recorder (sub_001A6A80, cdecl
+ * winners, losers, code) records no knockout of a fighter that comes back. Both call the generated body unchanged
+ * when the mode is off. */
+void ow_match_end_check(void (*gen)(void));
+void ow_result_record(void (*gen)(void));
+extern void sub_001A6750_gen(void);
+void sub_001A6750(void) { ow_match_end_check(sub_001A6750_gen); }
+extern void sub_001A6A80_gen(void);
+void sub_001A6A80(void) { ow_result_record(sub_001A6A80_gen); }
 /* The match's update (thiscall; the match at 0x349760, its state at +0x2D820).
  * Only states 5 and 8 run the simulation step above; any other state (intro,
  * special-move camera, match end) ends the live HUD. */
@@ -147,12 +161,14 @@ void sub_0008BE60_enter(void)
 void sub_00079B60_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 void sub_0007A8F0_enter(void) { if (s_ws_hud_live) ws_hud_heartbeat(); }
 static void crowd_guard_match_start(void);
+void ow_match_start(void);
 void sub_001A4D90_enter(void)
 {
     new_fighters_fight_setup();     /* a new fighter's style combination (src/hooks/new_fighters.c) */
     defjam_test_match_start();
     defjam_crowd_match_start();
     netplay_on_match_start();
+    ow_match_start();           /* Big Arena (src/hooks/openworld.c): scores, spawns, the mode for this fight */
     crowd_guard_match_start();
     cheats_match_start();       /* [cheats] (src/patches/cheats.c): a step count and logs only */
     if (combo_log_on()) combo_log_match_start();

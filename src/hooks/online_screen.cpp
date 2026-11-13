@@ -55,6 +55,7 @@
 #include "updater.h"
 #include "social.h"
 #include "fight_hud.h"
+#include "openworld.h"
 #include "fight_hud_rules.h"
 #include "start_countdown.h"
 #include "milestones.h"

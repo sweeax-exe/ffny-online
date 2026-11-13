@@ -63,6 +63,7 @@ static const char *const k_ws_hud[] = { "auto", "edges", "centered", NULL };
 static const char *const k_ws_cutscenes[] = { "authored", "fill", NULL };
 static const char *const k_ws_fill[] = { "blur", "black", NULL };
 static const char *const k_crowd_near[] = { "fade", "hide", NULL };
+static const char *const k_ow_camera[] = { "stock", "follow", "behind", NULL };
 
 /* A four-fighter match holds about 2 GiB of replacements. At 512 MiB the cache evicted and
  * re-decoded dozens of textures every two seconds in a fight on the Steam Deck. */
@@ -228,6 +229,21 @@ static RecompSetting g_display_settings[] = {
       "The 3 - 2 - 1 - FIGHT! start countdown in offline fights too, with the fighters held until FIGHT. "
       "Online matches always have it. Off (the default): offline fights start at once, as in the original "
       "game." },
+    /* Open-world phase 1 (src/hooks/openworld.c): Big Arena, offline only until the room option (milestone 2). */
+    { "openworld", "big_arena", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_OW_BIGARENA", 0,
+      "Big Arena (preview): offline free-for-all fights where a knocked-out fighter comes back after a few seconds "
+      "and the first to the score limit wins; the last fighter who hit someone gets the knockout. Made for the big "
+      "empty maps of FFNY Studio's Big Arena template. Offline only; Story and Team fights stay as they are." },
+    { "openworld", "score_limit", RECOMP_SETTING_INT, 5, 1, 50, NULL, "RECOMP_OW_SCORE_LIMIT", 0,
+      "Big Arena: knockouts needed to win." },
+    { "openworld", "respawn_seconds", RECOMP_SETTING_INT, 3, 1, 15, NULL, "RECOMP_OW_RESPAWN_SECONDS", 0,
+      "Big Arena: seconds before a knocked-out fighter comes back (then 2 seconds without damage)." },
+    { "openworld", "time_limit", RECOMP_SETTING_INT, 300, 0, 3600, NULL, "RECOMP_OW_TIME_LIMIT", 0,
+      "Big Arena: seconds of fighting before the leader wins (0: no time limit)." },
+    { "openworld", "camera", RECOMP_SETTING_ENUM, 1, 0, 0, k_ow_camera, "RECOMP_OW_CAMERA", 0,
+      "Big Arena camera: follow (your fighter, from above and behind; the stick works as always), behind (over the "
+      "shoulder, turns with your fighter) or stock (the game's own fight camera, which loses fighters far apart). "
+      "Only your PC sees it; the fight is the same on every PC." },
     { "music", "mode", RECOMP_SETTING_ENUM, 0, 0, 0, k_music_mode, "RECOMP_MUSIC_MODE", 0,
       "Your own songs (the music folder in the data folder, or add them in the launcher's Music): mine (only "
       "yours), mix (yours between the game's own tracks), original (the game's soundtrack only) or auto (mix "

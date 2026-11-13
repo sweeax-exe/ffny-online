@@ -48,6 +48,7 @@
 #include "account.h"
 #include "social.h"
 #include "rollback.h"
+#include "openworld.h"
 #include "test_observations.h"
 #include "netplay_servers.h"
 #include "netplay_check.h"
@@ -687,6 +688,7 @@ static struct {
         uint32_t crowd_gen[6];
         int crowd_gen_on;
         uint32_t seeds[32][2];
+        uint8_t ow[OW_STATE_BYTES];     /* Big Arena's scores and respawns (openworld.c) */
     } snap[ROLLBACK_SLOTS];
     unsigned rb_count, rb_steps, rb_deepest, rb_failed;
     double rb_ms_max, rb_ms_total;
@@ -8381,6 +8383,10 @@ static void step_run(void)
         if (fold < 0) fold = getenv("RECOMP_NETPLAY_HASH_WEAPONS") && *getenv("RECOMP_NETPLAY_HASH_WEAPONS") == '1';
         if (fold) N.hash_at[k] = (N.hash_at[k] ^ w) * 16777619u;
     }
+    {   /* Big Arena's scores and respawns (0 and no change while no such fight runs) */
+        uint32_t ow = ow_state_hash();
+        if (ow) N.hash_at[k] = (N.hash_at[k] ^ ow) * 16777619u;
+    }
     {   /* the x87 control word the step starts with (its precision bits round every result): a
          * change is logged, at most 12 a match, to compare the PCs of a desynced match */
         static uint16_t last_cw;
@@ -9137,6 +9143,7 @@ static void snap_save(void)
     N.snap[slot].test_step = defjam_test_current_step();
     memcpy(N.snap[slot].crowd_gen, g_crowd_gen, sizeof(g_crowd_gen));
     N.snap[slot].crowd_gen_on = g_crowd_gen_on;
+    ow_state_save(N.snap[slot].ow);
     EnterCriticalSection(&g_cs);
     memcpy(N.snap[slot].seeds, N.seeds, sizeof(N.snap[slot].seeds));
     LeaveCriticalSection(&g_cs);
@@ -9220,6 +9227,7 @@ static void rollback_to(uint32_t f)
     defjam_test_set_step(N.snap[slot].test_step);
     memcpy(g_crowd_gen, N.snap[slot].crowd_gen, sizeof(g_crowd_gen));
     g_crowd_gen_on = N.snap[slot].crowd_gen_on;
+    ow_state_load(N.snap[slot].ow);
     EnterCriticalSection(&g_cs);
     memcpy(N.seeds, N.snap[slot].seeds, sizeof(N.snap[slot].seeds));
     LeaveCriticalSection(&g_cs);
