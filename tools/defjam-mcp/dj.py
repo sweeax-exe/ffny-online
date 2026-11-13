@@ -93,7 +93,8 @@ def cmd_scenario(a):
     elif a.kind == "offline":
         r = scenarios.offline(type=a.type, venue=a.venue, f0=a.f0, f1=a.f1, cpu=not a.human, bot=a.bot,
                               fast_ko=a.fast_ko, turbo=a.turbo, timeout=a.timeout or 420,
-                              extra_env=env, fixture=a.fixture, shots_every=a.shots_every, **common)
+                              extra_env=env, fixture=a.fixture, shots_every=a.shots_every,
+                              shots_from=a.shots_from, **common)
     elif a.kind == "boot":
         r = scenarios.boot(turbo=a.turbo, timeout=a.timeout or 240, extra_env=env, goto=a.goto, **common)
     elif a.kind == "roomchat":
@@ -277,6 +278,8 @@ def main(argv=None):
     sc.add_argument("--fixture", help="a folder of save files copied over the copy's saves")
     sc.add_argument("--page-ms", type=int, default=1500)
     sc.add_argument("--shots-every", type=float, default=0, help="offline: also a capture every N s through the fight")
+    sc.add_argument("--shots-from", type=float, default=6, help="offline: the first fight capture N s after the "
+                    "match starts (default 6; 0.5 with --shots-every 0.4 catches the start countdown)")
     sc.add_argument("--goto", help="boot: then this main-menu entry by name (story, battle, rewards, online, slotN), or exit: the EXIT prompt, NO three ways, then YES (the game must quit with code 0)")
     sc.add_argument("--env", action="append", default=[], help="extra NAME=VALUE (checked against the machine rules); online: NAME@N=VALUE for copy N only")
     sc.add_argument("--copy-env", action="append", default=[],
