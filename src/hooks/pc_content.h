@@ -40,6 +40,9 @@ typedef struct PcContentPack {
     int off;                /* a replacement the player switched off */
     int composed;           /* fighter-body, clothing, venue: install.json, composed by the launcher */
     int applied;            /* composed: content-files/files.ini lists it in applied */
+    int fighter_fe_id;      /* a new fighter's front-end ID (100..127), 0 none */
+    int venue_fe_id;        /* build 82: a new venue's front-end ID (28..63), 0 none */
+    char reviewed[16];      /* build 82: the day the team accepted this version, YYYY-MM-DD ("" unknown) */
 } PcContentPack;
 
 /* The installed catalogue packs in catalogue order (re-read on every call; content.ini is small).
@@ -75,6 +78,27 @@ int pc_content_language_files(const char *id, char (*paths)[256], int max);
 
 /* RECOMP_OFFLINE_ONLY=1 (Studio's Test in a fight with an unreviewed pack): online is refused. */
 int pc_content_offline_only(void);
+
+/* Build 82: the host path of a game file the launcher composed and this run serves (content-files, e.g.
+ * "venue.xml" with a new venue in it), so host code reads what the game reads. 0 when the file is not served. */
+int pc_content_file(const char *game_path, char *out, int size);
+
+/* Build 82, new community content is out: the count of packs a sync would install, update or remove (the
+ * game's own `mods.py check` wrote <data>/mod-manager/news.ini), 0 none or not known; names gets their names
+ * (" | " between, may be NULL). RECOMP_TEST_CONTENT_NEWS=<n> fakes n (tests and screenshots). */
+int pc_content_news(char *names, int size);
+
+/* Build 82, the hub's NEW badge: a new fighter (front-end ID 100..127) or new venue (feID 28..63) from a pack the
+ * team accepted less than PC_CONTENT_NEW_DAYS days ago, which this player has not picked yet. picked: the player
+ * picked it (READY with the fighter, a vote for the venue, a match on it); its badge goes. RECOMP_TEST_CONTENT_NEW=
+ * all shows every new fighter and venue as new (screenshots). */
+#define PC_CONTENT_NEW_DAYS 14
+int pc_content_new_fighter(int fe_id);
+int pc_content_new_venue(int fe_id);
+void pc_content_picked_fighter(int fe_id);
+void pc_content_picked_venue(int fe_id);
+/* The days since a YYYY-MM-DD date, from today's date (UTC) given as days since 1970-01-01; -1 unreadable. */
+int pc_content_days_since(const char *date, long today);
 
 #ifdef __cplusplus
 }

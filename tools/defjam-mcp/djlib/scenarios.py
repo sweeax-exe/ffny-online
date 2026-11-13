@@ -2472,10 +2472,15 @@ def hill_watch_check(analyses, logs, problems):
 def rules_check(logs, fighter_rules, banned_tier, problems):
     """Build 68: per copy the room's rules as its host set them, the fighters its STARTs named, the RANDOM
     re-draws and MAX PING refusals; a START naming a fighter the rules leave out is a problem."""
-    bits = {"all": 0, "nobanned": 1, "nocreated": 2, "stock": 3}.get(fighter_rules or "all", 0)
+    rules = fighter_rules or "all"
+    bits = {"all": 0, "nobanned": 1, "nocreated": 2, "stock": 3}.get(rules.split("+")[0], 0)
+    if "standard" in rules:
+        bits |= 4       # build 82: STANDARD ONLY, community content off
     blocked = set(int(x) for x in (banned_tier or [])) if bits & 1 else set()
     if bits & 2:
         blocked.add(99)
+    if bits & 6:
+        blocked.update(range(100, 128))     # new fighters (stock rooms and STANDARD ONLY rooms)
     out = {}
     for i, path in logs.items():
         text = logparse.read_text(path)
@@ -2484,9 +2489,13 @@ def rules_check(logs, fighter_rules, banned_tier, problems):
         out[str(i)] = {"start_fighters": starts, "set": re.findall(r"tests: the room's fighter rules are (\d+), its max ping (\d+)", text)[:1],
                        "random_redraws": re.findall(r"RANDOM fighter again \(the room blocks \d+ fighters\): (\d+)", text),
                        "refused": re.findall(r"refused: (Your ping[^\n]*)", text)[:3]}
+        venues = [int(v) for v in re.findall(r"\[NETPLAY\] START: [^\n]*?venue (\d+)", text)]
+        out[str(i)]["start_venues"] = venues
         bad = sorted(set(named) & blocked)
         if bad:
             problems.append("rules: copy %d's STARTs named blocked fighters %s" % (i, bad))
+        if bits & 4 and any(28 <= v <= 63 for v in venues):
+            problems.append("rules: copy %d played a new venue in a STANDARD ONLY room: %s" % (i, venues))
     return out
 
 

@@ -33,6 +33,10 @@ typedef struct OnlineMode {
  * never in a vote of a mode with more than two fighters (docs/research/team-and-special-match-types.md). */
 #define ONLINE_ONE_ON_ONE_VENUE(fe) ((fe) == 17 || (fe) == 24 || (fe) == 26)
 #define ONLINE_MODE_TEAM 1      /* Team, 2 vs 2: room slots 0 and 1 against 2 and 3 */
+/* A new venue (FFNY Studio's new-venue packs, build 82 in the hub): the feIDs the account service lets a pack
+ * claim. Offered only in rooms with community content on (not STANDARD ONLY); never in ranked or the quick pools. */
+#define ONLINE_NEW_VENUE(fe) ((fe) >= 28 && (fe) <= 63)
+#define ONLINE_NEW_FIGHTER(id) ((id) >= 100 && (id) <= 127)
 
 /* Each returns the count and sets *out to a list that lives as long as the process. The two
  * from the dump are empty when it cannot be read. */

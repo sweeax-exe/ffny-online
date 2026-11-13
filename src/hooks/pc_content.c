@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #if defined(_WIN32)
 #include <windows.h>
 #define HOST_SEP "\\"
@@ -188,6 +189,9 @@ int pc_content_list(PcContentPack *out, int max)
             else if (!strcmp(k, "order")) p->order = atoi(v);
             else if (!strcmp(k, "composed")) p->composed = atoi(v) == 1;
             else if (!strcmp(k, "bytes")) p->bytes = atoll(v);
+            else if (!strcmp(k, "fighter_fe_id")) p->fighter_fe_id = atoi(v);
+            else if (!strcmp(k, "venue_fe_id")) p->venue_fe_id = atoi(v);
+            CONTENT_TEXT(reviewed);
 #undef CONTENT_TEXT
         }
     }
@@ -234,6 +238,154 @@ uint32_t pc_content_print(void)
     }
     if (!any) return 0;
     return h ? h : 1;
+}
+
+/* ---- build 82: new community content is out; the NEW badge ---- */
+
+int pc_content_news(char *names, int size)
+{
+    char path[1024], line[1200];
+    const char *root = data_root(), *test = getenv("RECOMP_TEST_CONTENT_NEWS");
+    FILE *f;
+    int pending = 0, in_section = 0;
+    if (names && size > 0) names[0] = 0;
+    if (test && *test) {
+        if (names && size > 0) snprintf(names, (size_t)size, "%s", atoi(test) > 0 ? "Doc Nine | The Block" : "");
+        return atoi(test) > 0 ? atoi(test) : 0;
+    }
+    if (!root) return 0;
+    snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "news.ini", root);
+    if (!(f = fopen(path, "rb"))) return 0;
+    while (fgets(line, sizeof line, f)) {
+        char *s = trim(line), *eq;
+        if (*s == '[') { in_section = !strcmp(s, "[news]"); continue; }
+        if (!in_section || !(eq = strchr(s, '='))) continue;
+        *eq = 0;
+        if (!strcmp(s, "pending")) pending = atoi(eq + 1);
+        else if (!strcmp(s, "names") && names && size > 0) snprintf(names, (size_t)size, "%s", eq + 1);
+    }
+    fclose(f);
+    return pending > 0 ? pending : 0;
+}
+
+/* Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's days_from_civil). */
+static long days_from_civil(int y, int m, int d)
+{
+    long era, yoe, doy, doe;
+    y -= m <= 2;
+    era = (y >= 0 ? y : y - 399) / 400;
+    yoe = (long)y - era * 400;
+    doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+int pc_content_days_since(const char *date, long today)
+{
+    int y, m, d;
+    if (!date || strlen(date) != 10 || sscanf(date, "%4d-%2d-%2d", &y, &m, &d) != 3 || date[4] != '-' || date[7] != '-' ||
+        y < 2000 || m < 1 || m > 12 || d < 1 || d > 31)
+        return -1;
+    return (int)(today - days_from_civil(y, m, d));
+}
+
+/* The packs with a new fighter or venue that are still new (accepted less than PC_CONTENT_NEW_DAYS ago), read
+ * from content.ini at most every five seconds; the picked ones are left out at the lookup. */
+typedef struct { int fighter, venue; char id[96]; } NewItem;
+static NewItem g_new[PC_CONTENT_MAX];
+static int g_new_count;
+static unsigned long long g_new_read;
+
+static unsigned long long now_ms(void)
+{
+#if defined(_WIN32)
+    return GetTickCount64();
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long long)ts.tv_sec * 1000ull + (unsigned long long)ts.tv_nsec / 1000000ull;
+#endif
+}
+
+static void refresh_new(void)
+{
+    static PcContentPack packs[PC_CONTENT_MAX];
+    const char *test = getenv("RECOMP_TEST_CONTENT_NEW");
+    int all = test && !strcmp(test, "all"), n, i;
+    long today = (long)(time(NULL) / 86400);
+    if (g_new_read && now_ms() - g_new_read < 5000) return;
+    g_new_read = now_ms();
+    g_new_count = 0;
+    n = pc_content_list(packs, PC_CONTENT_MAX);
+    for (i = 0; i < n && g_new_count < PC_CONTENT_MAX; i++) {
+        int age = pc_content_days_since(packs[i].reviewed, today);
+        if (!packs[i].fighter_fe_id && !packs[i].venue_fe_id) continue;
+        if (!all && (age < 0 || age >= PC_CONTENT_NEW_DAYS)) continue;
+        g_new[g_new_count].fighter = packs[i].fighter_fe_id;
+        g_new[g_new_count].venue = packs[i].venue_fe_id;
+        snprintf(g_new[g_new_count].id, sizeof g_new[0].id, "%s", packs[i].id);
+        g_new_count++;
+    }
+}
+
+static int picked(const char *id)
+{
+    char list[RECOMP_SETTING_TEXT_MAX];
+    if (getenv("RECOMP_TEST_CONTENT_NEW") && !strcmp(getenv("RECOMP_TEST_CONTENT_NEW"), "all")) return 0;
+    recomp_settings_get_text("content", "picked", list, sizeof list, "");
+    return in_list(list, id);
+}
+
+/* The player picked this pack's fighter or venue: [content] picked gets its id (newest first, as many as fit). */
+static void set_picked(const char *id)
+{
+    char list[RECOMP_SETTING_TEXT_MAX], out[RECOMP_SETTING_TEXT_MAX];
+    const char *p;
+    int o;
+    recomp_settings_get_text("content", "picked", list, sizeof list, "");
+    if (in_list(list, id)) return;
+    o = snprintf(out, sizeof out, "%s", id);
+    for (p = list; *p && o < (int)sizeof out;) {
+        const char *e = strchr(p, ',');
+        size_t k = e ? (size_t)(e - p) : strlen(p);
+        if (k && o + 1 + (int)k < (int)sizeof out) o += snprintf(out + o, sizeof out - (size_t)o, ",%.*s", (int)k, p);
+        p = e ? e + 1 : p + k;
+    }
+    recomp_settings_set_text("content", "picked", out);
+}
+
+int pc_content_new_fighter(int fe_id)
+{
+    int i;
+    if (fe_id < 100 || fe_id > 127) return 0;
+    refresh_new();
+    for (i = 0; i < g_new_count; i++) if (g_new[i].fighter == fe_id) return !picked(g_new[i].id);
+    return 0;
+}
+
+int pc_content_new_venue(int fe_id)
+{
+    int i;
+    if (fe_id < 28 || fe_id > 63) return 0;
+    refresh_new();
+    for (i = 0; i < g_new_count; i++) if (g_new[i].venue == fe_id) return !picked(g_new[i].id);
+    return 0;
+}
+
+void pc_content_picked_fighter(int fe_id)
+{
+    int i;
+    if (fe_id < 100 || fe_id > 127) return;
+    refresh_new();
+    for (i = 0; i < g_new_count; i++) if (g_new[i].fighter == fe_id) set_picked(g_new[i].id);
+}
+
+void pc_content_picked_venue(int fe_id)
+{
+    int i;
+    if (fe_id < 28 || fe_id > 63) return;
+    refresh_new();
+    for (i = 0; i < g_new_count; i++) if (g_new[i].venue == fe_id) set_picked(g_new[i].id);
 }
 
 int pc_content_language_blocked(const char *id)
@@ -350,6 +502,17 @@ static void serve_composed_files(const char *root)
     for (i = 0; i < g_file_count; i++) fprintf(stderr, "[CONTENT]   %s\n", g_files[i]);
 }
 
+int pc_content_file(const char *game_path, char *out, int size)
+{
+    int i;
+    if (!game_path || !out || size <= 0) return 0;
+    for (i = 0; i < g_file_count; i++) {
+        if (!same_game_path(game_path, g_files[i])) continue;
+        return snprintf(out, (size_t)size, "%s" HOST_SEP "%s%s", g_files_dir, g_files_sub[i], g_files[i]) < size;
+    }
+    return 0;
+}
+
 int pc_content_language_files(const char *id, char (*paths)[256], int max)
 {
     int i, j, n = 0;
@@ -384,6 +547,12 @@ int pc_content_language_files(const char *id, char (*paths)[256], int max)
 int pc_content_language_files(const char *id, char (*paths)[256], int max)
 {
     (void)id; (void)paths; (void)max;
+    return 0;
+}
+
+int pc_content_file(const char *game_path, char *out, int size)
+{
+    (void)game_path; (void)out; (void)size;
     return 0;
 }
 #endif

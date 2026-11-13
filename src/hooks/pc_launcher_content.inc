@@ -7,12 +7,17 @@
 // A pack of several mods ("Pack (N mods)", content.ini bundle=) is one card with its mods listed; a single
 // pack's card says "Single". docs/content-packs.md.
 
-// Sync once at the launcher's start and again with each update check; PLAY cancels a sync that is still
-// downloading (the packs come at the next start) and waits for it to stop, since an install holds the
-// lock the game takes.
+// Sync once at the launcher's start and again with each update check. Build 82: PLAY lets a sync that is
+// still running finish first (new community content decides who this PC meets online), and starts one more
+// when the last began over two minutes ago, so a catalogue that changed since then comes in before the game
+// starts; a no-change sync takes a second or two. While it waits the button says PLAY NOW: pressed, it cancels
+// the download (the packs come at the next start) and the game starts once the sync has stopped, since an
+// install holds the lock the game takes.
 static bool g_content_synced_once;
 static bool g_content_play_waiting;
+static bool g_content_play_skip;        // PLAY NOW pressed: the sync is being cancelled
 static UiTick g_content_next_sync;
+static UiTick g_content_sync_started;
 
 static bool content_sync_allowed()
 {
@@ -29,22 +34,40 @@ static void content_sync_tick()
     if (g_content_synced_once && ui_ticks() < g_content_next_sync) return;
     g_content_synced_once = true;
     g_content_next_sync = ui_ticks() + 5 * 60000;
-    pcui::mod_start("sync");
+    if (pcui::mod_start("sync")) g_content_sync_started = ui_ticks();
 }
 
 // PLAY pressed: true when the game may start now.
 static bool content_play_gate(bool pressed)
 {
-    if (pressed && pcui::mod_busy()) {
+    if (pressed && g_content_play_waiting) {        // PLAY NOW: without the rest of the new content
         pcui::mod_cancel();
+        g_content_play_skip = true;
+        return false;
+    }
+    if (pressed && !pcui::mod_busy() && content_sync_allowed() && !pcui::mod_recovery_needed() &&
+        (!g_content_synced_once || ui_ticks() - g_content_sync_started > 2 * 60000)) {
+        g_content_next_sync = 0;                    // a fresh look at the catalogue before the game starts
+        g_content_synced_once = false;
+        content_sync_tick();
+    }
+    if (pressed && pcui::mod_busy()) {
         g_content_play_waiting = true;
         return false;
     }
     if (g_content_play_waiting && !pcui::mod_busy()) {
-        g_content_play_waiting = false;
+        g_content_play_waiting = g_content_play_skip = false;
         return true;
     }
     return pressed;
+}
+
+// The line over PLAY while it waits for the sync (nullptr: none).
+static const char *content_play_note()
+{
+    if (!g_content_play_waiting) return nullptr;
+    return g_content_play_skip ? "Stopping the download: the game starts in a moment."
+                               : "Getting the newest community content first. PLAY NOW starts without it.";
 }
 
 static const char *content_type_label(const char *type)

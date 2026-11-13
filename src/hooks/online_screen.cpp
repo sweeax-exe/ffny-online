@@ -58,6 +58,8 @@
 #include "fight_hud_rules.h"
 #include "start_countdown.h"
 #include "milestones.h"
+#include "pc_content.h"
+#include "pc_mods.h"
 #include <time.h>
 
 namespace {
@@ -450,6 +452,7 @@ float hint(ImDrawList *dl, const Frame &f, float x, float y, const char *button,
     return 20 + text_width(f, g_title, 13, word) + 12;
 }
 
+int content_news(char *names, int size);
 // The page title in the corner, as the game writes MAIN MENU.
 void page_title(ImDrawList *dl, const Frame &f, const char *title)
 {
@@ -464,6 +467,13 @@ void page_title(ImDrawList *dl, const Frame &f, const char *title)
         rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
         text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "close the game: the launcher installs it", RIGHT, 0.8f);
+    } else if (content_news(nullptr, 0) > 0) {
+        // build 82: new community content is out (the game's own catalogue check): announced the same way
+        const char *line = "NEW COMMUNITY CONTENT IS OUT";
+        float w = text_width(f, g_title, 12, line);
+        rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
+        text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
+        text(dl, f, g_hand, 11, 606, 30, ORANGE, "restart FFNY Online to get it", RIGHT, 0.8f);
     }
 }
 
@@ -1144,7 +1154,7 @@ const char *cpu_level_text(int level)
 bool rules_offered() { int c = lobby_caps(); return c > 0 && (c & NETPLAY_CAP_ROOMRULES); }
 const char *rules_text(int rules)
 {
-    switch (rules) {
+    switch (NETPLAY_RULES_FIGHTERS(rules)) {     // build 82: STANDARD ONLY is a bit of its own (content_text)
     case NETPLAY_RULES_NO_BANNED: return "No banned tier";
     case NETPLAY_RULES_NO_CREATED: return "No created fighters";
     case NETPLAY_RULES_STOCK: return "Stock, no banned tier";
@@ -1157,6 +1167,54 @@ std::string max_ping_text(int ms)
     char buf[24];
     snprintf(buf, sizeof(buf), "%d ms", ms);
     return buf;
+}
+// build 82: STANDARD ONLY, community content off in a room (NETPLAY_RULES_STANDARD). The host is offered the switch
+// when this PC has community content (its print is the room's: every player has the same packs).
+bool standard_only(int rules) { return (rules & NETPLAY_RULES_STANDARD) != 0; }
+bool content_switch_offered() { return rules_offered() && pc_content_print() != 0; }
+const char *content_text(int rules) { return standard_only(rules) ? "Off: standard only" : "On: new fighters, venues"; }
+// A pool may hold new venues when community content is on (and this PC has it: the venue list has them then).
+bool community_pool(const NetRoomSettings &s) { return !standard_only(s.fighter_rules); }
+// The small NEW badge (build 82) on a new fighter's card or a new venue's: a red tab with its top left at x, y.
+void new_badge(ImDrawList *dl, const Frame &f, float x, float y, float size = 9)
+{
+    float w = text_width(f, g_title, size, "NEW") + 8;
+    rect(dl, f, x, y, w, size + 5, IM_COL32(200, 22, 38, 240), 3);
+    text(dl, f, g_title, size, x + w / 2, y + 2, WHITE, "NEW", CENTER, 0.6f);
+}
+// A small tag on a room row or header: STANDARD (community content off).
+float room_tag(ImDrawList *dl, const Frame &f, float right, float y, const char *word, float size = 9)
+{
+    float w = text_width(f, g_title, size, word) + 10;
+    rect(dl, f, right - w, y, w, size + 6, IM_COL32(0, 0, 0, 170), 3);
+    frame_rect(dl, f, right - w, y, w, size + 6, with_alpha(CREAM, 0.55f), 1.0f);
+    text(dl, f, g_title, size, right - w / 2, y + 2.5f, CREAM, word, CENTER, 0.6f);
+    return w;
+}
+// Build 82: new community content is out (pc_content_news, after the game's own catalogue check): the count of
+// changes, 0 none. The check runs when the hub opens and every ten minutes while an online page is up.
+int content_news(char *names, int size)
+{
+    if (gallery_on()) {     // the gallery: only its news page shows it (RECOMP_TEST_CONTENT_NEWS)
+        int n = G.page && !strcmp(G.page, "hub-news") ? pc_content_news(names, size) : 0;
+        if (!n && names && size > 0) names[0] = 0;
+        return n;
+    }
+    static unsigned long long last_check;
+    unsigned long long now = GetTickCount64();
+    if (!gallery_on() && (!last_check || now - last_check > 10 * 60 * 1000ull)) {
+        last_check = now;
+        pc_mods_check_start();
+    }
+    static unsigned long long read_at;
+    static int cached;
+    static char cached_names[256];
+    if (!read_at || now - read_at > 3000) {
+        read_at = now;
+        cached = pc_content_news(cached_names, sizeof(cached_names));
+    }
+    if (names && size > 0) snprintf(names, (size_t)size, "%s", cached_names);
+    return cached;
 }
 // A fighter this room's FIGHTER RULES leave out (the relay names them in ROOM; NETPLAY_CREATED_FIGHTER for
 // created fighters). Out of a room, none.
@@ -1490,12 +1548,14 @@ const std::vector<Preset> &presets()
 }
 
 // A preset's venues for a mode: a mode with more than two fighters leaves out the venues with a
-// one-on-one start table only (the relay does the same with any pool it gets).
-std::vector<int> preset_ids(int index, int mode)
+// one-on-one start table only (the relay does the same with any pool it gets), and the new venues (build 82: a copy
+// of such a venue keeps its one-on-one table); a room with community content off (STANDARD ONLY) leaves them out.
+std::vector<int> preset_ids(int index, int mode, bool community = true)
 {
     std::vector<int> out;
     for (int id : presets()[index].ids)
-        if (!many_fighters(mode) || !ONLINE_ONE_ON_ONE_VENUE(id)) out.push_back(id);
+        if ((!many_fighters(mode) || (!ONLINE_ONE_ON_ONE_VENUE(id) && !ONLINE_NEW_VENUE(id))) && (community || !ONLINE_NEW_VENUE(id)))
+            out.push_back(id);      // a new venue: One on One only (its start table may be its template's 1v1 one)
     return out;
 }
 
@@ -1504,7 +1564,7 @@ int preset_of(const NetRoomSettings &s)
     const auto &p = presets();
     if (fixed_venue(s.mode)) return -1;
     for (size_t i = 0; i < p.size(); i++) {
-        std::vector<int> ids = preset_ids((int)i, s.mode);
+        std::vector<int> ids = preset_ids((int)i, s.mode, community_pool(s));
         if ((int)ids.size() != s.pool_count) continue;
         bool same = true;
         for (int k = 0; k < s.pool_count; k++)
@@ -1524,7 +1584,19 @@ void apply_preset(NetRoomSettings &s, int index)
         return;
     }
     index = (index % (int)p.size() + (int)p.size()) % (int)p.size();
-    for (int id : preset_ids(index, s.mode)) if (s.pool_count < 32) s.pool[s.pool_count++] = (unsigned char)id;
+    for (int id : preset_ids(index, s.mode, community_pool(s))) if (s.pool_count < 32) s.pool[s.pool_count++] = (unsigned char)id;
+}
+
+// STANDARD ONLY switched on: the pool loses its new venues (the relay drops them too); a pool of only those
+// becomes every venue.
+void drop_new_venues(NetRoomSettings &s, int old_preset)
+{
+    if (community_pool(s) || fixed_venue(s.mode)) return;
+    if (old_preset >= 0) { apply_preset(s, old_preset); return; }
+    int n = 0;
+    for (int k = 0; k < s.pool_count; k++) if (!ONLINE_NEW_VENUE(s.pool[k])) s.pool[n++] = s.pool[k];
+    s.pool_count = n;
+    if (!n) apply_preset(s, 0);
 }
 
 // After the mode changed from `old_mode`: the pool the new mode votes on, the same preset where there
@@ -1535,7 +1607,7 @@ void fit_pool(NetRoomSettings &s, int old_mode, int old_preset)
     if (old_preset >= 0) { apply_preset(s, old_preset); return; }
     int n = 0;
     for (int k = 0; k < s.pool_count; k++)
-        if (!many_fighters(s.mode) || !ONLINE_ONE_ON_ONE_VENUE(s.pool[k])) s.pool[n++] = s.pool[k];
+        if (!many_fighters(s.mode) || (!ONLINE_ONE_ON_ONE_VENUE(s.pool[k]) && !ONLINE_NEW_VENUE(s.pool[k]))) s.pool[n++] = s.pool[k];
     s.pool_count = n;
     if (!n) apply_preset(s, 0);
 }
@@ -1927,10 +1999,15 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (us >= UPDATER_AVAILABLE && us <= UPDATER_STARTED) updater_info(&newer, nullptr, 0, nullptr, 0);
     }
     bool outdated = updater_local_build() > 0 && newer > updater_local_build();
+    char news_names[256];
+    int news = content_news(news_names, sizeof(news_names));
     if (outdated) {
         char line[96];
         snprintf(line, sizeof(line), "BUILD %d IS OUT: UPDATE IN THE LAUNCHER TO PLAY ONLINE", newer);
         text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
+    } else if (news > 0 && signed_in) {
+        // build 82: new community packs: the rooms of players who have them take only PCs with the same packs
+        text(dl, f, g_title, 14, 50, 56, ORANGE, upper(NETPLAY_CONTENT_NEWS_LINE).c_str(), LEFT, 1.2f);
     } else if (!signed_in) {
         const char *line = acc == ACCOUNT_WAITING ? "FINISH SIGNING IN WITH DISCORD IN YOUR BROWSER..."
                          : acc == ACCOUNT_CHECKING ? "CHECKING YOUR DISCORD SIGN-IN..."
@@ -2331,6 +2408,8 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         else
             snprintf(line, sizeof(line), "%s  %d/%d", mode_name(r.mode), r.players, r.max);
         text(dl, f, g_hand, 13, x + 14, y + 26, open ? ORANGE : with_alpha(ORANGE, 0.45f), line, LEFT, 0.8f);
+        if (r.rules >= 0 && standard_only(r.rules))     // build 82: community content off there
+            room_tag(dl, f, x + w - 8, y + 5, "STANDARD", 9);
         if (all && list[i].server >= 0) {      // the server's tag and this PC's ping there, bottom right
             int ms = list[i].ping_ms;
             char tag[32];
@@ -2556,6 +2635,7 @@ void venue_tile(ImDrawList *dl, const Frame &f, int venue, float x, float y, flo
         else text(dl, f, g_hand, banner - 4, x + w / 2, by + bh + 1, with_alpha(ORANGE, alpha), online_venue_name(venue),
                   CENTER, 0.8f, w);
     }
+    if (alpha > 0.5f && bh > 40 && pc_content_new_venue(venue)) new_badge(dl, f, bx + 5, by + 5, bh > 120 ? 11 : 9);
 }
 
 // The pool on the create page, filling the box under a caption (the preset and the count): one large
@@ -2611,9 +2691,9 @@ void venue_showcase(ImDrawList *dl, const Frame &f, const NetRoomSettings &s, fl
 void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &room)
 {
     // the rows; a King of the Hill room has one more, how each fight's venue is chosen
-    enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN, R_CPU, R_RULES, R_PING };
+    enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN, R_CPU, R_RULES, R_PING, R_CONTENT };
     static const char *const labels[] = { "MODE", "VENUE OF EACH FIGHT", "PLAYERS", "VENUES", "LISTED", "", "CPU LEVEL",
-                                          "FIGHTER RULES", "MAX PING" };
+                                          "FIGHTER RULES", "MAX PING", "COMMUNITY CONTENT" };
     NetRoomSettings &s = S.settings;
     bool was_koth = NETPLAY_IS_KOTH(s.mode), was_rot = NETPLAY_IS_FFAROT(s.mode);
     // the host cannot turn a room into the other kind (the relay refuses it)
@@ -2624,6 +2704,8 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     if (cpu_level_offered(s.mode)) rows_of.insert(rows_of.begin() + 2, R_CPU);
     // build 68: which fighters may be picked, and the highest ping a joining player may have (before LISTED)
     if (rules_offered()) rows_of.insert(rows_of.end() - 2, { R_RULES, R_PING });
+    // build 82: community content (new fighters, new venues) on or off for this room, when this PC has some
+    if (content_switch_offered()) rows_of.insert(rows_of.end() - 2, R_CONTENT);
     const int rows = (int)rows_of.size();
     if (S.settings_sel >= rows) S.settings_sel = rows - 1;
     if (pad.up) S.settings_sel = (S.settings_sel + rows - 1) % rows;
@@ -2664,7 +2746,16 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
             s.cpu_level = order[std::max(0, std::min(2, at + step))];
             break;
         }
-        case R_RULES: s.fighter_rules = (s.fighter_rules + step + 4) % 4; break;    // the NETPLAY_RULES_* order
+        case R_RULES:       // the NETPLAY_RULES_* order; STANDARD ONLY stays as it is
+            s.fighter_rules = (NETPLAY_RULES_FIGHTERS(s.fighter_rules) + step + 4) % 4 | (s.fighter_rules & NETPLAY_RULES_STANDARD);
+            break;
+        case R_CONTENT: {   // the same preset with or without the new venues; a custom pool loses them
+            int old_preset = preset_of(s);
+            s.fighter_rules ^= NETPLAY_RULES_STANDARD;
+            if (old_preset >= 0) apply_preset(s, old_preset);
+            else drop_new_venues(s, -1);
+            break;
+        }
         case R_PING: {     // OFF, 100, 150, 200 ms
             static const int order[] = { 0, 100, 150, 200 };
             int at = 0;
@@ -2683,7 +2774,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         was_koth = NETPLAY_IS_KOTH(s.mode);
     }
     bool koth = NETPLAY_IS_KOTH(s.mode), rot = NETPLAY_IS_FFAROT(s.mode);
-    float row_step = rows >= 7 ? 37 : rows >= 6 ? 46 : 54, row_h = rows >= 7 ? 34 : rows >= 6 ? 40 : 44;   // up to 8 rows above the hints
+    float row_step = rows >= 9 ? 33 : rows >= 7 ? 37 : rows >= 6 ? 46 : 54, row_h = rows >= 9 ? 31 : rows >= 7 ? 34 : rows >= 6 ? 40 : 44;   // up to 9 rows above the hints
 
     page_title(dl, f, S.settings_edit ? "ROOM SETTINGS" : "CREATE A ROOM");
     text(dl, f, g_hand, 15, 54, 66, ORANGE, s.name, LEFT, 0.8f);
@@ -2717,8 +2808,9 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_CPU: value = cpu_level_text(s.cpu_level); break;
         case R_RULES: value = rules_text(s.fighter_rules); break;
         case R_PING: value = s.max_ping > 0 ? "Up to " + max_ping_text(s.max_ping) : "Off: anyone joins"; break;
+        case R_CONTENT: value = content_text(s.fighter_rules); break;
         }
-        text(dl, f, g_title, 17, x + 12, y + (row_h < 40 ? 16 : 19), sel ? WHITE : GREY, value.c_str());
+        text(dl, f, g_title, row_h < 34 ? 15 : 17, x + 12, y + (row_h < 34 ? 14 : row_h < 40 ? 16 : 19), sel ? WHITE : GREY, value.c_str());
         // a fixed row (a special match's venue and players) has nothing to step through
         bool fixed = (fixed_venue(s.mode) && (row == R_POOL || row == R_PLAYERS)) || (is_team(s.mode) && row == R_PLAYERS);
         if (sel && !fixed) { text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER); }
@@ -2923,9 +3015,13 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
                 text(dl, f, g_title, 8, x + cw / 2, y + 3, with_alpha(ORANGE, sel ? 1.0f : 0.7f), "YOURS", CENTER, 0.6f);
             }
             if (blocked(i)) {   // left out by the room's FIGHTER RULES: dimmed, a red band
+                // build 82: a new fighter in a STANDARD ONLY room says why (community content is off)
+                bool off = ONLINE_NEW_FIGHTER(list[i].id) && standard_only(rules_room.settings.fighter_rules);
                 rect(dl, f, x + 1, y + 1, cw - 2, ch - 2, IM_COL32(0, 0, 0, 170), 3);
-                rect(dl, f, x + 1, y + ch / 2 - 7, cw - 2, 14, with_alpha(RED, 0.85f));
-                text(dl, f, g_title, 8, x + cw / 2, y + ch / 2 - 5, WHITE, "BANNED", CENTER, 0.6f);
+                rect(dl, f, x + 1, y + ch / 2 - 7, cw - 2, 14, with_alpha(off ? GREY : RED, 0.85f));
+                text(dl, f, g_title, 8, x + cw / 2, y + ch / 2 - 5, WHITE, off ? "STANDARD" : "BANNED", CENTER, 0.6f);
+            } else if (ONLINE_NEW_FIGHTER(list[i].id) && pc_content_new_fighter(list[i].id)) {
+                new_badge(dl, f, x + 3, y + 3, 8);      // build 82: new from the community
             }
             if (sel) selector(dl, f, x, y, cw, ch);
             if (mouse_click(f, x, y, cw, ch)) const_cast<Pad &>(pad).a = true;
@@ -2934,7 +3030,9 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     snprintf(page, sizeof(page), "%d / %d", S.fighter_sel + 1, n);
     text(dl, f, g_title, 12, gx + cols * (cw + 4) - 4, gy + rows * (ch + 6), GREY, page, RIGHT, 0.8f);
     if (pad.a && blocked(S.fighter_sel)) {
-        say("This room's FIGHTER RULES leave " + std::string(cur.name) + " out: pick another fighter.");
+        if (ONLINE_NEW_FIGHTER(cur.id) && standard_only(rules_room.settings.fighter_rules))
+            say("This room is STANDARD ONLY: community fighters are off here. Pick another fighter.");
+        else say("This room's FIGHTER RULES leave " + std::string(cur.name) + " out: pick another fighter.");
         const_cast<Pad &>(pad).a = false;
     }
     if (pad.a) {
@@ -2949,6 +3047,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
         if (pick_cp >= 0) cp_choose(pick_cp);   // which created fighter: remembered, and sent to the relay
         *chosen = true;
         *fighter = list[pick].id;
+        if (!S.random_pick) pc_content_picked_fighter(*fighter);     // build 82: its NEW badge goes
         if (S.random_pick) S.fighter_sel = pick;    // back here later: on the fighter it drew
     }
     // BACK from a ranked search's pick goes back to the mode chooser, not to the online menu (a player
@@ -3011,6 +3110,7 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             const Tex &banner = venue_name_tex(r.candidates[i]);
             if (banner.srv) image_fit(dl, f, banner, x + 2, y + w + 2, w - 4, 26);
             else text(dl, f, g_hand, 13, x + w / 2, y + w + 6, ORANGE, online_venue_name(r.candidates[i]), CENTER, 0.8f, w - 6);
+            if (pc_content_new_venue(r.candidates[i])) new_badge(dl, f, x + 9, y + 9, 11);     // build 82
         }
         // the votes, as stars
         for (int k = 0; k < nv; k++)
@@ -3028,7 +3128,10 @@ void draw_vote(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         hint(dl, f, hx, 396, "b", ranked ? ranked_leave_hint(ri) : "LEAVE ROOM");
     }
     if (pad.b) { netplay_lobby_leave(); S.page = HUB; say("You left the room."); return; }
-    if (pad.a) netplay_lobby_vote(rnd && S.vote_sel == n ? NETPLAY_VOTE_RANDOM : S.vote_sel);
+    if (pad.a) {
+        if (!(rnd && S.vote_sel == n) && S.vote_sel < n) pc_content_picked_venue(r.candidates[S.vote_sel]);   // build 82
+        netplay_lobby_vote(rnd && S.vote_sel == n ? NETPLAY_VOTE_RANDOM : S.vote_sel);
+    }
 }
 
 // ---- King of the Hill: the hill screen, "YOU'RE UP", and watching ----
@@ -3674,8 +3777,13 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             text(dl, f, g_title, 10, sx, 73, ORANGE, rl.c_str(), RIGHT, 0.6f);
             sx -= text_width(f, g_title, 10, rl.c_str()) + 12;
         }
-        if (r.settings.max_ping > 0)
-            text(dl, f, g_title, 10, sx, 73, ORANGE, ("MAX PING " + upper(max_ping_text(r.settings.max_ping).c_str())).c_str(), RIGHT, 0.6f);
+        if (r.settings.max_ping > 0) {
+            std::string mp = "MAX PING " + upper(max_ping_text(r.settings.max_ping).c_str());
+            text(dl, f, g_title, 10, sx, 73, ORANGE, mp.c_str(), RIGHT, 0.6f);
+            sx -= text_width(f, g_title, 10, mp.c_str()) + 12;
+        }
+        // build 82: community content off in this room
+        if (standard_only(r.settings.fighter_rules)) room_tag(dl, f, sx, 72, "STANDARD", 9);
     }
     if (worst > 150) {
         char warn[96];
@@ -4499,6 +4607,12 @@ void gallery_step()
                                          // build 68: room rules (CREATE A ROOM's rows, the room's line and its ping
                                          // warning, the grid with blocked fighters)
                                          "create-rules", "room-rules", "fighters-rules",
+                                         // build 82: community content (STANDARD ONLY on CREATE A ROOM, the room's
+                                         // line and the room list, the grid with new fighters off; the NEW badges;
+                                         // the news line; run with RECOMP_TEST_CONTENT_PRINT, a content root,
+                                         // RECOMP_TEST_CONTENT_NEW=all and RECOMP_TEST_CONTENT_NEWS=2)
+                                         "create-standard", "room-standard", "rooms-standard", "fighters-standard",
+                                         "fighters-new", "vote-new", "hub-news",
                                          // build 66: FFA rotation (its room, called, watching, its door)
                                          "rot", "rot-up", "rot-watch", "rot-fight", "create-rot", "hub-rot", "versus-rot",
                                          // build 70: the spectator HUD over a watched fight (the line, up next,
@@ -4724,7 +4838,44 @@ void gallery_step()
         S.quick_mode = cycle_index(cycle, p == "hub-team" ? 1 : p == "hub-koth" ? NETPLAY_MODE_KOTH_RANDOM
                                           : p == "hub-rot" ? NETPLAY_MODE_FFAROT : 7);
     }
-    else if (p == "rooms" || p == "rooms-special") { S.page = ROOMS; S.rooms_sel = p == "rooms" ? 1 : 5; }
+    else if (p == "rooms" || p == "rooms-special" || p == "rooms-standard") {
+        S.page = ROOMS;
+        S.rooms_sel = p == "rooms-special" ? 5 : p == "rooms-standard" ? 4 : 1;
+        for (size_t i = 0; i < G.rooms.size(); i++)     // build 82: Dee's rules and Ann's room switched community content off
+            G.rooms[i].rules = p == "rooms-standard" && (i == 0 || i == 4) ? NETPLAY_RULES_STANDARD : -1;
+    }
+    else if (p == "room-standard") {     // community content off, stock fighters: the line under the room's name
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        G.room.settings.fighter_rules = NETPLAY_RULES_STANDARD | NETPLAY_RULES_NO_CREATED;
+        drop_new_venues(G.room.settings, 1);
+    }
+    else if (p == "fighters-standard" || p == "fighters-new") {  // the new fighters off here (STANDARD ONLY), or NEW
+        S.page = FIGHTERS;
+        G.room = sample_room(0, 2, 2);
+        const auto &list = roster();
+        if (p == "fighters-standard") {
+            G.room.settings.fighter_rules = NETPLAY_RULES_STANDARD;
+            G.room.blocked_count = 0;
+            for (int id = 100; id <= 127; id++) G.room.blocked[G.room.blocked_count++] = (unsigned char)id;
+        }
+        S.fighter_sel = 0;
+        S.fighter_top = 0;
+        for (size_t i = 0; i < list.size(); i++) if (ONLINE_NEW_FIGHTER(list[i].id)) { S.fighter_sel = (int)i; break; }
+    }
+    else if (p == "vote-new") {      // a new venue among the three (its NEW badge)
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        G.room.phase = 1;
+        G.room.candidate_count = 3;
+        const OnlineVenue *v;
+        int nv = online_venues(&v), added = 6;
+        for (int i = 0; i < nv; i++) if (ONLINE_NEW_VENUE(v[i].fe_id)) { added = v[i].fe_id; break; }
+        G.room.candidates[0] = 1; G.room.candidates[1] = (unsigned char)added; G.room.candidates[2] = 11;
+        G.room.ms_left = 11000;
+        S.vote_sel = 1;
+    }
+    else if (p == "hub-news") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
     else if (p == "code") { S.page = CODE; snprintf(S.code, sizeof(S.code), "GTE4AQ"); S.code_pos = 3; }
     else if (p.compare(0, 6, "create") == 0) {     // every venue; -3, -6: two presets; -1: one venue
         S.page = SETTINGS;
@@ -4756,6 +4907,11 @@ void gallery_step()
             S.settings.fighter_rules = NETPLAY_RULES_STOCK;
             S.settings.max_ping = 150;
             S.settings_sel = 3;
+        }
+        if (p == "create-standard") {   // community content off; the cursor on its row (before LISTED)
+            S.settings.fighter_rules = NETPLAY_RULES_STANDARD;
+            drop_new_venues(S.settings, 0);
+            S.settings_sel = rules_offered() ? (content_switch_offered() ? 5 : 4) : 2;
         }
     }
     else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }

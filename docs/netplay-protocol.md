@@ -378,6 +378,24 @@ by older relays.
 - The room page colours each player's ping (green under 80 ms, yellow under 150, red from 150) and,
   while someone is red, says before READY that the fight may stutter and rollback helps.
 
+### STANDARD ONLY (build 82)
+
+- `rules` bit 2 (`4`), on top of the FIGHTER RULES above: the host switched the room's **community
+  content** off (CREATE A ROOM's COMMUNITY CONTENT row, offered only on a PC with community packs). New
+  fighters (front-end IDs 100..127, `type new-fighter` packs) and new venues (feIDs 28..63, Studio's
+  new-venue packs) cannot be picked; clothing packs stay (a clothing row has no number the fight reads:
+  name, group, colours, price, display text, variants, order and shop type).
+- The relay enforces it: a `READY` with a new fighter plays Doc (`55`), `ROOM` names IDs 100..127 as
+  blocked, and the pool loses its new venues on `CREATE` and `SETTINGS` (a pool of only new venues
+  becomes the mode's quick pool), so the candidates and a RANDOM win never draw one. A room without a
+  content print (no community packs) drops new venues from its pool the same way.
+- `ROOMS` (to a client with caps bit 16) and `ROOMLIST` (to a request whose `caps` has bit 16) carry,
+  after the list, one byte per listed room: its `rules` bits. The room list tags a room with bit 2
+  **STANDARD**. Older games stop reading after the list. A build-81 relay drops a `CREATE` or `SETTINGS` with `rules` 4..7 as malformed
+  (no answer), so the relay goes out before the game build.
+- `STANDARD ONLY` does not change who may join: the content print stays in the build fingerprint, so a
+  room still takes only PCs with the same community packs (`ERROR 15` otherwise).
+
 ## Spectator extension (watching a room's matches)
 
 A client may watch an ordinary room's matches without playing in them; its game runs each match
@@ -493,7 +511,7 @@ that relay.
 
 | Type | Name | Direction | Body after the header |
 |---|---|---|---|
-| 0x25 | `ROOMLIST` | client -> server | `nonce` u32, `build` 8 (the asker's fingerprint, zeros: any), `mode` u8 (0xFF any), `caps` u32 (bit 0: list King of the Hill rooms), then zero bytes (padding, see below) |
+| 0x25 | `ROOMLIST` | client -> server | `nonce` u32, `build` 8 (the asker's fingerprint, zeros: any), `mode` u8 (0xFF any), `caps` u32 (bit 0: list King of the Hill rooms; bit 16: each room's `rules` byte after the list, build 82), then zero bytes (padding, see below) |
 | 0x25 | `ROOMLIST` | server -> client | `nonce` u32 (the request's), `total` u16 (rooms that match), `count` u8, then per room: `room` 6, `name` string, `mode` u8, `players` u8, `max` u8, `phase` u8 (as in `ROOMS`), `age` u16 (seconds since the room was opened, 65535 at most) |
 
 - The rooms are those `LIST` gives a registered client of that build: public rooms, newest first,

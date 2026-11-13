@@ -238,8 +238,9 @@ def main(argv=None):
     sc.add_argument("--ko-winner", help="slot, alt or humans (only the human fighters; default alt; koth 0)")
     sc.add_argument("--cpu-level", choices=["easy", "normal", "hard"],
                     help="online (3-Way, FFA): the host sets its room's CPU level (RECOMP_TEST_CPU_LEVEL)")
-    sc.add_argument("--fighter-rules", choices=["all", "nobanned", "nocreated", "stock"],
-                    help="online: the host sets its room's FIGHTER RULES (RECOMP_TEST_FIGHTER_RULES, build 68)")
+    sc.add_argument("--fighter-rules", choices=["all", "nobanned", "nocreated", "stock", "standard", "stock+standard"],
+                    help="online: the host sets its room's FIGHTER RULES (RECOMP_TEST_FIGHTER_RULES, build 68; "
+                         "standard: STANDARD ONLY, community content off, build 82)")
     sc.add_argument("--max-ping", type=int, help="online: the host sets its room's MAX PING in ms (RECOMP_TEST_MAX_PING)")
     sc.add_argument("--banned-tier", help="online: fighter IDs, comma-separated, for the relay's banned-tier.txt ('' empty)")
     sc.add_argument("--bot", nargs="?", const=True, default=None,

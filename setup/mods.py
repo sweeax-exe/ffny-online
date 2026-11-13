@@ -521,9 +521,9 @@ class Manager:
                     url=url))
         self.progress('Catalogue verified and refreshed')
 
-    def choose(self, mod_id, requested=None, prerelease=None):
+    def choose(self, mod_id, requested=None, prerelease=None, index=None):
         prerelease = self.prerelease if prerelease is None else prerelease
-        index = self.trusted(fresh=True)
+        index = index or self.trusted(fresh=True)
         mod = next((m for m in index['mods'] if m['id'] == mod_id), None)
         check(mod, 'Mod not found in verified catalogue')
         candidates = [v for v in mod['versions'] if v['version'] not in mod['revoked_versions']
@@ -921,6 +921,7 @@ class Manager:
         """<data>/mod-manager/content.ini: the synced packs for the game (pc_content.c) and the Content page."""
         lines = ['; FFNY Online community packs, written by setup/mods.py sync. Do not edit.',
                  '[content]', 'revision=%d' % revision]
+        reviewed = self.reviewed_dates()
         rows = [(r.get('order', 0), mod_id, r) for mod_id, r in self.state()['installed'].items() if r.get('synced')]
         for order, mod_id, r in sorted(rows, key=lambda x: (x[0], x[1])):
             contract.slug(mod_id)
@@ -929,9 +930,65 @@ class Manager:
                         'description', 'fighter_fe_id', 'bundle', 'bundle_name'):
                 value = str(r.get(key, '')).replace('\n', ' ').replace('\r', ' ')[:500]
                 lines.append(key + '=' + value)
+            # build 82: the day the team accepted this version (the hub's NEW badge) and a new venue's feID
+            lines.append('reviewed=' + reviewed.get((mod_id, r.get('version')), ''))
             if (self.mods / mod_id / 'install.json').is_file():
                 lines.append('composed=1')     # pc_content.c counts it online only when content-files applied it
+                venue = new_venue_fe_id(self.mods / mod_id / 'install.json')
+                if venue:
+                    lines.append('venue_fe_id=%d' % venue)
         atomic_bytes(self.root / 'content.ini', ('\n'.join(lines) + '\n').encode('utf-8'))
+
+    def reviewed_dates(self):
+        """{(mod id, version): the catalogue's review date} from the cached verified catalogue ({} without one)."""
+        try:
+            index = self.trusted()
+        except (ValueError, OSError, KeyError, TypeError):
+            return {}
+        return {(m['id'], v['version']): v.get('reviewed', '') for m in index['mods'] for v in m['versions']}
+
+    def check_news(self, url=None):
+        """FFNY Online, from the running game (the online hub): would a sync now change the community packs? Fetches
+        and verifies the catalogue like refresh, but writes only <data>/mod-manager/news.ini (never the cached
+        catalogue, the state or the packs):
+
+            [news]
+            checked=<UTC time>
+            revision=<the catalogue's revision>
+            pending=<mods a sync would install, update or remove; 0 when the last sync already saw this revision>
+            names=<their names, ' | ' between>
+
+        The last sync's revision (content.ini) counts as handled: a pack that failed there is not news again."""
+        url = url or local_catalogue_url() or CATALOGUE_URL
+        check(self.keys, 'Catalogue signing key has not been provisioned')
+        raw = fetch_small(url, MAX_INDEX)
+        signature = fetch_small(url + '.sig', 64)
+        previous = read_json(self.root / 'catalogue.json', {})
+        index = verify_index(raw, signature, self.keys, previous.get('revision', 0), None, fresh=True)
+        names = []
+        if index['revision'] > self.content_revision():
+            installed = self.state()['installed']
+            for mod in sorted(index['mods'], key=lambda m: (m.get('order', 1 << 30), m['id'])):
+                receipt = installed.get(mod['id'])
+                if receipt and not receipt.get('synced'):
+                    continue        # a pack installed by hand keeps its id; sync leaves it
+                try:
+                    _, version = self.choose(mod['id'], index=index)
+                except ValueError:
+                    continue        # not for this launcher (capabilities, runtime): sync skips it too
+                if not receipt or receipt.get('version') != version['version'] or \
+                        receipt.get('archive_sha256') != version['archive']['sha256']:
+                    names.append(mod['name'])
+            for mod_id, receipt in installed.items():
+                mod = next((m for m in index['mods'] if m['id'] == mod_id), None)
+                if receipt.get('synced') and (mod is None or receipt.get('version') in mod['revoked_versions']):
+                    names.append(receipt.get('name', mod_id))
+        clean = ' | '.join(n.replace('\n', ' ').replace('\r', ' ')[:80] for n in names)[:1000]
+        atomic_bytes(self.root / 'news.ini', ('[news]\nchecked=%s\nrevision=%d\npending=%d\nnames=%s\n' % (
+            dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), index['revision'], len(names), clean)
+        ).encode('utf-8'))
+        self.message = '%d community pack change(s) waiting' % len(names) if names else 'Community content up to date'
+        return names
 
     def view(self):
         state = self.state()
@@ -972,6 +1029,18 @@ class Manager:
         atomic_bytes(self.root / 'view.ini', ('\n'.join(lines) + '\n').encode())
 
 
+def new_venue_fe_id(install_json):
+    """A venue pack's new venue front-end ID (its new-venue op's fe_id, 28..63), else 0."""
+    try:
+        ops = json.loads(Path(install_json).read_text(encoding='utf-8')).get('ops') or []
+        for op in ops:
+            if isinstance(op, dict) and op.get('op') == 'new-venue' and isinstance(op.get('fe_id'), int)                     and 28 <= op['fe_id'] <= 63:
+                return op['fe_id']
+    except (OSError, ValueError, AttributeError):
+        pass
+    return 0
+
+
 def content_hash(files):
     """The pack's content hash: SHA-256 over "path\\0sha256\\n" of every file, sorted by path (Studio's
     contentpack and the account service compute the same)."""
@@ -998,7 +1067,7 @@ def pack_signature_ok(keys, mod_id, version, kind):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('status', 'refresh', 'install', 'remove', 'rollback', 'recover', 'sync',
-                                            'compose'))
+                                            'compose', 'check'))
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--game-dir', type=Path, help="the player's dump (default <data>/extracted, else ./game)")
     parser.add_argument('--runtime', default='0.0.0')
@@ -1015,6 +1084,14 @@ def main():
     try:
         manager = Manager(args.data_dir, args.runtime, args.capability, cancel=args.cancel_file, prerelease=args.prerelease,
                           game_dir=args.game_dir)
+        if args.command == 'check':
+            # from the running game: no writer lock (a launcher's sync may hold it), only news.ini is written
+            try:
+                manager.check_news()
+            except (ValueError, OSError, KeyError, TypeError, urllib.error.URLError) as error:
+                return failure(error)
+            print(json.dumps(dict(event='complete', message=manager.message)), flush=True)
+            return 0
         with file_lock(manager.root / 'writer.lock'):
             try:
                 if (manager.root / 'journal.json').exists():
