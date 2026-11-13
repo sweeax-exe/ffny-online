@@ -879,13 +879,16 @@ class Manager:
     def composed_packs(self):
         """Every synced pack with an install.json, for content_compose."""
         out = []
+        reviewed = self.reviewed_dates()
         for mod_id, r in self.state()['installed'].items():
             contract.slug(mod_id)
             folder = self.mods / mod_id
             if r.get('synced') and not linked(folder) and (folder / 'install.json').is_file():
+                # reviewed: the day the team accepted this version (a new fighter's thumbs carry NEW for a while)
                 pack = dict(id=mod_id, version=r.get('version', ''), content_sha256=r.get('content_sha256', ''),
                             kind=r.get('kind', 'replacement'), order=r.get('order', 0), folder=folder,
-                            fighter_fe_id=r.get('fighter_fe_id', 0))
+                            fighter_fe_id=r.get('fighter_fe_id', 0),
+                            reviewed=reviewed.get((mod_id, r.get('version')), ''))
                 if r.get('bundle'):
                     # content_compose applies a pack of several mods whole or not at all
                     pack.update(bundle=r['bundle'], bundle_name=r.get('bundle_name', r['bundle']))

@@ -28,7 +28,7 @@ One implementation for both sides: FFNY Studio (``ffnystudio/newfighter.py``) an
 import re
 import struct
 
-from . import fightervoice
+from . import fighterart, fightervoice
 from .sod import Sod, name_hash
 from .sodwrite import name_above
 
@@ -227,7 +227,9 @@ def add_fighter(fighter_bytes, template_fe_id, fe_id, hub_name, model=None):
 # -- menu pictures --------------------------------------------------------------------------------------------------
 
 # The per-fighter art in screens/screens.viv, loaded by path (select screen, loading and summary cards). A family
-# whose name starts with p_ (and the bare portrait/<n>_<k>p) is numbered feID + 1, the others feID.
+# whose name starts with p_ (and the bare portrait/<n>_<k>p) is numbered feID + 1, the others feID. thumb<n> is
+# the select grid's cell under the cursor, thumb<n>off the cell when the cursor is elsewhere. ``fighterart.py``
+# paints a pack's own art into the copies.
 PICTURE_FAMILIES = (
     ("screens/portrait/p_CF/p_cf_%d_%dp.big", 1, (2, 3, 4)),
     ("screens/portrait/l_CF/l_CF_%d_%dp.big", 0, (2, 3, 4)),
@@ -241,6 +243,7 @@ PICTURE_FAMILIES = (
     ("screens/portrait/t_CT/t_CT_%d.big", 0, None),
     ("screens/portrait/t_CO/t_CO_%d.big", 0, None),
     ("screens/thumbs/thumb%d.big", 0, None),
+    ("screens/thumbs/thumb%doff.big", 0, None),
 )
 
 
@@ -516,13 +519,16 @@ class _View:
         return self.files.current(self.rel, name)
 
 
-def apply_op(files, op, fe_id, pictures=True, pack=None):
+def apply_op(files, op, fe_id, pictures=True, pack=None, new=False):
     """The edits of one new-fighter op on the player's files as the packs so far left them: [(where, path,
     entry, bytes)], ``where`` "loose" (a whole file, entry None), "replace" or "add" (an archive entry; plain bytes,
     the caller stores them). ``files`` gives ``current(path, entry="")`` (bytes; a missing file or entry raises
     KeyError or OSError) and ``names(path)`` (an archive's entry names, the added ones too). ``fe_id`` is the
-    place (100..127). ``pack(path)`` reads one of the pack's own files (an own voice's clips, ``voice/...``).
-    Raises FighterError when the op does not fit (the ID or the model is taken, no such template)."""
+    place (100..127). ``pack(path)`` reads one of the pack's own files (an own voice's clips, ``voice/...``; its
+    menu art, ``art/body.png``, ``art/head.png`` and ``art/name.png``: KeyError or OSError for one it does not
+    have, and the pictures that art would fill stay the template's). ``new`` stamps NEW on the select grid's two
+    thumbs (a pack with head art only). Raises FighterError when the op does not fit (the ID or the model is
+    taken, no such template, art of the wrong size)."""
     problems = op_problems(op, allow_fe_id=True)
     if problems:
         raise FighterError(problems[0])
@@ -569,8 +575,15 @@ def apply_op(files, op, fe_id, pictures=True, pack=None):
     if tags is not None:
         edits.append(("loose", ANIM_TAGS, None, add_anim_tags(tags, template, model)))
     if pictures:
-        edits += [("add", SCREENS_ARCHIVE, n, data)
-                  for n, data in picture_copies(_View(files, SCREENS_ARCHIVE), template_fe_id, fe_id)]
+        copies = picture_copies(_View(files, SCREENS_ARCHIVE), template_fe_id, fe_id)
+        if pack is not None:
+            try:
+                art = fighterart.load_art(pack)
+            except fighterart.ArtError as e:
+                raise FighterError("art: %s" % e)
+            if art:
+                copies = [(n, fighterart.paint_picture(n, data, art, new=new)) for n, data in copies]
+        edits += [("add", SCREENS_ARCHIVE, n, data) for n, data in copies]
     return edits
 
 
