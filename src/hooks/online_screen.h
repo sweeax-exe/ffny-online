@@ -24,6 +24,9 @@ namespace online_screen {
 /* Load fonts and textures; call with the overlay's device before ImGui::NewFrame. */
 void prepare(void *d3d11_device);
 
+/* Off Windows: the same, with the overlay's Vulkan objects (online_screen_vk.h uses them). */
+void prepare_vk(void *vk_device, void *vk_physical, unsigned queue_family, void *vk_queue);
+
 /* The main menu is up: the ONLINE poster and, while slot 6 has the cursor, its door. */
 bool decor_wanted();
 void draw_decor(ImDrawList *dl, ImVec2 display);

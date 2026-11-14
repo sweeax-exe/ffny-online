@@ -4875,6 +4875,8 @@ void overlay_init_backend(const D3D8VkOverlayFrame *f)
     info.PipelineInfoMain.RenderPass = (VkRenderPass)f->render_pass;
     ImGui_ImplVulkan_Init(&info);
     g_vk_generation = f->generation;
+    online_screen::prepare_vk((void *)info.Device, (void *)info.PhysicalDevice,
+                              info.QueueFamily, (void *)info.Queue);
 }
 
 void overlay_draw(const D3D8VkOverlayFrame *f, void *)

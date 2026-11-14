@@ -192,7 +192,11 @@ int g_avatar_textures = 0;          // tests: how many pictures became textures
 
 void avatar_drop(std::map<long long, AvatarTex>::iterator it)
 {
+#if !defined(_WIN32)
+    (void)it;       /* the vulkan set goes with the descriptor pool at shutdown */
+#else
     if (it->second.tex.srv) { it->second.tex.srv->Release(); g_avatar_textures--; }
+#endif
     g_avatars.erase(it);
 }
 
@@ -207,9 +211,15 @@ void avatars_update()
         }
         AvatarTex &a = g_avatars[px.id];
         a.asked = GetTickCount64();
+#if !defined(_WIN32)
+        a.tex.srv = VK_NULL_HANDLE;
+#else
         if (a.tex.srv) { a.tex.srv->Release(); a.tex.srv = nullptr; g_avatar_textures--; }
+#endif
         a.none = !px.ok || !make_texture(px.rgba, px.w, px.h, a.tex);
+#if defined(_WIN32)
         if (!a.none) g_avatar_textures++;
+#endif
     }
     while (g_avatars.size() > AVATAR_CAP) {
         auto oldest = g_avatars.begin();

@@ -19,6 +19,16 @@
 #include <windows.h>
 #include <wincodec.h>
 #include <d3d11.h>
+#else
+#include "win32_compat.h"           // GetTickCount64, _stricmp, the sync primitives
+#include "imgui_impl_vulkan.h"
+#include "online_screen_vk.h"
+#include <unistd.h>
+#include <sys/stat.h>
+#include <time.h>
+#define localtime_s(tm, t) (localtime_r((t), (tm)) ? 0 : 1)
+#define gmtime_s(tm, t) (gmtime_r((t), (tm)) ? 0 : 1)
+#define _mkgmtime(t) timegm(t)
 #endif
 #include <ctype.h>
 #include <float.h>
@@ -113,7 +123,7 @@ extern "C" void online_menu_on_funccall(const char *text)
     }
 }
 
-#if defined(_WIN32)
+#if 1 /* the online screens build everywhere (linux-online) */
 
 namespace {
 
@@ -121,15 +131,28 @@ const int ONLINE_SLOT = 6;
 
 // ---- art ------------------------------------------------------------------------------------
 
+#if defined(_WIN32)
 ID3D11Device *g_dev = nullptr;
+#else
+static void *g_dev = nullptr;                   /* unused off Windows: textures go through osvk_* */
+#endif
 
+#if defined(_WIN32)
 struct Tex {
     ID3D11ShaderResourceView *srv = nullptr;
     float w = 0, h = 0;
     bool tried = false;
 };
+#else
+struct Tex {
+    VkDescriptorSet srv = VK_NULL_HANDLE;    /* imgui's sampled-image set (ImTextureID) */
+    float w = 0, h = 0;
+    bool tried = false;
+};
+#endif
 std::map<std::string, Tex> g_tex;
 
+#if defined(_WIN32)
 std::wstring art_root()
 {
     const char *data = getenv("DEFJAM_DATA");
@@ -142,7 +165,25 @@ std::wstring art_root()
     }
     return root + L"online-art\\";
 }
+#else
+static bool os_file_exists(const char *path)
+{
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+static std::string art_root_s()
+{
+    const char *data = getenv("DEFJAM_DATA");
+    std::string root;
+    if (data && *data) {
+        root = data;
+        if (!root.empty() && root.back() != '/') root += '/';
+    }
+    return root + "online-art/";
+}
+#endif
 
+#if defined(_WIN32)
 bool load_png(const std::wstring &path, Tex &t)
 {
     IWICImagingFactory *factory = nullptr;
@@ -187,12 +228,31 @@ bool load_png(const std::wstring &path, Tex &t)
     if (ok) { t.w = (float)w; t.h = (float)h; }
     return ok;
 }
+#endif
+
+#if !defined(_WIN32)
+static bool load_png_s(const std::string &path, Tex &t)
+{
+    if (!g_osvk.device || !os_file_exists(path.c_str())) return false;
+    int w = 0, h = 0, comp = 0;
+    unsigned char *px = stbi_load(path.c_str(), &w, &h, &comp, 4);
+    if (!px || !w || !h || w > 4096 || h > 4096) { if (px) stbi_image_free(px); return false; }
+    VkDescriptorSet set = osvk_texture(px, w, h);
+    stbi_image_free(px);
+    if (!set) return false;
+    t.srv = set;
+    t.w = (float)w;
+    t.h = (float)h;
+    return true;
+}
+#endif
 
 const Tex &tex(const std::string &rel)
 {
     Tex &t = g_tex[rel];
     if (!t.tried) {
         t.tried = true;
+#if defined(_WIN32)
         std::wstring name;
         for (char c : rel) name += (wchar_t)(c == '/' ? '\\' : c);
         // A language mod may carry translated copies in its own online-art folder (same layout).
@@ -205,6 +265,16 @@ const Tex &tex(const std::string &rel)
             }
         }
         if (!done) load_png(art_root() + name, t);
+#else
+        std::string name = rel;
+        for (char &c : name) if (c == '\\') c = '/';
+        bool done = false;
+        if (const char *lang = pc_language_dir()) {
+            std::string path = std::string(lang) + "/online-art/" + name;
+            if (os_file_exists(path.c_str())) done = load_png_s(path, t);
+        }
+        if (!done) load_png_s(art_root_s() + name, t);
+#endif
     }
     return t;
 }
@@ -242,14 +312,19 @@ bool g_fonts_tried = false;
 
 ImFont *add_font(const char *file)
 {
+#if defined(_WIN32)
     std::wstring wpath = art_root() + L"fonts\\";
     for (const char *c = file; *c; c++) wpath += (wchar_t)*c;
     if (GetFileAttributesW(wpath.c_str()) == INVALID_FILE_ATTRIBUTES) return nullptr;
     char path[MAX_PATH * 3];
     WideCharToMultiByte(CP_UTF8, 0, wpath.c_str(), -1, path, sizeof(path), nullptr, nullptr);
+#else
+    std::string path = art_root_s() + "fonts/" + file;
+    if (!os_file_exists(path.c_str())) return nullptr;
+#endif
     ImFontConfig cfg;
     cfg.OversampleH = 2;
-    return ImGui::GetIO().Fonts->AddFontFromFileTTF(path, 24.0f, &cfg);
+    return ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), 24.0f, &cfg);
 }
 
 ImFont *font_or_default(ImFont *f) { return f ? f : ImGui::GetFont(); }
@@ -577,6 +652,7 @@ bool g_look_tried = false;
 // ffny-branding/<file> in the working directory (the game's folder: the source tree, or the installed
 // copy, where ffny-branding sits beside branding/) or up to four folders above the executable, as
 // the launcher finds it.
+#if defined(_WIN32)
 bool find_ffny_branding(const wchar_t *file, std::wstring &out)
 {
     out = std::wstring(L"ffny-branding\\") + file;
@@ -593,9 +669,36 @@ bool find_ffny_branding(const wchar_t *file, std::wstring &out)
     }
     return false;
 }
+#else
+static bool find_ffny_branding_s(const char *file, std::string &out)
+{
+    out = std::string("ffny-branding/") + file;
+    if (os_file_exists(out.c_str())) return true;
+    char dir[1024];
+    ssize_t n = readlink("/proc/self/exe", dir, sizeof(dir) - 1);
+    if (n <= 0 || n >= (ssize_t)sizeof(dir)) return false;
+    dir[n] = 0;
+    for (int up = 0; up <= 4; up++) {
+        char *slash = strrchr(dir, '/');
+        if (!slash) return false;
+        *slash = 0;
+        out = std::string(dir) + "/ffny-branding/" + file;
+        if (os_file_exists(out.c_str())) return true;
+    }
+    return false;
+}
+#endif
 
 bool make_texture(const std::vector<unsigned char> &rgba, int w, int h, Tex &t)
 {
+#if !defined(_WIN32)
+    VkDescriptorSet set = osvk_texture(rgba.data(), w, h);
+    if (!set) return false;
+    t.srv = set;
+    t.w = (float)w;
+    t.h = (float)h;
+    return true;
+#else
     D3D11_TEXTURE2D_DESC desc = {};
     desc.Width = (UINT)w;
     desc.Height = (UINT)h;
@@ -612,14 +715,22 @@ bool make_texture(const std::vector<unsigned char> &rgba, int w, int h, Tex &t)
     texture->Release();
     if (ok) { t.w = (float)w; t.h = (float)h; }
     return ok;
+#endif
 }
 
 void load_look()
 {
     if (g_look_tried || !g_dev) return;
     g_look_tried = true;
+#if !defined(_WIN32)
+    {
+        std::string bgpath;
+        if (find_ffny_branding_s("launcher-bg-blur.jpg", bgpath)) load_png_s(bgpath, g_bg_blur);
+    }
+#else
     std::wstring path;
     if (find_ffny_branding(L"launcher-bg-blur.jpg", path)) load_png(path, g_bg_blur);
+#endif
     // a soft round light: white, its alpha falling off like a Gaussian
     const int L = 128;
     std::vector<unsigned char> px((size_t)L * L * 4);
@@ -1519,8 +1630,13 @@ const std::vector<OnlineFighter> &roster()
         const OnlineFighter *all;
         int n = online_fighters(&all);
         for (int i = 0; i < n; i++) {
+#if defined(_WIN32)
             std::wstring path = art_root() + L"fighters\\" + std::to_wstring(all[i].id) + L".png";
             if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) list.push_back(all[i]);
+#else
+            std::string path = art_root_s() + "fighters/" + std::to_string(all[i].id) + ".png";
+            if (os_file_exists(path.c_str())) list.push_back(all[i]);
+#endif
         }
         if (list.empty()) for (int i = 0; i < n; i++) list.push_back(all[i]);
         // new fighters (content packs, online_new_fighters): with or without their own art
@@ -5294,7 +5410,11 @@ namespace online_screen {
 
 void prepare(void *device)
 {
+#if !defined(_WIN32)
+    g_dev = VK_NULL_HANDLE;                     /* textures go through osvk_* (set by prepare_vk) */
+#else
     g_dev = (ID3D11Device *)device;
+#endif
     if (!g_fonts_tried) {
         g_fonts_tried = true;
         g_title = add_font("TradeBld.ttf");             // items and door titles, like STORY
@@ -5305,6 +5425,16 @@ void prepare(void *device)
         if (!g_stencil) g_stencil = g_title;
         g_serif = add_font("AachenStd-Bold.ttf");
         g_worn = add_font("TeaChest.ttf");             // online art 7 on (scripts/online-art.py)
+#if !defined(_WIN32)
+        {
+            std::string anton;
+            if (find_ffny_branding_s("fonts/Anton-Regular.ttf", anton)) {
+                ImFontConfig cfg;
+                cfg.OversampleH = 2;
+                g_numbers = ImGui::GetIO().Fonts->AddFontFromFileTTF(anton.c_str(), 24.0f, &cfg);
+            }
+        }
+#else
         std::wstring anton;
         if (find_ffny_branding(L"fonts\\Anton-Regular.ttf", anton)) {
             char path[MAX_PATH * 3];
@@ -5313,10 +5443,18 @@ void prepare(void *device)
             cfg.OversampleH = 2;
             g_numbers = ImGui::GetIO().Fonts->AddFontFromFileTTF(path, 24.0f, &cfg);
         }
+#endif
         fprintf(stderr, "[ONLINE] art %s, fonts %s\n", tex("ui/online_poster.png").srv ? "found" : "missing",
                 g_title ? "found" : "missing");
     }
 }
+
+#if !defined(_WIN32)
+void prepare_vk(void *vk_device, void *vk_physical, unsigned queue_family, void *vk_queue)
+{
+    osvk_set((VkDevice)vk_device, (VkPhysicalDevice)vk_physical, queue_family, (VkQueue)vk_queue);
+}
+#endif
 
 // The menu reports itself before its first frame; the ticks say it is really on screen
 // (without the patched menu's ticks there is no ONLINE entry to draw for either).
