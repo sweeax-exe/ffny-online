@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local-only patch that gives the main menu a real ONLINE slot.
+"""Local-only patch that gives the main menu a real ONLINE slot (and the select grid the new fighters' pictures).
 
 The shipped main menu (screens/intMain/mainMenu.big, an EA "APT" movie) lays its
 items out in a 3x3 grid and leaves the bottom-left cell empty: slot index 6 is
@@ -7,7 +7,7 @@ items out in a 3x3 grid and leaves the bottom-left cell empty: slot index 6 is
 that slot. It writes a complete patched copy of the player's own
 `screens/screens.viv` to `<data>/override/screens/screens.viv`, which the port
 loads in place of the original (the original file is never opened for writing).
-Only one archive entry changes; the rest of the archive is copied byte for byte.
+Only the entries named below change; the rest of the archive is copied byte for byte.
 
     python scripts/apt-patch.py                  # build the override
     python scripts/apt-patch.py --check          # report whether it exists and is current
@@ -45,6 +45,17 @@ every internal pointer there is an absolute offset):
     same per-frame FuncCall("Online.Tick()"): a new empty-sprite placement in frame 0 of its main
     timeline carrying an EnterFrame clip event. The screen defines no clip event or onEnterFrame
     of its own and nothing else on it changes; its entry is hash-gated like the main menu's;
+  * battle/chooseF2, chooseF3, chooseF4 (patch version 5), the fighter select screens: a grid cell is
+    an instance of the library sprite `thumbAll` (300 frames) that shows frame <feID> under the cursor
+    and frame <feID + 149> otherwise; the pictures are baked into the screen, and the frames of the
+    community fighters (feID 100..127, `src/hooks/new_fighters.c`) hold none. Each of those 56 frames
+    gets one more Action item: `this.attachMovie("emptyClip", "nfThumb", 2)`, the clip moved to the
+    cell's corner, and `loadMovie` of the fighter's own thumb file into it (`thumbs/thumb<feID>.swf`
+    under the cursor, `thumbs/thumb<feID>off.swf` otherwise, i.e. `screens/thumbs/thumb<feID>.big` and
+    `thumb<feID>off.big`, which the launcher writes from the pack's art). Only those frame records
+    change; the screens' own program, pictures and stock frames stay byte-identical. Patched once: a
+    pack only adds its thumb files. These three entries are optional: one that does not match its
+    hashes stays as it is and the tool says so (`note: ... left as it is`), the menu patch is kept;
   * the `.apt` is re-laid out in its BIGF (other inner files byte-identical),
     wrapped as a literal-only RefPack stream, appended to the archive copy, and
     its directory record and the header total size are updated.
@@ -90,9 +101,10 @@ NEW_POS = (-61.0, 95.5)           # bottom-left cell: its poster's centre (-62.5
                                   # (+1.5, +1.5) offset every other slot's hit target has
 
 NEW_CLIP_NAME = "mmOnline"
-PATCH_VERSION = 4                 # 1: slot 6 + Focus/Open; 2: + per-frame Online.Tick();
+PATCH_VERSION = 5                 # 1: slot 6 + Focus/Open; 2: + per-frame Online.Tick();
                                   # 3: + the ONLINE poster painted into the poster wall textures;
-                                  # 4: + the same per-frame Online.Tick() on battle/cmtype
+                                  # 4: + the same per-frame Online.Tick() on battle/cmtype;
+                                  # 5: + the community fighters' grid pictures on battle/chooseF2/3/4
 CLIP_EVENT_ENTERFRAME = 0x02
 PLACE_HAS_CLIP_ACTIONS = 0x80
 CMD_TICK = "Online.Tick()"
@@ -129,12 +141,44 @@ CMTYPE_TEMPLATE_NAME = "rules"        # an empty-sprite placement of frame 0 tha
 CMTYPE_TICK_DEPTH = 130
 CMTYPE_TICK_NAME = "onlineTick"
 
+# battle/chooseF2, chooseF3, chooseF4 (the fighter select screens, patch version 5): the grid's cells are
+# instances of the library sprite "thumbAll" (300 frames). A cell shows frame <feID> (0-based) under the cursor
+# and frame <feID + 149> otherwise; the stock frames place one baked picture each, the frames of the community
+# fighters (feID 100..127) place none. Each of those frames gets one more Action that attaches an empty clip
+# and loads the fighter's own thumb file into it (screens/thumbs/thumb<feID>.big under the cursor,
+# thumb<feID>off.big otherwise: the launcher writes both from the pack's art, setup/ffnycontent/newfighter.py).
+CHOOSEF_ENTRIES = {
+    # entry: (movie name, payload SHA-256, .apt SHA-256, .const SHA-256, thumbAll's character)
+    "screens/battle/chooseF2.big": (
+        "chooseF2", "e0e91bf970eb679b627a1fec8a8ae1efcd73ff7ee96d006923930a6cdc05bc0f",
+        "cee0019857c8d19602f7aa2422e35633ee15feebe58331aae3319d702658ebe0",
+        "16a49566356425bcc912c6cba6d259f20a61845bae4e1e77050530d4357e0266", 303),
+    "screens/battle/chooseF3.big": (
+        "chooseF3", "6e9476f5bf9c5e2727e8c73dbe3e4c4adb1fa65c44374ac360c4f2dacffd5220",
+        "066828bef2df3b809d99252df15b5faf4b27b6b4a47bcf593e937992c2eaacd7",
+        "fe4dca8dcf6758398540ead9cd7bf2a2bfc62d4ce470b2f0770c69bf6a044d66", 306),
+    "screens/battle/chooseF4.big": (
+        "chooseF4", "5b7375ff8678a9239c52bd9a38c914190b65a50f49b332c3d27557c5f150040b",
+        "a23b71d752873f4e9fb9809be25a78fe76f5091760d17a9c561753462ac6448c",
+        "46bc842e5141d979960b4deda2d065ddf0fee33e79c216456e4a396c2b77bcda", 305),
+}
+CHOOSEF_SPRITE_NAME = "thumbAll"
+CHOOSEF_SPRITE_FRAMES = 300
+CHOOSEF_EMPTY_NAME = "emptyClip"      # the screens' own exported empty sprite (their portraits load into it)
+CHOOSEF_FIRST, CHOOSEF_COUNT = 100, 28        # the community fighters' front-end IDs (new_fighters.c)
+CHOOSEF_NORMAL_OFFSET = 149           # gotoAndStop(feID + CHAR_SELECTED_OFFSET 150) is 0-based frame feID + 149
+CHOOSEF_CLIP_NAME = "nfThumb"
+CHOOSEF_DEPTH = 2                     # the baked pictures sit at depth 1
+CHOOSEF_ORIGIN = -18.5                # the baked shapes are centred (-18.5..18.5); a thumb file starts at (0, 0)
+CHOOSEF_URL_ON = "thumbs/thumb%d.swf"
+CHOOSEF_URL_OFF = "thumbs/thumb%doff.swf"
+
 BIG_ALIGN = 128                   # inner BIGF entries are 128-aligned
 OUTER_ALIGN = 4
 
 SPEC = {                          # operand layout of opcodes (checked on 2,485 function bodies)
     0x81: "a", 0x83: "pp", 0x87: "a", 0x8A: "a", 0x8B: "p", 0x8C: "p", 0x94: "a",
-    0x99: "a", 0x9D: "a", 0x9F: "a",
+    0x99: "a", 0x9A: "", 0x9D: "a", 0x9F: "a",
     0xA1: "p", 0xA2: "b", 0xA3: "H", 0xA4: "p", 0xA5: "p", 0xA6: "p", 0xA7: "p",
     0xAE: "b", 0xAF: "b", 0xB0: "b", 0xB1: "b", 0xB2: "b", 0xB3: "b",
     0xB4: "f", 0xB5: "b", 0xB6: "h", 0xB7: "i",
@@ -145,6 +189,7 @@ OP_CONSTPOOL, OP_PUSHDATA, OP_DEFFUNC, OP_DEFFUNC2 = 0x88, 0x96, 0x9B, 0x8E
 OP_BRANCH, OP_IF = 0x99, 0x9D
 OP_PUSHSTRING, OP_PUSHCONST, OP_PUSHVAR, OP_GETMEMBER = 0xA1, 0xA2, 0xAE, 0xAF
 OP_CALLNAMEDMETHODPOP, OP_PUSHBYTE = 0xB2, 0xB5
+OP_GETVARIABLE, OP_CALLMETHODPOP, OP_PUSHTHISVAR, OP_GETURL2, OP_PUSHFLOAT = 0x1C, 0x5D, 0x70, 0x9A, 0xB4
 FUNC_MARKER = struct.pack("<II", 0x98765432, 0x12345678)
 
 
@@ -873,6 +918,187 @@ def patch_cmtype_entry(raw_entry, extras=None):
     return new_raw, lines
 
 
+# --------------------------------- battle/chooseF2/3/4: the community fighters' pictures in the grid
+
+def choosef_frames(first=CHOOSEF_FIRST, count=CHOOSEF_COUNT):
+    """[(0-based frame of thumbAll, the thumb file's URL)] for every community fighter: the frame a cell
+    shows under the cursor and the one it shows otherwise."""
+    out = []
+    for fe_id in range(first, first + count):
+        out.append((fe_id, CHOOSEF_URL_ON % fe_id))
+        out.append((fe_id + CHOOSEF_NORMAL_OFFSET, CHOOSEF_URL_OFF % fe_id))
+    return sorted(out)
+
+
+def asm_choosef_action(addr, sp, url_ptr):
+    """The frame action of one community fighter's picture. Every statement is one the game's own sprite
+    frame actions use (`this.<method>(...)` as the loaders' `this.loadMovie`, a child clip by its name and
+    GetURL2 with the clip as target as the Story sketch screen's thumbs), and every string is an inline
+    EA_PushString, so the action needs no ConstantPool:
+
+        this.attachMovie("emptyClip", "nfThumb", 2);
+        nfThumb._x = -18.5;  nfThumb._y = -18.5;
+        loadMovie(<url>, nfThumb);
+    """
+    a = Asm(addr)
+    a.op(OP_PUSHBYTE, CHOOSEF_DEPTH)
+    a.op_u32(OP_PUSHSTRING, sp["clip"])
+    a.op_u32(OP_PUSHSTRING, sp["empty"])
+    a.op(OP_PUSHBYTE, 3, OP_PUSHTHISVAR)
+    a.op_u32(OP_PUSHSTRING, sp["attachMovie"])
+    a.op(OP_CALLMETHODPOP)
+    for prop in ("_x", "_y"):
+        a.op_u32(OP_PUSHSTRING, sp["clip"])
+        a.op(OP_GETVARIABLE)
+        a.op_u32(OP_PUSHSTRING, sp[prop])
+        a.op(OP_PUSHFLOAT)
+        a.buf += struct.pack("<f", CHOOSEF_ORIGIN)
+        a.op(OP_SETMEMBER)
+    a.op_u32(OP_PUSHSTRING, url_ptr)
+    a.op_u32(OP_PUSHSTRING, sp["clip"])
+    a.op(OP_GETVARIABLE, OP_GETURL2, OP_END)
+    return bytes(a.buf)
+
+
+def _exports(apt, movie):
+    """{name: character} of a movie's export table (the first of a repeated name)."""
+    count, table = struct.unpack_from("<II", apt, movie + 48)
+    out = {}
+    for i in range(count):
+        name, char = struct.unpack_from("<II", apt, table + 8 * i)
+        out.setdefault(cstr(apt, name), char)
+    return out
+
+
+def build_choosef_apt(apt, const, sprite=None):
+    """Give thumbAll's frames of the community fighters their loading action. Returns (new .apt, info)."""
+    if len(apt) % 4:
+        raise PatchError("the .apt length %d is not a multiple of 4" % len(apt))
+    movie = struct.unpack_from("<I", const, 0x14)[0]
+    if movie + 56 > len(apt) or u32(apt, movie) != 9:
+        raise PatchError("movie header not at 0x%X" % movie)
+    nchars, chars = u32(apt, movie + 20), u32(apt, movie + 24)
+    exports = _exports(apt, movie)
+    char = exports.get(CHOOSEF_SPRITE_NAME)
+    if char is None or (sprite is not None and char != sprite):
+        raise PatchError("%r is not exported as character %s" % (CHOOSEF_SPRITE_NAME, sprite))
+    if CHOOSEF_EMPTY_NAME not in exports:
+        raise PatchError("the screen exports no %r" % CHOOSEF_EMPTY_NAME)
+    ch = u32(apt, chars + 4 * char) if char < nchars else 0
+    if not ch or u32(apt, ch) != 5 or u32(apt, ch + 8) != CHOOSEF_SPRITE_FRAMES:
+        raise PatchError("%r is not a sprite of %d frames" % (CHOOSEF_SPRITE_NAME, CHOOSEF_SPRITE_FRAMES))
+    frames = u32(apt, ch + 12)
+    wanted = choosef_frames()
+    old = {}
+    for frame, _ in wanted:
+        n, ip = struct.unpack_from("<II", apt, frames + 8 * frame)
+        items = [u32(apt, ip + 4 * k) for k in range(n)]
+        for it in items:
+            kind = u32(apt, it)
+            if kind == 3 and u32(apt, it + 8) == CHOOSEF_DEPTH:
+                raise PatchError("frame %d already places something at depth %d" % (frame, CHOOSEF_DEPTH))
+            if kind not in (1, 3, 4):
+                raise PatchError("frame %d has an item of type %d" % (frame, kind))
+        old[frame] = items
+
+    pos = len(apt)
+    data = bytearray()
+
+    def put_str(text):
+        at = pos + len(data)
+        data.extend(text.encode("latin-1") + b"\x00")
+        return at
+
+    def pad4():
+        while (pos + len(data)) % 4:
+            data.append(0)
+
+    sp = dict(clip=put_str(CHOOSEF_CLIP_NAME), empty=put_str(CHOOSEF_EMPTY_NAME),
+              attachMovie=put_str("attachMovie"), _x=put_str("_x"), _y=put_str("_y"))
+    urls = {frame: put_str(url) for frame, url in wanted}
+    records = {}
+    for frame, url in wanted:
+        pad4()
+        code_at = pos + len(data)
+        data += asm_choosef_action(code_at, sp, urls[frame])
+        pad4()
+        item_at = pos + len(data)
+        data += struct.pack("<II", 1, code_at)
+        arr_at = pos + len(data)
+        data += struct.pack("<%dI" % (len(old[frame]) + 1), *(old[frame] + [item_at]))
+        records[frame] = (len(old[frame]) + 1, arr_at, code_at, url)
+    pad4()
+    new_apt = bytearray(apt) + data
+    for frame, (n, arr_at, _, _) in records.items():
+        struct.pack_into("<II", new_apt, frames + 8 * frame, n, arr_at)
+    info = dict(frames=frames, records=records, old=old, strings=sp, apt_len=len(new_apt), char=char)
+    return bytes(new_apt), info
+
+
+def verify_choosef_apt(apt, new_apt, info):
+    """Only the frame records of the community fighters changed; every new action decodes to the one
+    statement sequence, with its strings where they should be; the old items of a frame are kept."""
+    frames, records = info["frames"], info["records"]
+    allowed = set()
+    for frame in records:
+        allowed.update((frames + 8 * frame, frames + 8 * frame + 4))
+    for off in range(0, len(apt), 4):
+        if apt[off:off + 4] != new_apt[off:off + 4] and off not in allowed:
+            raise PatchError("original .apt bytes changed unexpectedly at 0x%X" % off)
+    shape = [OP_PUSHBYTE, OP_PUSHSTRING, OP_PUSHSTRING, OP_PUSHBYTE, OP_PUSHTHISVAR, OP_PUSHSTRING,
+             OP_CALLMETHODPOP] + [OP_PUSHSTRING, OP_GETVARIABLE, OP_PUSHSTRING, OP_PUSHFLOAT, OP_SETMEMBER] * 2 + [
+             OP_PUSHSTRING, OP_PUSHSTRING, OP_GETVARIABLE, OP_GETURL2, OP_END]
+    for frame, (n, arr_at, code_at, url) in sorted(records.items()):
+        if struct.unpack_from("<II", new_apt, frames + 8 * frame) != (n, arr_at):
+            raise PatchError("frame record %d is wrong" % frame)
+        ptrs = list(struct.unpack_from("<%dI" % n, new_apt, arr_at))
+        if ptrs[:-1] != info["old"][frame] or struct.unpack_from("<II", new_apt, ptrs[-1]) != (1, code_at):
+            raise PatchError("frame %d lost an item or its action item is wrong" % frame)
+        ins = decode(new_apt, code_at)
+        if [i.op for i in ins] != shape:
+            raise PatchError("the action of frame %d does not decode to the expected statements" % frame)
+        strings = [cstr(new_apt, i.vals[0]) for i in ins if i.op == OP_PUSHSTRING]
+        if strings != [CHOOSEF_CLIP_NAME, CHOOSEF_EMPTY_NAME, "attachMovie", CHOOSEF_CLIP_NAME, "_x",
+                       CHOOSEF_CLIP_NAME, "_y", url, CHOOSEF_CLIP_NAME]:
+            raise PatchError("the action of frame %d pushes the wrong strings" % frame)
+        if ins[-1].nxt > len(new_apt):
+            raise PatchError("the action of frame %d runs off the end" % frame)
+    return "%d frame actions appended (%d bytes), no existing byte changed but their frame records" % (
+        len(records), len(new_apt) - len(apt))
+
+
+def choosef_patcher(entry_name):
+    """The Plan patcher of one select screen: raw (RefPack) entry -> (new raw entry, report lines)."""
+    movie, payload_sha, apt_sha, const_sha, sprite = CHOOSEF_ENTRIES[entry_name]
+
+    def patch(raw_entry, extras=None):
+        payload = refpack_decode(raw_entry)
+        if sha(payload) != payload_sha:
+            raise PatchError("the decompressed %s payload does not match the expected hash" % movie)
+        files = inner_files(payload)
+        apt, const = files.get(movie + ".apt"), files.get(movie + ".const")
+        if apt is None or const is None or sha(apt) != apt_sha or sha(const) != const_sha:
+            raise PatchError("%s.apt/.const do not match the expected hashes" % movie)
+        new_apt, info = build_choosef_apt(apt, const, sprite)
+        lines = ["verify %s.apt: %s" % (movie, verify_choosef_apt(apt, new_apt, info))]
+        new_payload = rebuild_bigf(payload, {movie + ".apt": new_apt})
+        new_files = inner_files(new_payload)
+        if list(new_files) != list(files):
+            raise PatchError("%s inner file list changed" % movie)
+        for n in files:
+            if n != movie + ".apt" and files[n] != new_files[n]:
+                raise PatchError("%s inner file %s changed" % (movie, n))
+        if new_files[movie + ".apt"] != new_apt:
+            raise PatchError("re-laid out %s.apt differs from the built one" % movie)
+        new_raw = refpack_encode_literal(new_payload)
+        if refpack_decode(new_raw) != new_payload:
+            raise PatchError("%s RefPack round trip failed" % movie)
+        lines.append("%s payload %d -> %d bytes, entry %d -> %d bytes (literal RefPack)"
+                     % (movie, len(payload), len(new_payload), len(raw_entry), len(new_raw)))
+        return new_raw, lines
+    return patch
+
+
 # ------------------------------------------------------------ textures (DXT5)
 
 def shpx_directory(x):
@@ -1167,14 +1393,18 @@ def patch_entry(raw_entry, extras=None):
 
 class Plan:
     """Everything needed to write or compare the patched archive. The main entry is patched by
-    `patcher(raw, extras)`; `more` lists further entries as (name, patcher(raw)) pairs. Each patched
-    entry is appended to the archive (4-aligned) and its directory record points at the copy."""
+    `patcher(raw, extras)`; `more` lists further entries as (name, patcher(raw)) pairs, or
+    (name, patcher(raw), True) for an optional one: an optional entry that is missing or that its
+    patcher refuses stays as it is and leaves a note line. Each patched entry is appended to the
+    archive (4-aligned) and its directory record points at the copy."""
 
     def __init__(self, src_path, entry_name=ENTRY_NAME, patcher=None, extra_entries=None, more=None):
         self.src = src_path
         self.size = os.path.getsize(src_path)
         if more is None and patcher is None:
             more = [(CMTYPE_ENTRY_NAME, patch_cmtype_entry)]
+            more += [(name, choosef_patcher(name), True) for name in CHOOSEF_ENTRIES]
+        self.lines = []
         with open(src_path, "rb") as f:
             top = f.read(32)
             if top[:4] not in (b"BIG4", b"BIGF"):
@@ -1201,15 +1431,27 @@ class Plan:
             wanted = [POSTER_ENTRY_NAME] if extra_entries is None and patcher is None else (extra_entries or [])
             for name in wanted:
                 extras[name] = read(name)[1]
-            jobs = [(entry_name, self.rec_pos, (patcher or patch_entry), (raw, extras))]
-            for name, fn in (more or []):
-                rpos, raw2 = read(name)
-                jobs.append((name, rpos, fn, (raw2,)))
-        self.lines = []
+            jobs = [(entry_name, self.rec_pos, (patcher or patch_entry), (raw, extras), False)]
+            for item in (more or []):
+                name, fn, optional = item[0], item[1], len(item) > 2 and bool(item[2])
+                try:
+                    rpos, raw2 = read(name)
+                except PatchError as e:
+                    if not optional:
+                        raise
+                    self.lines.append("note: %s left as it is (%s)" % (name, e))
+                    continue
+                jobs.append((name, rpos, fn, (raw2,), optional))
         self.blobs = []                     # [(archive offset, bytes)]
         cursor = self.size
-        for name, rpos, fn, args in jobs:
-            new_raw, lines = fn(*args)
+        for name, rpos, fn, args, optional in jobs:
+            try:
+                new_raw, lines = fn(*args)
+            except PatchError as e:
+                if not optional:
+                    raise
+                self.lines.append("note: %s left as it is (%s)" % (name, e))
+                continue
             self.lines += lines
             at = align(cursor, OUTER_ALIGN)
             self.blobs.append((at, new_raw))
