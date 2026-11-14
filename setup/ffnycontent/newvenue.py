@@ -19,11 +19,15 @@ import re
 from types import SimpleNamespace
 
 from . import sod as sodmod
+from . import viv
 
 VENUE_XML = "venue.xml"
 ENTITY_XML = "assets/entity.xml"
 VENUE_ARCHIVE = "assets/v2bg.viv"
 ICROWD_ARCHIVE = "assets/icrowd.viv"
+CAMERA_ARCHIVE = "assets/v2ta.viv"
+CAMERA_BANK = re.compile(r"(BT4V|VI_)(\d\d[A-Z])(\d{0,2})\.viv", re.IGNORECASE)
+_BANK_SYMBOL = re.compile(rb"__AnimationBank:::(BT4V|VI_)(\d\d[A-Z])(\d{0,2})_")
 LOCATOR_ENTRY = re.compile(r"icl_\d\d[A-Z]\.o")
 LOCATOR_MIN, LOCATOR_MAX = 4 * 1024, 64 * 1024     # retail: 10640 to 20592 bytes
 
@@ -110,6 +114,31 @@ def check_crowd(op, entries):
     if not LOCATOR_MIN <= e.get("result_size", 0) <= LOCATOR_MAX:
         raise VenueError("%s has an unlikely size" % want)
     return want
+
+
+def repair_camera_bank(entry, data, code):
+    """A new venue's camera bank (``assets/v2ta.viv|BT4V28A.viv``, ``VI_28A11.viv``) with its objects' symbols
+    naming the venue's own ``code``. FFNY Studio up to 0.1.0-beta.24 copied the template's bank with only the
+    directory renamed, so the objects still said ``__AnimationBank:::BT4V03A_EYE``; a BLAZIN' on such a venue
+    corrupted the game's heap and the game crashed after the fight (``sub_00029DE0``). The fix is the same-length
+    rename the new Studio makes; ``data`` is returned unchanged when it is not such a bank or is right already."""
+    m = CAMERA_BANK.fullmatch(entry or "")
+    if not m or m.group(2).upper() != (code or "").upper():
+        return data
+    prefix, own, suffix = m.group(1).upper().encode(), m.group(2).upper().encode(), m.group(3).encode()
+    wrapped = viv.is_refpack(data)
+    blob = viv.unwrap(data) if wrapped else data
+    if blob[:4] != b"BIGF":
+        return data
+
+    def own_name(s):
+        if s.group(1).upper() == prefix and s.group(3) == suffix and s.group(2) != own:
+            return b"__AnimationBank:::" + s.group(1) + own + s.group(3) + b"_"
+        return s.group(0)
+    fixed = _BANK_SYMBOL.sub(own_name, blob)
+    if fixed == blob:
+        return data
+    return viv.refpack_store(fixed) if wrapped else fixed
 
 
 def check_locator(base, result):
