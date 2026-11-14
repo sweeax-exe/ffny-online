@@ -210,8 +210,9 @@ if(DEFJAM_BUILD_GAME)
     else()
         # One SDL for the window, the sound and the pads: SDL3, the system's.
         defjam_app_icon(${PROJECT_NAME})
+        find_package(OpenSSL REQUIRED)      # the online layer's HTTPS (src/hooks/account.c)
         target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui
-                              SDL3::SDL3 Vulkan::Vulkan ${CMAKE_DL_LIBS} m)
+                              SDL3::SDL3 Vulkan::Vulkan OpenSSL::SSL OpenSSL::Crypto ${CMAKE_DL_LIBS} m)
         if(APPLE)
             # Shift held at start-up (src/host_posix.c) is read from the window server.
             target_link_libraries(${PROJECT_NAME} PRIVATE "-framework ApplicationServices" "-framework AppKit")
