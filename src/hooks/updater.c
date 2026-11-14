@@ -110,7 +110,11 @@ int updater_local_build(void)
     /* tests: RECOMP_TEST_LOCAL_BUILD=22 plays an older build, so the published one shows as an update */
     const char *test = getenv("RECOMP_TEST_LOCAL_BUILD");
     if (test && atoi(test) > 0) return atoi(test);
+    #if defined(_WIN32)
     f = fopen("config\\remaster-version.txt", "r");
+#else
+    f = fopen("config/remaster-version.txt", "r");
+#endif
     if (f) {
         if (fscanf(f, "%d", &build) != 1) build = 0;
         fclose(f);

@@ -2291,8 +2291,21 @@ FILE *netplay_open_fight_file(const char *name, int *overridden)
 {
     const char *data = getenv("DEFJAM_DATA");
     char path[MAX_PATH];
+    char posix_name[MAX_PATH];
     FILE *f = NULL;
     *overridden = 0;
+#if !defined(_WIN32)
+    {   /* the game's names use backslashes ("assets\gamecore.xml"): the host's separator */
+        char *w = posix_name;
+        const char *r = name;
+        while (*r && w < posix_name + sizeof(posix_name) - 1) {
+            *w++ = *r == '\\' ? '/' : *r;
+            r++;
+        }
+        *w = 0;
+        name = posix_name;
+    }
+#endif
     /* A language mod that rebuilds one of these files changes what the fight reads: printed as
      * the game opens it, so two PCs with different such mods are told apart (a pack that only
      * translates text archives leaves the print alone). */
@@ -2305,11 +2318,19 @@ FILE *netplay_open_fight_file(const char *name, int *overridden)
 #endif
     }
     if (!f && data && *data) {
+#if defined(_WIN32)
         snprintf(path, sizeof(path), "%s\\override\\%s", data, name);
+#else
+        snprintf(path, sizeof(path), "%s/override/%s", data, name);
+#endif
         if ((f = fopen(path, "rb")) != NULL) *overridden = 1;
     }
     if (!f) {
+#if defined(_WIN32)
         snprintf(path, sizeof(path), "game\\%s", name);
+#else
+        snprintf(path, sizeof(path), "game/%s", name);
+#endif
         f = fopen(path, "rb");
     }
     return f;
