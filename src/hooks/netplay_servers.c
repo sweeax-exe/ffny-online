@@ -5,6 +5,8 @@
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#else
+#include "netplay_sockets_posix.h"
 #endif
 #include "host.h"
 #include <ctype.h>
@@ -48,7 +50,7 @@ const char *netservers_short(int index)
     return index >= 0 && index < NETSERVER_COUNT ? k_relays[index].short_name : "custom";
 }
 
-#if defined(_WIN32)
+#if 1 /* was defined(_WIN32); the server list now builds everywhere (linux-online) */
 
 #define STATUS_TYPE   0x24
 #define STATUS_LEN    26
@@ -189,7 +191,7 @@ static void run_round(void)
             int n, done = 1;
             FD_ZERO(&rd);
             FD_SET(s, &rd);
-            n = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(s, (char *)b, sizeof(b), 0) : 0;
+            n = select_(s, &rd, &tv) > 0 ? recv(s, (char *)b, sizeof(b), 0) : 0;
             if (n >= STATUS_LEN && !memcmp(b, "DJNP", 4) && b[4] == 1 && b[5] == STATUS_TYPE) {
                 uint32_t nonce = rd32(b + 6);
                 int who = (int)((nonce >> 4) & 0xF), probe = (int)(nonce & 0xF);
@@ -238,10 +240,12 @@ static DWORD WINAPI probe_thread(LPVOID unused)
 {
     (void)unused;
     {
+#if defined(_WIN32)
         typedef HRESULT (WINAPI *SetThreadDescriptionFn)(HANDLE, PCWSTR);
         SetThreadDescriptionFn name = (SetThreadDescriptionFn)(void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"),
                                                                                     "SetThreadDescription");
         if (name) name(GetCurrentThread(), L"relay status");
+#endif
     }
     for (;;) {
         WaitForSingleObject(P.wake, INFINITE);
@@ -517,7 +521,7 @@ static void list_round(void)
         int ages[LISTED_MAX];
         FD_ZERO(&rd);
         FD_SET(s, &rd);
-        n = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(s, (char *)b, sizeof(b), 0) : 0;
+        n = select_(s, &rd, &tv) > 0 ? recv(s, (char *)b, sizeof(b), 0) : 0;
         if (n < 13 || memcmp(b, "DJNP", 4) || b[4] != 1 || b[5] != ROOMLIST_TYPE) continue;
         for (i = 0; i < NETSERVER_COUNT; i++) if (want[i] && rd32(b + 6) == nonce[i]) who = i;
         if (who < 0) continue;
@@ -628,7 +632,7 @@ static void players_round(void)
         NetPlayer list[PLAYERS_MAX];
         FD_ZERO(&rd);
         FD_SET(s, &rd);
-        n = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(s, (char *)b, sizeof(b), 0) : 0;
+        n = select_(s, &rd, &tv) > 0 ? recv(s, (char *)b, sizeof(b), 0) : 0;
         if (n < 15 || memcmp(b, "DJNP", 4) || b[4] != 1 || b[5] != PLAYERLIST_TYPE) continue;
         for (i = 0; i < NETSERVER_COUNT; i++) if (want[i] && rd32(b + 6) == nonce[i]) who = i;
         if (who < 0) continue;
@@ -668,10 +672,12 @@ static DWORD WINAPI list_thread(LPVOID unused)
 {
     (void)unused;
     {
+#if defined(_WIN32)
         typedef HRESULT (WINAPI *SetThreadDescriptionFn)(HANDLE, PCWSTR);
         SetThreadDescriptionFn name = (SetThreadDescriptionFn)(void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"),
                                                                                     "SetThreadDescription");
         if (name) name(GetCurrentThread(), L"relay rooms");
+#endif
     }
     for (;;) {
         WaitForSingleObject(R.wake, INFINITE);

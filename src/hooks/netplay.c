@@ -28,6 +28,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
+#else
+#include "netplay_sockets_posix.h"
 #endif
 #include "host.h"
 #include <ctype.h>
@@ -69,7 +71,7 @@
 #define RESULTS_MAX    ((G_RESULT_COUNT - G_RESULTS) / 0x10u)
 #define G_CROWD_RECORDS 0x003494E0u     /* count of the crowd's "audience public" records */
 
-#if !defined(_WIN32)
+#if 0 /* the POSIX stubs below are retired: the real implementation now builds everywhere (linux-online) */
 
 int netplay_host(const char *s, const char *n, int d) { (void)s; (void)n; (void)d; return -1; }
 int netplay_join(const char *s, const char *n, const char *r) { (void)s; (void)n; (void)r; return -1; }
@@ -4440,10 +4442,12 @@ static DWORD WINAPI net_thread(LPVOID unused)
         if (lag_ms > 0) fprintf(stderr, "[NETPLAY] tests: arriving packets held %d ms (+0..%d)\n", lag_ms, lag_jitter);
     }
     {   /* named for crash reports (main.c prints the thread's name) */
+#if defined(_WIN32)
         typedef HRESULT (WINAPI *SetThreadDescriptionFn)(HANDLE, PCWSTR);
         SetThreadDescriptionFn name = (SetThreadDescriptionFn)(void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"),
                                                                                     "SetThreadDescription");
         if (name) name(GetCurrentThread(), L"online play");
+#endif
     }
     N.started = N.last_rx = GetTickCount64();
     data_print_ready();     /* made in the background since the start: waits only while that pass runs */
@@ -4737,7 +4741,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
             struct timeval tv = { 0, 20000 };
             FD_ZERO(&rd);
             FD_SET(N.sock, &rd);
-            got = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(N.sock, (char *)b, sizeof(b), 0) : 0;
+            got = select_(N.sock, &rd, &tv) > 0 ? recv(N.sock, (char *)b, sizeof(b), 0) : 0;
         }
         if (got > 0 && lag_ms > 0) {        /* tests: hold every arriving packet for a while */
             if (lag_n < LAG_QUEUE) {
