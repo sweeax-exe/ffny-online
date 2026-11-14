@@ -25,10 +25,25 @@
 
 #if !defined(_WIN32)
 
+/* the launcher's updates stay Windows-only; the build number still matters online (the
+ * relay turns older builds away), so read it as the Windows side does */
+int updater_local_build(void)
+{
+    int build = 0;
+    const char *test = getenv("RECOMP_TEST_LOCAL_BUILD");
+    FILE *f;
+    if (test && atoi(test) > 0) return atoi(test);
+    f = fopen("config/remaster-version.txt", "r");
+    if (f) {
+        if (fscanf(f, "%d", &build) != 1) build = 0;
+        fclose(f);
+    }
+    return build;
+}
+
 void updater_check(void) {}
 void updater_restart(void) {}
 enum UpdaterState updater_state(void) { return UPDATER_CURRENT; }
-int updater_local_build(void) { return 0; }
 void updater_info(int *b, char *v, int vs, char *n, int ns) { if (b) *b = 0; if (vs > 0) v[0] = 0; if (ns > 0) n[0] = 0; }
 int updater_can_install(void) { return 0; }
 void updater_install(void) {}
@@ -115,6 +130,7 @@ int updater_local_build(void)
 #else
     f = fopen("config/remaster-version.txt", "r");
 #endif
+
     if (f) {
         if (fscanf(f, "%d", &build) != 1) build = 0;
         fclose(f);
