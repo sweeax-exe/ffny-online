@@ -5,6 +5,10 @@
 // graphics_mod_launcher.cpp.
 #define _CRT_SECURE_NO_WARNINGS
 #include "graphics_mod.h"
+#if !defined(_WIN32)
+#include <strings.h>
+#define _stricmp strcasecmp
+#endif
 
 #include <algorithm>
 #include <cctype>

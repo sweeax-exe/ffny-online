@@ -210,6 +210,11 @@ if(DEFJAM_BUILD_GAME)
     else()
         # One SDL for the window, the sound and the pads: SDL3, the system's.
         defjam_app_icon(${PROJECT_NAME})
+        # The lifted code's pointer arithmetic reads as MSVC wrote it: int<->pointer
+        # conversions are intentional there (XBOX_PTR feeds addresses straight into
+        # VirtualProtect/memcpy). GCC treats them as errors; the code is sound.
+        set_source_files_properties(src/hooks/rollback.c PROPERTIES COMPILE_OPTIONS
+                                    "-Wno-int-conversion;-Wno-incompatible-pointer-types")
         find_package(OpenSSL REQUIRED)      # the online layer's HTTPS (src/hooks/account.c)
         target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp recomp_settings defjam_imgui
                               SDL3::SDL3 Vulkan::Vulkan OpenSSL::SSL OpenSSL::Crypto ${CMAKE_DL_LIBS} m)

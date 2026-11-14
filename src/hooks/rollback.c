@@ -24,9 +24,14 @@
 #include "recomp_settings.h"
 #include "pc_settings.h"
 
-#ifdef _WIN32
+#if 1 /* was defined(_WIN32): the rollback core now builds everywhere (linux-online) */
 #include "host.h"
+#if defined(_WIN32)
 #include <intrin.h>
+#else
+#include <x86intrin.h>      /* __rdtsc */
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -153,7 +158,11 @@ static volatile LONG s_tracking;
 static CRITICAL_SECTION s_track_cs;
 static DWORD s_game_tid;
 static PVOID s_veh;
-static __declspec(thread) int t_in_sound;   /* this thread is inside a sound engine command */
+#if defined(_WIN32)
+static __declspec(thread) int t_in_sound;
+#else
+static _Thread_local int t_in_sound;
+#endif   /* this thread is inside a sound engine command */
 static volatile LONG s_foreign;
 extern void (*xbox_guest_write_notify)(void *host, size_t length);
 static int s_audio_state;               /* 0 before, 1 during, 2 after the audio start-up */
@@ -519,6 +528,7 @@ static uint8_t *s_data_before;          /* rollback_prepare: .data before the ho
 /* The first write since the reference to page p, by the game thread or another. Lock-free: it runs
  * in the exception handler of whichever thread wrote, and two threads may meet on one page (both
  * make it writable; the one that cleared the flag decides). Printing waits for the game thread. */
+int arena_free_now(uint32_t a);   /* forward: the release pass frees kept blocks */
 static void first_write(uint32_t p, int game)
 {
     DWORD old;
@@ -2113,7 +2123,7 @@ again:
     return a;
 }
 
-static int arena_free_now(uint32_t a)
+int arena_free_now(uint32_t a)
 {
     int i;
     if (!s_arena || !in_arena(a)) return 0;

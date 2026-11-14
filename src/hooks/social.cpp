@@ -1887,6 +1887,7 @@ namespace social {
 void crew_challenge(long long, const std::string &, int) {}
 void battle_answer(const char *) {}
 void ladder() {}
+void online_want() {}
 bool gold_tag(const View &, const std::string &) { return false; }
 void look_want(long long) {}
 void locker_load() {}

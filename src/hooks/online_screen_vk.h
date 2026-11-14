@@ -12,6 +12,9 @@
 #include <string.h>
 
 // stb_image, vendored by the toolkit (one .c-wide include, here)
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_PNG
 #include "../../tools/xboxrecomp/src/nv2a/stb/stb_image.h"
 
 struct OsVk {
