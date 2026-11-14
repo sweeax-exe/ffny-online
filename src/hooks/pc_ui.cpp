@@ -4909,26 +4909,31 @@ void overlay_draw(const D3D8VkOverlayFrame *f, void *)
 
     // Dim the game and put the settings in a panel in the middle (as the Direct3D overlay does).
     ImGuiIO &io = ImGui::GetIO();
-    if (g_just_opened) {
-        g_just_opened = false;
-        ImGui::SetNextWindowFocus();
-    }
-    ImDrawList *bg = ImGui::GetBackgroundDrawList();
-    bg->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 150));
-    float pw = io.DisplaySize.x * 0.82f, ph = io.DisplaySize.y * 0.86f;
-    if (pw < 560) pw = io.DisplaySize.x;
-    if (ph < 420) ph = io.DisplaySize.y;
     bool close_request = false;
-    {
+    if (online_screen::take_open_request()) {      // ONLINE chosen in the game's main menu
+        set_open(true);
+        g_online = true;
+    }
+    if (g_online) {
+        if (!online_screen::draw(io.DisplaySize)) close_request = true;
+    } else {
+        if (g_just_opened) {
+            g_just_opened = false;
+            ImGui::SetNextWindowFocus();
+        }
+        ImDrawList *bg = ImGui::GetBackgroundDrawList();
+        bg->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 150));
+        float pw = io.DisplaySize.x * 0.82f, ph = io.DisplaySize.y * 0.86f;
+        if (pw < 560) pw = io.DisplaySize.x;
+        if (ph < 420) ph = io.DisplaySize.y;
         ImGui::SetNextWindowBgAlpha(0.96f);
         UiResult r = ui_draw(UI_OVERLAY, (io.DisplaySize.x - pw) / 2, (io.DisplaySize.y - ph) / 2, pw, ph);
         close_request = r.leave;
+        // Escape or the pad's cancel button closes the overlay, unless a popup or a capture is open.
+        if (!ui_capturing() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
+            (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
+            close_request = true;
     }
-    // Escape or the pad's cancel button closes the overlay, unless a popup or a capture is open.
-    if (!ui_capturing() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
-        (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
-        close_request = true;
-
     ImGui::Render();
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), (VkCommandBuffer)f->command_buffer);
     if (close_request) set_open(false);
