@@ -28,6 +28,13 @@
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "crypt32.lib")
+#else
+#include "win32_compat.h"
+#include <sys/stat.h>
+#include <wchar.h>
+#include <time.h>
+#define SOURCE_ACCOUNT_PORT 1
+#endif
 
 #define ACCOUNT_HOST L"play.defjam.online"
 #define ACCOUNT_URL "https://play.defjam.online"
@@ -55,12 +62,23 @@ static void set_reason(const char *text)
  * cancel a request that waits (social_shutdown); the owner then leaves that handle alone. */
 static SRWLOCK g_live_lock = SRWLOCK_INIT;
 /* How many bytes the last request_full of this thread read (account_fetch: binary answers). */
+#if defined(_WIN32)
 static __declspec(thread) int g_last_len;
+#else
+static _Thread_local int g_last_len;
+#endif
+#if !defined(_WIN32)
+#include "account_posix_impl.h"
+#endif
 
 static int request_full(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
                         const void *body, DWORD blen, char *buf, int size, int limit_ms, int receive_ms,
                         void *volatile *live)
 {
+#if !defined(_WIN32)
+    (void)receive_ms;       /* the posix client's waits are all capped by limit_ms */
+    return request_full_posix(method, path, token, ctype, body, blen, buf, size, limit_ms, live);
+#else
     HINTERNET session = NULL, connect = NULL, req = NULL;
     int canceled = 0;
     DWORD status = 0, ssize = sizeof(status);
@@ -123,6 +141,8 @@ static int request_full(const wchar_t *method, const wchar_t *path, const char *
     if (session) WinHttpCloseHandle(session);
     g_last_len = n;
     return canceled ? 0 : (int)status;
+    }
+#endif
 }
 
 static int request_body_ms(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
@@ -195,35 +215,62 @@ static int json_str(const char *json, const char *key, char *out, int size)
 static void data_path(char *out, int size)
 {
     const char *settings = pc_settings_path(), *data = getenv("DEFJAM_DATA");
-    const char *slash = settings ? strrchr(settings, '\\') : NULL;
-    if (!slash && settings) slash = strrchr(settings, '/');
-    if (slash) snprintf(out, size, "%.*s\\account.dat", (int)(slash - settings), settings);
-    else if (data && *data) snprintf(out, size, "%s\\account.dat", data);     /* runs without settings.ini */
+    const char *slash = settings ? strrchr(settings, '/') : NULL;
+#if defined(_WIN32)
+    if (!slash && settings) slash = strrchr(settings, '\\');
+    const char *sep = "\\";
+#else
+    const char *sep = "/";
+#endif
+    if (slash) snprintf(out, size, "%.*s%saccount.dat", (int)(slash - settings), settings, sep);
+    else if (data && *data) snprintf(out, size, "%s%saccount.dat", data, sep); /* runs without settings.ini */
     else snprintf(out, size, "account.dat");
 }
 
 static void save(void)
 {
     char path[MAX_PATH], plain[300];
-    DATA_BLOB in, out = { 0 };
     FILE *f;
     AcquireSRWLockShared(&g_lock);
     snprintf(plain, sizeof(plain), "%s\n%s\n%s\n", g_token, g_name, g_username);
     ReleaseSRWLockShared(&g_lock);
-    in.pbData = (BYTE *)plain;
-    in.cbData = (DWORD)strlen(plain);
     data_path(path, sizeof(path));
-    if (!CryptProtectData(&in, L"FFNY Online session", NULL, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &out)) return;
-    f = fopen(path, "wb");
-    if (f) { fwrite(out.pbData, 1, out.cbData, f); fclose(f); }
+#if !defined(_WIN32)
+    {
+        unsigned char key[32], *blob;
+        int bloblen = 0, klen;
+        char kpath[MAX_PATH + 8];
+        if (!session_key_load((session_key_path(kpath, (int)sizeof(kpath), path), kpath), key) &&
+            !session_key_make(kpath, key)) goto nosave;
+        blob = session_crypt((const unsigned char *)plain, (int)strlen(plain), key, &bloblen);
+        SecureZeroMemory(key, sizeof(key));
+        if (!blob) goto nosave;
+        f = fopen(path, "wb");
+        if (f) { fwrite(blob, 1, (size_t)bloblen, f); fclose(f); chmod(path, 0600); }
+        SecureZeroMemory(blob, (size_t)bloblen);
+        free(blob);
+    }
+nosave:
+#else
+    {
+        DATA_BLOB in, out = { 0 };
+        in.pbData = (BYTE *)plain;
+        in.cbData = (DWORD)strlen(plain);
+        if (!CryptProtectData(&in, L"FFNY Online session", NULL, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &out)) return;
+        f = fopen(path, "wb");
+        if (f) { fwrite(out.pbData, 1, out.cbData, f); fclose(f); }
+        LocalFree(out.pbData);
+    }
+#endif
     SecureZeroMemory(plain, sizeof(plain));
-    LocalFree(out.pbData);
 }
 
 static int load(void)
 {
     char path[MAX_PATH], blob[2048];
+#if defined(_WIN32)
     DATA_BLOB in, out = { 0 };
+#endif
     size_t got;
     FILE *f;
     {   /* tests: RECOMP_ACCOUNT_TEST_TOKEN, a session of a local test account service (accounts
@@ -244,6 +291,36 @@ static int load(void)
     if (!f) return 0;
     got = fread(blob, 1, sizeof(blob), f);
     fclose(f);
+#if !defined(_WIN32)
+    {
+        unsigned char key[32], *plainb;
+        int plainlen = 0, len;
+        char kpath[MAX_PATH + 8], plain[300];
+        char *a, *b, *c;
+        session_key_path(kpath, (int)sizeof(kpath), path);
+        if (!got || !session_key_load(kpath, key)) return 0;
+        plainb = session_decrypt((const unsigned char *)blob, (int)got, key, &plainlen);
+        SecureZeroMemory(key, sizeof(key));
+        if (!plainb) return 0;
+        len = plainlen < (int)sizeof(plain) - 1 ? plainlen : (int)sizeof(plain) - 1;
+        memcpy(plain, plainb, (size_t)len);
+        plain[len] = 0;
+        SecureZeroMemory(plainb, (size_t)plainlen);
+        free(plainb);
+        a = plain;
+        b = strchr(a, '\n');
+        c = b ? strchr(b + 1, '\n') : NULL;
+        if (!b || !c || b - a != 64) return 0;
+        *b = *c = 0;
+        AcquireSRWLockExclusive(&g_lock);
+        snprintf(g_token, sizeof(g_token), "%s", a);
+        snprintf(g_name, sizeof(g_name), "%s", b + 1);
+        snprintf(g_username, sizeof(g_username), "%.64s", c + 1);
+        { char *nl = strchr(g_username, '\n'); if (nl) *nl = 0; }
+        ReleaseSRWLockExclusive(&g_lock);
+        SecureZeroMemory(plain, sizeof(plain));
+    }
+#else
     in.pbData = (BYTE *)blob;
     in.cbData = (DWORD)got;
     if (!got || !CryptUnprotectData(&in, NULL, NULL, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &out)) return 0;
@@ -268,8 +345,14 @@ static int load(void)
         ReleaseSRWLockExclusive(&g_lock);
         SecureZeroMemory(plain, sizeof(plain));
     }
+#endif
     return 1;
 }
+
+#if !defined(_WIN32)
+#define DeleteFileA(p) unlink(p)
+#define _strdup strdup
+#endif
 
 static void forget(void)
 {
@@ -321,21 +404,34 @@ static void random_hex(char *out)       /* 64 hex digits */
 {
     unsigned char b[32];
     int i;
+#if !defined(_WIN32)
+    if (!random_bytes(b, sizeof(b))) b[0] = (unsigned char)getpid();
+#else
     BCryptGenRandom(NULL, b, sizeof(b), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+#endif
     for (i = 0; i < 32; i++) sprintf(out + 2 * i, "%02x", b[i]);
     SecureZeroMemory(b, sizeof(b));
 }
 
 static int sha256_hex(const char *text, char *out)
 {
-    BCRYPT_ALG_HANDLE alg = NULL;
     unsigned char h[32];
-    int i, ok;
-    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) != 0) return 0;
-    ok = BCryptHash(alg, NULL, 0, (PUCHAR)text, (ULONG)strlen(text), h, sizeof(h)) == 0;
-    BCryptCloseAlgorithmProvider(alg, 0);
+    int i;
+#if !defined(_WIN32)
+    unsigned int hlen = 0;
+    if (!EVP_Digest(text, strlen(text), h, &hlen, EVP_sha256(), NULL) || hlen != 32) return 0;
+#else
+    {
+        BCRYPT_ALG_HANDLE alg = NULL;
+        int ok;
+        if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) != 0) return 0;
+        ok = BCryptHash(alg, NULL, 0, (PUCHAR)text, (ULONG)strlen(text), h, sizeof(h)) == 0;
+        BCryptCloseAlgorithmProvider(alg, 0);
+        if (!ok) return 0;
+    }
+#endif
     for (i = 0; i < 32; i++) sprintf(out + 2 * i, "%02x", h[i]);
-    return ok;
+    return 1;
 }
 
 static DWORD WINAPI sign_in_thread(LPVOID unused)
@@ -346,11 +442,23 @@ static DWORD WINAPI sign_in_thread(LPVOID unused)
     random_hex(secret);
     if (!sha256_hex(secret, login)) { set_reason("Windows could not start the sign-in."); set_state(ACCOUNT_FAILED); return 0; }
     snprintf(url, sizeof(url), ACCOUNT_URL "/auth/discord/start?login=%s", login);
+#if !defined(_WIN32)
+    {
+        char cmd[MAX_PATH + 16];
+        int rc = snprintf(cmd, sizeof(cmd), "xdg-open '%s'", url);
+        if (rc <= 0 || system(cmd) != 0) {
+            set_reason("The browser did not open.");
+            set_state(ACCOUNT_FAILED);
+            return 0;
+        }
+    }
+#else
     if ((INT_PTR)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL) <= 32) {
         set_reason("The browser did not open.");
         set_state(ACCOUNT_FAILED);
         return 0;
     }
+#endif
     snprintf(body, sizeof(body), "{\"secret\":\"%s\"}", secret);
     for (i = 0; i < POLL_COUNT && !g_cancel; i++) {
         int status;
@@ -606,8 +714,12 @@ int account_call(const char *method, const char *path, const char *json, char *b
     int status;
     if (size > 0) buf[0] = 0;
     if (g_state != ACCOUNT_IN && g_state != ACCOUNT_CHECKING) return -1;
-    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 512)) return -1;
+    if (!utf8_to_wide(path, -1, wpath, 512)) return -1;
+#if !defined(_WIN32)
+    { int mn = utf8_to_wide(method, -1, wmethod, 16); (void)mn; }
+#else
     swprintf(wmethod, 16, L"%hs", method);
+#endif
     AcquireSRWLockShared(&g_lock);
     memcpy(token, g_token, sizeof(token));
     ReleaseSRWLockShared(&g_lock);
@@ -630,7 +742,7 @@ int account_fetch(const char *path, void *buf, int size, int *len)
     wchar_t wpath[512];
     int status;
     if (len) *len = 0;
-    if (size < 2 || !MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 512)) return -1;
+    if (size < 2 || !utf8_to_wide(path, -1, wpath, 512)) return -1;
     status = request_full(L"GET", wpath, NULL, NULL, NULL, 0, (char *)buf, size, 0, 0, NULL);
     if (len) *len = status == 200 ? g_last_len : 0;
     return status;
@@ -645,6 +757,21 @@ int account_test_server_local(void)
 int account_download(const char *path, unsigned long long from, int (*sink)(void *ctx, const char *data, unsigned n),
                      void *ctx, int *partial)
 {
+#if !defined(_WIN32)
+    char token[65], host[64];
+    int status;
+    if (partial) *partial = 0;
+    if (g_state != ACCOUNT_IN && g_state != ACCOUNT_CHECKING) return -1;
+    snprintf(host, sizeof(host), "%s", "play.defjam.online");
+    AcquireSRWLockShared(&g_lock);
+    memcpy(token, g_token, sizeof(token));
+    ReleaseSRWLockShared(&g_lock);
+    status = account_download_posix(host, path, from, sink, ctx, partial,
+                                    g_state == ACCOUNT_IN ? token : NULL);
+    SecureZeroMemory(token, sizeof(token));
+    if (status == 401) { forget(); set_reason("Your sign-in ran out; sign in again."); set_state(ACCOUNT_OUT); }
+    return status;
+#else
     HINTERNET session = NULL, connect = NULL, req = NULL;
     DWORD status = 0, ssize = sizeof(status);
     const char *test = getenv("RECOMP_ACCOUNT_SERVER");
@@ -655,7 +782,7 @@ int account_download(const char *path, unsigned long long from, int (*sink)(void
     char *buf;
     if (partial) *partial = 0;
     if (g_state != ACCOUNT_IN && g_state != ACCOUNT_CHECKING) return -1;
-    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 512)) return -1;
+    if (!utf8_to_wide(path, -1, wpath, 512)) return -1;
     if (test && *test) {
         const char *colon = strchr(test, ':');
         int len = colon ? (int)(colon - test) : (int)strlen(test);
@@ -701,12 +828,18 @@ int account_download(const char *path, unsigned long long from, int (*sink)(void
     if (session) WinHttpCloseHandle(session);
     if (status == 401) { forget(); set_reason("Your sign-in ran out; sign in again."); set_state(ACCOUNT_OUT); }
     return (int)status;
+    }
+#endif
 }
 
 void account_cancel_call(void *volatile *live)
 {
     AcquireSRWLockExclusive(&g_live_lock);
+#if defined(_WIN32)
     if (*live && *live != (void *)1) WinHttpCloseHandle((HINTERNET)*live);
+#else
+    if (*live && *live != (void *)1) shutdown((int)(intptr_t)((HttpLive *)*live)->fd, SHUT_RDWR);
+#endif
     *live = (void *)1;      /* closed, or not to start: the owner leaves the handle alone */
     ReleaseSRWLockExclusive(&g_live_lock);
 }
@@ -783,7 +916,7 @@ int account_report_crash(const char *json, unsigned timeout_ms)
     return (int)g_crash_status;
 }
 
-#else   /* sign-in is Windows only for now, like online play */
+#if 0   /* the POSIX stubs below are retired: the real implementation now builds everywhere */
 
 void account_init(void) {}
 void account_refresh(void) {}
