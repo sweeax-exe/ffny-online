@@ -58,6 +58,7 @@
 #include "fight_hud_rules.h"
 #include "start_countdown.h"
 #include "milestones.h"
+#include "season_search.h"
 #include "pc_content.h"
 #include "pc_mods.h"
 #include "music_library.h"
@@ -859,7 +860,7 @@ void door_panel(ImDrawList *dl, const Frame &f)
 
 // ---- input --------------------------------------------------------------------------------------
 
-struct Pad { bool up, down, left, right, a, b, x, y, lb, rb, lb_once, lb_down, r3; };
+struct Pad { bool up, down, left, right, a, b, x, y, lb, rb, lb_once, lb_down, r3, lt, rt, keys; };     // keys: the page has the keyboard (false in a cleared Pad: chat, wheel, gallery)
 
 // Mouse: hovering a box picks it, a click chooses it.
 bool gallery_on();
@@ -930,6 +931,10 @@ struct State {
     // another relay), and the relays it searched when the screen last said so
     unsigned long long quick_since = 0;
     unsigned quick_scope = 0;
+    // FIGHTERS (build 83): the name search. TAB (or Ctrl+F) opens it and the letter keys type the name; the grid
+    // shows only the fighters that match. LT/RT jump by first letter, with or without it.
+    bool fsearch_on = false;
+    std::string fsearch;
 } S;
 
 // ---- the test gallery ----------------------------------------------------------------------------
@@ -1039,6 +1044,8 @@ bool turf_shown();
 void open_turf(Page back);
 bool turf_gallery(const std::string &p);
 bool turf_board_up();                                       // the map page (the city) is up
+std::string turf_season_countdown();                        // build 83: "TURF WAR ENDS IN 17 DAYS", "" without a season
+std::string season_countdown();                             // build 83: "SEASON 1 ENDS IN 48 DAYS" (ranked_ui.inc)
 void turf_board_note(ImDrawList *dl, const char *note, bool error);   // a note on it
 bool tset_gallery(const std::string &p);      // tset_ui.inc
 bool tset_created_ok(const NetRoom &r);       // tset_ui.inc
@@ -1376,7 +1383,7 @@ Pad read_pad()
         return false;
     };
     // Letter keys follow the game's keyboard layout (WASD, K/L/J/I); on the code and name pages they type.
-    bool letters = S.page != CODE && S.page != NAME;
+    bool letters = S.page != CODE && S.page != NAME && !(S.page == FIGHTERS && S.fsearch_on);
     auto key = [&](ImGuiKey k) { return letters ? k : ImGuiKey_None; };
     p.up = any({ ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp, ImGuiKey_UpArrow, key(ImGuiKey_W) }, true);
     p.down = any({ ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown, ImGuiKey_DownArrow, key(ImGuiKey_S) }, true);
@@ -1395,6 +1402,9 @@ Pad read_pad()
     p.lb_once = any({ ImGuiKey_GamepadL1, ImGuiKey_PageUp, ImGuiKey_Q }, false);
     p.lb_down = ImGui::IsKeyDown(ImGuiKey_GamepadL1) || ImGui::IsKeyDown(ImGuiKey_PageUp) || ImGui::IsKeyDown(ImGuiKey_Q);
     p.r3 = any({ ImGuiKey_GamepadR3, key(ImGuiKey_V) }, false);      // TURF WAR: watch the turf battle under way
+    p.lt = any({ ImGuiKey_GamepadL2 }, true);       // FIGHTERS: the previous first letter
+    p.rt = any({ ImGuiKey_GamepadR2 }, true);       // FIGHTERS: the next first letter
+    p.keys = true;
     return p;
 }
 
@@ -2013,7 +2023,13 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     } else if (news > 0 && signed_in) {
         // build 82: new community packs: the rooms of players who have them take only PCs with the same packs
         text(dl, f, g_title, 14, 50, 56, ORANGE, upper(NETPLAY_CONTENT_NEWS_LINE).c_str(), LEFT, 1.2f);
-    } else if (!signed_in) {
+    } else if (signed_in) {
+        // build 83: the ranked season's countdown (and the Turf War's), where the line is free
+        std::string l = ranked_shown() ? season_countdown() : std::string();
+        std::string t = turf ? turf_season_countdown() : std::string();
+        if (!t.empty()) l += (l.empty() ? "" : "    -    ") + t;
+        if (!l.empty()) text(dl, f, g_title, 14, 50, 56, CREAM, l.c_str(), LEFT, 1.2f, 556);
+    } else {
         const char *line = acc == ACCOUNT_WAITING ? "FINISH SIGNING IN WITH DISCORD IN YOUR BROWSER..."
                          : acc == ACCOUNT_CHECKING ? "CHECKING YOUR DISCORD SIGN-IN..."
                          : "SIGN IN WITH DISCORD TO FIGHT ONLINE";
@@ -2237,6 +2253,10 @@ void draw_stats(ImDrawList *dl, const Frame &f, const Pad &pad)
     int &tab0 = ranked_stats_tab();
     if (pad.x && tab0 <= NETRANK_MODES) account_fetch_stats_page(S.stats_page);
     page_title(dl, f, "MY STATS");
+    if (ranked_shown()) {   // build 83: the season's countdown under the title (every tab, SEASON REWARDS too)
+        std::string c = season_countdown();
+        if (!c.empty()) text(dl, f, g_hand, 12, 52, 57, ORANGE, c.c_str(), LEFT, 0.8f, 205);
+    }
     enum AccountState acc = acc_state();
     StatsView v;
     bool have = (acc == ACCOUNT_IN || acc == ACCOUNT_CHECKING) && read_stats(v);
@@ -2935,15 +2955,54 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     *chosen = false;
     if (!n) { S.page = HUB; return; }
     if (S.fighter_sel >= n) S.fighter_sel = 0;
-    if (pad.left) S.fighter_sel = (S.fighter_sel + n - 1) % n;
-    if (pad.right) S.fighter_sel = (S.fighter_sel + 1) % n;
-    if (pad.up) S.fighter_sel = std::max(0, S.fighter_sel - cols);
-    if (pad.down) S.fighter_sel = std::min(n - 1, S.fighter_sel + cols);
-    if (pad.lb) S.fighter_sel = std::max(0, S.fighter_sel - cols * rows);
-    if (pad.rb) S.fighter_sel = std::min(n - 1, S.fighter_sel + cols * rows);
-    int row = S.fighter_sel / cols;
+    // build 83: the name search (players' idea). TAB or Ctrl+F opens it; typed letters and digits filter the grid,
+    // BACKSPACE takes one off, ESC (B) or TAB closes it. Host-side UI only: the pick is sent as before.
+    bool kb_open = pad.keys && (ImGui::IsKeyPressed(ImGuiKey_Tab, false) ||
+                                     (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)));
+    if (kb_open && !S.fsearch_on) { S.fsearch_on = true; kb_open = false; }
+    if (S.fsearch_on && pad.keys) {
+        ImGuiIO &io = ImGui::GetIO();
+        for (int i = 0; i < io.InputQueueCharacters.Size; i++) {
+            ImWchar c = io.InputQueueCharacters[i];
+            if (c < 0x80 && (isalnum((int)c) || c == ' ' || c == '-' || c == '.') && S.fsearch.size() < 24) S.fsearch += (char)c;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Backspace, true) && !S.fsearch.empty()) S.fsearch.pop_back();
+        if (kb_open || pad.b) {     // closes the search, not the page
+            S.fsearch_on = false;
+            S.fsearch.clear();
+            const_cast<Pad &>(pad).b = false;
+        }
+    }
+    // the cards shown: every one, or the ones whose name matches (RANDOM only without a search)
+    std::vector<int> vis;
+    for (int i = 0; i < n; i++)
+        if (S.fsearch.empty() || (list[i].id != FIGHTER_RANDOM && fighter_name_matches(list[i].name, S.fsearch.c_str())))
+            vis.push_back(i);
+    bool none = vis.empty();
+    if (none) for (int i = 0; i < n; i++) vis.push_back(i);     // nothing matches: the full grid stays, the box says so
+    int vn = (int)vis.size();
+    int at = 0;
+    {
+        auto it = std::find(vis.begin(), vis.end(), S.fighter_sel);
+        if (it == vis.end()) S.fighter_sel = vis[0];        // the selection follows the search to its first match
+        else at = (int)(it - vis.begin());
+    }
+    if (pad.left) at = (at + vn - 1) % vn;
+    if (pad.right) at = (at + 1) % vn;
+    if (pad.up) at = std::max(0, at - cols);
+    if (pad.down) at = std::min(vn - 1, at + cols);
+    if (pad.lb) at = std::max(0, at - cols * rows);
+    if (pad.rb) at = std::min(vn - 1, at + cols * rows);
+    if (pad.lt || pad.rt) {         // LT/RT: the previous / next first letter among the cards shown
+        std::vector<const char *> names;
+        for (int i : vis) names.push_back(list[i].id == FIGHTER_RANDOM ? "" : list[i].name);
+        at = fighter_letter_jump(names.data(), vn, at, pad.rt ? 1 : -1);
+    }
+    S.fighter_sel = vis[at];
+    int row = at / cols;
     if (row < S.fighter_top) S.fighter_top = row;
     if (row >= S.fighter_top + rows) S.fighter_top = row - rows + 1;
+    if (S.fighter_top > std::max(0, (vn - 1) / cols - rows + 1)) S.fighter_top = std::max(0, (vn - 1) / cols - rows + 1);
 
     page_title(dl, f, "CHOOSE FIGHTER");
     const OnlineFighter &cur = list[S.fighter_sel];
@@ -2986,8 +3045,9 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     glass(dl, f, gx - 8, gy - 8, cols * (cw + 4) + 12, rows * (ch + 6) + 26);
     for (int r = 0; r < rows; r++)
         for (int c = 0; c < cols; c++) {
-            int i = (S.fighter_top + r) * cols + c;
-            if (i >= n) break;
+            int k = (S.fighter_top + r) * cols + c;
+            if (k >= vn) break;
+            int i = vis[k];
             float x = gx + c * (cw + 4), y = gy + r * (ch + 6);
             if (mouse_pick(f, x, y, cw, ch)) S.fighter_sel = i;
             bool sel = i == S.fighter_sel;
@@ -3032,8 +3092,21 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
             if (mouse_click(f, x, y, cw, ch)) const_cast<Pad &>(pad).a = true;
         }
     char page[32];
-    snprintf(page, sizeof(page), "%d / %d", S.fighter_sel + 1, n);
+    snprintf(page, sizeof(page), "%d / %d", at + 1, vn);
     text(dl, f, g_title, 12, gx + cols * (cw + 4) - 4, gy + rows * (ch + 6), GREY, page, RIGHT, 0.8f);
+    {   // the search line under the grid: the box while it is open, else how to open it
+        float sy = gy + rows * (ch + 6);
+        if (S.fsearch_on || !S.fsearch.empty()) {
+            std::string l = "SEARCH: " + upper(S.fsearch.c_str()) + ((GetTickCount64() / 500) % 2 ? "_" : " ");
+            float w = std::max(150.0f, text_width(f, g_title, 12, l.c_str()) + 16);
+            rect(dl, f, gx - 2, sy - 2, w, 18, IM_COL32(120, 12, 26, 230), 4);
+            text(dl, f, g_title, 12, gx + 6, sy, WHITE, l.c_str(), LEFT, 0.8f);
+            if (none) text(dl, f, g_title, 11, gx + w + 6, sy + 1, ORANGE, "NO FIGHTER BY THAT NAME", LEFT, 0.6f);
+            else text(dl, f, g_title, 10, gx + w + 6, sy + 2, GREY, "ESC CLOSES", LEFT, 0.6f);
+        } else {
+            text(dl, f, g_title, 10, gx, sy + 2, GREY, "TAB: SEARCH BY NAME    LT / RT: BY FIRST LETTER", LEFT, 0.6f);
+        }
+    }
     if (pad.a && blocked(S.fighter_sel)) {
         if (ONLINE_NEW_FIGHTER(cur.id) && standard_only(rules_room.settings.fighter_rules))
             say("This room is STANDARD ONLY: community fighters are off here. Pick another fighter.");
@@ -3058,6 +3131,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
     // BACK from a ranked search's pick goes back to the mode chooser, not to the online menu (a player
     // who wanted another fighter for ranked landed on the hub, 2026-11-03)
     if (pad.b) S.page = S.ranked_pick ? RANKED_MODES : HUB;
+    if (pad.a || pad.b) { S.fsearch_on = false; S.fsearch.clear(); }
 }
 
 // ---- the room ----
@@ -4619,6 +4693,8 @@ void gallery_step()
                                          // RECOMP_TEST_CONTENT_NEW=all and RECOMP_TEST_CONTENT_NEWS=2)
                                          "create-standard", "room-standard", "rooms-standard", "fighters-standard",
                                          "fighters-new", "vote-new", "hub-news",
+                                         // build 83: the hub fighter search (a query; one nothing matches)
+                                         "fighters-search", "fighters-search-none",
                                          // build 66: FFA rotation (its room, called, watching, its door)
                                          "rot", "rot-up", "rot-watch", "rot-fight", "create-rot", "hub-rot", "versus-rot",
                                          // build 70: the spectator HUD over a watched fight (the line, up next,
@@ -4818,6 +4894,13 @@ void gallery_step()
     {   // the ranked pages add their ranks to the sample statistics
         static const std::string base_stats = G.stats;
         G.stats = base_stats;
+        if (const char *d = getenv("RECOMP_TEST_SEASON_END")) {    // build 83: a regular season ending in <d> days
+            char line[96];
+            snprintf(line, sizeof(line), "season=1|Season 1|0|%lld\n", (long long)time(nullptr) + (long long)(atof(d) * 86400) + 60);
+            G.stats += line;
+        }
+        S.fsearch_on = false;
+        S.fsearch.clear();
         ranked_stats_tab() = 0;
         if (music_gallery(p)) return;
         if (milestones_gallery(p)) return;
@@ -4856,6 +4939,15 @@ void gallery_step()
         G.room = sample_room(0, 2, 2);
         G.room.settings.fighter_rules = NETPLAY_RULES_STANDARD | NETPLAY_RULES_NO_CREATED;
         drop_new_venues(G.room.settings, 1);
+    }
+    else if (p == "fighters-search" || p == "fighters-search-none") {     // build 83: the name search open
+        S.page = FIGHTERS;
+        G.room = sample_room(0, 2, 2);
+        const char *q = getenv("RECOMP_TEST_FIGHTER_SEARCH");
+        S.fsearch_on = true;
+        S.fsearch = p == "fighters-search-none" ? "zzq" : q && *q ? q : "ma";
+        S.fighter_sel = 0;
+        S.fighter_top = 0;
     }
     else if (p == "fighters-standard" || p == "fighters-new") {  // the new fighters off here (STANDARD ONLY), or NEW
         S.page = FIGHTERS;

@@ -135,6 +135,19 @@ std::string season_ends_in(const SeasonInfo &si)
     return b;
 }
 
+// build 83: "SEASON 1 ENDS IN 48 DAYS" (hours on the last day, "ENDS TODAY" in its last hour) for a regular
+// season with an end (the service's current season end, as GET /api/ranked/seasons' now.end); "" without one, and
+// for a preseason (its own strip says it).
+std::string season_countdown()
+{
+    SeasonInfo si = read_season();
+    if (!si.valid || si.pre || si.end <= 0) return "";
+    char label[32], out[96];
+    snprintf(label, sizeof(label), "SEASON %d", si.n > 0 ? si.n : 1);
+    season_countdown_text(label, si.end, (long long)time(nullptr), out, sizeof(out));
+    return out;
+}
+
 // The preseason's line: "PRESEASON - TEST WEEK - ENDS IN 5D 12H - RANKS RESET AT THE END".
 std::string preseason_line(const SeasonInfo &si)
 {

@@ -332,6 +332,24 @@ void turf_poll()
     if (!TW.map_at || now - TW.map_at > every) turf_fetch_map();
 }
 
+long long turf_now(const TurfMap &m);
+
+// build 83: the hub's line: "TURF WAR ENDS IN 17 DAYS" (the map's season end), "" without a map or an end.
+std::string turf_season_countdown()
+{
+    long long ends, now;
+    {
+        std::lock_guard<std::mutex> lock(TW.mu);
+        if (TW.map_status != 200) return "";
+        ends = TW.map.ends ? TW.map.ends : TW.season.ends;
+        now = turf_now(TW.map);
+    }
+    if (!now) now = (long long)time(nullptr);
+    char out[96];
+    season_countdown_text("TURF WAR", ends, now, out, sizeof(out));
+    return out;
+}
+
 bool turf_shown()
 {
     if (gallery_on()) return TW.gallery_entry;
