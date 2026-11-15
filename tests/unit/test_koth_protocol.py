@@ -243,6 +243,28 @@ def test_hill_watch_matches_the_relay():
     assert 'cl.caps&CapHillWatch != 0' in relay          # answered only to a client that has it
 
 
+def test_hill_watch_fight_of_four():
+    # build 84 (a player report, 2026-11-15: in FFA rotation rooms the waiting players could not watch): a
+    # watcher of a fight of four puts its pad on no port (the toolkit's local slot -1), so such a fight is
+    # watched live; builds 71-83 kept the names screen for it, which in a room of five or more was every fight
+    body = NETPLAY_C[NETPLAY_C.index('static void assign_input(int on)'):]
+    body = body[:body.index('\n}\n')]
+    assert 'local = N.players < 4 ? N.players : N.load_done ? -1 : 3;' in body     # the menus before the load keep it
+    assert 'if (N.watching && N.players >= 4 && N.lockstep) assign_input(1);' in NETPLAY_C     # off every port at the load
+    runs = NETPLAY_C[NETPLAY_C.index('static int hill_watch_runs('):]
+    runs = runs[:runs.index('\n}\n')]
+    assert 'if (count >= 4) return 0;' not in runs and 'RECOMP_HILL_WATCH_FOUR' in runs
+    host = (ROOT / 'tools/xboxrecomp/src/input/input_host.c')
+    if host.is_file():      # the toolkit submodule checked out
+        multi = host.read_text(encoding='utf-8')
+        multi = multi[multi.index('void xbox_HostInputSetNetplayMulti('):]
+        assert 'local_slot < -1' in multi[:multi.index('\n}\n')]
+    # a player who came in during the fight is told when the live picture comes
+    ui = (ROOT / 'src/hooks/online_screen.cpp').read_text(encoding='utf-8')
+    assert 'This fight began before you came in. You watch the next one live' in ui
+    assert ui.count('watch_hint(h)') == 2
+
+
 def _relay_bit(name):
     m = re.search(r'^\s*%s\s+uint32\s+=\s+1\s*<<\s*(\d+)' % name, GO, re.M)
     if not m:

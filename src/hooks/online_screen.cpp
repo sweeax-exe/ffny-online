@@ -3467,6 +3467,19 @@ int my_hill_fighter(const NetRoom &r)
     return m.pick >= 0 ? m.pick : slot_fighter(r, r.you);
 }
 
+// The line under the watching screens. Build 84: a player who came in while the fight ran has no WATCH
+// for it (the relay sends one when the fight starts; a fight cannot be joined halfway), so it says when
+// the live picture comes instead of promising it now (a player report, 2026-11-15: the ones waiting in an
+// FFA rotation room "can't watch the match").
+static const char *watch_hint(const NetHill &h)
+{
+    if (!((lobby_caps() & NETPLAY_CAP_HILL_WATCH) && hill_watch_setting()))
+        return "The fight runs on the fighters' PCs. The result comes here when it is over.";
+    if (!(h.watch_seed && h.watch_seed == h.seed))
+        return "This fight began before you came in. You watch the next one live; the result comes here.";
+    return "Watching live: the next fight shows on your screen. The result comes here when it is over.";
+}
+
 // The watching screen: the fight this PC does not play in. Phase 1 shows who fights, the king's
 // crown and streak, and the line; the fight itself runs on the fighters' PCs only.
 void draw_watch_rot(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r, const HillView &v);
@@ -3521,10 +3534,7 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     glass(dl, f, 40, 382, 560, 28, 8);
     text(dl, f, g_title, 14, 52, 388, WHITE, line.c_str(), LEFT, 1.0f);
     if (v.next == r.you) text(dl, f, g_hand, 18, 588, 386, ORANGE, "YOU'RE UP NEXT", RIGHT, 1.2f);
-    text(dl, f, g_title, 11, 320, 362, GREY, (lobby_caps() & NETPLAY_CAP_HILL_WATCH) && hill_watch_setting()
-             ? "Watching live: the next fight shows on your screen. The result comes here when it is over."
-             : "The fight runs on the fighters' PCs. The result comes here when it is over.",
-         CENTER, 0.8f);
+    text(dl, f, g_title, 11, 320, 362, GREY, watch_hint(h), CENTER, 0.8f);
     float hx = 54;
     bool left = false;
     hx += hint(dl, f, hx, 414, "x", "CHOOSE FIGHTER");
@@ -3573,6 +3583,8 @@ void draw_watch_rot(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoo
     text(dl, f, g_stencil, 30, 320, 326, CREAM, n > 2 ? "FREE FOR ALL" : "ONE ON ONE", CENTER, 1.6f);
     if (from_watch && h.watch_venue)
         text(dl, f, g_hand, 14, 320, 360, ORANGE, upper(online_venue_name(h.watch_venue)).c_str(), CENTER, 0.8f, 300);
+    else if (!from_watch)   // build 84: came in during the fight: when the live picture comes
+        text(dl, f, g_title, 11, 320, 362, GREY, watch_hint(h), CENTER, 0.8f);
     std::string line = "NEXT:";
     int shown = 0;
     for (int i = 0; i < h.count && shown < 4; i++) {
