@@ -325,6 +325,25 @@ def test_new_venue(game, data):
     assert "feID 28 is taken" in result["skipped"][0][1]
 
 
+def test_new_venue_camera_bank_symbols_are_renamed():
+    """Studio <= beta.24 copied BT4V03A.viv as BT4V28A.viv with the objects still naming BT4V03A: a BLAZIN' on that
+    venue corrupted the heap (crash after the fight). The composer renames the symbols to the venue's own code."""
+    trailer = b"L231" + struct.pack(">I", 2)
+    old = viv.build_archive([("BT4V28A_EYE.o", b"\x7fELF" + b"\0" * 40 + b"__AnimationBank:::BT4V03A_EYE\0"),
+                             ("BT4V28A_TARGET.o", b"\x7fELF" + b"\0" * 40 + b"__AnimationBank:::BT4V03A_TARGET\0")])
+    fixed = newvenue.repair_camera_bank("BT4V28A.viv", old, "28A")
+    assert len(fixed) == len(old) and b"03A" not in fixed and fixed == old.replace(b"BT4V03A", b"BT4V28A")
+    assert newvenue.repair_camera_bank("BT4V28A.viv", fixed, "28A") == fixed       # right already: unchanged
+    wrapped = viv.refpack_store(old)
+    assert viv.unwrap(newvenue.repair_camera_bank("BT4V28A.viv", wrapped, "28A")) == fixed
+    vi = viv.build_archive([("VI_28A11_EYE.o", b"\x7fELF__AnimationBank:::VI_03A11_EYE\0"
+                                               b"__AnimationBank:::VI_03A12_EYE\0")], align=128, trailer=trailer)
+    assert newvenue.repair_camera_bank("VI_28A11.viv", vi, "28A") == vi.replace(b"VI_03A11", b"VI_28A11")
+    # another venue's bank, or a non-bank entry: untouched
+    assert newvenue.repair_camera_bank("BT4V28A.viv", old, "29A") == old
+    assert newvenue.repair_camera_bank("CE_128A.viv", old, "28A") == old
+
+
 
 LOCATOR = b"\x7fELF" + bytes(range(256)) * 40           # a stand-in locator file (10244 bytes)
 CROWD_OP = {"op": "new-venue", "template": "V2BG_03A", "template_code": "03A", "template_fe_id": 3,

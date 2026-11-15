@@ -470,6 +470,11 @@ def apply_pack(work, folder, info, fe_id=None):
             newvenue.check_locator(base, result)
         if rel == newvenue.VENUE_ARCHIVE and e['mode'] == 'add' and entry in models:
             newvenue.check_model(result, models[entry])
+        if rel == newvenue.CAMERA_ARCHIVE and e['mode'] == 'add':
+            # a new venue's camera bank from Studio <= beta.24 names the template inside (BLAZIN' heap crash)
+            for op in info.get('ops', []):
+                if op['op'] == 'new-venue':
+                    result = newvenue.repair_camera_bank(entry, result, op.get('code'))
         if e['mode'] == 'add':
             if work.exists(rel, entry):
                 raise ComposeError('%s exists already' % ('%s|%s' % (rel, entry) if entry else rel))
