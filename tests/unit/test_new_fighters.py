@@ -86,6 +86,9 @@ def test_several_and_refusals():
         nf.append_character(out, 55, 100, "Again", "Again")
     with pytest.raises(nf.FighterError):
         nf.append_character(SOD, 55, 128, "Too far", "Too far")
+    for no_place in (98, 99, 40, 0, 4):
+        with pytest.raises(nf.FighterError):
+            nf.append_character(SOD, 55, no_place, "Not a place", "Not a place")
     with pytest.raises(nf.FighterError):
         nf.append_character(SOD, 55, 100, "x", "x", edits={nf.W_CORE_ID: 1})
 
@@ -96,5 +99,4 @@ def test_c_reader_matches_the_layout():
                         ("W_MAIN", nf.W_MAIN), ("ROW_WORDS", nf.ROW_WORDS)):
         assert "#define %s %d" % (name, value) in src
     hdr = (ROOT / "src/hooks/new_fighters.h").read_text(encoding="utf-8")
-    assert "#define NEW_FIGHTER_FIRST %d" % nf.FIRST_NEW_FE_ID in hdr
-    assert "#define NEW_FIGHTER_LAST %d" % nf.LAST_NEW_FE_ID in hdr
+    assert '#include "new_fighter_places.h"' in hdr        # the places: test_new_fighter_places.py

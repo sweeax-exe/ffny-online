@@ -74,7 +74,7 @@ typedef struct NetRoomSettings {
 #define NETPLAY_RULES_NO_CREATED 2      /* no created fighter */
 #define NETPLAY_RULES_STOCK      3      /* both: stock fighters, no banned tier */
 /* build 82: STANDARD ONLY, a bit on top of the others: the room's community content is off. New fighters
- * (IDs 100..127, named in NetRoom.blocked) and new venues (ONLINE_NEW_VENUE feIDs, left out of the pool) cannot
+ * (their places, new_fighter_places.h, named in NetRoom.blocked) and new venues (ONLINE_NEW_VENUE feIDs, left out of the pool) cannot
  * be picked; clothing packs stay (they only change looks). The relay enforces it. */
 #define NETPLAY_RULES_STANDARD   4
 #define NETPLAY_RULES_MASK       7      /* every FIGHTER RULES bit a build-82 relay takes */

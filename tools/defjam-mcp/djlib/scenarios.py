@@ -2480,7 +2480,9 @@ def rules_check(logs, fighter_rules, banned_tier, problems):
     if bits & 2:
         blocked.add(99)
     if bits & 6:
-        blocked.update(range(100, 128))     # new fighters (stock rooms and STANDARD ONLY rooms)
+        # new fighters' places (stock rooms and STANDARD ONLY rooms): 100..127 and the 20 low IDs
+        blocked.update(list(range(100, 128)) + [5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95,
+                                                 96, 97])
     out = {}
     for i, path in logs.items():
         text = logparse.read_text(path)

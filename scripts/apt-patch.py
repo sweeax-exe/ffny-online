@@ -48,7 +48,8 @@ every internal pointer there is an absolute offset):
   * battle/chooseF2, chooseF3, chooseF4 (patch version 5), the fighter select screens: a grid cell is
     an instance of the library sprite `thumbAll` (300 frames) that shows frame <feID> under the cursor
     and frame <feID + 149> otherwise; the pictures are baked into the screen, and the frames of the
-    community fighters (feID 100..127, `src/hooks/new_fighters.c`) hold none. Each of those 56 frames
+    community fighters (feID 100..127 and the 20 low places, `src/hooks/new_fighter_places.h`) hold none but
+    37's (an unused Crow 2's picture, which the patch takes out with a RemoveObject). Each of those 96 frames
     gets one more Action item: `this.attachMovie("emptyClip", "nfThumb", 2)`, the clip moved to the
     cell's corner, and `loadMovie` of the fighter's own thumb file into it (`thumbs/thumb<feID>.swf`
     under the cursor, `thumbs/thumb<feID>off.swf` otherwise, i.e. `screens/thumbs/thumb<feID>.big` and
@@ -144,7 +145,9 @@ CMTYPE_TICK_NAME = "onlineTick"
 # battle/chooseF2, chooseF3, chooseF4 (the fighter select screens, patch version 5): the grid's cells are
 # instances of the library sprite "thumbAll" (300 frames). A cell shows frame <feID> (0-based) under the cursor
 # and frame <feID + 149> otherwise; the stock frames place one baked picture each, the frames of the community
-# fighters (feID 100..127) place none. Each of those frames gets one more Action that attaches an empty clip
+# fighters (their places: feID 100..127 and 20 low IDs, src/hooks/new_fighter_places.h) place none, but for frames 37
+# and 186 (place 37, an unused Crow 2's picture; the patch replaces that placement by a RemoveObject of depth 1, as the
+# empty frames have). Each of those frames gets one more Action that attaches an empty clip
 # and loads the fighter's own thumb file into it (screens/thumbs/thumb<feID>.big under the cursor,
 # thumb<feID>off.big otherwise: the launcher writes both from the pack's art, setup/ffnycontent/newfighter.py).
 CHOOSEF_ENTRIES = {
@@ -165,7 +168,9 @@ CHOOSEF_ENTRIES = {
 CHOOSEF_SPRITE_NAME = "thumbAll"
 CHOOSEF_SPRITE_FRAMES = 300
 CHOOSEF_EMPTY_NAME = "emptyClip"      # the screens' own exported empty sprite (their portraits load into it)
-CHOOSEF_FIRST, CHOOSEF_COUNT = 100, 28        # the community fighters' front-end IDs (new_fighters.c)
+CHOOSEF_PLACES = tuple(range(100, 128)) + (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95, 96,
+                                           97)    # the community fighters' front-end IDs (new_fighter_places.h)
+CHOOSEF_BAKED_DEPTH = 1               # the depth of the screens' own baked pictures
 CHOOSEF_NORMAL_OFFSET = 149           # gotoAndStop(feID + CHAR_SELECTED_OFFSET 150) is 0-based frame feID + 149
 CHOOSEF_CLIP_NAME = "nfThumb"
 CHOOSEF_DEPTH = 2                     # the baked pictures sit at depth 1
@@ -920,11 +925,11 @@ def patch_cmtype_entry(raw_entry, extras=None):
 
 # --------------------------------- battle/chooseF2/3/4: the community fighters' pictures in the grid
 
-def choosef_frames(first=CHOOSEF_FIRST, count=CHOOSEF_COUNT):
+def choosef_frames(places=CHOOSEF_PLACES):
     """[(0-based frame of thumbAll, the thumb file's URL)] for every community fighter: the frame a cell
     shows under the cursor and the one it shows otherwise."""
     out = []
-    for fe_id in range(first, first + count):
+    for fe_id in places:
         out.append((fe_id, CHOOSEF_URL_ON % fe_id))
         out.append((fe_id + CHOOSEF_NORMAL_OFFSET, CHOOSEF_URL_OFF % fe_id))
     return sorted(out)
@@ -989,14 +994,18 @@ def build_choosef_apt(apt, const, sprite=None):
         raise PatchError("%r is not a sprite of %d frames" % (CHOOSEF_SPRITE_NAME, CHOOSEF_SPRITE_FRAMES))
     frames = u32(apt, ch + 12)
     wanted = choosef_frames()
-    old = {}
+    old, baked = {}, {}
+    # the low places' frames (100..127's are as the own-cell patch left them: frame 249 keeps its placement)
+    low_frames = {f for f, _ in choosef_frames([p for p in CHOOSEF_PLACES if p < 100])}
     for frame, _ in wanted:
         n, ip = struct.unpack_from("<II", apt, frames + 8 * frame)
         items = [u32(apt, ip + 4 * k) for k in range(n)]
-        for it in items:
+        for k, it in enumerate(items):
             kind = u32(apt, it)
             if kind == 3 and u32(apt, it + 8) == CHOOSEF_DEPTH:
                 raise PatchError("frame %d already places something at depth %d" % (frame, CHOOSEF_DEPTH))
+            if kind == 3 and u32(apt, it + 8) == CHOOSEF_BAKED_DEPTH and frame in low_frames:
+                baked[frame] = k        # a stock picture at a low place (37: Crow 2's): taken out below
             if kind not in (1, 3, 4):
                 raise PatchError("frame %d has an item of type %d" % (frame, kind))
         old[frame] = items
@@ -1016,6 +1025,16 @@ def build_choosef_apt(apt, const, sprite=None):
     sp = dict(clip=put_str(CHOOSEF_CLIP_NAME), empty=put_str(CHOOSEF_EMPTY_NAME),
               attachMovie=put_str("attachMovie"), _x=put_str("_x"), _y=put_str("_y"))
     urls = {frame: put_str(url) for frame, url in wanted}
+    remove_at = None
+    if baked:
+        pad4()
+        remove_at = pos + len(data)
+        data += struct.pack("<II", 4, CHOOSEF_BAKED_DEPTH)      # RemoveObject, depth 1 (as the empty frames have)
+    kept = {}
+    for frame in old:
+        kept[frame] = list(old[frame])
+        if frame in baked:
+            kept[frame][baked[frame]] = remove_at
     records = {}
     for frame, url in wanted:
         pad4()
@@ -1025,13 +1044,14 @@ def build_choosef_apt(apt, const, sprite=None):
         item_at = pos + len(data)
         data += struct.pack("<II", 1, code_at)
         arr_at = pos + len(data)
-        data += struct.pack("<%dI" % (len(old[frame]) + 1), *(old[frame] + [item_at]))
-        records[frame] = (len(old[frame]) + 1, arr_at, code_at, url)
+        data += struct.pack("<%dI" % (len(kept[frame]) + 1), *(kept[frame] + [item_at]))
+        records[frame] = (len(kept[frame]) + 1, arr_at, code_at, url)
     pad4()
     new_apt = bytearray(apt) + data
     for frame, (n, arr_at, _, _) in records.items():
         struct.pack_into("<II", new_apt, frames + 8 * frame, n, arr_at)
-    info = dict(frames=frames, records=records, old=old, strings=sp, apt_len=len(new_apt), char=char)
+    info = dict(frames=frames, records=records, old=old, kept=kept, baked=baked, remove_at=remove_at, strings=sp,
+                apt_len=len(new_apt), char=char)
     return bytes(new_apt), info
 
 
@@ -1052,8 +1072,12 @@ def verify_choosef_apt(apt, new_apt, info):
         if struct.unpack_from("<II", new_apt, frames + 8 * frame) != (n, arr_at):
             raise PatchError("frame record %d is wrong" % frame)
         ptrs = list(struct.unpack_from("<%dI" % n, new_apt, arr_at))
-        if ptrs[:-1] != info["old"][frame] or struct.unpack_from("<II", new_apt, ptrs[-1]) != (1, code_at):
+        if ptrs[:-1] != info["kept"][frame] or struct.unpack_from("<II", new_apt, ptrs[-1]) != (1, code_at):
             raise PatchError("frame %d lost an item or its action item is wrong" % frame)
+        for k, (was, now) in enumerate(zip(info["old"][frame], ptrs[:-1])):
+            if was != now and not (info["baked"].get(frame) == k and now == info["remove_at"]
+                                   and struct.unpack_from("<II", new_apt, now) == (4, CHOOSEF_BAKED_DEPTH)):
+                raise PatchError("frame %d: item %d changed but its baked picture's removal" % (frame, k))
         ins = decode(new_apt, code_at)
         if [i.op for i in ins] != shape:
             raise PatchError("the action of frame %d does not decode to the expected statements" % frame)
@@ -1063,8 +1087,7 @@ def verify_choosef_apt(apt, new_apt, info):
             raise PatchError("the action of frame %d pushes the wrong strings" % frame)
         if ins[-1].nxt > len(new_apt):
             raise PatchError("the action of frame %d runs off the end" % frame)
-    return "%d frame actions appended (%d bytes), no existing byte changed but their frame records" % (
-        len(records), len(new_apt) - len(apt))
+    return "%d frame actions appended (%d bytes, %d baked picture(s) removed), no existing byte changed but their "         "frame records" % (len(records), len(new_apt) - len(apt), len(info["baked"]))
 
 
 def choosef_patcher(entry_name):

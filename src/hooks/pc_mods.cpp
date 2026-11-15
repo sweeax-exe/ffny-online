@@ -136,6 +136,9 @@ static bool helper_args(const std::string &command, const std::string &id, std::
     args.insert(args.end(), {"--capability", "language-v1"});
     // Fighter bodies, clothing, venues: mods.py composes them from the player's dump (pc_content.c serves them).
     args.insert(args.end(), {"--capability", "content-v1"});
+    // Build 84: new fighters at the 20 low places (new_fighter_places.h); the account service marks such packs
+    // fighter-places-v2, and only index-v4.json lists them.
+    args.insert(args.end(), {"--capability", "fighter-places-v2"});
     {
         auto game = fs::current_path(error) / "game";
         if (!error && fs::is_directory(game, error)) {

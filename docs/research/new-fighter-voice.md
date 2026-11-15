@@ -67,7 +67,8 @@ each clip with a PCM frame as the stock clips do.
 
 ## 2. Design
 
-* **Voice number** N = 40 + (feID - 100) (040..067). No claim: the account service's place decides it.
+* **Voice number** N = 40 + the place index (040..067 for 100..127; build 84: 068..087 for the 20 low places,
+  `src/hooks/new_fighter_places.h`; the flags array above has 200 bytes, so 040..087 fit beside 500..538 at 100..138). No claim: the account service's place decides it.
 * **Pack:** the new-fighter op's gameplay block takes `"voice": {"mode": "own", "lines": {group: [paths]}}`
   (groups `intro win taunt blazin weapon environment special crowd`, at most 1/1/7/1/8/8/8/8 clips, 7.8/8.0/4.0/
   6.0/4.5/5.5/6.0/5.5 s); the clips are in the pack as `voice/<name>.asf` (36 kHz streams) and `voice/<name>.sch`

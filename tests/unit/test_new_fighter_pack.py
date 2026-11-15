@@ -108,6 +108,39 @@ def test_new_fighter_gameplay_is_written_into_its_row(tmp_path):
     assert got["applied"] == [] and got["skipped"]
 
 
+def test_new_fighter_at_a_low_place(tmp_path):
+    """Build 84: a place below 98 (newfighter.LOW_PLACES). Place 37 has an unused Crow 2's pictures in the retail
+    screens (thumb37, thumb37off, l_MS_37_*, 38_2p/3p): the new fighter's copies replace them; place 5 has none."""
+    pack = make_pack(tmp_path / "packs" / "doc-low", "V2IP_7L5A", "Doc Low")
+    other = make_pack(tmp_path / "packs" / "doc-five", "V2IP_7L6A", "Doc Five")
+    data = tmp_path / "data"
+    got = content_compose.compose(data, GAME, [record(pack, "doc-low", 1, 37), record(other, "doc-five", 2, 5)],
+                                  off=(), log=lambda t: None, languages=[])
+    assert got["applied"] == ["doc-low", "doc-five"] and not got["skipped"]
+    rows = nf.characters(composed(data, nf.SOD_PATH).read_bytes())
+    assert [(r["fe_id"], r["display"], r["core_id"], r["main"]) for r in rows[-2:]] == [(37, "Doc Low", 10, 1),
+                                                                                      (5, "Doc Five", 10, 1)]
+    assert sorted(r["fe_id"] for r in rows) == sorted([r["fe_id"] for r in rows[:-2]] + [37, 5])
+    stock = viv.Archive(str(GAME / nf.SCREENS_ARCHIVE))
+    screens = viv.Archive(str(composed(data, nf.SCREENS_ARCHIVE)))
+    for name in ("screens/thumbs/thumb37.big", "screens/thumbs/thumb37off.big", "screens/portrait/38_2p.big",
+                 "screens/portrait/l_MS_37_2p.big"):
+        assert stock.has(name) and screens.has(name)
+        assert screens.read(name) != stock.read(name), name      # the new fighter's, not Crow 2's
+        inner = viv.Archive(viv.unwrap(screens.read(name)))
+        assert all(e.name.lower().startswith(name.rsplit("/", 1)[1][:-4].lower()) for e in inner.entries)
+    assert screens.has("screens/thumbs/thumb5.big") and screens.has("screens/portrait/p_cf/p_cf_6_2p.big")
+    assert not stock.has("screens/thumbs/thumb5.big")
+
+
+def test_a_place_outside_the_list_is_refused(tmp_path):
+    for place in (98, 99, 40, 128, 4):
+        pack = make_pack(tmp_path / "packs" / ("p%d" % place), "V2IP_7P%dA" % (place % 10), "Doc P")
+        got = content_compose.compose(tmp_path / ("data%d" % place), GAME, [record(pack, "p", 1, place)], off=(),
+                                      log=lambda t: None, languages=[])
+        assert got["applied"] == [] and got["skipped"], place
+
+
 def test_same_packs_same_files_whatever_the_order_of_places(tmp_path):
     a = make_pack(tmp_path / "packs" / "doc-two", "V2IP_7K3A", "Doc Two")
     b = make_pack(tmp_path / "packs" / "blaze-x", "V2IP_7Q1A", "Doc Three")
@@ -156,7 +189,10 @@ def test_catalogue_place_field():
                                       "file_count": 1, "sha256": "0" * 64, "root": "doc-two"}}],
             "kind": "content", "type": "new-fighter", "order": 3, "fighter_fe_id": 100}
     mod_catalogue.validate_mod(dict(base))
+    for good in (5, 37, 97, 127):
+        mod_catalogue.validate_mod(dict(base, fighter_fe_id=good))
     for bad in (dict(base, fighter_fe_id=128), dict(base, fighter_fe_id="100"), dict(base, type="venue"),
+                dict(base, fighter_fe_id=98), dict(base, fighter_fe_id=40), dict(base, fighter_fe_id=4),
                 {k: v for k, v in base.items() if k != "fighter_fe_id"}):
         with pytest.raises(ValueError):
             mod_catalogue.validate_mod(bad)

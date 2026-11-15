@@ -13,8 +13,8 @@ static const char *const k_entry[FV_FILES] = {
 
 int fighter_voice_number(int fe_id)
 {
-    if (fe_id < FV_FIRST_FE_ID || fe_id > FV_LAST_FE_ID) return -1;
-    return FV_FIRST_VOICE + (fe_id - FV_FIRST_FE_ID);
+    int place = new_fighter_place(fe_id);
+    return place < 0 ? -1 : FV_FIRST_VOICE + place;
 }
 
 void fighter_voice_entry_name(int voice, int i, char *out, size_t n)

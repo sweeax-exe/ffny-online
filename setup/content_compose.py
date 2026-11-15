@@ -689,7 +689,8 @@ def new_packs(packs, today=None):
 
 def hub_portraits(data, packs, template, known=()):
     """<data>/online-art/fighters/<feID>.png (the online hub's portrait, like the stock ones ``scripts/
-    online-art.py`` writes) for each applied new fighter whose pack has body art; a 100..127 portrait of no
+    online-art.py`` writes) for each applied new fighter whose pack has body art; a new fighter's place's portrait
+    of no
     applied pack is removed. ``template(entry)``: an entry of screens.viv (the template's team portrait gives the
     tone; KeyError and the like: the stock cool tone). ``known``: the [feID, pack id] pairs written before for
     the same inputs, not drawn again while their file is there. Returns the pairs there now."""
@@ -702,7 +703,7 @@ def hub_portraits(data, packs, template, known=()):
             if not ops:
                 continue
             place = fighter_place(ops[0], p.get('fighter_fe_id'))
-            if not newfighter.FIRST_NEW_FE_ID <= place <= newfighter.LAST_NEW_FE_ID or place in dict(there):
+            if not newfighter.is_place(place) or place in dict(there):
                 continue
             path = folder / ('%d.png' % place)
             if (place, p['id']) not in known or not path.is_file():
@@ -720,7 +721,7 @@ def hub_portraits(data, packs, template, known=()):
         except PACK_ERRORS:
             continue                        # no body art, or art the composer refused: no portrait
     keep = {place for place, _ in there}
-    for place in range(newfighter.FIRST_NEW_FE_ID, newfighter.LAST_NEW_FE_ID + 1):
+    for place in newfighter.PLACES:
         path = folder / ('%d.png' % place)
         if place not in keep and path.is_file():
             try:

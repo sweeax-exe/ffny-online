@@ -429,10 +429,11 @@ def test_plan_patches_two_entries_of_a_fake_archive(tmp_path):
 
 # ------------------------------------------- battle/chooseF2/3/4: the community fighters' grid pictures
 
-def synthetic_choosef(frames=300, exports=("thumbAll", "emptyClip"), depth2_frame=None):
+def synthetic_choosef(frames=300, exports=("thumbAll", "emptyClip"), depth2_frame=None, baked37=False):
     """A tiny stand-in for chooseF2.apt/.const: a movie that exports a 300-frame sprite "thumbAll"
     (character 7) and an empty one-frame sprite "emptyClip" (character 9). Frame 249 of thumbAll has a
-    Stop action and a placement at depth 1, frame 250 a RemoveObject, every other frame no item."""
+    Stop action and a placement at depth 1, frame 250 a RemoveObject, every other frame no item. With
+    ``baked37`` frames 37 and 186 have the Stop action and the placement too (as the retail screens' Crow 2)."""
     const = bytearray(b"Apt constant file\0\0") + struct.pack("<III", 0x100, 0, 0x20)
     apt = bytearray(0x3000)
     movie, chars, exp, names = 0x100, 0x200, 0x300, 0x380
@@ -461,6 +462,9 @@ def synthetic_choosef(frames=300, exports=("thumbAll", "emptyClip"), depth2_fram
     if frames > 250:
         struct.pack_into("<II", apt, sprite_frames + 8 * 249, 2, arr249)
         struct.pack_into("<II", apt, sprite_frames + 8 * 250, 1, arr250)
+    if baked37:
+        struct.pack_into("<II", apt, sprite_frames + 8 * 37, 2, arr249)
+        struct.pack_into("<II", apt, sprite_frames + 8 * 186, 2, arr249)
     if depth2_frame is not None:
         other, arr = 0x5C0, 0x600
         struct.pack_into("<16I", apt, other, 3, 0x06, ap.CHOOSEF_DEPTH, 3, 0x3F800000, 0, 0, 0x3F800000, 0, 0,
@@ -472,10 +476,16 @@ def synthetic_choosef(frames=300, exports=("thumbAll", "emptyClip"), depth2_fram
 
 def test_choosef_frames_are_the_cursor_and_the_normal_frame_of_each_new_fighter():
     frames = dict(ap.choosef_frames())
-    assert len(frames) == 56 and min(frames) == 100 and max(frames) == 276
+    assert len(frames) == 96 and min(frames) == 5 and max(frames) == 276
     assert frames[100] == "thumbs/thumb100.swf" and frames[127] == "thumbs/thumb127.swf"
     assert frames[249] == "thumbs/thumb100off.swf" and frames[276] == "thumbs/thumb127off.swf"
-    assert not set(frames) & (set(range(0, 100)) | set(range(128, 249)) | {299})     # no stock frame
+    # the 20 low places (new_fighter_places.h): cursor frame feID, normal frame feID + 149
+    low = (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95, 96, 97)
+    assert all(frames[f] == "thumbs/thumb%d.swf" % f and frames[f + 149] == "thumbs/thumb%doff.swf" % f for f in low)
+    stock = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30, 31,
+             32, 33, 34, 35, 36, 38, 43, 44, 45, 46, 47, 48, 50, 51, 54, 55, 56, 57, 58, 59, 60, 61, 62, 64, 65, 67, 68,
+             69, 70, 71, 72, 73, 74, 75, 76, 77, 80, 81, 82, 83, 84, 85, 91, 92, 93, 98, 99}
+    assert not set(frames) & (stock | {f + 149 for f in stock} | {299})     # no stock fighter's frame
 
 
 def test_choosef_action_known_bytes():
@@ -498,7 +508,7 @@ def test_choosef_action_known_bytes():
 def test_choosef_actions_on_a_synthetic_movie():
     apt, const = synthetic_choosef()
     new, info = ap.build_choosef_apt(apt, const, 7)
-    assert "56 frame actions appended" in ap.verify_choosef_apt(apt, new, info)
+    assert "96 frame actions appended" in ap.verify_choosef_apt(apt, new, info)
     frames = info["frames"]
     diff = {i // 8 * 8 for i in range(len(apt)) if apt[i] != new[i]}
     assert diff == {frames + 8 * f for f, _ in ap.choosef_frames()}
@@ -522,6 +532,30 @@ def test_choosef_actions_on_a_synthetic_movie():
     bad = bytearray(new)
     bad[0x500] ^= 1
     with pytest.raises(ap.PatchError, match="changed unexpectedly"):
+        ap.verify_choosef_apt(apt, bytes(bad), info)
+
+
+def test_choosef_takes_out_a_baked_picture_at_a_place():
+    """Place 37 (an unused Crow 2 in the retail screens) has a picture in frames 37 and 186: the patch points
+    those frames at a RemoveObject of depth 1 instead of the placement and keeps their Stop action."""
+    apt, const = synthetic_choosef(baked37=True)
+    new, info = ap.build_choosef_apt(apt, const, 7)
+    assert "2 baked picture(s) removed" in ap.verify_choosef_apt(apt, new, info)
+    frames = info["frames"]
+    for frame, url in ((37, "thumbs/thumb37.swf"), (186, "thumbs/thumb37off.swf")):
+        n, arr = struct.unpack_from("<II", new, frames + 8 * frame)
+        items = struct.unpack_from("<3I", new, arr)
+        assert n == 3 and items[0] == 0x510 and struct.unpack_from("<II", new, items[1]) == (4, 1)
+        code = ap.u32(new, items[2] + 4)
+        assert [ap.cstr(new, i.vals[0]) for i in ap.decode(new, code) if i.op == 0xA1][-2] == url
+    # frame 249 (place 100's normal frame) keeps its own placement: it is no baked picture of a low place
+    n, arr = struct.unpack_from("<II", new, frames + 8 * 249)
+    assert struct.unpack_from("<2I", new, arr) == (0x510, 0x520)
+    # pointing the frame back at the placement is caught
+    bad = bytearray(new)
+    n, arr = struct.unpack_from("<II", new, frames + 8 * 37)
+    struct.pack_into("<I", bad, arr + 4, 0x600)
+    with pytest.raises(ap.PatchError):
         ap.verify_choosef_apt(apt, bytes(bad), info)
 
 
@@ -590,7 +624,9 @@ def test_real_archive_plan_verifies_and_leaves_the_source_alone(tmp_path):
     assert any(l.startswith("verify .apt: 25 function bodies") for l in plan.lines)
     assert any(l.startswith("verify cmtype.apt: tick clip appended") for l in plan.lines)
     for movie in ("chooseF2", "chooseF3", "chooseF4"):
-        assert any(l.startswith("verify %s.apt: 56 frame actions appended" % movie) for l in plan.lines)
+        assert any(l.startswith("verify %s.apt: 96 frame actions appended" % movie) for l in plan.lines)
+        # place 37: the retail Crow 2 picture in frames 37 and 186 is taken out
+        assert any(l.startswith("verify %s.apt: 96" % movie) and "2 baked picture(s) removed" in l for l in plan.lines)
     assert not any(l.startswith("note: screens/battle/") for l in plan.lines)
     assert len(plan.blobs) == 5
     assert plan.final_size == plan.blobs[-1][0] + len(plan.blobs[-1][1])

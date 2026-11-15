@@ -1,21 +1,21 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Copyright (c) 2026 sweeax-exe (FFNY Online) */
-/* New fighters: Character rows of assets/djv2.sod with a front-end ID of 100..127 (a content pack's
+/* New fighters: Character rows of assets/djv2.sod at a new fighter's place (new_fighter_places.h: 100..127 and 20
+ * free IDs below 98; a content pack's
  * new-fighter op, scripts/new-fighter.py for tests), each a copy of a stock fighter's row (the same coreID,
  * so the same moves) with its own name and model. docs/research/new-fighters.md. */
 #ifndef DEFJAM_NEW_FIGHTERS_H
 #define DEFJAM_NEW_FIGHTERS_H
 
 #include <stdint.h>
+#include "new_fighter_places.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define NEW_FIGHTER_FIRST 100
-#define NEW_FIGHTER_LAST 127    /* the match setup reads the fighter byte signed: feID 128 crashed the load
-                                 * (guest address 0xFFFFFFF0, 2026-11-12); 127 fights. docs/research/new-fighters.md */
-#define NEW_FIGHTER_MAX (NEW_FIGHTER_LAST - NEW_FIGHTER_FIRST + 1)
+/* NEW_FIGHTER_MAX places, new_fighter_place(fe_id): new_fighter_places.h. The match setup reads the fighter
+ * byte signed: feID 128 crashed the load (guest address 0xFFFFFFF0, 2026-11-12); 127 fights. */
 
 typedef struct NewFighter {
     int fe_id;

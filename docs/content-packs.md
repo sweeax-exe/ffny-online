@@ -86,13 +86,20 @@ template's, the model's symbols renamed) and whose one op `{"op": "new-fighter",
 the same text as Studio's `ffnystudio/newfighter.py`): a Character row in `djv2.sod` (the template's row with its
 own front-end ID, name and model; the template's coreID, so it fights like the template), the model's
 `entity.xml` entity, its `IntroExtro.xml` entry in `nis.viv`, its `CE_`/`CI_` camera banks in `v2ta.viv` and
-placeholder menu pictures in `screens.viv`. The front-end ID (100..127) is the **account service's place for the
-pack**, carried in the signed catalogue as the mod's `fighter_fe_id` and kept in the receipt: two players with the
+placeholder menu pictures in `screens.viv`. The front-end ID (one of 48 places: 100..127 and, from build 84, the 20
+low IDs 5 15 29 37 39 42 49 53 63 66 79 86 87 88 89 90 94 95 96 97; `newfighter.PLACES`, the game's
+`src/hooks/new_fighter_places.h`) is the **account service's place for the pack**, carried in the signed catalogue as the mod's `fighter_fe_id` and kept in the receipt: two players with the
 same packs build the same files whatever else they have. A synced new fighter without a place, or whose place or
 model is taken, is skipped. A pack installed by hand (or a Studio test) names its place in the op (`fe_id`).
 The catalogue with new fighters is `index-v2.json`; `index.json` is the same catalogue without them for launchers
 up to build 78, whose strict check would refuse the type and the key. Launchers of build 79 read `index-v2.json`;
-from the mod-bundles branch on the launcher reads `index-v3.json` (see "Packs of several mods" below). The three files share their
+from the mod-bundles branch on the launcher reads `index-v3.json` (see "Packs of several mods" below), and from build 84
+`index-v4.json`: the only one that lists a new fighter at a low place (its version has the capability
+`fighter-places-v2`, which the build-84 game offers, `src/hooks/pc_mods.cpp`); a launcher up to build 83 refuses a
+`fighter_fe_id` outside 100..127 and with it the whole catalogue. The account service gives low places only once
+build 84 is out (its `-fighter-places-switch`), in the order 100..123, the low places, 124..127. At place 37 the
+retail screens hold an unused Crow 2's pictures (`thumb37`, `l_MS_37_*`, `38_2p/3p`): the new fighter's copies
+replace them, and `scripts/apt-patch.py` takes Crow 2's baked grid picture out of frames 37 and 186. The files share their
 revisions: a cached revision of another file is not "changed without a new revision".
 
 A relay before this branch refuses the longer HELLO; it is sent only by a PC with `content` packs, so the relay

@@ -95,9 +95,39 @@ import into the copied files (Fighters page), unchanged: the copy only proves th
   index, and the load crashes (0xFFFFFFF0); 200 and 254 hang in `Game.GetMatchInfo`. So the grid thumbnail
   sprite (frames feID and feID + 150), the 80-entry unlock set and the 128-entry list array are not the limit:
   outfits use the template cell's thumbnail, the unlock set is not used, and 74 + 28 fits in 128.
-* **+20 cheaply**: the unused feIDs below 98 (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86..90, 94..97; leave out
-  40, 41, 52 and 78, the fighter.xml IDs the hub maps to Teck, Santos, O.E and Erick Sermon). Needs the hooks and
-  the hub to take a list of "new" IDs instead of the range 100..127. **48** in all, 122 of the list array's 128.
+* **Build 84: 48 places** (`src/hooks/new_fighter_places.h`): 100..127, then the 20 front-end IDs below 98 that
+  are free: **5 15 29 37 39 42 49 53 63 66 79 86 87 88 89 90 94 95 96 97**. Proof, per reader of a front-end ID
+  (2026-11-15, branch `feat/fighter-places-48`):
+  * **Database**: the 75 retail Character rows have feIDs 0-4, 6-14, 16-28, 30-36, 38, 43-48, 50, 51, 54-62, 64,
+    65, 67-77, 80-85, 91-93, 98 (`scripts/sod-characters.py`) [V]. Below 128 the rest is 40, 41, 52, 78 (the
+    fighter.xml IDs of Teck, Santos, O.E and Erick Sermon, which the hub's `k_battle_ids` and the relay's
+    `BattleIDs` turn into 85, 93, 92, 91: left out), 99 (a created fighter's byte: left out) and the 20 places.
+    75 rows + 48 = 123 of the 128-entry list array.
+  * **Match setup** (lifted code): the fighter byte `GD+0x1AAA+5*slot` is written by `sub_0001E700`
+    (`ControllerSetup` `sub_000558E0`/`sub_00055A20`, Story's `sub_000C1240`) and read by `sub_0001E820` (6
+    callers), `sub_0001E850` (`== 99`), `sub_0001EC50`, `sub_00020270`/`sub_00020525` (`== 99`). The compare
+    constants of these and of `GetMatchInfo` `sub_00046D20`, `StartGame` `sub_00046E40`, `ResetFighterList`
+    `sub_00047BC0` (56, 57, 59, 80..84, 98), `GetNextFighter` `sub_000480E0`, `sub_0003E170`, `sub_00065540`,
+    `sub_000871F0`, `sub_00087AF0` (87: a coreID, a new fighter keeps its template's), `sub_001A4D90`,
+    `sub_001A8180` and the unlock routines `sub_000158F0`/`sub_00016810`/`sub_00017000` hold none of the 20 IDs
+    but as loop bounds (5) [V, static]. **Story** sets an opponent's byte from a Character row's feID
+    (`sub_000BEE90` lookup of field `0xB03E16FC`) and the hero's as 99 (`sub_000C1240` at 0x0C1464): no Story
+    fight can name a place [V, static].
+  * **fighter.xml** has an entry for every ID up to 141; at the places only cut or placeholder ones (model EMPTY or
+    NULL, or a created fighter's archetype 86..97 `CP B__`..`CP K__`, which a created fighter's byte 99 carries
+    separately) and 37 "Crow2 (NO PLAYABLE)" (model V2IP_126B, which the Story cinematics load by name only).
+    Battle, the hub and the relay take a fighter from the database, never from fighter.xml [V].
+  * **Menus**: the select grid's `thumbAll` frames n and n + 149 of a low place place no picture, but 37 and 186
+    (Crow 2's): `scripts/apt-patch.py` points those two frames at a RemoveObject of depth 1 and loads the pack's
+    thumb as for 100..127. The screens have Crow 2's `thumb37`, `thumb37off`, `l_MS_37_2/3/4p`, `38_2p/3p`; the
+    composer replaces them with the new fighter's copies (`picture_copies(..., replace_existing=True)`); no other
+    place has a retail picture [V, the dump's screens.viv].
+  * **Hub, CPU, random, draft, ranked sets, crews, KOTH, stats**: all stock lists are the 75 database IDs
+    (`online_data.c` `k_sod_fighters`, the relay's `ValidFighters`), which hold no place; the hub's new-fighter
+    test is `new_fighter_is_place()`; online-art writes no `fighters/<place>.png` from the dump (no `p_CT_<n+1>`
+    at a place); My Stats keys a fighter by its ID and names it from the database [V].
+  * **Voice**: N = 40 + the place index, 040..067 for 100..127 (as before) and 068..087 for the low places; the
+    speech archive has 000..039 and 500..538 only [V].
 * **To 155 (feID 100..254)**: find every place that sign-extends the fighter byte on the setup and match path
   (`movsx` of the setup entry's byte +1: `Controller.ControllerSetup` `sub_000558E0`, the entry helpers
   `sub_0001E690`/`sub_0001E820`, `Game.GetMatchInfo` `sub_00046D20`, `Game.StartGame` `sub_00046E40`/`sub_00020270`,

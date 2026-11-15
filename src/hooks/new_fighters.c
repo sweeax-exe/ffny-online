@@ -6,7 +6,8 @@
  * The select screens (battle/chooseF2/3/4) build their grid from Game.ResetFighterList() and then one
  * Game.GetNextFighter() string per outfit, "CLOTH=<outfits of the cell>&FE_ID=<id>&LOCK=<1 unlocked>&U=..",
  * until "NO_RETURN". ResetFighterList (sub_00047BC0) lists the Character rows whose word 13 is 1, sorts them,
- * and groups Blaze 2/3, Sticky 2 and D-Mob 2/3 under their cells by hard-coded IDs. A new row (feID 100..127)
+ * and groups Blaze 2/3, Sticky 2 and D-Mob 2/3 under their cells by hard-coded IDs (80..84; it skips 98). A new
+ * row (at a new fighter's place, new_fighter_places.h: 100..127, then 20 free IDs below 98)
  * comes out as a cell of its own, locked (it is not in the profile's 80-entry fighter set), with the grid
  * thumbnail of frame feID, which is empty.
  *
@@ -97,7 +98,7 @@ static void load(void)
                 if (row + 4 * ROW_WORDS > size) continue;
                 fe = rd32(d + row + 4 * W_FE_ID);
                 core = rd32(d + row + 4 * W_CORE_ID);
-                if (fe >= NEW_FIGHTER_FIRST && fe <= NEW_FIGHTER_LAST) {
+                if (new_fighter_is_place((int)fe)) {
                     NewFighter *nf;
                     if (g_new_count >= NEW_FIGHTER_MAX) continue;
                     nf = &g_new[g_new_count++];
@@ -201,7 +202,7 @@ static const FighterGameplay *slot_gameplay(uint32_t gd, int s, int *fe_out)
     if (gd < 0x10000u) return NULL;
     fe = (int)MEM8(gd + GD_FIGHTER + 5u * (uint32_t)s);
     if (fe_out) *fe_out = fe;
-    if (fe < NEW_FIGHTER_FIRST || fe > NEW_FIGHTER_LAST) return NULL;
+    if (!new_fighter_is_place(fe)) return NULL;
     return new_fighter_gameplay(fe);
 }
 
@@ -369,7 +370,7 @@ static int voice_files_present(int voice)
     return g_voice_present[idx] > 0;
 }
 
-/* The own voice number of new fighter fe_id when its row asks for one (word 21 = 40 + feID - 100), else -1. */
+/* The own voice number of new fighter fe_id when its row asks for one (word 21 = 40 + its place index), else -1. */
 static int new_fighter_voice(int fe_id)
 {
     int i, n = fighter_voice_number(fe_id);
@@ -389,7 +390,7 @@ void new_fighters_voice(void)
     for (s = 0; s < 4; s++) {
         uint32_t row = SPEECH_ROWS + SPEECH_ROW_SIZE * (uint32_t)s, was = MEM32(row + SPEECH_VOICE);
         fe = (int)MEM8(gd + GD_FIGHTER + 5u * (uint32_t)s);
-        if (fe < NEW_FIGHTER_FIRST || fe > NEW_FIGHTER_LAST || MEM32(row) == 0xFFFFFFFFu) continue;
+        if (!new_fighter_is_place(fe) || MEM32(row) == 0xFFFFFFFFu) continue;
         voice = new_fighter_voice(fe);
         if (voice < 0 || (int)was == voice) continue;
         if ((int)MEM32(row) != new_fighter_core(fe)) {
@@ -493,7 +494,7 @@ static void read_guest(uint32_t p, char *out, int size)
 static void rebuild_list(void)
 {
     char raw[LIST_MAX][TEXT_MAX];
-    int n = 0, i, k, fe_place, moved = 0;
+    int n = 0, i, k, place, fe_place, moved = 0;
     uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp;
     double fp[8];
     int fp_top = g_fp_top;
@@ -517,11 +518,12 @@ static void rebuild_list(void)
     g_list_n = 0;
     for (i = 0; i < n && g_list_n < LIST_MAX; i++) {
         int fe = field(raw[i], "FE_ID");
-        if (fe >= NEW_FIGHTER_FIRST && fe <= NEW_FIGHTER_LAST) continue;     /* placed below */
+        if (new_fighter_is_place(fe)) continue;     /* placed below */
         snprintf(g_list[g_list_n++], TEXT_MAX, "%s", raw[i]);
     }
-    for (fe_place = NEW_FIGHTER_FIRST; fe_place <= NEW_FIGHTER_LAST && g_list_n < LIST_MAX; fe_place++) {
+    for (place = 0; place < NEW_FIGHTER_MAX && g_list_n < LIST_MAX; place++) {     /* 100..127, then the low IDs */
         char add[TEXT_MAX] = "";
+        fe_place = new_fighter_place_id(place);
         for (k = 0; k < g_new_count && g_new[k].fe_id != fe_place; k++) {}
         if (k >= g_new_count) continue;
         for (i = 0; i < n; i++)
