@@ -3664,6 +3664,7 @@ bool g_online = false;              // the overlay shows the online screens (the
 bool g_exit = false;                // the overlay shows the main menu's QUIT FFNY ONLINE? prompt
 std::atomic<bool> g_exit_req{false};    // ESC or a click on the EXIT chip (window thread)
 bool g_ms = false;                  // the overlay shows MILESTONES (the user-ID screen, the Story crib)
+bool g_skin = false;                // build 85: the overlay shows the skin window over a select screen
 std::atomic<bool> g_ms_req{false};      // a click on the MILESTONES chip (window thread)
 std::atomic<int> g_menu_eats_back{0};   // the title reads no BACK (VIEW) on the main menu (game thread)
 bool g_exit_view_down = true;       // the pad's VIEW was held last frame (true: a held one never opens it)
@@ -3782,7 +3783,7 @@ void set_open(bool open)
     if (g_open.load() == open) return;
     g_open = open;
     g_just_opened = open;
-    if (!open) g_online = g_exit = g_ms = false;
+    if (!open) g_online = g_exit = g_ms = g_skin = false;
     if (open) { g_hold_input = false; xbox_HostInputSetUiActive(1); }
     else g_hold_input = true;           // released in release_input_when_idle
 #if !defined(_WIN32)
@@ -4508,7 +4509,11 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         g_menu_eats_back = (online_screen::exit_wanted() || ms_here) && !ptt ? 1 : 0;
         bool req = g_exit_req.exchange(false);
         bool ms_req = g_ms_req.exchange(false);
-        if (!g_open.load() && !g_note.open && !toggled && online_screen::exit_wanted() &&
+        // build 85: a pick of a fighter with skins on the game's own select screen opens the skin window
+        if (!g_open.load() && !g_note.open && !toggled && online_screen::take_skin_window_request()) {
+            set_open(true);
+            g_skin = true;
+        } else if (!g_open.load() && !g_note.open && !toggled && online_screen::exit_wanted() &&
             (req || view_press || online_screen::take_exit_test_request())) {
             set_open(true);
             g_exit = true;
@@ -4618,6 +4623,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         if (!online_screen::draw(io.DisplaySize)) close_request = true;
     } else if (g_ms) {
         if (g_note.open ? false : !online_screen::draw_milestones(io.DisplaySize)) close_request = true;
+    } else if (g_skin) {
+        if (!g_note.open && online_screen::draw_skin_window(io.DisplaySize)) close_request = true;
     } else if (g_exit) {
         int answer = g_note.open ? 0 : online_screen::draw_exit_prompt(io.DisplaySize);
         if (answer == 2 && g_window) {

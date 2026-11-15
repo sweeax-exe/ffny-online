@@ -47,6 +47,7 @@
 #include "cheats.h"
 #include "online_guard.h"
 #include "hooks/new_fighters.h"
+#include "hooks/fighter_skins.h"
 
 extern void sub_000158F0(void);
 
@@ -228,6 +229,7 @@ static void start_game_wrapper(void)
         real();
     cheats_start_game_done(gd);
     new_fighters_start_game_done(gd);   /* a new fighter's own stats and Blazins (src/hooks/new_fighters.c) */
+    fighter_skins_start_game_done(gd);  /* a skin's model in its slot (src/hooks/fighter_skins.c) */
 }
 
 /* Always wrapped: the Story hero cheat can be turned on in the overlay at any time. Without a

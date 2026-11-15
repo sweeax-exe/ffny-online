@@ -57,6 +57,7 @@
 #include "pc_content.h"
 #include "pc_mods.h"
 #include "fight_hud.h"
+#include "fighter_skins.h"
 #include "start_countdown.h"
 #include "detmath/detmath.h"
 
@@ -109,6 +110,8 @@ int netplay_hill_watch_quiet(void) { return 0; }
 int netplay_last_match_key(char *out, int size) { if (size > 0) out[0] = 0; return 0; }
 void netplay_lobby_settings(const NetRoomSettings *s) { (void)s; }
 void netplay_lobby_ready(int r, int f) { (void)r; (void)f; }
+void netplay_lobby_ready_skin(int r, int f, int k) { (void)r; (void)f; (void)k; }
+int netplay_lobby_skins(void) { return 0; }
 void netplay_lobby_vote(int c) { (void)c; }
 void netplay_lobby_leave(void) {}
 void netplay_lobby_yield(void) {}
@@ -309,6 +312,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                  * players of the community Android port where the relay allows it (setting
                                  * [online] crossplay_android, default off; docs/research/crossplay-optin.md) */
 #define CAPS_XPLAY_OPT (recomp_settings_get("online", "crossplay_android", 0) ? CAPS_XPLAY_ANDROID : 0u) /* sent only while on */
+#define CAPS_SKINS    4194304u  /* 1 << 22 (build 85), both ways: READY's third byte is the player's skin of a stock fighter,
+                                 * and START (WATCH, WATCHLATE) ends with the players' skins (src/hooks/fighter_skins.c) */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -3736,6 +3741,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     uint32_t seed;
     int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred, late = watching == 2, cpu = NETPLAY_CPU_HARD;
     int hill_watch = watching == 3, leaving = 0;
+    int skin_of_slot[ROOMSLOTS];
+    memset(skin_of_slot, 0, sizeof(skin_of_slot));
     if (len < 4) return;
     if (late || hill_watch) watching = 1;   /* T_WATCHLATE: watched like a WATCH, from the players' next fight */
     seed = get32(b);
@@ -3764,6 +3771,14 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         if (r.i < r.n) {    /* build 67: the CPU fighters' level, after the created fighters (absent: Hard) */
             cpu = rd8(&r);
             if (r.bad || cpu > NETPLAY_CPU_EASY) return;
+        }
+        if (r.i < r.n) {    /* build 85: the players' skins, after the CPU level (relays answering CAPS_SKINS) */
+            int ns = rd8(&r), k;
+            for (k = 0; k < ns && !r.bad; k++) {
+                int s = rd8(&r), v = rd8(&r);
+                if (s < ROOMSLOTS && v <= FIGHTER_SKINS_PER) skin_of_slot[s] = v;
+            }
+            if (r.bad) return;
         }
         if (!(N.start_seed && seed == N.start_seed)) {
             EnterCriticalSection(&g_cs);
@@ -3798,6 +3813,9 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         N.start_slots[i] = slots[i];
         m.fighter[i] = fighters[i];
         m.pad[i] = i;
+        /* build 85: the look START gives the player; every PC of the match has the same skins (the room's content
+         * print), and a skin this PC does not know plays the stock look (fighter_skins_set_slot) */
+        m.skin[i] = slots[i] < ROOMSLOTS ? skin_of_slot[slots[i]] : 0;
     }
     if (pos < 0 && !watching) return;
     if (watching) pos = -1;         /* spectator mode: no position, every player is remote */
@@ -3935,6 +3953,9 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         int at = 0;
         for (i = 0; i < count && at < (int)sizeof(list) - 6; i++) at += snprintf(list + at, sizeof(list) - at, " %d", fighters[i]);
         fprintf(stderr, "[NETPLAY] START: fighters%s\n", list);
+        for (i = 0, at = 0; i < count && at < (int)sizeof(list) - 6; i++) at += snprintf(list + at, sizeof(list) - at, " %d", m.skin[i]);
+        for (i = 0; i < count && !m.skin[i]; i++) {}
+        if (i < count) fprintf(stderr, "[SKINS] START: skins%s\n", list);
     }
     if (late) {
         /* The players fight, or sit on their results, and choose Rematch there: no new START comes
@@ -4538,7 +4559,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
-                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_XPLAY_OPT | CAPS_HILL_CREATED |
+                              CAPS_SKINS); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -5702,9 +5724,36 @@ void netplay_lobby_settings(const NetRoomSettings *settings)
 
 void netplay_lobby_ready(int ready, int fighter)
 {
-    uint8_t b[2] = { (uint8_t)(ready ? 1 : 0), (uint8_t)fighter };
+    /* build 85: the look the hub's last pick took with this fighter (its skin window), when this PC has that skin;
+     * RECOMP_TEST_SKIN=<n> (tests) plays skin n of any fighter that has one */
+    const char *test = getenv("RECOMP_TEST_SKIN");
+    int skin = 0;
+    if (fighter >= 0 && fighter < 98) {
+        if (test && *test) skin = atoi(test);
+        else if (recomp_settings_get("online", "fighter", -1) == fighter) skin = recomp_settings_get("online", "fighter_skin", 0);
+        if (skin && !fighter_skin_get(fighter, skin, NULL)) skin = 0;
+    }
+    netplay_lobby_ready_skin(ready, fighter, skin);
+}
+
+int netplay_lobby_skins(void)
+{
+    int on;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     EnterCriticalSection(&g_cs);
+    on = relay_has(CAPS_SKINS);
+    LeaveCriticalSection(&g_cs);
+    return on;
+}
+
+void netplay_lobby_ready_skin(int ready, int fighter, int skin)
+{
+    /* build 85: the skin as a third byte, only to a relay that answered CAPS_SKINS (an older one reads two) */
+    uint8_t b[3] = { (uint8_t)(ready ? 1 : 0), (uint8_t)fighter, (uint8_t)(skin > 0 && skin <= FIGHTER_SKINS_PER ? skin : 0) };
+    int len = 2;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    if (relay_has(CAPS_SKINS) && fighter >= 0 && fighter < 0xFF) len = 3;
     if (N.roomv.in_room && NETPLAY_IS_HILL(N.roomv.settings.mode) && fighter >= 0 && fighter < 0xFF) {
         /* build 73: kept until the room has it (hill_pick_tick), and the fighter of this PC's next ready */
         if (N.koth_pick != fighter) N.koth_pick_tries = 0;
@@ -5712,7 +5761,8 @@ void netplay_lobby_ready(int ready, int fighter)
         N.koth_pick_sent = GetTickCount64();
     }
     LeaveCriticalSection(&g_cs);
-    request(T_READY, b, 2);
+    if (len == 3 && b[2]) fprintf(stderr, "[SKINS] READY: fighter %d, skin %d\n", fighter, b[2]);
+    request(T_READY, b, len);
 }
 
 void netplay_lobby_vote(int choice)

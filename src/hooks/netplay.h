@@ -366,6 +366,10 @@ int netplay_hill_watch_quiet(void);
 int netplay_last_match_key(char *out, int size);
 void netplay_lobby_settings(const NetRoomSettings *settings);   /* host only */
 void netplay_lobby_ready(int ready, int fighter);
+/* Build 85: READY with the player's skin of a stock fighter (fighter_skins.h; 0 Default), sent as READY's third byte
+ * to a relay that answered CAPS_SKINS (else as netplay_lobby_ready). netplay_lobby_skins: the relay takes skins. */
+void netplay_lobby_ready_skin(int ready, int fighter, int skin);
+int netplay_lobby_skins(void);
 void netplay_lobby_vote(int choice);
 void netplay_lobby_leave(void);
 /* King of the Hill: give up this PC's place in the line (to the back; a king gives up the crown).

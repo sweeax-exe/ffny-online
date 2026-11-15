@@ -43,7 +43,22 @@ typedef struct PcContentPack {
     int fighter_fe_id;      /* a new fighter's front-end ID (100..127), 0 none */
     int venue_fe_id;        /* build 82: a new venue's front-end ID (28..63), 0 none */
     char reviewed[16];      /* build 82: the day the team accepted this version, YYYY-MM-DD ("" unknown) */
+    int skin;               /* build 85: a new fighter the team accepted as a skin (fighter_mode=skin) */
+    int skin_of;            /* ... the stock fighter it is an outfit of (its front-end ID), -1 none */
 } PcContentPack;
+
+/* Build 85, skins: a new-fighter pack the team accepted as an extra outfit of a stock fighter (same gameplay, new
+ * look; no place, no Character row). The launcher composed its model files and lists it in content-files/files.ini
+ * ("skin=<pack id>|<template feID>|<model>|<name>"), in catalogue order: the skins of one template are numbered
+ * from 1 in that order (0 is the template's own look), the same on every PC with the same content print. */
+#define PC_SKIN_MAX 64
+typedef struct PcContentSkin {
+    char id[96];            /* the pack id */
+    int template_fe_id;
+    char model[16];         /* V2IP_7xxA */
+    char name[48];          /* the name in the game */
+} PcContentSkin;
+int pc_content_skins(PcContentSkin *out, int max);
 
 /* The installed catalogue packs in catalogue order (re-read on every call; content.ini is small).
  * Returns the count (at most max). */

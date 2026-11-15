@@ -58,6 +58,7 @@
 #include "fight_hud_rules.h"
 #include "start_countdown.h"
 #include "milestones.h"
+#include "fighter_skins.h"
 #include "pc_content.h"
 #include "pc_mods.h"
 #include "music_library.h"
@@ -914,6 +915,11 @@ struct State {
     int name_pos = 0, name_cp = -1;
     int fighters_cp = -1;           // FIGHTERS: the selected card's cp_cards index, -1 a roster fighter
     bool random_pick = false;       // FIGHTERS: the last pick was the RANDOM card (the hub says so)
+    // build 85: the skin window over CHOOSE FIGHTER (skins_ui.inc): open, for which fighter, its choice, since when;
+    // pick_skin: the look of the last pick (0 Default; RANDOM is always Default)
+    bool skin_open = false;
+    int skin_fe = -1, skin_sel = 0, pick_skin = 0;
+    ULONGLONG skin_opened = 0;
     uint32_t watch_hidden = 0;      // King of the Hill: the fight whose watching screen B closed
     unsigned long long give_up_at = 0, lb_since = 0;    // King of the Hill: LB gave up the spot; LB held since
     bool lb_long_done = false;      // the long LB press has acted
@@ -2927,8 +2933,13 @@ int grid_pos(const std::vector<OnlineFighter> &list, int fighter)
     return at;
 }
 
-void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen, int *fighter)
+#include "skins_ui.inc"
+
+void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chosen, int *fighter)
 {
+    // build 85: while the skin window is open the grid takes no input (the window does, below)
+    Pad idle = {};
+    const Pad &pad = S.skin_open ? idle : pad_in;
     const auto &list = grid_fighters();
     int n = (int)list.size();
     const int cols = 7, rows = 4;
@@ -3050,10 +3061,35 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad, bool *chosen,
         }
         int pick_cp = pick < (int)g_grid_cp.size() ? g_grid_cp[pick] : -1;
         if (pick_cp >= 0) cp_choose(pick_cp);   // which created fighter: remembered, and sent to the relay
-        *chosen = true;
-        *fighter = list[pick].id;
-        if (!S.random_pick) pc_content_picked_fighter(*fighter);     // build 82: its NEW badge goes
-        if (S.random_pick) S.fighter_sel = pick;    // back here later: on the fighter it drew
+        S.pick_skin = 0;
+        if (!S.random_pick && pick_cp < 0 && list[pick].id < 98 && fighter_skins_count(list[pick].id) > 0) {
+            // build 85: a fighter with skins: the skin window first, on the look played last with it
+            S.skin_open = true;
+            S.skin_fe = list[pick].id;
+            S.skin_sel = fighter_skins_remembered(S.skin_fe);
+            S.skin_opened = GetTickCount64();
+            { Pad none = {}; skin_test_keys(none, true); }
+            fprintf(stderr, "[SKINS] hub: %s has %d skin(s): the skin window, on %d\n", list[pick].name,
+                    fighter_skins_count(S.skin_fe), S.skin_sel);
+        } else {
+            *chosen = true;
+            *fighter = list[pick].id;
+            if (!S.random_pick) pc_content_picked_fighter(*fighter);     // build 82: its NEW badge goes
+            if (S.random_pick) S.fighter_sel = pick;    // back here later: on the fighter it drew
+        }
+    }
+    if (S.skin_open) {
+        // the press that opened it must not take the first look at once
+        int r = skin_window(dl, f, GetTickCount64() - S.skin_opened > 250 ? pad_in : idle, S.skin_fe, &S.skin_sel);
+        if (r == 1) {
+            S.pick_skin = S.skin_sel;
+            fighter_skins_remember(S.skin_fe, S.skin_sel);
+            *chosen = true;
+            *fighter = S.skin_fe;
+            pc_content_picked_fighter(*fighter);
+            fprintf(stderr, "[SKINS] hub: feID %d with skin %d\n", S.skin_fe, S.skin_sel);
+        }
+        if (r) S.skin_open = false;
     }
     // BACK from a ranked search's pick goes back to the mode chooser, not to the online menu (a player
     // who wanted another fighter for ranked landed on the hub, 2026-11-03)
@@ -4602,6 +4638,8 @@ void gallery_step()
                                          "room-special", "vote-team",
                                          // build 67: RANDOM in the grid and in the vote
                                          "fighters-random", "vote-random",
+                                         // build 85: the skin window over CHOOSE FIGHTER (a fighter with skins, else none)
+                                         "fighters-skins",
                                          "ranked", "voice", "music", "music-own", "music-empty", "stats", "stats-1v1", "players", "fighters",
                                          // build 47: every server's players (All servers)
                                          "players-all",
@@ -4806,6 +4844,7 @@ void gallery_step()
     G.results_slots = 0;
     G.maint_secs = -1;
     QW.open = QW.gallery = false;
+    S.skin_open = false;                // build 85: the skin window only on its own page
     G.rollback = G.rb_must = false;
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
     G.crew = NetCrew();
@@ -4926,6 +4965,21 @@ void gallery_step()
     else if (p == "players") S.page = PLAYERS;
     else if (p == "players-all") { S.page = PLAYERS; G.choice = NETCHOICE_ALL; }
     else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
+    else if (p == "fighters-skins") {   // build 85: the first fighter of the grid that has skins, its window open
+        S.page = FIGHTERS;
+        S.fighter_top = 0;
+        const auto &list = grid_fighters();
+        for (int i = 0; i < (int)list.size(); i++)
+            if (list[i].id >= 0 && list[i].id < 98 && fighter_skins_count(list[i].id) > 0) {
+                S.fighter_sel = i;
+                S.fighter_top = i / 7 > 3 ? i / 7 - 3 : 0;
+                S.skin_open = true;
+                S.skin_fe = list[i].id;
+                S.skin_sel = 1;
+                S.skin_opened = GetTickCount64();
+                break;
+            }
+    }
     else if (p == "fighters-rules") {   // a room of stock fighters and no banned tier: two fighters blocked, one chosen
         S.page = FIGHTERS;
         G.room = sample_room(0, 2, 2);
@@ -5356,6 +5410,41 @@ bool exit_chip_at(float x, float y)
 {
     if (now_ms() - g_exit_chip_ms > 300) return false;
     return x >= g_exit_chip.x && x < g_exit_chip.z && y >= g_exit_chip.y && y < g_exit_chip.w;
+}
+
+// ---- the skin window over the game's own select screens (build 85, skins_ui.inc) ----
+
+static struct { int slot, fe, sel; ULONGLONG opened; } g_sw;
+
+bool take_skin_window_request()
+{
+    int slot, fe;
+    if (!fighter_skins_take_window(&slot, &fe)) return false;
+    g_sw.slot = slot;
+    g_sw.fe = fe;
+    g_sw.sel = fighter_skins_remembered(fe);
+    g_sw.opened = GetTickCount64();
+    { Pad none = {}; skin_test_keys(none, true); }
+    fprintf(stderr, "[SKINS] skin window: slot %d, feID %d, %d skin(s), on %d\n", slot, fe, fighter_skins_count(fe), g_sw.sel);
+    return true;
+}
+
+bool draw_skin_window(ImVec2 display)
+{
+    Frame f = menu_frame(display);
+    Pad idle = {};
+    Pad pad = GetTickCount64() - g_sw.opened > 300 ? read_pad() : idle;    // not the A that picked the fighter
+    int r = skin_window(ImGui::GetForegroundDrawList(), f, pad, g_sw.fe, &g_sw.sel);
+    if (!r) return false;
+    if (r == 1) {
+        fighter_skins_set_slot(g_sw.slot, g_sw.fe, g_sw.sel);
+        fighter_skins_remember(g_sw.fe, g_sw.sel);
+        fprintf(stderr, "[SKINS] skin window: slot %d takes %s\n", g_sw.slot, g_sw.sel ? "a skin" : "Default");
+    } else {
+        fighter_skins_set_slot(g_sw.slot, g_sw.fe, 0);
+        fprintf(stderr, "[SKINS] skin window: back (slot %d keeps the fighter's own look)\n", g_sw.slot);
+    }
+    return true;
 }
 
 bool take_exit_test_request()
@@ -6008,6 +6097,7 @@ bool draw_pages(ImVec2 display)
         draw_fighters(dl, f, pad, &chosen, &fighter);
         if (chosen) {
             recomp_settings_set("online", "fighter", fighter);
+            recomp_settings_set("online", "fighter_skin", S.pick_skin);     // build 85: READY's skin (netplay.c)
             if (S.ranked_pick && !room.in_room) {
                 ranked_search(fighter);
                 S.page = RANKED;
@@ -6020,7 +6110,10 @@ bool draw_pages(ImVec2 display)
                         if (room.players[i].slot == room.you) ready = room.players[i].ready;
                     netplay_lobby_ready(ready, fighter);
                 }
+                FighterSkin look;
+                bool skinned = S.pick_skin > 0 && fighter_skin_get(fighter, S.pick_skin, &look);
                 say((S.random_pick ? std::string("RANDOM: ") : std::string()) + fighter_label(fighter) +
+                    (skinned ? std::string(" (") + look.name + ")" : std::string()) +
                     (room.in_room && NETPLAY_IS_HILL(room.settings.mode) ? " it is, from your next fight." : " it is."));
                 S.page = HUB;
             }

@@ -172,6 +172,7 @@ int pc_content_list(PcContentPack *out, int max)
             if (n >= max || !valid_id(s + 6)) continue;
             cur = n++;
             memset(&out[cur], 0, sizeof out[cur]);
+            out[cur].skin_of = -1;
             snprintf(out[cur].id, sizeof out[cur].id, "%s", s + 6);
             continue;
         }
@@ -191,6 +192,8 @@ int pc_content_list(PcContentPack *out, int max)
             else if (!strcmp(k, "bytes")) p->bytes = atoll(v);
             else if (!strcmp(k, "fighter_fe_id")) p->fighter_fe_id = atoi(v);
             else if (!strcmp(k, "venue_fe_id")) p->venue_fe_id = atoi(v);
+            else if (!strcmp(k, "fighter_mode")) p->skin = !strcmp(v, "skin");
+            else if (!strcmp(k, "skin_of")) p->skin_of = atoi(v);
             CONTENT_TEXT(reviewed);
 #undef CONTENT_TEXT
         }
@@ -234,10 +237,58 @@ uint32_t pc_content_print(void)
             for (c = parts[k]; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
             h = (h ^ (uint8_t)(k < 2 ? 0 : '\n')) * 16777619u;
         }
+        if (packs[i].skin) {    /* build 85: a skin is another look than the same pack as a fighter */
+            const char *c;
+            for (c = "skin\n"; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
+        }
         any = 1;
     }
     if (!any) return 0;
     return h ? h : 1;
+}
+
+/* ---- build 85: skins ---- */
+
+int pc_content_skins(PcContentSkin *out, int max)
+{
+    static PcContentPack packs[PC_CONTENT_MAX];
+    char path[1024], line[1200];
+    const char *root = data_root();
+    FILE *f;
+    int n = 0, np, in_section = 0;
+    if (!root || max <= 0) return 0;
+    np = pc_content_list(packs, PC_CONTENT_MAX);
+    snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "content-files" HOST_SEP "files.ini", root);
+    if (!(f = fopen(path, "rb"))) return 0;
+    while (fgets(line, sizeof line, f) && n < max) {
+        char *s = trim(line), *fields[4], *q;
+        int k, i, ok = 0;
+        if (*s == '[') { in_section = !strcmp(s, "[content-files]"); continue; }
+        if (!in_section || strncmp(s, "skin=", 5)) continue;
+        q = s + 5;
+        for (k = 0; k < 4; k++) {
+            fields[k] = q;
+            q = k < 3 ? strchr(q, '|') : NULL;
+            if (k < 3 && !q) break;
+            if (q) *q++ = 0;
+        }
+        if (k < 4 || !valid_id(fields[0])) continue;
+        /* only a skin of an installed pack the composition applied, which content.ini calls a skin of the same
+         * template (a pack the launcher installed by hand never is one) */
+        for (i = 0; i < np; i++)
+            if (!strcmp(packs[i].id, fields[0]) && packs[i].skin && packs[i].applied &&
+                packs[i].skin_of == atoi(fields[1]))
+                ok = 1;
+        if (!ok || strlen(fields[2]) != 9 || strncmp(fields[2], "V2IP_7", 6)) continue;
+        memset(&out[n], 0, sizeof out[n]);
+        snprintf(out[n].id, sizeof out[n].id, "%s", fields[0]);
+        out[n].template_fe_id = atoi(fields[1]);
+        snprintf(out[n].model, sizeof out[n].model, "%s", fields[2]);
+        snprintf(out[n].name, sizeof out[n].name, "%s", trim(fields[3]));
+        n++;
+    }
+    fclose(f);
+    return n;
 }
 
 /* ---- build 82: new community content is out; the NEW badge ---- */

@@ -19,6 +19,7 @@
 #include <string.h>
 #include "recomp/gen/recomp_types.h"
 #include "automatch.h"
+#include "fighter_skins.h"
 #include "netplay.h"
 #include "online_screen.h"
 #include "created_fighter.h"
@@ -80,7 +81,7 @@ void automatch_request(const AutoMatch *m)
 
 int automatch_pending(void) { return g_armed || g_running; }
 
-/* "type=0,venue=1,f0=55,p0=0,f1=22,p1=-1" (pads: -1 is the CPU) -> a request. */
+/* "type=0,venue=1,f0=55,p0=0,f1=22,p1=-1" (pads: -1 is the CPU; s0=1: slot 0 plays skin 1) -> a request. */
 int automatch_request_text(const char *e)
 {
     AutoMatch m;
@@ -97,6 +98,7 @@ int automatch_request_text(const char *e)
             else if (!strcmp(key, "venue")) m.venue = value;
             else if (key[0] == 'f' && key[1] >= '0' && key[1] <= '3') m.fighter[key[1] - '0'] = value;
             else if (key[0] == 'p' && key[1] >= '0' && key[1] <= '3') m.pad[key[1] - '0'] = value;
+            else if (key[0] == 's' && key[1] >= '0' && key[1] <= '3') m.skin[key[1] - '0'] = value;     /* build 85 */
             else if (key[0] == 'u' && key[1] >= '0' && key[1] <= '3' && value >= 0 && value < 16) user[key[1] - '0'] = value + 1;
             if (key[0] == 'f' && key[1] >= '0' && key[1] <= '3' && key[1] - '0' + 1 > m.count) m.count = key[1] - '0' + 1;
         }
@@ -255,6 +257,9 @@ static void run_sequence(void)
         }
         call("Controller.ControllerSetup(%d,%d,%d,%d)", i, m->pad[i], fighter, i);
     }
+    /* build 85: each fighter's skin (START's, or a test's), after the set-up calls that reset them */
+    fighter_skins_clear_slots();
+    for (i = 0; i < m->count; i++) fighter_skins_set_slot(i, m->fighter[i], m->pad[i] >= 0 ? m->skin[i] : 0);
     call("Game.ResetVenueList(0)");
     call("Game.ChooseVenue(%d)", m->venue);
     call("Controller.GetCustomControlMap()");
