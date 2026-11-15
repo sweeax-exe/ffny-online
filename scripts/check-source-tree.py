@@ -20,6 +20,18 @@ BLOCKED_ROOTS = {'game', 'assets', 'extracted', 'logs', 'build', 'out', 'save', 
 # D58: the owner explicitly approved these two README visuals for publication.
 # Exact hashes prevent the exception from admitting other captures or game data.
 APPROVED_README_MEDIA = {
+    # 2026-11-15, FFNY Online's owner: the FFNY Studio web page's pictures (our own NY city renders and
+    # Studio screenshots with the test fighter Shade 2; no third-party characters or brands).
+    'website/media/studio/blender-scene.webp': 'b9879f88b25f35fc4f6dd4a5133fd594a0011809d6567f5c0a9790375a14d6e8',
+    'website/media/studio/clothing-colour.webp': '12f77c66d7e505fe8f9d2e267644d442c1a380bcd2930a907cc24db9d70ab74d',
+    'website/media/studio/fighter-import.webp': '067be64a567696664661931b119fca4db2d65478a45245c6fe5ec4a1187ea6d1',
+    'website/media/studio/hero-nyc.webp': '7df942d27f14bfeafa6727dc59c1da45fbc3181e1ac7990fa27664b9944c4a23',
+    'website/media/studio/map-editor.webp': '90c38d1d182cd5530bac611dacb941c49f49bc78d868a5dd743ffb86580b2ab8',
+    'website/media/studio/og-studio.jpg': '12eeecd1f54c9d697cd12adfaf7582aca92375047aa1f2ba7ecd717733afd2f0',
+    'website/media/studio/pack-review.webp': 'b60032a62e6c97719975dc086708c17bf376a38ce4d9215ac066da3aad34712b',
+    'website/media/studio/test-fight.webp': '663072810f333e98c57229910627be8526fcb31238626d759171282d9606a2aa',
+    'website/media/studio/use-in-game.webp': '863ac426a4f99091c3aba3346f0b41d7d68d2c00e15afdc30079a885256af36a',
+    'website/media/studio/voice-lines.webp': '168c6960384d804bef61a4a88456788b521271d7b6d52e113d91e0e98050110e',
     'docs/media/fight-screenshot.png': '9804400a61948f0d562809cf46f3da09a2aa310f4b1b37f98c167b92c8fad434',
     'docs/media/fight-gameplay.gif': '77012147d4fe73227222c988610dba82510df1abad4f2405f1164935920b4277',
     # 2026-10-09, at the owner's request: the port's own setup wizard and launcher. No game artwork.
