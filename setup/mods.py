@@ -1044,14 +1044,31 @@ class Manager:
                             composed=(folder / 'install.json').is_file(), online_ok=local_online_safe(folder)))
         return out
 
+    def catalogue_places(self):
+        """The new-fighter places of the cached signed catalogue (a live pack this PC has not synced yet holds its
+        place too); empty when there is none or it does not verify."""
+        try:
+            return {m['fighter_fe_id'] for m in self.trusted()['mods'] if isinstance(m.get('fighter_fe_id'), int)}
+        except (ValueError, OSError, KeyError, TypeError):
+            return set()
+
     def compose(self):
         """Compose the fighter-body, clothing and venue packs into <data>/mod-manager/content-files (the game
-        serves them). Holds the runtime lock, so never while the game runs."""
+        serves them). Holds the runtime lock, so never while the game runs. A player's own new fighter whose place
+        a community fighter has now moves to a free one (content_compose.settle_places); its local.json keeps the
+        new place, so the next compose and the Content page agree."""
         with file_lock(self.root / 'runtime.lock'):
             self.progress('Preparing community content')
             off = content_compose.read_off(self.data)
             packs = self.composed_packs() + [p for p in self.local_packs() if p['composed'] and p['id'] not in off]
-            result = content_compose.compose(self.data, self.game, packs, root=self.root, log=lambda text: None)
+            moved = []
+            result = content_compose.compose(self.data, self.game, packs, root=self.root, log=moved.append,
+                                             reserved=self.catalogue_places())
+            if any([self.keep_local_place(p) for p in packs if p.get('local')]):
+                self.write_content(self.content_revision())     # the Content page and the game: the new place
+            for line in moved:
+                if 'moved from place' in line or 'left out' in line:
+                    self.progress(line.replace('[compose] ', ''))
         skipped = '; '.join('%s: %s' % s for s in result['skipped'] + result.get('lang_skipped', []))
         languages = sorted({i for i, _ in result.get('lang_files', [])})
         with_lang = ' (also with %s)' % ', '.join(languages) if languages else ''
@@ -1062,6 +1079,19 @@ class Manager:
                                                                                     len(result['files']), with_lang)
         self.progress(text + ('. Not applied: ' + skipped if skipped else ''))
         return result
+
+    def keep_local_place(self, p):
+        """Write a player's own pack's (new) place into its local.json when compose moved it; True when it did."""
+        path = Path(p['folder']) / LOCAL_FILE
+        try:
+            info = read_json(path, None, 64 * 1024)
+        except (ValueError, OSError):
+            return False
+        place = p.get('fighter_fe_id') or 0
+        if isinstance(info, dict) and place and info.get('fighter_fe_id') != place and not linked(path):
+            atomic_json(path, dict(info, fighter_fe_id=place))
+            return True
+        return False
 
     def compose_quietly(self, problems):
         try:
