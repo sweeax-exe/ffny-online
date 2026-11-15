@@ -137,3 +137,12 @@ def test_incomplete_transaction_blocks_game_even_without_launcher(bridge,tmp_pat
     root=tmp_path/'mod-manager';root.mkdir();(root/'journal.json').write_text('{}')
     result=subprocess.run([str(bridge),str(tmp_path),'hold'],capture_output=True,text=True,timeout=10)
     assert result.returncode==2
+
+
+def test_launcher_offers_the_voice_capability():
+    """Build 80 composes new fighters' voice banks; the account service marks those packs voice-v1, so the
+    launcher must offer it or every voiced pack is skipped by the sync (found Nov 13)."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / 'src' / 'hooks' / 'pc_mods.cpp').read_text(encoding='utf-8')
+    for cap in ('language-v1', 'content-v1', 'voice-v1'):
+        assert '{"--capability", "%s"}' % cap in src
