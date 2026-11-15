@@ -66,7 +66,7 @@ void ui_context_end();
 void ui_apply_scale(UiWindow window);
 
 // Once a frame, before ImGui::NewFrame: every pad's buttons become the menu's gamepad navigation.
-void ui_feed_gamepad();
+void ui_feed_gamepad(bool focused = true);   // focused false: the pads count as released
 
 #if defined(_WIN32)
 // A key, mouse button or wheel notch being learned for a binding takes the message. Returns true

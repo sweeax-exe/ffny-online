@@ -456,7 +456,7 @@ extern "C" int pc_launcher_run(void)
 
         ui_lock();
         ui_apply_scale(window);
-        ui_feed_gamepad();
+        ui_feed_gamepad(GetForegroundWindow() == window);     // not the pad presses meant for another window
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();

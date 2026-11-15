@@ -457,12 +457,15 @@ static void capture_poll_pad()
 
 // ---- pads drive the menu --------------------------------------------------------------------------
 
-void ui_feed_gamepad()
+void ui_feed_gamepad(bool focused)
 {
     ImGuiIO &io = ImGui::GetIO();
     InputRaw all;
     memset(&all, 0, sizeof(all));
-    for (int slot = 0; slot < 4; slot++) {
+    // Pads are read whatever window is in front (XInput): a launcher behind FFNY Studio or a test fight must
+    // not take their presses, or every A pressed there activates the launcher's focused button (the Studio
+    // card's Open started Studio again on each press). Unfocused, the pads count as released.
+    for (int slot = 0; focused && slot < 4; slot++) {
         InputRaw raw;
         if (!xbox_HostInputRawPad(slot, &raw)) continue;
         for (int s = 0; s < INPUT_SRC_COUNT; s++)
