@@ -48,6 +48,10 @@ LAST_NEW_FE_ID = 127        # the match setup reads the fighter byte signed: 128
 LOW_PLACES = (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95, 96, 97)
 PLACES = tuple(range(FIRST_NEW_FE_ID, LAST_NEW_FE_ID + 1)) + LOW_PLACES
 PLACES_CAPABILITY = "fighter-places-v2"     # a pack at a low place: launchers from build 84 take it
+# The order places are given in (the account service's NewFighterPlaceOrder, FFNY Studio's local test place):
+# 100..123, the low places, 124..127 last (kept free as long as possible for the per-slot rows of a later dynamic
+# binding, community/unlimited-fighters-study.md in the game repository). Change the order here and on the server.
+PLACE_ORDER = PLACES[:24] + LOW_PLACES + PLACES[24:28]
 
 
 def is_place(fe_id):

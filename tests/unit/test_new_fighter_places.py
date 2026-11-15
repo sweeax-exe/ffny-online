@@ -64,6 +64,8 @@ def test_the_python_lists():
     assert list(nf.PLACES) == PLACES and list(nf.LOW_PLACES) == LOW
     assert list(mod_catalogue.FIGHTER_FE_IDS) == PLACES
     assert [nf.place_index(p) for p in PLACES] == list(range(48))
+    # the order places are given in (the account service, Studio's test place): 100..123, the low ones, 124..127
+    assert list(nf.PLACE_ORDER) == list(range(100, 124)) + LOW + [124, 125, 126, 127]
     assert all(nf.place_index(x) is None for x in STOCK + OLD_IDS + [CREATED, 128, -1, True])
     assert list(_module("apt_patch", ROOT / "scripts/apt-patch.py").CHOOSEF_PLACES) == PLACES
     assert list(_module("online_art", ROOT / "scripts/online-art.py").NEW_FIGHTER_PLACES) == PLACES
@@ -93,8 +95,8 @@ def test_the_relay_and_the_account_service():
     m = re.search(r"var NewFighterPlaces = \[\]int\{(.*?)\}", accounts, re.S)
     assert m and ints(m.group(1)) == PLACES
     # the order the account service gives them: 100..123, the low places, 124..127 last (kept free for later)
-    m = re.search(r"var NewFighterPlaceOrder = .*?\{(.*?)\}", accounts, re.S)
-    assert m
+    # the account service builds NewFighterPlaceOrder as newfighter.PLACE_ORDER: 100..123, the low places, 124..127
+    assert "NewFighterPlaces[:24]" in accounts and "NewFighterLowPlaces..." in accounts and "NewFighterPlaces[24:28]" in accounts
 
 
 # -- with the user's own dump ---------------------------------------------------------------------------------------
