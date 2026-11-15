@@ -48,9 +48,10 @@ import struct
 from ffnycontent import clothing, cpparts, delta, fighterart, loc, newfighter, newvenue, viv
 
 SCHEMA = 1
-COMPOSER = 5                    # bump when the output for the same inputs changes
+COMPOSER = 6                    # bump when the output for the same inputs changes
 NEW_DAYS = 14                   # a new fighter's select thumbs carry NEW for this long after its review
 HUB_ART = ('online-art', 'fighters')    # <data>/online-art/fighters/<feID>.png: the online hub's portraits
+SKIN_ART = ('online-art', 'skins')      # <data>/online-art/skins/<pack id>.png: a skin's picture in the skin window
 TYPES = ('fighter-body', 'clothing', 'venue', 'new-fighter')
 OUT = 'content-files'
 LANG_DIR = 'lang'               # content-files/lang/<language pack>/<P>: the packs on top of that translation
@@ -428,9 +429,58 @@ def apply_new_fighter(work, op, fe_id, folder=None, new=False):
             work.add(rel, entry, data)
 
 
-def apply_pack(work, folder, info, fe_id=None, new=False):
+def is_skin(p):
+    """A new-fighter pack the team accepted as a skin (the catalogue's ``fighter_mode``): an outfit of its template."""
+    return p.get('fighter_mode') == 'skin'
+
+
+def apply_skin(work, op, skin_of=None):
+    """A skin: a new-fighter pack the team accepted as an extra outfit of its template (same gameplay, new look).
+    It gets the model's own files (the pack's add entries), its entity, IntroExtro entry, camera banks and
+    animation tags, as a new fighter does, but no Character row, no place and no menu pictures, and none of the
+    op's gameplay or voice: the game swaps the template's model for this one at match start for a player who
+    picked the skin (src/hooks/fighter_skins.c). ``skin_of``: the template the catalogue names (it must be the
+    op's). Returns (template feID, model, name)."""
+    problems = newfighter.op_problems(op, allow_fe_id=True)
+    if problems:
+        raise newfighter.FighterError(problems[0])
+    template_fe_id, template, model = op['template_fe_id'], op['template_model'], op['model']
+    if skin_of is not None and skin_of != template_fe_id:
+        raise ComposeError('the catalogue names fighter %s as this skin\'s template, the pack %d' % (skin_of,
+                                                                                                 template_fe_id))
+    files = FighterFiles(work)
+    rows = {r['fe_id']: r for r in newfighter.characters(files.current(newfighter.SOD_PATH))}
+    if template_fe_id not in rows or rows[template_fe_id]['model'].upper() != template.upper():
+        raise newfighter.FighterError('%s is not fighter %d of your game' % (template, template_fe_id))
+    if any(r['model'].upper() == model.upper() for r in rows.values()):
+        raise newfighter.FighterError('the model %s is another fighter\'s already' % model)
+    work.set_loose(newfighter.ENTITY_XML, newfighter.add_entity(files.current(newfighter.ENTITY_XML), template, model))
+    nis = next((n for n in files.names(newfighter.NIS_ARCHIVE) if n.lower() == newfighter.INTRO_EXTRO.lower()), None)
+    if nis is None:
+        raise newfighter.FighterError('%s has no %s' % (newfighter.NIS_ARCHIVE, newfighter.INTRO_EXTRO))
+    work.replace(newfighter.NIS_ARCHIVE, nis, newfighter.add_taunt(files.current(newfighter.NIS_ARCHIVE, nis),
+                                                                    template, model))
+    banks = newfighter.model_banks(newfighter._View(files, newfighter.BANK_ARCHIVE), template, model)
+    if len(banks) != 2:
+        raise newfighter.FighterError('the camera banks of %s are missing, or %s has its own already' % (template,
+                                                                                                         model))
+    for name, data in banks:
+        if work.exists(newfighter.BANK_ARCHIVE, name):
+            raise ComposeError('%s|%s exists already' % (newfighter.BANK_ARCHIVE, name))
+        work.add(newfighter.BANK_ARCHIVE, name, data)
+    try:
+        tags = files.current(newfighter.ANIM_TAGS)
+    except (KeyError, OSError):
+        tags = None
+    if tags is not None:
+        work.set_loose(newfighter.ANIM_TAGS, newfighter.add_anim_tags(tags, template, model))
+    return template_fe_id, model, op['name']
+
+
+def apply_pack(work, folder, info, fe_id=None, new=False, skin=False, skin_of=None):
     """One pack's ops (first, on the files as the earlier packs left them) and entries; raises on any failure.
-    ``fe_id``: a new-fighter pack's place from the signed catalogue; ``new``: its select thumbs carry NEW."""
+    ``fe_id``: a new-fighter pack's place from the signed catalogue; ``new``: its select thumbs carry NEW;
+    ``skin``: the team accepted the new fighter as a skin of its template (``skin_of``, ``apply_skin``)."""
     clothing_ops = [op for op in info.get('ops', []) if op['op'] in CLOTHING_OPS]
     if clothing_ops:
         tables = {}
@@ -462,7 +512,9 @@ def apply_pack(work, folder, info, fe_id=None, new=False):
         work.set_loose(newvenue.ENTITY_XML, entity_xml)
         work.set_loose(clothing.SOD_PATH, sod_blob)
     for op in info.get('ops', []):
-        if op['op'] == 'new-fighter':
+        if op['op'] == 'new-fighter' and skin:
+            apply_skin(work, op, skin_of)
+        elif op['op'] == 'new-fighter':
             apply_new_fighter(work, op, fe_id, folder, new)
     for e in info.get('entries', []):
         rel, entry = e['archive'], e['entry']
@@ -542,10 +594,29 @@ def write_files(folder, work, only=None):
     return files
 
 
+def skins_of(packs):
+    """The applied skins in catalogue order: [(pack id, template feID, model, name)]. The game numbers the skins of
+    each template from 1 in this order (0 is the template's own look), the same on every PC with the same packs
+    (the content print), so the online START names a skin by that number."""
+    out = []
+    for p in packs:
+        if not is_skin(p):
+            continue
+        try:
+            ops = [op for op in read_install(p['folder']).get('ops', []) if op['op'] == 'new-fighter']
+        except PACK_ERRORS:
+            continue
+        if ops:
+            out.append((p['id'], ops[0]['template_fe_id'], ops[0]['model'], ops[0]['name']))
+    return out
+
+
 def write_files_ini(new, applied, skipped, off, files, lang_files, lang_skipped):
     lines = ['[content-files]', 'schema=%d' % SCHEMA, 'set=' + set_hash(applied, off),
              'applied=' + ','.join(p['id'] for p in applied),
              'skipped=' + '; '.join('%s: %s' % (i, clean(r)) for i, r in skipped)]
+    # skins (pc_content.c, fighter_skins.c): skin=<pack id>|<template feID>|<model>|<name in the game>
+    lines += ['skin=%s|%d|%s|%s' % (i, t, m, clean(n).replace('|', ' ')) for i, t, m, n in skins_of(applied)]
     lines += ['file=' + rel for rel in sorted(files, key=str.lower)]
     lines += ['lang=%s|%s' % (pack_id, rel) for pack_id, rel in sorted(lang_files, key=lambda x: (x[0], x[1].lower()))]
     if lang_skipped:
@@ -563,7 +634,7 @@ def run_packs(bases, chosen, log, new=()):
         snap = work.snapshot()
         try:
             info = read_install(p['folder'])
-            apply_pack(work, p['folder'], info, p.get('fighter_fe_id'), p['id'] in new)
+            apply_pack(work, p['folder'], info, p.get('fighter_fe_id'), p['id'] in new, is_skin(p), p.get('skin_of'))
             applied.append(p)
         except PACK_ERRORS + (cpparts.PartsError, loc.LocError, newfighter.FighterError) as error:
             work.restore(snap)
@@ -663,7 +734,8 @@ def read_files_ini(root):
 def inputs_key(game, packs, off, languages=(), new=()):
     raw = json.dumps([COMPOSER, str(Path(game).resolve()),
                       [[p['id'], p['version'], p['content_sha256'], p.get('fighter_fe_id', 0)]
-                       + ([p['bundle']] if p.get('bundle') else []) for p in packs],
+                       + ([p['bundle']] if p.get('bundle') else [])
+                       + (['skin', p.get('skin_of')] if is_skin(p) else []) for p in packs],
                       sorted(off),
                       [[lang['id'], lang['stamp']] for lang in languages],
                       sorted(new)])
@@ -697,6 +769,8 @@ def hub_portraits(data, packs, template, known=()):
     known = {(int(fe), str(pack_id)) for fe, pack_id in known}
     there = []
     for p in packs:
+        if is_skin(p):
+            continue                        # a skin has no place (skin_portraits)
         try:
             ops = [op for op in read_install(p['folder']).get('ops', []) if op['op'] == 'new-fighter']
             if not ops:
@@ -727,6 +801,48 @@ def hub_portraits(data, packs, template, known=()):
                 path.unlink()
             except OSError:
                 pass
+    return there
+
+
+def skin_portraits(data, packs, template, missing_only=False):
+    """<data>/online-art/skins/<pack id>.png, the picture of each applied skin whose pack has body art (made like a
+    new fighter's hub portrait, ``hub_portraits``), for the skin window of the select screens and the online hub; a
+    picture of no applied skin is removed. ``template(entry)`` as for ``hub_portraits``. ``missing_only``: draw only the pictures that are not
+    there (the inputs did not change). Returns the pack ids with a picture."""
+    folder = Path(data).joinpath(*SKIN_ART)
+    there = []
+    for p in packs:
+        if not is_skin(p):
+            continue
+        try:
+            ops = [op for op in read_install(p['folder']).get('ops', []) if op['op'] == 'new-fighter']
+            if not ops:
+                continue
+            path = folder / ('%s.png' % p['id'])
+            if missing_only and path.is_file():
+                there.append(p['id'])
+                continue
+            body = pack_reader(p['folder'])(fighterart.BODY)
+            try:
+                team = template('screens/portrait/p_CT/p_CT_%d.big' % (ops[0]['template_fe_id'] + 1))
+            except PACK_ERRORS:
+                team = None
+            picture = fighterart.hub_portrait(body, team)
+            if not path.is_file() or path.read_bytes() != picture:
+                folder.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_name(path.name + '.tmp')
+                tmp.write_bytes(picture)
+                os.replace(tmp, path)
+            there.append(p['id'])
+        except PACK_ERRORS:
+            continue                        # no body art, or art the composer refused: the window shows the name
+    if folder.is_dir():
+        for path in folder.glob('*.png'):
+            if path.stem not in there:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
     return there
 
 
@@ -779,6 +895,8 @@ def compose(data, game, packs, off=None, root=None, log=print, languages=None, t
         screens = Bases(data, game)
         hub_portraits(data, [p for p in chosen if p['id'] in ids],
                       lambda entry: screens.read(newfighter.SCREENS_ARCHIVE, entry), state.get('hub', []))
+        skin_portraits(data, [p for p in chosen if p['id'] in ids],
+                       lambda entry: screens.read(newfighter.SCREENS_ARCHIVE, entry), missing_only=True)
         return {'applied': state['applied'], 'skipped': [tuple(s) for s in state.get('skipped', [])],
                 'files': state.get('files', []), 'lang_files': [tuple(x) for x in state.get('lang_files', [])],
                 'lang_skipped': [tuple(s) for s in state.get('lang_skipped', [])], 'unchanged': True}
@@ -809,6 +927,7 @@ def compose(data, game, packs, off=None, root=None, log=print, languages=None, t
     else:
         remove_output(root)
     hub = hub_portraits(data, applied, lambda entry: work.current(newfighter.SCREENS_ARCHIVE, entry))
+    skin_portraits(data, applied, lambda entry: work.current(newfighter.SCREENS_ARCHIVE, entry))
     state = {'schema': SCHEMA, 'key': key, 'bases': bases.seen, 'applied': [p['id'] for p in applied],
              'skipped': skipped, 'files': files, 'lang_files': lang_files, 'lang_skipped': lang_skipped, 'hub': hub,
              'set': set_hash(applied, switched) if applied else ''}

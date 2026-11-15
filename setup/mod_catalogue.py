@@ -31,6 +31,11 @@ TYPES = ('fighter-texture', 'fighter-body', 'fighter-model', 'clothing', 'venue'
 # a new fighter's front-end ID, given by the account service when the pack is submitted (index-v2.json only:
 # launchers up to build 78 read index.json, which leaves new fighters out, and would refuse the key and the type)
 FIGHTER_FE_IDS = range(100, 128)
+# a new fighter the team accepted as a SKIN (an extra outfit of a stock fighter, same gameplay, new look) has no
+# place: "fighter_mode": "skin" and "skin_of": the template's front-end ID (index-v4.json only: launchers of build
+# 84 and older read index-v3.json, which leaves skins out, and would refuse a new fighter without a place)
+FIGHTER_MODES = ('skin',)
+SKIN_TEMPLATES = frozenset(i for i in range(0, 98) if i not in (80, 81, 82, 83, 84))
 # a mod that is one item of a pack of several mods ("Pack (N mods)"): the pack's id and title, always together
 # (index-v3.json only: launchers of build 79 read index-v2.json, which leaves bundle items out, and would refuse
 # the keys). The launcher installs and removes a pack's mods as one unit.
@@ -43,7 +48,11 @@ def ffny_mod(mod):
         require(mod['type'] in TYPES, 'Invalid type')
     if 'order' in mod:
         positive(mod['order'])
-    if mod.get('type') == 'new-fighter' or 'fighter_fe_id' in mod:
+    if 'fighter_mode' in mod or 'skin_of' in mod:
+        require(mod.get('type') == 'new-fighter' and mod.get('fighter_mode') in FIGHTER_MODES
+                and type(mod.get('skin_of')) is int and mod['skin_of'] in SKIN_TEMPLATES
+                and 'fighter_fe_id' not in mod, 'Invalid skin')
+    elif mod.get('type') == 'new-fighter' or 'fighter_fe_id' in mod:
         require(mod.get('type') == 'new-fighter' and type(mod.get('fighter_fe_id')) is int
                 and mod['fighter_fe_id'] in FIGHTER_FE_IDS, 'Invalid new fighter place')
     if 'language' in mod:
@@ -110,7 +119,7 @@ def positive(value):
 
 def validate_mod(mod):
     fields(mod, 'id name description authors class licence homepage versions revoked_versions',
-           'kind type order language fighter_fe_id bundle bundle_name')
+           'kind type order language fighter_fe_id fighter_mode skin_of bundle bundle_name')
     ffny_mod(mod)
     slug(mod['id'])
     for key in ('name', 'description', 'licence'):
