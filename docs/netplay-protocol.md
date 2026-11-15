@@ -382,7 +382,7 @@ by older relays.
 
 - `rules` bit 2 (`4`), on top of the FIGHTER RULES above: the host switched the room's **community
   content** off (CREATE A ROOM's COMMUNITY CONTENT row, offered only on a PC with community packs). New
-  fighters (their places: front-end IDs 100..127 and, from build 84, 20 low IDs; `type new-fighter` packs) and new venues (feIDs 28..63, Studio's
+  fighters (their places: front-end IDs 100..127 and, from build 85, 20 low IDs; `type new-fighter` packs) and new venues (feIDs 28..63, Studio's
   new-venue packs) cannot be picked; clothing packs stay (a clothing row has no number the fight reads:
   name, group, colours, price, display text, variants, order and shop type).
 - The relay enforces it: a `READY` with a new fighter plays Doc (`55`), `ROOM` names all 48 places as

@@ -101,7 +101,7 @@ import into the copied files (Fighters page), unchanged: the copy only proves th
   right after the set (record + 0x1420), one slot further on every screen change, and into the save (main-menu crash
   under `Audio.PlayMusic`). Since build 84 the insert refuses a full set and the load repairs a save that ran over
   (`recomp_manual.c`, `sub_00016810` / `sub_00014540`); the venue set (30, 24 stock) is guarded the same way.
-* **Build 84: 48 places** (`src/hooks/new_fighter_places.h`): 100..127, then the 20 front-end IDs below 98 that
+* **Build 85: 48 places** (`src/hooks/new_fighter_places.h`): 100..127, then the 20 front-end IDs below 98 that
   are free: **5 15 29 37 39 42 49 53 63 66 79 86 87 88 89 90 94 95 96 97**. Proof, per reader of a front-end ID
   (2026-11-15, branch `feat/fighter-places-48`):
   * **Database**: the 75 retail Character rows have feIDs 0-4, 6-14, 16-28, 30-36, 38, 43-48, 50, 51, 54-62, 64,

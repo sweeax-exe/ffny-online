@@ -146,7 +146,7 @@ static bool helper_args(const std::string &command, const std::string &id, std::
     // sub_00016810). The account service marks new-fighter packs fighter-sets-v1 from build 84 on, so a build-83
     // launcher never composes more than the ones it already had.
     args.insert(args.end(), {"--capability", "fighter-sets-v1"});
-    // Build 84: new fighters at the 20 low places (new_fighter_places.h); the account service marks such packs
+    // Build 85: new fighters at the 20 low places (new_fighter_places.h); the account service marks such packs
     // fighter-places-v2, and only index-v4.json lists them.
     args.insert(args.end(), {"--capability", "fighter-places-v2"});
     {

@@ -30,7 +30,7 @@ KINDS = ('content', 'replacement')
 TYPES = ('fighter-texture', 'fighter-body', 'fighter-model', 'clothing', 'venue', 'language', 'new-fighter')
 # a new fighter's front-end ID, given by the account service when the pack is submitted (index-v2.json only:
 # launchers up to build 78 read index.json, which leaves new fighters out, and would refuse the key and the type)
-# Build 84: the 20 low places too (index-v4.json only: launchers of builds 80..83 read index-v3.json, which leaves
+# Build 85: the 20 low places too (index-v4.json only: launchers of builds 80..84 read index-v3.json, which leaves
 # fighters at those places out, and would refuse them); setup/ffnycontent/newfighter.py PLACES has the same list.
 FIGHTER_FE_IDS = tuple(range(100, 128)) + (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95, 96,
                                            97)

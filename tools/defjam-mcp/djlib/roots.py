@@ -101,7 +101,7 @@ def _content(root, content):
     if os.path.isdir(files):
         make_junction(os.path.join(root, "mod-manager", "content-files"), files)
     # A new fighter's hub portrait: compose writes it to <data>/online-art/fighters/<feID>.png (its place:
-    # NEW_FIGHTER_PLACES, 100..127 and the 20 low IDs of build 84).
+    # NEW_FIGHTER_PLACES, 100..127 and the 20 low IDs of build 85).
     # The root's online-art is a junction to <data>'s, never to be written: with such portraits in the content
     # root it becomes a copy of it (about 6 MB) with them added, so the hub's fighter list shows them.
     art = os.path.join(content, "online-art", "fighters")

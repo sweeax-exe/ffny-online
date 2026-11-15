@@ -34,8 +34,8 @@ import content_compose
 
 # FFNY Online's own catalogue: the account service signs it with its content key when the team accepts a
 # pack (docs/content-packs.md); the launcher syncs it at every start ("sync"). index-v4.json lists everything,
-# also new fighters at the 20 low places (build 84, newfighter.LOW_PLACES; their versions need the capability
-# fighter-places-v2); index-v3.json is the same catalogue without those, for launchers of builds 80..83, whose
+# also new fighters at the 20 low places (build 85, newfighter.LOW_PLACES; their versions need the capability
+# fighter-places-v2); index-v3.json is the same catalogue without those, for launchers of builds 80..84, whose
 # check refuses a place outside 100..127; index-v3.json and up list the mods of a pack of several mods (with
 # "bundle" and "bundle_name"); index-v2.json is without pack items, for launchers of build 79; index.json also
 # leaves new fighters out, for launchers up to build 78. All share their revisions.
@@ -484,7 +484,7 @@ def fetch_small(url, limit):
 
 def fetch_index(url):
     """(raw, signature, url) of a catalogue index. index-v4.json that the server does not have yet (404: an account
-    service from before build 84) falls back to index-v3.json, the same catalogue without fighters at low places."""
+    service from before build 85) falls back to index-v3.json, the same catalogue without fighters at low places."""
     try:
         return fetch_small(url, MAX_INDEX), fetch_small(url + '.sig', 64), url
     except urllib.error.HTTPError as error:

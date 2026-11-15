@@ -41,13 +41,13 @@ W_SPEED, W_TOUGHNESS, W_SPEECH = 22, 25, 21
 FIRST_NEW_FE_ID = 100
 LAST_NEW_FE_ID = 127        # the match setup reads the fighter byte signed: 128 crashes the load
 # The places of new fighters (the account service gives each accepted one; the signed catalogue's fighter_fe_id),
-# in the order it gives them: 100..127 first (builds 79..83 know only these), then the 20 front-end IDs below 98
+# in the order it gives them: 100..127 first (builds 79..84 know only these), then the 20 front-end IDs below 98
 # that no retail Character row has and nothing else uses (``docs/research/new-fighters.md`` section 5 in the game
 # repository; not 40, 41, 52 and 78, the old fighter.xml IDs of Teck, Santos, O.E and Erick Sermon, nor 98 and 99).
 # The same list: the game's src/hooks/new_fighter_places.h, the relay's and the account service's NewFighterPlaces.
 LOW_PLACES = (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95, 96, 97)
 PLACES = tuple(range(FIRST_NEW_FE_ID, LAST_NEW_FE_ID + 1)) + LOW_PLACES
-PLACES_CAPABILITY = "fighter-places-v2"     # a pack at a low place: launchers from build 84 take it
+PLACES_CAPABILITY = "fighter-places-v2"     # a pack at a low place: launchers from build 85 take it
 # The order places are given in (the account service's NewFighterPlaceOrder, FFNY Studio's local test place):
 # 100..123, the low places, 124..127 last (kept free as long as possible for the per-slot rows of a later dynamic
 # binding, community/unlimited-fighters-study.md in the game repository). Change the order here and on the server.

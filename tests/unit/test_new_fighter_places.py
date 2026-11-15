@@ -1,4 +1,4 @@
-"""The 48 places of new fighters (build 84): 100..127, then the 20 front-end IDs below 98 that no stock fighter has
+"""The 48 places of new fighters (build 85): 100..127, then the 20 front-end IDs below 98 that no stock fighter has
 and nothing else uses (docs/research/new-fighters.md section 5). Every list of them is the same list, in the same
 order (the place index numbers a fighter's own voice and orders the select grid's community row): the game's
 src/hooks/new_fighter_places.h, setup/ffnycontent/newfighter.py PLACES, setup/mod_catalogue.py FIGHTER_FE_IDS,
@@ -78,7 +78,7 @@ def test_the_python_lists():
 
 
 def test_voice_numbers():
-    """A place's own voice is 40 + its index: 100..127 keep 040..067 (packs of builds 79..83), the low places get
+    """A place's own voice is 40 + its index: 100..127 keep 040..067 (packs of builds 79..84), the low places get
     068..087; stock voices are 000..039 and 500..538."""
     assert [fv.voice_number(p) for p in PLACES] == list(range(40, 88))
     assert fv.voice_number(100) == 40 and fv.voice_number(127) == 67 and fv.voice_number(5) == 68

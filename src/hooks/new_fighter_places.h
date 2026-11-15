@@ -2,7 +2,7 @@
  * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The places of new fighters: the front-end IDs a content pack's new fighter may have (the account service gives
  * each accepted one its place, the signed catalogue carries it as fighter_fe_id). 48, in the order the service
- * gives them: 100..127 first (builds 79..83 knew only these), then the 20 IDs below 98 that no Character row of
+ * gives them: 100..127 first (builds 79..84 knew only these), then the 20 IDs below 98 that no Character row of
  * the retail database has and nothing else uses (docs/research/new-fighters.md section 5):
  *
  *   5 15 29 37 39 42 49 53 63 66 79 86 87 88 89 90 94 95 96 97

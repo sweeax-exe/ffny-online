@@ -113,7 +113,7 @@ def test_new_fighter_gameplay_is_written_into_its_row(tmp_path):
 
 
 def test_new_fighter_at_a_low_place(tmp_path):
-    """Build 84: a place below 98 (newfighter.LOW_PLACES). Place 37 has an unused Crow 2's pictures in the retail
+    """Build 85: a place below 98 (newfighter.LOW_PLACES). Place 37 has an unused Crow 2's pictures in the retail
     screens (thumb37, thumb37off, l_MS_37_*, 38_2p/3p): the new fighter's copies replace them; place 5 has none."""
     pack = make_pack(tmp_path / "packs" / "doc-low", "V2IP_7L5A", "Doc Low")
     other = make_pack(tmp_path / "packs" / "doc-five", "V2IP_7L6A", "Doc Five")

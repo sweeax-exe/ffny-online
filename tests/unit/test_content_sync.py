@@ -163,7 +163,7 @@ def test_catalogue_url_is_ours_and_local_http_only_for_tests():
 
 
 def test_index_v4_falls_back_to_v3_on_an_older_server(monkeypatch):
-    """Build 84 reads index-v4.json; an account service from before it answers 404 there, and the launcher reads
+    """Build 85 reads index-v4.json; an account service from before it answers 404 there, and the launcher reads
     index-v3.json (the same catalogue without fighters at low places). Any other failure stays a failure."""
     import urllib.error
     served = {mods.CATALOGUE_URL_V3: b'v3', mods.CATALOGUE_URL_V3 + '.sig': b's3'}
