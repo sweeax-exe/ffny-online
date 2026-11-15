@@ -70,6 +70,11 @@ def _copy_save(src, dst, partitions):
     shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True)
 
 
+# the new fighters' places (setup/ffnycontent/newfighter.py PLACES, src/hooks/new_fighter_places.h)
+NEW_FIGHTER_PLACES = tuple(range(100, 128)) + (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95,
+                                               96, 97)
+
+
 def content_for(i):
     """The community-content root of test copy i from DJ_CONTENT (dj.py --content-root): one folder for every
     copy, or one per copy comma-separated ('' = none). A content root is a data folder that `setup/mods.py
@@ -95,6 +100,22 @@ def _content(root, content):
     files = os.path.join(content, "mod-manager", "content-files")
     if os.path.isdir(files):
         make_junction(os.path.join(root, "mod-manager", "content-files"), files)
+    # A new fighter's hub portrait: compose writes it to <data>/online-art/fighters/<feID>.png (its place:
+    # NEW_FIGHTER_PLACES, 100..127 and the 20 low IDs of build 84).
+    # The root's online-art is a junction to <data>'s, never to be written: with such portraits in the content
+    # root it becomes a copy of it (about 6 MB) with them added, so the hub's fighter list shows them.
+    art = os.path.join(content, "online-art", "fighters")
+    new = [n for n in (os.listdir(art) if os.path.isdir(art) else [])
+           if n.endswith(".png") and n[:-4].isdigit() and int(n[:-4]) in NEW_FIGHTER_PLACES]
+    if new:
+        link = os.path.join(root, "online-art")
+        if os.path.lexists(link) and is_link(link):
+            src = os.path.realpath(link)
+            remove_link(link)
+            shutil.copytree(src, link)
+        os.makedirs(os.path.join(link, "fighters"), exist_ok=True)
+        for n in new:
+            shutil.copy2(os.path.join(art, n), os.path.join(link, "fighters", n))
 
 
 def create(name, fixture=None, partitions=False, data=None, content=None):

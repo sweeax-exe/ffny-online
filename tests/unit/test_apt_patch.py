@@ -427,6 +427,184 @@ def test_plan_patches_two_entries_of_a_fake_archive(tmp_path):
     assert ap.compare_override(plan, str(dst))
 
 
+# ------------------------------------------- battle/chooseF2/3/4: the community fighters' grid pictures
+
+def synthetic_choosef(frames=300, exports=("thumbAll", "emptyClip"), depth2_frame=None, baked37=False):
+    """A tiny stand-in for chooseF2.apt/.const: a movie that exports a 300-frame sprite "thumbAll"
+    (character 7) and an empty one-frame sprite "emptyClip" (character 9). Frame 249 of thumbAll has a
+    Stop action and a placement at depth 1, frame 250 a RemoveObject, every other frame no item. With
+    ``baked37`` frames 37 and 186 have the Stop action and the placement too (as the retail screens' Crow 2)."""
+    const = bytearray(b"Apt constant file\0\0") + struct.pack("<III", 0x100, 0, 0x20)
+    apt = bytearray(0x3000)
+    movie, chars, exp, names = 0x100, 0x200, 0x300, 0x380
+    struct.pack_into("<I", const, 0x14, movie)
+    struct.pack_into("<2I", apt, movie, 9, 0x09876543)
+    struct.pack_into("<II", apt, movie + 20, 10, chars)
+    at = names
+    for k, name in enumerate(exports):
+        apt[at:at + len(name) + 1] = name.encode() + b"\0"
+        struct.pack_into("<II", apt, exp + 8 * k, at, {"thumbAll": 7, "emptyClip": 9}.get(name, 3))
+        at += len(name) + 1
+    struct.pack_into("<II", apt, movie + 48, len(exports), exp)
+    sprite, sprite_frames, empty = 0x400, 0x1000, 0x440
+    struct.pack_into("<4I", apt, sprite, 5, 0x09876543, frames, sprite_frames)
+    struct.pack_into("<4I", apt, empty, 5, 0x09876543, 1, 0x480)
+    struct.pack_into("<I", apt, chars + 4 * 7, sprite)
+    struct.pack_into("<I", apt, chars + 4 * 9, empty)
+    code, act, place, remove, arr249, arr250 = 0x500, 0x510, 0x520, 0x560, 0x570, 0x580
+    apt[code:code + 2] = bytes([0x07, 0x00])                                        # Stop; End
+    struct.pack_into("<II", apt, act, 1, code)
+    struct.pack_into("<16I", apt, place, 3, 0x06, 1, 3, 0x3F800000, 0, 0, 0x3F800000, 0, 0,
+                     0xFFFFFFFF, 0, 0, 0, 0xFFFFFFFF, 0)
+    struct.pack_into("<II", apt, remove, 4, 1)
+    struct.pack_into("<II", apt, arr249, act, place)
+    struct.pack_into("<I", apt, arr250, remove)
+    if frames > 250:
+        struct.pack_into("<II", apt, sprite_frames + 8 * 249, 2, arr249)
+        struct.pack_into("<II", apt, sprite_frames + 8 * 250, 1, arr250)
+    if baked37:
+        struct.pack_into("<II", apt, sprite_frames + 8 * 37, 2, arr249)
+        struct.pack_into("<II", apt, sprite_frames + 8 * 186, 2, arr249)
+    if depth2_frame is not None:
+        other, arr = 0x5C0, 0x600
+        struct.pack_into("<16I", apt, other, 3, 0x06, ap.CHOOSEF_DEPTH, 3, 0x3F800000, 0, 0, 0x3F800000, 0, 0,
+                         0xFFFFFFFF, 0, 0, 0, 0xFFFFFFFF, 0)
+        struct.pack_into("<I", apt, arr, other)
+        struct.pack_into("<II", apt, sprite_frames + 8 * depth2_frame, 1, arr)
+    return bytes(apt), bytes(const)
+
+
+def test_choosef_frames_are_the_cursor_and_the_normal_frame_of_each_new_fighter():
+    frames = dict(ap.choosef_frames())
+    assert len(frames) == 96 and min(frames) == 5 and max(frames) == 276
+    assert frames[100] == "thumbs/thumb100.swf" and frames[127] == "thumbs/thumb127.swf"
+    assert frames[249] == "thumbs/thumb100off.swf" and frames[276] == "thumbs/thumb127off.swf"
+    # the 20 low places (new_fighter_places.h): cursor frame feID, normal frame feID + 149
+    low = (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95, 96, 97)
+    assert all(frames[f] == "thumbs/thumb%d.swf" % f and frames[f + 149] == "thumbs/thumb%doff.swf" % f for f in low)
+    stock = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30, 31,
+             32, 33, 34, 35, 36, 38, 43, 44, 45, 46, 47, 48, 50, 51, 54, 55, 56, 57, 58, 59, 60, 61, 62, 64, 65, 67, 68,
+             69, 70, 71, 72, 73, 74, 75, 76, 77, 80, 81, 82, 83, 84, 85, 91, 92, 93, 98, 99}
+    assert not set(frames) & (stock | {f + 149 for f in stock} | {299})     # no stock fighter's frame
+
+
+def test_choosef_action_known_bytes():
+    sp = dict(clip=0x100, empty=0x108, attachMovie=0x114, _x=0x120, _y=0x124)
+    code = ap.asm_choosef_action(0x2000, sp, 0x130)
+    f = struct.pack("<f", -18.5)
+    assert code == (bytes([0xB5, 2, 0xA1, 0]) + le(0x100) + bytes([0xA1, 0, 0, 0]) + le(0x108)
+                    + bytes([0xB5, 3, 0x70, 0xA1]) + le(0x114) + bytes([0x5D])
+                    + bytes([0xA1, 0, 0]) + le(0x100) + bytes([0x1C, 0xA1, 0, 0]) + le(0x120) + bytes([0xB4]) + f
+                    + bytes([0x4F, 0xA1, 0]) + le(0x100) + bytes([0x1C, 0xA1, 0, 0]) + le(0x124) + bytes([0xB4]) + f
+                    + bytes([0x4F, 0xA1, 0]) + le(0x130) + bytes([0xA1, 0, 0, 0]) + le(0x100)
+                    + bytes([0x1C, 0x9A, 0x00]))
+    # the operands stay aligned on the absolute address wherever the action starts
+    for addr in (0x2001, 0x2002, 0x2003):
+        ins = ap.decode(bytes(addr) + ap.asm_choosef_action(addr, sp, 0x130), addr)
+        assert [i.vals[0] for i in ins if i.op == 0xA1] == [0x100, 0x108, 0x114, 0x100, 0x120, 0x100, 0x124,
+                                                            0x130, 0x100]
+
+
+def test_choosef_actions_on_a_synthetic_movie():
+    apt, const = synthetic_choosef()
+    new, info = ap.build_choosef_apt(apt, const, 7)
+    assert "96 frame actions appended" in ap.verify_choosef_apt(apt, new, info)
+    frames = info["frames"]
+    diff = {i // 8 * 8 for i in range(len(apt)) if apt[i] != new[i]}
+    assert diff == {frames + 8 * f for f, _ in ap.choosef_frames()}
+    # an empty frame: one item, the action; its URL is the fighter's cursor-on thumb
+    n, arr = struct.unpack_from("<II", new, frames + 8 * 113)
+    assert n == 1
+    kind, code = struct.unpack_from("<II", new, ap.u32(new, arr))
+    ins = ap.decode(new, code)
+    assert kind == 1 and [i.op for i in ins[-3:]] == [0x1C, 0x9A, 0]
+    assert [ap.cstr(new, i.vals[0]) for i in ins if i.op == 0xA1][-2:] == ["thumbs/thumb113.swf", "nfThumb"]
+    # frame 249 keeps its Stop action and its placement, then loads fighter 100's normal thumb
+    n, arr = struct.unpack_from("<II", new, frames + 8 * 249)
+    assert n == 3 and struct.unpack_from("<2I", new, arr) == (0x510, 0x520)
+    code = ap.u32(new, ap.u32(new, arr + 8) + 4)
+    assert [ap.cstr(new, i.vals[0]) for i in ap.decode(new, code) if i.op == 0xA1][-2] == "thumbs/thumb100off.swf"
+    # tampering with an action or with an original byte is caught
+    bad = bytearray(new)
+    bad[code] = 0x17
+    with pytest.raises(ap.PatchError, match="expected statements"):
+        ap.verify_choosef_apt(apt, bytes(bad), info)
+    bad = bytearray(new)
+    bad[0x500] ^= 1
+    with pytest.raises(ap.PatchError, match="changed unexpectedly"):
+        ap.verify_choosef_apt(apt, bytes(bad), info)
+
+
+def test_choosef_takes_out_a_baked_picture_at_a_place():
+    """Place 37 (an unused Crow 2 in the retail screens) has a picture in frames 37 and 186: the patch points
+    those frames at a RemoveObject of depth 1 instead of the placement and keeps their Stop action."""
+    apt, const = synthetic_choosef(baked37=True)
+    new, info = ap.build_choosef_apt(apt, const, 7)
+    assert "2 baked picture(s) removed" in ap.verify_choosef_apt(apt, new, info)
+    frames = info["frames"]
+    for frame, url in ((37, "thumbs/thumb37.swf"), (186, "thumbs/thumb37off.swf")):
+        n, arr = struct.unpack_from("<II", new, frames + 8 * frame)
+        items = struct.unpack_from("<3I", new, arr)
+        assert n == 3 and items[0] == 0x510 and struct.unpack_from("<II", new, items[1]) == (4, 1)
+        code = ap.u32(new, items[2] + 4)
+        assert [ap.cstr(new, i.vals[0]) for i in ap.decode(new, code) if i.op == 0xA1][-2] == url
+    # frame 249 (place 100's normal frame) keeps its own placement: it is no baked picture of a low place
+    n, arr = struct.unpack_from("<II", new, frames + 8 * 249)
+    assert struct.unpack_from("<2I", new, arr) == (0x510, 0x520)
+    # pointing the frame back at the placement is caught
+    bad = bytearray(new)
+    n, arr = struct.unpack_from("<II", new, frames + 8 * 37)
+    struct.pack_into("<I", bad, arr + 4, 0x600)
+    with pytest.raises(ap.PatchError):
+        ap.verify_choosef_apt(apt, bytes(bad), info)
+
+
+def test_choosef_refuses_a_movie_that_is_not_the_select_screen():
+    apt, const = synthetic_choosef(exports=("thumbAll",))
+    with pytest.raises(ap.PatchError, match="emptyClip"):
+        ap.build_choosef_apt(apt, const, 7)
+    apt, const = synthetic_choosef(exports=("emptyClip",))
+    with pytest.raises(ap.PatchError, match="thumbAll"):
+        ap.build_choosef_apt(apt, const, 7)
+    apt, const = synthetic_choosef()
+    with pytest.raises(ap.PatchError, match="thumbAll"):                # another character than expected
+        ap.build_choosef_apt(apt, const, 8)
+    apt, const = synthetic_choosef(frames=200)
+    with pytest.raises(ap.PatchError, match="300 frames"):
+        ap.build_choosef_apt(apt, const, 7)
+    apt, const = synthetic_choosef(depth2_frame=101)
+    with pytest.raises(ap.PatchError, match="depth 2"):
+        ap.build_choosef_apt(apt, const, 7)
+
+
+def test_choosef_entry_that_differs_keeps_the_menu_patch(tmp_path):
+    """An optional entry (the select screens) that its patcher refuses, or that the archive lacks, leaves
+    a note; the other entries are patched as before."""
+    other = make_big(b"BIGF", [("chooseF2.apt", b"x" * 40)], 128)
+    with pytest.raises(ap.PatchError, match="expected hash"):
+        ap.choosef_patcher("screens/battle/chooseF2.big")(ap.refpack_encode_literal(other))
+    a_new = ap.refpack_encode_literal(b"A" * 333)
+    entries = [("screens/a.big", ap.refpack_encode_literal(b"a")),
+               ("screens/battle/chooseF2.big", ap.refpack_encode_literal(other))]
+    src = tmp_path / "screens.viv"
+    src.write_bytes(make_big(b"BIG4", entries))
+    more = [(n, ap.choosef_patcher(n), True) for n in ("screens/battle/chooseF2.big", "screens/battle/chooseF3.big")]
+    plan = ap.Plan(str(src), entry_name="screens/a.big", patcher=lambda raw, extras: (a_new, ["a"]), more=more)
+    assert len(plan.blobs) == 1 and plan.blobs[0][1] == a_new
+    notes = [l for l in plan.lines if l.startswith("note: ")]
+    assert len(notes) == 2 and "chooseF2.big left as it is" in notes[1] and "chooseF3.big left as it is" in notes[0]
+    dst = tmp_path / "o" / "screens.viv"
+    ap.write_override(plan, str(dst))
+    out = dst.read_bytes()
+    recs = {r[0]: r for r in ap.big_records(out)}
+    old = {r[0]: r for r in ap.big_records(src.read_bytes())}
+    assert recs["screens/battle/chooseF2.big"][2:] == old["screens/battle/chooseF2.big"][2:]
+    # a required entry still refuses the whole plan
+    with pytest.raises(ap.PatchError):
+        ap.Plan(str(src), entry_name="screens/a.big", patcher=lambda raw, extras: (a_new, ["a"]),
+                more=[("screens/battle/chooseF2.big", ap.choosef_patcher("screens/battle/chooseF2.big"))])
+
+
 # ------------------------------------------------------------ the user's own dump
 
 def data_screens():
@@ -445,6 +623,11 @@ def test_real_archive_plan_verifies_and_leaves_the_source_alone(tmp_path):
         pytest.skip("not the reference dump: %s" % e)
     assert any(l.startswith("verify .apt: 25 function bodies") for l in plan.lines)
     assert any(l.startswith("verify cmtype.apt: tick clip appended") for l in plan.lines)
-    assert len(plan.blobs) == 2
+    for movie in ("chooseF2", "chooseF3", "chooseF4"):
+        assert any(l.startswith("verify %s.apt: 96 frame actions appended" % movie) for l in plan.lines)
+        # place 37: the retail Crow 2 picture in frames 37 and 186 is taken out
+        assert any(l.startswith("verify %s.apt: 96" % movie) and "2 baked picture(s) removed" in l for l in plan.lines)
+    assert not any(l.startswith("note: screens/battle/") for l in plan.lines)
+    assert len(plan.blobs) == 5
     assert plan.final_size == plan.blobs[-1][0] + len(plan.blobs[-1][1])
     assert (src.stat().st_size, src.stat().st_mtime_ns) == before

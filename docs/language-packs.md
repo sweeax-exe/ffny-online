@@ -203,7 +203,9 @@ pictures only: they change nothing a fight reads, so players with and without th
 ahead of that override copy and is built from the dump, so it must carry the same change: make the pack
 from a translated copy of the **override** `screens.viv` (the patched `mainMenu.apt`, `cmtype.apt` and the
 poster in `mainMenu.xsh` then become part of its deltas). When `apt-patch.py`'s output changes, such a
-pack is remade.
+pack is remade. Patch version 5 also changes `battle/chooseF2.apt`, `chooseF3.apt` and `chooseF4.apt` (the
+community fighters' pictures in the select grid): while a pack made from an older override is on, a
+community fighter's cell shows the create-player picture (nothing else changes) until the pack is remade.
 
 ## Format
 

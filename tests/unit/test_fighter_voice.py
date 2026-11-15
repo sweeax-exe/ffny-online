@@ -334,6 +334,11 @@ def checker(tmp_path_factory):
 def test_c_file_check_agrees(checker):
     full = [(n.upper() if i % 2 else n.replace("\\", "/"), b"x") for i, n in enumerate(fv.voice_entries(40))]
     some = [(n, b"x") for n in fv.voice_entries(41)[:-1]] + [(fv.voice_entries(41)[-1], b"")]
-    out = checker(viv.build_archive([("other.bin", b"y")] + full + some), [99, 100, 101, 102, 127, 128])
-    assert out[:6] == ["99 -1", "100 40 1", "101 41 0", "102 42 0", "127 67 0", "128 -1"]
-    assert out[6:] == fv.voice_entries(40)
+    low = [(n, b"x") for n in fv.voice_entries(68)]         # place 5, the first low place (build 84)
+    out = checker(viv.build_archive([("other.bin", b"y")] + full + some + low),
+                  [99, 100, 101, 102, 127, 128, 5, 37, 97, 98, 40, 0])
+    assert out[:12] == ["99 -1", "100 40 1", "101 41 0", "102 42 0", "127 67 0", "128 -1", "5 68 1", "37 71 0",
+                        "97 87 0", "98 -1", "40 -1", "0 -1"]
+    assert out[12:] == fv.voice_entries(40)
+    # the same numbers as the installer's
+    assert [fv.voice_number(f) for f in (100, 127, 5, 37, 97)] == [40, 67, 68, 71, 87]

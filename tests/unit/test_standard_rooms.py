@@ -43,7 +43,8 @@ def test_game_side_rules_bit_and_ranges():
     assert 'list[i].rules = rd8(&r) & NETPLAY_RULES_MASK' in NETPLAY_C
     assert 'req[21] = 1;' in SERVERS_C and 'list[k].rules = b[at + k] & NETPLAY_RULES_MASK' in SERVERS_C
     assert '#define ONLINE_NEW_VENUE(fe) ((fe) >= 28 && (fe) <= 63)' in DATA_H
-    assert '#define ONLINE_NEW_FIGHTER(id) ((id) >= 100 && (id) <= 127)' in DATA_H
+    # a new fighter: one of its 48 places (test_new_fighter_places.py)
+    assert '#define ONLINE_NEW_FIGHTER(id) new_fighter_is_place(id)' in DATA_H
     # the hub's venue list is the venue.xml the game reads (with the composed new venues)
     assert 'pc_content_file("venue.xml", composed, sizeof composed)' in DATA_C
     # ERROR 15 keeps the hub session and says the news line; the hub says it too

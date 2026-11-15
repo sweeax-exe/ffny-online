@@ -28,7 +28,7 @@ One implementation for both sides: FFNY Studio (``ffnystudio/newfighter.py``) an
 import re
 import struct
 
-from . import fightervoice
+from . import fighterart, fightervoice
 from .sod import Sod, name_hash
 from .sodwrite import name_above
 
@@ -40,6 +40,28 @@ W_NAME, W_CHARISMA, W_COST, W_DISPLAY, W_ENTITY, W_FE_ID, W_CORE_ID, W_HEALTH, W
 W_SPEED, W_TOUGHNESS, W_SPEECH = 22, 25, 21
 FIRST_NEW_FE_ID = 100
 LAST_NEW_FE_ID = 127        # the match setup reads the fighter byte signed: 128 crashes the load
+# The places of new fighters (the account service gives each accepted one; the signed catalogue's fighter_fe_id),
+# in the order it gives them: 100..127 first (builds 79..83 know only these), then the 20 front-end IDs below 98
+# that no retail Character row has and nothing else uses (``docs/research/new-fighters.md`` section 5 in the game
+# repository; not 40, 41, 52 and 78, the old fighter.xml IDs of Teck, Santos, O.E and Erick Sermon, nor 98 and 99).
+# The same list: the game's src/hooks/new_fighter_places.h, the relay's and the account service's NewFighterPlaces.
+LOW_PLACES = (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95, 96, 97)
+PLACES = tuple(range(FIRST_NEW_FE_ID, LAST_NEW_FE_ID + 1)) + LOW_PLACES
+PLACES_CAPABILITY = "fighter-places-v2"     # a pack at a low place: launchers from build 84 take it
+# The order places are given in (the account service's NewFighterPlaceOrder, FFNY Studio's local test place):
+# 100..123, the low places, 124..127 last (kept free as long as possible for the per-slot rows of a later dynamic
+# binding, community/unlimited-fighters-study.md in the game repository). Change the order here and on the server.
+PLACE_ORDER = PLACES[:24] + LOW_PLACES + PLACES[24:28]
+
+
+def is_place(fe_id):
+    """Whether ``fe_id`` is a new fighter's place (``PLACES``)."""
+    return isinstance(fe_id, int) and not isinstance(fe_id, bool) and fe_id in PLACES
+
+
+def place_index(fe_id):
+    """The index of place ``fe_id`` in ``PLACES`` (0..47: its own voice number is 40 + it), or None."""
+    return PLACES.index(fe_id) if is_place(fe_id) else None
 STOCK_ROWS = 75
 
 
@@ -79,7 +101,7 @@ def characters(blob):
 
 def append_character(blob, template_fe_id, fe_id, name, display, model=None, edits=None):
     """``djv2.sod`` with a new Character row copied from the row of ``template_fe_id``: its own ``fe_id``
-    (100..127), row name (``name``, made to hash above every other row name), display name and model
+    (a place, ``PLACES``), row name (``name``, made to hash above every other row name), display name and model
     (default: the template's). ``edits`` maps row word indices to new values (stats). Returns
     (bytes, row name, item ID).
 
@@ -87,8 +109,9 @@ def append_character(blob, template_fe_id, fe_id, name, display, model=None, edi
     blocks and the feID list each one entry longer, and a new string table. The table header's row count and
     the three block pointers and the file header's string-table offset are updated in place; no existing
     row moves or changes its ID."""
-    if not FIRST_NEW_FE_ID <= fe_id <= LAST_NEW_FE_ID:
-        raise FighterError("a new fighter's feID is %d..%d" % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID))
+    if not is_place(fe_id):
+        raise FighterError("a new fighter's feID is one of its places (%d..%d, %s)"
+                           % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID, ", ".join(map(str, LOW_PLACES))))
     s = Sod(blob)
     t = s.table_hashes.index(CHARACTER)
     off = s.table_offsets[t]
@@ -227,7 +250,9 @@ def add_fighter(fighter_bytes, template_fe_id, fe_id, hub_name, model=None):
 # -- menu pictures --------------------------------------------------------------------------------------------------
 
 # The per-fighter art in screens/screens.viv, loaded by path (select screen, loading and summary cards). A family
-# whose name starts with p_ (and the bare portrait/<n>_<k>p) is numbered feID + 1, the others feID.
+# whose name starts with p_ (and the bare portrait/<n>_<k>p) is numbered feID + 1, the others feID. thumb<n> is
+# the select grid's cell under the cursor, thumb<n>off the cell when the cursor is elsewhere. ``fighterart.py``
+# paints a pack's own art into the copies.
 PICTURE_FAMILIES = (
     ("screens/portrait/p_CF/p_cf_%d_%dp.big", 1, (2, 3, 4)),
     ("screens/portrait/l_CF/l_CF_%d_%dp.big", 0, (2, 3, 4)),
@@ -241,14 +266,17 @@ PICTURE_FAMILIES = (
     ("screens/portrait/t_CT/t_CT_%d.big", 0, None),
     ("screens/portrait/t_CO/t_CO_%d.big", 0, None),
     ("screens/thumbs/thumb%d.big", 0, None),
+    ("screens/thumbs/thumb%doff.big", 0, None),
 )
 
 
-def picture_copies(archive, template_fe_id, fe_id, rename_inner=True):
+def picture_copies(archive, template_fe_id, fe_id, rename_inner=True, replace_existing=False):
     """[(new entry name, bytes)]: the template's menu pictures under the new ID (placeholders), as plain (not
     RefPack-stored) archives. Each is a small BIG whose entries are named after it (``p_cf_56_2p.apt/.const/.o/
     .xsh``); with ``rename_inner`` the copy's entries take the new name too (without it the picture stays blank,
-    measured 2026-11-11). ``archive``: anything with ``names()`` and ``read(name)`` (the unwrapped bytes) of
+    measured 2026-11-11). A picture the archive has under the new name already is left out, unless
+    ``replace_existing`` (place 37: the retail screens hold an unused Crow 2's pictures there, ``thumb37``,
+    ``l_MS_37_*``, ``38_*p``; the new fighter's copies replace them). ``archive``: anything with ``names()`` and ``read(name)`` (the unwrapped bytes) of
     screens.viv, e.g. a ``viv.Archive``."""
     from . import viv
     names = {n.lower(): n for n in archive.names()}
@@ -258,7 +286,7 @@ def picture_copies(archive, template_fe_id, fe_id, rename_inner=True):
             args_old = (template_fe_id + offset,) + ((k,) if k else ())
             args_new = (fe_id + offset,) + ((k,) if k else ())
             old, new = pattern % args_old, pattern % args_new
-            if old.lower() not in names or new.lower() in names:
+            if old.lower() not in names or (new.lower() in names and not replace_existing):
                 continue
             raw = archive.read(names[old.lower()])
             if rename_inner:
@@ -272,7 +300,7 @@ def picture_copies(archive, template_fe_id, fe_id, rename_inner=True):
                         n = stem_new + n[len(stem_old):]
                     files.append((n, inner.raw(e)))
                 raw = viv.build_archive(files, magic=inner.magic, size_le=bool(inner.size_le))
-            out.append((new, raw))
+            out.append((names.get(new.lower(), new), raw))     # an existing one under its own spelling
     return out
 
 
@@ -382,7 +410,7 @@ def add_taunt(taunt_bytes, template_model, model):
 #     (``apply_op``): the Character row in djv2.sod, the entity, the IntroExtro entry, the camera banks and
 #     placeholder menu pictures.
 #
-# The front-end ID (100..127) is not in the pack: the account service gives every accepted new fighter its place
+# The front-end ID (a place, ``PLACES``) is not in the pack: the account service gives every accepted new fighter its place
 # and the signed catalogue carries it (``fighter_fe_id``), so every player with the same packs gets the same IDs
 # whatever else is installed. A pack installed by hand or tested from Studio says it in the op (``fe_id``).
 
@@ -460,7 +488,7 @@ def op_problems(op, allow_fe_id=False):
     keys = set(OP_KEYS) | set(OP_OPTIONAL) | ({"fe_id"} if allow_fe_id else set())
     out = []
     if "fe_id" in op and not allow_fe_id:
-        out.append("leave fe_id out; the server gives a new fighter its place (100 to 127)")
+        out.append("leave fe_id out; the server gives a new fighter its place")
     extra = sorted(set(op) - keys - {"fe_id"})
     if extra or any(k not in op for k in OP_KEYS):
         out.append("a new-fighter op holds %s (and optionally %s)" % (", ".join(OP_KEYS), ", ".join(OP_OPTIONAL)))
@@ -473,8 +501,9 @@ def op_problems(op, allow_fe_id=False):
         out.append("model must be V2IP_7xxA")
     if "fe_id" in op and allow_fe_id:
         f = op["fe_id"]
-        if not (isinstance(f, int) and not isinstance(f, bool) and FIRST_NEW_FE_ID <= f <= LAST_NEW_FE_ID):
-            out.append("fe_id must be %d..%d" % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID))
+        if not is_place(f):
+            out.append("fe_id must be a new fighter's place (%d..%d, %s)" % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID,
+                                                                            ", ".join(map(str, LOW_PLACES))))
     out += ["name: " + p for p in name_problems(op.get("name"))]
     if "gameplay" in op:
         out += ["gameplay: " + p for p in gameplay_problems(op["gameplay"])]
@@ -519,18 +548,22 @@ class _View:
         return self.files.current(self.rel, name)
 
 
-def apply_op(files, op, fe_id, pictures=True, pack=None):
+def apply_op(files, op, fe_id, pictures=True, pack=None, new=False):
     """The edits of one new-fighter op on the player's files as the packs so far left them: [(where, path,
     entry, bytes)], ``where`` "loose" (a whole file, entry None), "replace" or "add" (an archive entry; plain bytes,
     the caller stores them). ``files`` gives ``current(path, entry="")`` (bytes; a missing file or entry raises
     KeyError or OSError) and ``names(path)`` (an archive's entry names, the added ones too). ``fe_id`` is the
-    place (100..127). ``pack(path)`` reads one of the pack's own files (an own voice's clips, ``voice/...``).
-    Raises FighterError when the op does not fit (the ID or the model is taken, no such template)."""
+    place (``PLACES``). ``pack(path)`` reads one of the pack's own files (an own voice's clips, ``voice/...``; its
+    menu art, ``art/body.png``, ``art/head.png`` and ``art/name.png``: KeyError or OSError for one it does not
+    have, and the pictures that art would fill stay the template's). ``new`` stamps NEW on the select grid's two
+    thumbs (a pack with head art only). Raises FighterError when the op does not fit (the ID or the model is
+    taken, no such template, art of the wrong size)."""
     problems = op_problems(op, allow_fe_id=True)
     if problems:
         raise FighterError(problems[0])
-    if not (isinstance(fe_id, int) and FIRST_NEW_FE_ID <= fe_id <= LAST_NEW_FE_ID):
-        raise FighterError("a new fighter needs its place (front-end ID %d..%d)" % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID))
+    if not is_place(fe_id):
+        raise FighterError("a new fighter needs its place (front-end ID %d..%d or %s)"
+                           % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID, ", ".join(map(str, LOW_PLACES))))
     template_fe_id, template, model, name = op["template_fe_id"], op["template_model"], op["model"], op["name"]
     sod_blob = files.current(SOD_PATH)
     rows = {r["fe_id"]: r for r in characters(sod_blob)}
@@ -542,7 +575,7 @@ def apply_op(files, op, fe_id, pictures=True, pack=None):
     words = gameplay_words(op["gameplay"]) if "gameplay" in op else None
     voice = (op.get("gameplay") or {}).get("voice") or {}
     if voice.get("mode") == "own":
-        # the own voice: its five files at N = 40 + feID - 100 in the speech archive, and N in word 21
+        # the own voice: its five files at N = 40 + its place index in the speech archive, and N in word 21
         if pack is None:
             raise FighterError("this new fighter's own voice needs the pack's voice files")
         words = dict(words or {})
@@ -572,8 +605,16 @@ def apply_op(files, op, fe_id, pictures=True, pack=None):
     if tags is not None:
         edits.append(("loose", ANIM_TAGS, None, add_anim_tags(tags, template, model)))
     if pictures:
-        edits += [("add", SCREENS_ARCHIVE, n, data)
-                  for n, data in picture_copies(_View(files, SCREENS_ARCHIVE), template_fe_id, fe_id)]
+        copies = picture_copies(_View(files, SCREENS_ARCHIVE), template_fe_id, fe_id, replace_existing=True)
+        if pack is not None:
+            try:
+                art = fighterart.load_art(pack)
+            except fighterart.ArtError as e:
+                raise FighterError("art: %s" % e)
+            if art:
+                copies = [(n, fighterart.paint_picture(n, data, art, new=new)) for n, data in copies]
+        there = {n.lower() for n in files.names(SCREENS_ARCHIVE)}
+        edits += [("replace" if n.lower() in there else "add", SCREENS_ARCHIVE, n, data) for n, data in copies]
     return edits
 
 

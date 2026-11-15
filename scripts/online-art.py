@@ -231,6 +231,27 @@ def maybe_refpack(blob):
     return hd_assets.unpack_refpack(blob) if blob[:2] in (b"\x10\xfb", b"\x11\xfb", b"\x90\xfb", b"\x91\xfb") else blob
 
 
+# setup/ffnycontent/newfighter.py PLACES (this script runs without the setup package on its path)
+NEW_FIGHTER_PLACES = tuple(range(100, 128)) + (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95,
+                                               96, 97)
+
+
+def keep_new_fighters(old, new):
+    """The community new fighters' hub portraits (fighters/<place>.png, the places of setup/ffnycontent/newfighter.py
+    PLACES: 100..127 and 20 low IDs no stock fighter has) are not from the dump: the launcher's
+    composer (setup/content_compose.py) draws them from the packs' own art, so a rebuild carries them over from
+    the folder it replaces. Returns the IDs kept."""
+    import shutil
+    kept = []
+    for place in NEW_FIGHTER_PLACES:
+        picture = Path(old) / "fighters" / ("%d.png" % place)
+        if picture.is_file() and not picture.is_symlink():
+            (Path(new) / "fighters").mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(picture, Path(new) / "fighters" / picture.name)
+            kept.append(place)
+    return kept
+
+
 def build(data, out):
     screens = Path(data) / "extracted" / "screens" / "screens.viv"
     fonts = Path(data) / "extracted" / "fonts" / "fonts.viv"
@@ -319,6 +340,7 @@ def build(data, out):
     (tmp / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     if out.exists():
         import shutil
+        keep_new_fighters(out, tmp)
         shutil.rmtree(out)
     tmp.rename(out)
     return manifest

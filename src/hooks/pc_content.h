@@ -40,7 +40,7 @@ typedef struct PcContentPack {
     int off;                /* a replacement the player switched off */
     int composed;           /* fighter-body, clothing, venue: install.json, composed by the launcher */
     int applied;            /* composed: content-files/files.ini lists it in applied */
-    int fighter_fe_id;      /* a new fighter's front-end ID (100..127), 0 none */
+    int fighter_fe_id;      /* a new fighter's front-end ID (its place, new_fighter_places.h), 0 none */
     int venue_fe_id;        /* build 82: a new venue's front-end ID (28..63), 0 none */
     char reviewed[16];      /* build 82: the day the team accepted this version, YYYY-MM-DD ("" unknown) */
     int local;              /* the player's own pack (FFNY Studio's "Use in my game", local.json): switchable,
@@ -101,7 +101,7 @@ int pc_content_file(const char *game_path, char *out, int size);
  * (" | " between, may be NULL). RECOMP_TEST_CONTENT_NEWS=<n> fakes n (tests and screenshots). */
 int pc_content_news(char *names, int size);
 
-/* Build 82, the hub's NEW badge: a new fighter (front-end ID 100..127) or new venue (feID 28..63) from a pack the
+/* Build 82, the hub's NEW badge: a new fighter (its place, new_fighter_places.h) or new venue (feID 28..63) from a pack the
  * team accepted less than PC_CONTENT_NEW_DAYS days ago, which this player has not picked yet. picked: the player
  * picked it (READY with the fighter, a vote for the venue, a match on it); its badge goes. RECOMP_TEST_CONTENT_NEW=
  * all shows every new fighter and venue as new (screenshots). */

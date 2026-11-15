@@ -4956,7 +4956,7 @@ void gallery_step()
         if (p == "fighters-standard") {
             G.room.settings.fighter_rules = NETPLAY_RULES_STANDARD;
             G.room.blocked_count = 0;
-            for (int id = 100; id <= 127; id++) G.room.blocked[G.room.blocked_count++] = (unsigned char)id;
+            for (int k = 0; k < NEW_FIGHTER_MAX; k++) G.room.blocked[G.room.blocked_count++] = (unsigned char)new_fighter_place_id(k);
         }
         S.fighter_sel = 0;
         S.fighter_top = 0;

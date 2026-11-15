@@ -33,11 +33,14 @@ import mod_catalogue as contract
 import content_compose
 
 # FFNY Online's own catalogue: the account service signs it with its content key when the team accepts a
-# pack (docs/content-packs.md); the launcher syncs it at every start ("sync"). index-v3.json lists everything,
-# also the mods of a pack of several mods (with "bundle" and "bundle_name"); index-v2.json is the same catalogue
-# without pack items, for launchers of build 79; index.json also leaves new fighters out, for launchers up to
-# build 78. The three share their revisions.
-CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v3.json'
+# pack (docs/content-packs.md); the launcher syncs it at every start ("sync"). index-v4.json lists everything,
+# also new fighters at the 20 low places (build 84, newfighter.LOW_PLACES; their versions need the capability
+# fighter-places-v2); index-v3.json is the same catalogue without those, for launchers of builds 80..83, whose
+# check refuses a place outside 100..127; index-v3.json and up list the mods of a pack of several mods (with
+# "bundle" and "bundle_name"); index-v2.json is without pack items, for launchers of build 79; index.json also
+# leaves new fighters out, for launchers up to build 78. All share their revisions.
+CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v4.json'
+CATALOGUE_URL_V3 = 'https://play.defjam.online/updates/content/index-v3.json'
 CATALOGUE_URL_V2 = 'https://play.defjam.online/updates/content/index-v2.json'
 CATALOGUE_URL_V1 = 'https://play.defjam.online/updates/content/index.json'
 KEYS = Path(__file__).resolve().parents[1] / 'config/mods/catalogue-keys.json'
@@ -479,6 +482,17 @@ def fetch_small(url, limit):
         return data
 
 
+def fetch_index(url):
+    """(raw, signature, url) of a catalogue index. index-v4.json that the server does not have yet (404: an account
+    service from before build 84) falls back to index-v3.json, the same catalogue without fighters at low places."""
+    try:
+        return fetch_small(url, MAX_INDEX), fetch_small(url + '.sig', 64), url
+    except urllib.error.HTTPError as error:
+        if error.code != 404 or url != CATALOGUE_URL:
+            raise
+    return fetch_small(CATALOGUE_URL_V3, MAX_INDEX), fetch_small(CATALOGUE_URL_V3 + '.sig', 64), CATALOGUE_URL_V3
+
+
 def semver(value):
     match = contract.version(value.removeprefix('v'))
     pre = match[4]
@@ -606,8 +620,7 @@ class Manager:
     def refresh(self, url=CATALOGUE_URL):
         check(self.keys, 'Catalogue signing key has not been provisioned; local mods still work')
         self.progress('Checking project catalogue')
-        raw = fetch_small(url, MAX_INDEX)
-        signature = fetch_small(url + '.sig', 64)
+        raw, signature, url = fetch_index(url)
         previous = read_json(self.root / 'catalogue.json', {})
         # index.json, index-v2.json and index-v3.json share their revisions but not their bytes: the same revision
         # from another file is no change without a new revision (an older revision is still a rollback)
@@ -1000,13 +1013,16 @@ class Manager:
     def composed_packs(self):
         """Every synced pack with an install.json, for content_compose."""
         out = []
+        reviewed = self.reviewed_dates()
         for mod_id, r in self.state()['installed'].items():
             contract.slug(mod_id)
             folder = self.mods / mod_id
             if r.get('synced') and not linked(folder) and (folder / 'install.json').is_file():
+                # reviewed: the day the team accepted this version (a new fighter's thumbs carry NEW for a while)
                 pack = dict(id=mod_id, version=r.get('version', ''), content_sha256=r.get('content_sha256', ''),
                             kind=r.get('kind', 'replacement'), order=r.get('order', 0), folder=folder,
-                            fighter_fe_id=r.get('fighter_fe_id', 0))
+                            fighter_fe_id=r.get('fighter_fe_id', 0),
+                            reviewed=reviewed.get((mod_id, r.get('version')), ''))
                 if r.get('bundle'):
                     # content_compose applies a pack of several mods whole or not at all
                     pack.update(bundle=r['bundle'], bundle_name=r.get('bundle_name', r['bundle']))
@@ -1183,8 +1199,7 @@ class Manager:
         The last sync's revision (content.ini) counts as handled: a pack that failed there is not news again."""
         url = url or local_catalogue_url() or CATALOGUE_URL
         check(self.keys, 'Catalogue signing key has not been provisioned')
-        raw = fetch_small(url, MAX_INDEX)
-        signature = fetch_small(url + '.sig', 64)
+        raw, signature, url = fetch_index(url)
         previous = read_json(self.root / 'catalogue.json', {})
         index = verify_index(raw, signature, self.keys, previous.get('revision', 0), None, fresh=True)
         names = []

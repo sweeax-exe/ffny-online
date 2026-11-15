@@ -5,6 +5,8 @@
 #ifndef DEFJAM_ONLINE_DATA_H
 #define DEFJAM_ONLINE_DATA_H
 
+#include "new_fighter_places.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -36,7 +38,8 @@ typedef struct OnlineMode {
 /* A new venue (FFNY Studio's new-venue packs, build 82 in the hub): the feIDs the account service lets a pack
  * claim. Offered only in rooms with community content on (not STANDARD ONLY); never in ranked or the quick pools. */
 #define ONLINE_NEW_VENUE(fe) ((fe) >= 28 && (fe) <= 63)
-#define ONLINE_NEW_FIGHTER(id) ((id) >= 100 && (id) <= 127)
+/* A new fighter's place (new_fighter_places.h: 100..127 and 20 free IDs below 98; content packs). */
+#define ONLINE_NEW_FIGHTER(id) new_fighter_is_place(id)
 
 /* Each returns the count and sets *out to a list that lives as long as the process. The two
  * from the dump are empty when it cannot be read. */
@@ -44,7 +47,7 @@ int online_fighters(const OnlineFighter **out);
 int online_venues(const OnlineVenue **out);
 int online_modes(const OnlineMode **out);
 
-/* The new fighters (front-end IDs 100..127, content packs; new_fighters.h): offered in the hub's fighter
+/* The new fighters (their places, new_fighter_places.h; content packs; new_fighters.h): offered in the hub's fighter
  * list, never as CPU places, random picks or in drafts. */
 int online_new_fighters(const OnlineFighter **out);
 const char *online_fighter_name(int id);    /* "Fighter 12" if unknown */

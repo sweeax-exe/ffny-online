@@ -14,8 +14,9 @@ How a fighter speaks. A voice number N names five things in ``audio/speech2.viv`
 * two streams, ``speech\\streams\\intro\\NNN.asf`` (the entrance line, 36 kHz, loaded into a 0x25800-byte buffer
   per slot) and ``speech\\streams\\extro\\NNN.asf`` (the victory line, 36 kHz).
 
-Stock voices are 000..039 and 500..538. A new fighter with its own voice gets ``N = 40 + (feID - 100)`` (040..067,
-free in every dump), so it never needs a server claim: the place the account service gives the fighter decides
+Stock voices are 000..039 and 500..538. A new fighter with its own voice gets ``N = 40 + its place index``
+(``newfighter.PLACES``: 100..127 are 040..067, the 20 low places 068..087; free in every dump), so it never needs
+a server claim: the place the account service gives the fighter decides
 it. The pack holds only the modder's own clips (``voice/*.sch`` bank lines at 24 kHz, ``voice/intro.asf`` and
 ``voice/win.asf`` at 36 kHz), listed by group in the new-fighter op's gameplay block::
 
@@ -83,10 +84,11 @@ class VoiceError(ValueError):
 
 
 def voice_number(fe_id):
-    """The own voice number of new fighter ``fe_id`` (40..67), or None."""
-    if isinstance(fe_id, int) and not isinstance(fe_id, bool) and FIRST_FE_ID <= fe_id <= LAST_FE_ID:
-        return FIRST_VOICE + fe_id - FIRST_FE_ID
-    return None
+    """The own voice number of new fighter ``fe_id`` (40..87: 40 + its place index, ``newfighter.PLACES``), or
+    None."""
+    from .newfighter import place_index
+    index = place_index(fe_id)
+    return None if index is None else FIRST_VOICE + index
 
 
 def template_voice(fe_id, speech_word):
@@ -529,7 +531,7 @@ def voice_files(current, names, template_fe_id, template_speech, fe_id, lines, r
     file; ``template_speech`` is the template's row word 21. Raises VoiceError."""
     voice = voice_number(fe_id)
     if voice is None:
-        raise VoiceError("a new fighter's voice needs its place (100..127)")
+        raise VoiceError("a new fighter's voice needs its place")
     problems = lines_problems(lines)
     if problems:
         raise VoiceError(problems[0])

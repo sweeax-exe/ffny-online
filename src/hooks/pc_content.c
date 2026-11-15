@@ -6,6 +6,7 @@
  * loader, the file system and the netplay which packs are on. */
 #define _CRT_SECURE_NO_WARNINGS
 #include "pc_content.h"
+#include "new_fighter_places.h"
 #include "recomp_settings.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -389,7 +390,7 @@ static void set_picked(const char *id)
 int pc_content_new_fighter(int fe_id)
 {
     int i;
-    if (fe_id < 100 || fe_id > 127) return 0;
+    if (!new_fighter_is_place(fe_id)) return 0;
     refresh_new();
     for (i = 0; i < g_new_count; i++) if (g_new[i].fighter == fe_id) return !picked(g_new[i].id);
     return 0;
@@ -407,7 +408,7 @@ int pc_content_new_venue(int fe_id)
 void pc_content_picked_fighter(int fe_id)
 {
     int i;
-    if (fe_id < 100 || fe_id > 127) return;
+    if (!new_fighter_is_place(fe_id)) return;
     refresh_new();
     for (i = 0; i < g_new_count; i++) if (g_new[i].fighter == fe_id) set_picked(g_new[i].id);
 }

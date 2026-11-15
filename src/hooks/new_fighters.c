@@ -1,19 +1,22 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Copyright (c) 2026 sweeax-exe (FFNY Online) */
-/* New fighters as extra outfits of a stock fighter's select cell. See new_fighters.h and
+/* New fighters as select cells of their own (the community row). See new_fighters.h and
  * docs/research/new-fighters.md.
  *
  * The select screens (battle/chooseF2/3/4) build their grid from Game.ResetFighterList() and then one
  * Game.GetNextFighter() string per outfit, "CLOTH=<outfits of the cell>&FE_ID=<id>&LOCK=<1 unlocked>&U=..",
  * until "NO_RETURN". ResetFighterList (sub_00047BC0) lists the Character rows whose word 13 is 1, sorts them,
- * and groups Blaze 2/3, Sticky 2 and D-Mob 2/3 under their cells by hard-coded IDs. A new row (feID 100..127)
+ * and groups Blaze 2/3, Sticky 2 and D-Mob 2/3 under their cells by hard-coded IDs (80..84; it skips 98). A new
+ * row (at a new fighter's place, new_fighter_places.h: 100..127, then 20 free IDs below 98)
  * comes out as a cell of its own, locked (it is not in the profile's 80-entry fighter set), with the grid
  * thumbnail of frame feID, which is empty.
  *
  * So right after the game's ResetFighterList this reads the whole list once (the game's own strings, in its
- * order) and answers the screen's GetNextFighter calls from a copy in which each new fighter's string moved
- * behind its template's outfits, every string of that cell says one outfit more, and the new outfit is
- * unlocked (LOCK=1). Nothing is saved and no profile changes: an unlock is the answer's only. */
+ * order) and answers the screen's GetNextFighter calls from a copy in which the stock strings keep their order and
+ * every new fighter follows as a cell of its own, by place: the last row(s) of the grid, unlocked (LOCK=1), one
+ * outfit (CLOTH=1). Its grid thumbnail, portrait and name art are its own files (the pack's pictures, painted by
+ * the launcher; the grid picture through the chooseF2/3/4 patch of scripts/apt-patch.py). The template is the
+ * gameplay basis only. Nothing is saved and no profile changes: an unlock is the answer's only. */
 #define _CRT_SECURE_NO_WARNINGS
 #include "host.h"
 #include <stdio.h>
@@ -95,7 +98,7 @@ static void load(void)
                 if (row + 4 * ROW_WORDS > size) continue;
                 fe = rd32(d + row + 4 * W_FE_ID);
                 core = rd32(d + row + 4 * W_CORE_ID);
-                if (fe >= NEW_FIGHTER_FIRST && fe <= NEW_FIGHTER_LAST) {
+                if (new_fighter_is_place((int)fe)) {
                     NewFighter *nf;
                     if (g_new_count >= NEW_FIGHTER_MAX) continue;
                     nf = &g_new[g_new_count++];
@@ -126,7 +129,7 @@ static void load(void)
     for (i = 0; i < g_new_count; i++) {
         const FighterGameplay *g = &g_gp[i];
         g_gp_ok[i] = fighter_gameplay_decode(g_words[i][W_BLAZINS], g_words[i][W_GAMEPLAY], &g_gp[i]);
-        fprintf(stderr, "[NEWFIGHTER] feID %d \"%s\": coreID %d, an outfit of feID %d\n", g_new[i].fe_id,
+        fprintf(stderr, "[NEWFIGHTER] feID %d \"%s\": coreID %d, template feID %d\n", g_new[i].fe_id,
                 g_new[i].name, g_new[i].core_id, g_new[i].template_fe_id);
         if (g_gp_ok[i])
             fprintf(stderr, "[NEWFIGHTER] feID %d gameplay: stats %d %d %d %d %d %d %d, moves %s%d, Blazins %d %d %d %d\n",
@@ -199,7 +202,7 @@ static const FighterGameplay *slot_gameplay(uint32_t gd, int s, int *fe_out)
     if (gd < 0x10000u) return NULL;
     fe = (int)MEM8(gd + GD_FIGHTER + 5u * (uint32_t)s);
     if (fe_out) *fe_out = fe;
-    if (fe < NEW_FIGHTER_FIRST || fe > NEW_FIGHTER_LAST) return NULL;
+    if (!new_fighter_is_place(fe)) return NULL;
     return new_fighter_gameplay(fe);
 }
 
@@ -367,7 +370,7 @@ static int voice_files_present(int voice)
     return g_voice_present[idx] > 0;
 }
 
-/* The own voice number of new fighter fe_id when its row asks for one (word 21 = 40 + feID - 100), else -1. */
+/* The own voice number of new fighter fe_id when its row asks for one (word 21 = 40 + its place index), else -1. */
 static int new_fighter_voice(int fe_id)
 {
     int i, n = fighter_voice_number(fe_id);
@@ -387,7 +390,7 @@ void new_fighters_voice(void)
     for (s = 0; s < 4; s++) {
         uint32_t row = SPEECH_ROWS + SPEECH_ROW_SIZE * (uint32_t)s, was = MEM32(row + SPEECH_VOICE);
         fe = (int)MEM8(gd + GD_FIGHTER + 5u * (uint32_t)s);
-        if (fe < NEW_FIGHTER_FIRST || fe > NEW_FIGHTER_LAST || MEM32(row) == 0xFFFFFFFFu) continue;
+        if (!new_fighter_is_place(fe) || MEM32(row) == 0xFFFFFFFFu) continue;
         voice = new_fighter_voice(fe);
         if (voice < 0 || (int)was == voice) continue;
         if ((int)MEM32(row) != new_fighter_core(fe)) {
@@ -491,7 +494,7 @@ static void read_guest(uint32_t p, char *out, int size)
 static void rebuild_list(void)
 {
     char raw[LIST_MAX][TEXT_MAX];
-    int n = 0, i, j, k, moved = 0;
+    int n = 0, i, k, place, fe_place, moved = 0;
     uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp;
     double fp[8];
     int fp_top = g_fp_top;
@@ -510,31 +513,30 @@ static void rebuild_list(void)
     g_fp_control_word = fp_cw;
     if (g_self >= 0x10000u) MEM32(g_self + 0x18u) = 0;     /* the game's cursor back to the start */
     if (!n) return;
-    /* the copy: the stock strings in order, each new fighter's behind its template's outfits */
+    /* the copy: the stock strings in their order, then every new fighter as a cell of its own (the community
+     * row at the end of the grid), by place, unlocked, one outfit; its template is its gameplay basis only */
     g_list_n = 0;
     for (i = 0; i < n && g_list_n < LIST_MAX; i++) {
         int fe = field(raw[i], "FE_ID");
-        if (new_fighter_template(fe) >= 0) continue;     /* placed with its template below */
-        snprintf(g_list[g_list_n], TEXT_MAX, "%s", raw[i]);
-        if (fe >= NEW_FIGHTER_FIRST && fe <= NEW_FIGHTER_LAST)
-            set_field(g_list[g_list_n], "LOCK", 1);       /* no template here: a cell of its own, unlocked */
-        g_list_n++;
+        if (new_fighter_is_place(fe)) continue;     /* placed below */
+        snprintf(g_list[g_list_n++], TEXT_MAX, "%s", raw[i]);
     }
-    for (k = 0; k < g_new_count; k++) {
-        int tpl = g_new[k].template_fe_id, at = -1, cloth, first;
+    for (place = 0; place < NEW_FIGHTER_MAX && g_list_n < LIST_MAX; place++) {     /* 100..127, then the low IDs */
         char add[TEXT_MAX] = "";
-        if (tpl < 0) continue;
+        fe_place = new_fighter_place_id(place);
+        for (k = 0; k < g_new_count && g_new[k].fe_id != fe_place; k++) {}
+        if (k >= g_new_count) continue;
         for (i = 0; i < n; i++)
-            if (field(raw[i], "FE_ID") == g_new[k].fe_id) snprintf(add, sizeof(add), "%s", raw[i]);
-        for (i = 0; i < g_list_n; i++)
-            if (field(g_list[i], "FE_ID") == tpl) { at = i; break; }
-        if (at < 0 || g_list_n >= LIST_MAX) continue;
+            if (field(raw[i], "FE_ID") == fe_place) { snprintf(add, sizeof(add), "%s", raw[i]); break; }
         if (!add[0]) {
-            /* not in the game's own list (it always is today; kept for a list hook): the template's string
+            /* not in the game's own list (it always is today; kept for a list hook): its template's string
              * with this row's ID and stat bars (U, L, S, T, H, C = words 17, 16, 22, 25, 12, 2) */
             const uint32_t *w = g_words[k];
-            snprintf(add, sizeof(add), "%s", g_list[at]);
-            set_field(add, "FE_ID", g_new[k].fe_id);
+            int tpl = g_new[k].template_fe_id;
+            for (i = 0; i < n; i++)
+                if (field(raw[i], "FE_ID") == tpl) { snprintf(add, sizeof(add), "%s", raw[i]); break; }
+            if (!add[0]) continue;
+            set_field(add, "FE_ID", fe_place);
             set_field(add, "U", (int)w[17]);
             set_field(add, "L", (int)w[16]);
             set_field(add, "S", (int)w[22]);    /* the first S= is the speed bar, a later one a style */
@@ -542,40 +544,22 @@ static void rebuild_list(void)
             set_field(add, "H", (int)w[12]);
             set_field(add, "C", (int)w[2]);
         }
-        cloth = field(g_list[at], "CLOTH");
-        first = at;
-        if (cloth < 1) cloth = 1;
-        /* the cell's outfits: the template's string and the cloth-1 after it that say the same count */
-        for (j = at + 1; j < g_list_n && j < first + cloth && field(g_list[j], "CLOTH") == cloth; j++) {}
-        memmove(g_list[j + 1], g_list[j], (size_t)(g_list_n - j) * TEXT_MAX);
-        g_list_n++;
-        snprintf(g_list[j], TEXT_MAX, "%s", add);
-        set_field(g_list[j], "LOCK", 1);
-        for (i = first; i <= j; i++) set_field(g_list[i], "CLOTH", cloth + 1);
+        set_field(add, "CLOTH", 1);
+        set_field(add, "LOCK", 1);
+        snprintf(g_list[g_list_n++], TEXT_MAX, "%s", add);
         moved++;
-    }
-    /* a new fighter whose template has no cell in this list (none, or not offered here) keeps its own, unlocked */
-    for (k = 0; k < g_new_count; k++) {
-        int found = 0;
-        for (i = 0; i < g_list_n; i++) if (field(g_list[i], "FE_ID") == g_new[k].fe_id) found = 1;
-        for (i = 0; i < n && !found && g_list_n < LIST_MAX; i++)
-            if (field(raw[i], "FE_ID") == g_new[k].fe_id) {
-                snprintf(g_list[g_list_n], TEXT_MAX, "%s", raw[i]);
-                set_field(g_list[g_list_n++], "LOCK", 1);
-                found = 1;
-            }
     }
     g_list_pos = 0;
     g_serving = 1;
     {
         static int told;
         if (told++ < 6)
-            fprintf(stderr, "[NEWFIGHTER] fighter list: %d strings from the game, %d answered, %d new fighters as outfits\n",
+            fprintf(stderr, "[NEWFIGHTER] fighter list: %d strings from the game, %d answered, %d new fighters in cells of their own\n",
                     n, g_list_n, moved);
         if (told < 3)
             for (i = 0; i < g_list_n; i++)
                 for (k = 0; k < g_new_count; k++)
-                    if (field(g_list[i], "FE_ID") == g_new[k].fe_id || field(g_list[i], "FE_ID") == g_new[k].template_fe_id)
+                    if (field(g_list[i], "FE_ID") == g_new[k].fe_id)
                         fprintf(stderr, "[NEWFIGHTER]   %d: %s\n", i, g_list[i]);
     }
 }
