@@ -330,7 +330,13 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
         if (!strcmp(p.type, "language"))
             ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 53 * s), col(k_gold),
                         on ? "Choose it under Settings > General > Game language." : "Off: not offered as a game language.");
-        else if (p.description[0])
+        else if (!strcmp(p.type, "new-fighter") && p.template_name[0]) {
+            // where to find it: new fighters are an outfit in their template's spot until they get their own cell
+            char where[160];
+            snprintf(where, sizeof where, "Find it in %s's spot on the select screen (one of the outfits there).",
+                     p.template_name);
+            ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 53 * s), col(k_gold), where);
+        } else if (p.description[0])
             ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 53 * s), col(k_white, 0.5f), p.description);
         ld->PopClipRect();
         char id[128];

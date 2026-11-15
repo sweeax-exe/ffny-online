@@ -33,16 +33,44 @@ extern BOOL (*g_xbox_game_file_redirect)(const char *relative, content_host_char
 
 #define CONTENT_FILES_MAX 64
 
+/* Paths in this file are UTF-8 (build 83). The narrow environment and fopen() use the ANSI code page, which
+ * cannot hold a data folder whose path has letters outside it (a Cyrillic or Greek user name on a Western
+ * Windows): content.ini was not found there, the launcher's Content page said "No community packs yet" although
+ * the sync had installed them, and the game served none of the composed files, so it went online with another
+ * content print than everyone else. DEFJAM_DATA is read wide and every file opens wide. */
+#if defined(_WIN32)
+static FILE *content_fopen(const char *path, const char *mode)
+{
+    WCHAR w[1400], m[8];
+    int i;
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, w, (int)(sizeof w / sizeof w[0]))) return NULL;
+    for (i = 0; mode[i] && i < 7; i++) m[i] = (WCHAR)mode[i];
+    m[i] = 0;
+    return _wfopen(w, m);
+}
+#else
+#define content_fopen fopen
+#endif
+
 static const char *data_root(void)
 {
+#if defined(_WIN32)
+    static char utf8[MAX_PATH * 4];
+    const WCHAR *w = _wgetenv(L"DEFJAM_DATA");
+    if (!w || !*w || !WideCharToMultiByte(CP_UTF8, 0, w, -1, utf8, (int)sizeof utf8, NULL, NULL)) return NULL;
+    return utf8;
+#else
     const char *d = getenv("DEFJAM_DATA");
     return d && *d ? d : NULL;
+#endif
 }
 
 static int folder_exists(const char *path)
 {
 #if defined(_WIN32)
-    DWORD a = GetFileAttributesA(path);
+    WCHAR w[1400];
+    DWORD a = MultiByteToWideChar(CP_UTF8, 0, path, -1, w, (int)(sizeof w / sizeof w[0]))
+                  ? GetFileAttributesW(w) : INVALID_FILE_ATTRIBUTES;
     return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
 #else
     struct stat st;
@@ -80,7 +108,7 @@ static int read_files_ini(const char *root, char *applied, size_t applied_size,
     if (nfiles) *nfiles = 0;
     if (!root) return 0;
     snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "content-files" HOST_SEP "files.ini", root);
-    if (!(f = fopen(path, "rb"))) return 0;
+    if (!(f = content_fopen(path, "rb"))) return 0;
     while (fgets(line, sizeof line, f)) {
         char *s = trim(line), *eq;
         if (*s == '[') { in_section = !strcmp(s, "[content-files]"); continue; }
@@ -160,7 +188,7 @@ int pc_content_list(PcContentPack *out, int max)
     int n = 0, cur = -1;
     if (!root || max <= 0) return 0;
     snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "content.ini", root);
-    if (!(f = fopen(path, "rb"))) return 0;
+    if (!(f = content_fopen(path, "rb"))) return 0;
     while (fgets(line, sizeof line, f)) {
         char *s = trim(line), *eq;
         if (*s == ';' || *s == '#' || !*s) continue;
@@ -193,7 +221,8 @@ int pc_content_list(PcContentPack *out, int max)
             else if (!strcmp(k, "venue_fe_id")) p->venue_fe_id = atoi(v);
             else if (!strcmp(k, "local")) p->local = atoi(v) == 1;
             else if (!strcmp(k, "online_ok")) p->online_ok = atoi(v) == 1;
-            CONTENT_TEXT(reviewed);
+            CONTENT_TEXT(reviewed); CONTENT_TEXT(template_name);
+            else if (!strcmp(k, "template_fe_id")) p->template_fe_id = atoi(v);
 #undef CONTENT_TEXT
         }
     }
@@ -258,7 +287,7 @@ int pc_content_news(char *names, int size)
     }
     if (!root) return 0;
     snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "news.ini", root);
-    if (!(f = fopen(path, "rb"))) return 0;
+    if (!(f = content_fopen(path, "rb"))) return 0;
     while (fgets(line, sizeof line, f)) {
         char *s = trim(line), *eq;
         if (*s == '[') { in_section = !strcmp(s, "[news]"); continue; }
@@ -441,7 +470,7 @@ static void read_lang_lines(const char *root)
     int in_section = 0;
     g_lang_count = 0;
     snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "content-files" HOST_SEP "files.ini", root);
-    if (!(f = fopen(path, "rb"))) return;
+    if (!(f = content_fopen(path, "rb"))) return;
     while (fgets(line, sizeof line, f) && g_lang_count < CONTENT_FILES_MAX) {
         char *s = trim(line), *bar;
         if (*s == '[') { in_section = !strcmp(s, "[content-files]"); continue; }
@@ -482,7 +511,7 @@ static BOOL content_redirect(const char *relative, content_host_char *host_path,
         if (snprintf(host, sizeof host, "%s" HOST_SEP "%s%s", g_files_dir, g_files_sub[i], g_files[i]) >= (int)sizeof host) break;
 #if defined(_WIN32)
         for (c = host; *c; c++) if (*c == '/') *c = '\\';
-        if (!MultiByteToWideChar(CP_ACP, 0, host, -1, host_path, (int)size)) return FALSE;
+        if (!MultiByteToWideChar(CP_UTF8, 0, host, -1, host_path, (int)size)) return FALSE;
 #else
         (void)c;
         if ((size_t)snprintf(host_path, size, "%s", host) >= size) return FALSE;
@@ -503,7 +532,7 @@ static void serve_composed_files(const char *root)
         char host[1400];
         FILE *f;
         if (snprintf(host, sizeof host, "%s" HOST_SEP "%s", g_files_dir, g_files[i]) >= (int)sizeof host) continue;
-        if (!(f = fopen(host, "rb"))) { fprintf(stderr, "[CONTENT] composed file missing: %s\n", g_files[i]); continue; }
+        if (!(f = content_fopen(host, "rb"))) { fprintf(stderr, "[CONTENT] composed file missing: %s\n", g_files[i]); continue; }
         fclose(f);
         if (g_file_count != i) memcpy(g_files[g_file_count], g_files[i], sizeof g_files[i]);
         g_files_sub[g_file_count][0] = 0;
@@ -542,7 +571,7 @@ int pc_content_language_files(const char *id, char (*paths)[256], int max)
             if (strcmp(g_lang_ids[j], id) || !same_game_path(g_lang_paths[j], g_files[i])) continue;
             if (snprintf(host, sizeof host, "%s" HOST_SEP "lang" HOST_SEP "%s" HOST_SEP "%s", g_files_dir, id,
                          g_files[i]) >= (int)sizeof host) continue;
-            if (!(f = fopen(host, "rb"))) {
+            if (!(f = content_fopen(host, "rb"))) {
                 fprintf(stderr, "[CONTENT] composed file missing: lang/%s/%s\n", id, g_files[i]);
                 continue;
             }
@@ -580,7 +609,9 @@ void pc_content_start(const char *root)
     char list[4096] = "", *old;
     const char *tex_root = getenv("RECOMP_TEXTURE_ROOT");
     int n, i, o = 0, used = 0;
-    (void)root;
+#if defined(_WIN32)
+    if (data_root()) root = data_root();    /* the caller's root is in the ANSI code page; this one is UTF-8 */
+#endif
     {
         const char *v = getenv("RECOMP_CONTENT");
         if (v && !strcmp(v, "0")) { fprintf(stderr, "[CONTENT] off for this run (RECOMP_CONTENT=0)\n"); return; }
@@ -603,7 +634,7 @@ void pc_content_start(const char *root)
         if (tex_root && *tex_root) continue;
         if (root) {
             snprintf(manifest, sizeof manifest, "%s" HOST_SEP "mods" HOST_SEP "%s" HOST_SEP "manifest.ini", root, p->id);
-            if (!(f = fopen(manifest, "rb"))) continue;
+            if (!(f = content_fopen(manifest, "rb"))) continue;
             fclose(f);
         }
         if (old && *old) {     /* listed by hand already */

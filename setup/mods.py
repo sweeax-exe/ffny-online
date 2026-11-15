@@ -15,6 +15,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import socket
 import stat
 import struct
 import sys
@@ -769,7 +770,10 @@ class Manager:
         try:
             self.refresh(url)
         except (ValueError, OSError, urllib.error.URLError) as error:
-            problems.append('Catalogue: ' + str(error))
+            # build 83: a plain line for the Content page instead of "<urlopen error [WinError 10061] ...>"
+            problems.append('the FFNY server could not be reached (%s); the packs you have stay as they are'
+                            % plain_network_error(error) if isinstance(error, (OSError, urllib.error.URLError))
+                            and not isinstance(error, ModError) else 'Catalogue: ' + str(error))
         try:
             index = self.trusted(fresh=True)
         except (ValueError, OSError) as error:
@@ -820,6 +824,8 @@ class Manager:
                     raise
                 if mod.get('bundle'):
                     reasons[mod['id']] = '%s: %s' % (mod['name'], error)     # reported for its pack below
+                elif self.needs_newer(mod):
+                    problems.append('%s needs a newer FFNY Online - update to get it' % (mod.get('name') or mod['id']))
                 else:
                     problems.append('%s: %s' % (mod['id'], error))
         done += self.sync_bundles(ordered, wanted, reasons, problems)
@@ -832,6 +838,15 @@ class Manager:
                 except (ValueError, OSError) as error:
                     problems.append('%s: %s' % (mod_id, error))
         return done
+
+    def needs_newer(self, mod):
+        """Whether a catalogue mod has a stable, unrevoked version that only a newer game or launcher could take
+        (a higher min_recomp or a capability this launcher does not offer, as voice-v1 before build 83): the
+        Content page then says so in plain words instead of 'No compatible, nonrevoked version'."""
+        versions = [v for v in mod.get('versions', []) if v.get('version') not in mod.get('revoked_versions', [])
+                    and (self.prerelease or v.get('channel') == 'stable')]
+        return bool(versions) and not any(semver(v['min_recomp']) <= semver(self.runtime)
+                                          and set(v['capabilities']) <= self.capabilities for v in versions)
 
     def sync_bundles(self, ordered, wanted, reasons, problems):
         """A pack of several mods is one unit: unless every mod of it is installed at the catalogue's version,
@@ -973,6 +988,10 @@ class Manager:
                 venue = new_venue_fe_id(self.mods / mod_id / 'install.json')
                 if venue:
                     lines.append('venue_fe_id=%d' % venue)
+                template = new_fighter_template_fe_id(self.mods / mod_id / 'install.json')
+                if template:
+                    # build 83: the Content page says where the new fighter is ("in D-Mob's spot")
+                    lines += ['template_fe_id=%d' % template, 'template_name=' + self.fighter_name(template)]
         for p in self.local_packs():
             # the player's own packs (FFNY Studio, "Use in my game"): local=1, never in the online content print;
             # online_ok=0 keeps the game offline while the pack is on (pc_content.c)
@@ -986,7 +1005,23 @@ class Manager:
                 venue = new_venue_fe_id(p['folder'] / 'install.json')
                 if venue:
                     lines.append('venue_fe_id=%d' % venue)
+                template = new_fighter_template_fe_id(p['folder'] / 'install.json')
+                if template:
+                    lines += ['template_fe_id=%d' % template, 'template_name=' + self.fighter_name(template)]
         atomic_bytes(self.root / 'content.ini', ('\n'.join(lines) + '\n').encode('utf-8'))
+
+    def fighter_name(self, fe_id):
+        """A stock fighter's name as the select screen shows it (the player's djv2.sod Character rows), '' when
+        the dump is not at hand."""
+        if not hasattr(self, '_fighter_names'):
+            self._fighter_names = {}
+            try:
+                from ffnycontent import newfighter
+                rows = newfighter.characters((self.game / 'assets' / 'djv2.sod').read_bytes())
+                self._fighter_names = {r['fe_id']: r['display'] for r in rows}
+            except (OSError, ValueError, KeyError, ImportError):
+                pass
+        return re.sub(r'[\r\n]', ' ', str(self._fighter_names.get(fe_id, '')))[:40]
 
     def reviewed_dates(self):
         """{(mod id, version): the catalogue's review date} from the cached verified catalogue ({} without one)."""
@@ -1085,6 +1120,34 @@ def new_venue_fe_id(install_json):
         for op in ops:
             if isinstance(op, dict) and op.get('op') == 'new-venue' and isinstance(op.get('fe_id'), int)                     and 28 <= op['fe_id'] <= 63:
                 return op['fe_id']
+    except (OSError, ValueError, AttributeError):
+        pass
+    return 0
+
+
+def plain_network_error(error):
+    """A few words for a failed download: no connection, a timeout, an HTTP status, else the OS's text."""
+    reason = getattr(error, 'reason', error)
+    if isinstance(error, urllib.error.HTTPError):
+        return 'the server answered %d' % error.code
+    if isinstance(reason, (TimeoutError, socket.timeout)) or 'timed out' in str(reason):
+        return 'no answer in time'
+    if isinstance(reason, (ConnectionRefusedError, ConnectionResetError)) or getattr(reason, 'winerror', 0) in (10061, 10054):
+        return 'no connection'
+    if isinstance(reason, socket.gaierror):
+        return 'no internet connection or no name lookup'
+    return 'no connection'
+
+
+def new_fighter_template_fe_id(install_json):
+    """A new fighter pack's template fighter (its new-fighter op's template_fe_id, fighter.xml 0..99): the new
+    fighter shows as an outfit in that fighter's spot on the select screen. Else 0."""
+    try:
+        ops = json.loads(Path(install_json).read_text(encoding='utf-8')).get('ops') or []
+        for op in ops:
+            if (isinstance(op, dict) and op.get('op') == 'new-fighter' and isinstance(op.get('template_fe_id'), int)
+                    and 0 <= op['template_fe_id'] < 100):
+                return op['template_fe_id']
     except (OSError, ValueError, AttributeError):
         pass
     return 0

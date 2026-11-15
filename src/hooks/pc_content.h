@@ -46,6 +46,8 @@ typedef struct PcContentPack {
     int local;              /* the player's own pack (FFNY Studio's "Use in my game", local.json): switchable,
                                never in the online print */
     int online_ok;          /* local: it only changes how things look (textures), so it may stay on online */
+    int template_fe_id;     /* build 83: a new fighter's template (its spot on the select screen), 0 none */
+    char template_name[48]; /* ... and that fighter's name ("D-Mob"), "" unknown */
 } PcContentPack;
 
 /* The installed catalogue packs in catalogue order (re-read on every call; content.ini is small).

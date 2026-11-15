@@ -210,7 +210,7 @@ def test_sync_composes_a_fighter_body_pack_and_marks_it_composed(tmp_path, monke
     old = mods.Manager(tmp_path / 'old', '0.13.0', ['textures-v1'], keys=[key.public_key().public_bytes_raw().hex()],
                        game_dir=game)
     run_sync(old, raw, sig, {mod['versions'][0]['archive']['sha256']: path})
-    assert not (old.mods / 'new-body').exists() and 'new-body:' in old.message
+    assert not (old.mods / 'new-body').exists() and 'Paper test needs a newer FFNY Online' in old.message
     # dropped from the catalogue: the pack and the composed files go
     raw, sig = publish(key, [], 2)
     run_sync(manager, raw, sig, {})
@@ -431,3 +431,22 @@ def test_composed_packs_carry_the_pack(tmp_path, monkeypatch):
     packs = manager.composed_packs()
     assert [(p['id'], p['bundle'], p['bundle_name']) for p in packs] == [('new-body', 'body-set', 'Body set')]
     assert 'applied=new-body' in (manager.root / 'content-files' / 'files.ini').read_text(encoding='utf-8')
+
+
+def test_a_pack_for_a_newer_build_is_named_in_plain_words(setup, tmp_path):
+    """A pack whose only version needs a capability this launcher lacks (voice-v1 before build 83) is not
+    "No compatible, nonrevoked version available for this runtime/channel" on the Content page but
+    "<name> needs a newer FFNY Online - update to get it"; the others still sync."""
+    manager, key = setup
+    a_path, a = base.package(tmp_path, name='good')
+    b_path, b = base.package(tmp_path, name='voiced', color='blue')
+    ffny(key, a_path, a, order=1)
+    ffny(key, b_path, b, order=2)
+    b['name'] = 'CJ'
+    b['versions'][0]['capabilities'] = ['textures-v1', 'voice-v1']
+    raw, sig = publish(key, [a, b], 1)
+    run_sync(manager, raw, sig, {a['versions'][0]['archive']['sha256']: a_path,
+                                 b['versions'][0]['archive']['sha256']: b_path})
+    assert (manager.mods / 'good').is_dir() and not (manager.mods / 'voiced').exists()
+    assert 'Not synced: CJ needs a newer FFNY Online - update to get it' in manager.message
+    assert 'nonrevoked' not in manager.message

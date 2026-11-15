@@ -42,7 +42,13 @@ static int g_loaded;
 
 static char *read_file(const char *path)
 {
+#if defined(_WIN32)
+    /* UTF-8 paths (pc_content_file's composed venue.xml under a data folder outside the ANSI code page) */
+    WCHAR w[1400];
+    FILE *f = MultiByteToWideChar(CP_UTF8, 0, path, -1, w, (int)(sizeof w / sizeof w[0])) ? _wfopen(w, L"rb") : NULL;
+#else
     FILE *f = fopen(path, "rb");
+#endif
     long size;
     char *text;
     if (!f) return NULL;
