@@ -140,14 +140,17 @@ def test_sync_refuses_a_bad_pack_signature_and_keeps_going(setup, tmp_path):
     assert 'forged: Pack signature is invalid' in manager.message
 
 
-def test_sync_keeps_a_hand_installed_folder(setup, tmp_path):
+def test_sync_moves_an_unowned_folder_aside(setup, tmp_path):
+    """Build 84: a folder without local.json that the manager does not own no longer blocks the catalogue pack:
+    it is moved to mod-manager/replaced/ (test_content_unowned_folder.py has the other cases)."""
     manager, key = setup
     a_path, a = base.package(tmp_path, name='mine')
     ffny(key, a_path, a)
     (manager.mods / 'mine').mkdir()
     raw, sig = publish(key, [a], 1)
     run_sync(manager, raw, sig, {a['versions'][0]['archive']['sha256']: a_path})
-    assert 'mine:' in manager.message and not (manager.mods / 'mine' / 'manifest.ini').exists()
+    assert (manager.mods / 'mine' / 'manifest.ini').exists()
+    assert [p.name.split('-')[0] for p in (manager.root / 'replaced').iterdir()] == ['mine']
 
 
 def test_catalogue_url_is_ours_and_local_http_only_for_tests():

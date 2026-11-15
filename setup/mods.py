@@ -585,6 +585,7 @@ class Manager:
         self.message = ''
         self.prerelease = prerelease
         self.newer = {}         # build 83: raw sync problems -> plain words (a pack only a newer build takes)
+        self.notes = []         # build 84: what a sync did besides installing (an unowned folder adopted or moved aside)
 
     def cancelled(self):
         check(not (self.cancel_file and self.cancel_file.exists()), 'Operation cancelled; previous installation preserved')
@@ -731,7 +732,8 @@ class Manager:
             if old:
                 check(self.unchanged(target, old), 'Managed mod has local edits/missing files; preserve them before replacing')
             else:
-                check(not target.exists() and not linked(target), 'A local folder already uses this mod ID; it will not be overwritten')
+                check(not target.exists() and not linked(target),
+                      'A local folder already uses this mod ID; it will not be overwritten (%s)' % target)
             check(not linked(backup), 'Unsafe rollback folder')
             if backup.exists():
                 check(old and old.get('previous') and self.unchanged(backup, old['previous']),
@@ -801,6 +803,9 @@ class Manager:
                     items = sorted(m['id'] for m in self.trusted()['mods'] if m.get('bundle') == mod['bundle'])
                     receipt.update(bundle=mod['bundle'], bundle_name=mod['bundle_name'], bundle_items=items)
             self.cancelled()
+            if synced and self.take_unowned(mod_id, receipt):
+                self.progress('Installed ' + mod['name'])
+                return
             self.progress('Installing verified package')
             self.commit(mod_id, stage, receipt)
             self.progress(('Installed ' + mod['name']) if synced else
@@ -808,6 +813,42 @@ class Manager:
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
+
+    def take_unowned(self, mod_id, receipt):
+        """Build 84, a catalogue pack's folder <data>/mods/<id> is there but state.json does not own it (a copy by
+        hand, or a sync cut short, e.g. by the certificate failures before build 83), which used to block the pack
+        for good ("A local folder already uses this mod ID"):
+          (a) its files are exactly the signed package's: adopted into state.json as installed (True);
+          (c) it has local.json (the player's own pack from FFNY Studio): never touched; refused with its path;
+          (b) anything else: moved aside, never deleted, to <data>/mod-manager/replaced/<id>-<UTC time>, and the
+              signed package is installed as usual (False). The move is logged and named on the Content page."""
+        target = self.mods / mod_id
+        if mod_id in self.state()['installed'] or not (target.exists() or linked(target)):
+            return False
+        check(not linked(target), 'the folder %s is a link, not a pack folder; remove the link to get this pack' % target)
+        check(not target.is_file(), 'a file %s is in the way of this pack; move it away to get the pack' % target)
+        check(not (target / LOCAL_FILE).exists(),
+              'your own pack in %s uses the same id as this community pack; it is kept (give it another id to get both)'
+              % target)
+        with file_lock(self.root / 'runtime.lock'):
+            if self.unchanged(target, receipt):
+                state = self.state()
+                state['installed'][mod_id] = receipt
+                json_bytes(state)
+                atomic_json(self.root / 'state.json', state)
+                self.note('%s: the folder %s already held this exact pack; taken over as installed' % (mod_id, target))
+                return True
+            replaced = safe_dir(self.root / 'replaced')
+            aside = replaced / ('%s-%s' % (mod_id, dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')))
+            check(not aside.exists(), 'Unsafe replaced folder')
+            durable_rename(target, aside)
+            self.note('%s: an old folder %s that was not the signed pack was moved to %s' % (mod_id, target, aside))
+        return False
+
+    def note(self, text):
+        """Build 84: one line of what a sync did besides installing, for the Content page and the launcher log."""
+        self.notes.append(text)
+        print(json.dumps(dict(event='log', message=text)), file=sys.stderr, flush=True)
 
     def bundle_members(self, mod_id):
         """The installed synced mods of the pack ``mod_id`` names (the pack's id or one of its mods), else []."""
@@ -901,6 +942,8 @@ class Manager:
             'Community content synced: %d change(s), %d pack(s) installed' % (done, count)
         if problems:
             message += '. Not synced: ' + '; '.join(plain.get(p, p) for p in problems)
+        if self.notes:
+            message += '. ' + '; '.join(self.notes)
         self.progress(message)
 
     def sync_packs(self, index, problems):
@@ -1155,11 +1198,12 @@ class Manager:
             clean = lambda v: str(v).replace('\n', ' ').replace('\r', ' ')
             atomic_bytes(self.root / 'sync-result.ini', (
                 '; the last community content sync, written by setup/mods.py sync. Do not edit.\n[sync]\n'
-                'time=%s\nresult=%s\nkind=%s\nreason=%s\ndetail=%s\nskipped=%s\nrevision=%d\npacks=%d\nids=%s\n' % (
+                'time=%s\nresult=%s\nkind=%s\nreason=%s\ndetail=%s\nskipped=%s\nrevision=%d\npacks=%d\nids=%s\n'
+                'notes=%s\n' % (
                     dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), result, kind, clean(reason)[:300],
                     clean('; '.join(str(p) for p in problems))[:1000],
                     clean(', '.join(str(p).split(':', 1)[0] for p in skipped))[:500], revision, len(ids),
-                    clean(','.join(ids))[:1000])
+                    clean(','.join(ids))[:1000], clean('; '.join(getattr(self, 'notes', [])))[:1000])
             ).encode('utf-8'))
         except (ValueError, OSError, KeyError, TypeError):
             pass
