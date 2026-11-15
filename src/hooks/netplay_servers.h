@@ -33,6 +33,7 @@ enum NetServerState {
 #define NETSERVER_RANKED   1
 #define NETSERVER_KOTH     2
 #define NETSERVER_ROLLBACK 4
+#define NETSERVER_SAME     8   /* build 83 relays: `same` is set */
 
 typedef struct NetServerInfo {
     const char *id;         /* "eu", "na", "west" */
@@ -45,6 +46,8 @@ typedef struct NetServerInfo {
     int waiting, idle;      /* this build's players waiting in public rooms / in the lobby */
     int flags;              /* NETSERVER_RANKED | ... */
     int version;            /* protocol version byte, 0 unknown */
+    int same;               /* build 83 (NETSERVER_SAME): players with exactly this PC's fingerprint, community content
+                             * included; online - same are on another build, platform or content set */
 } NetServerInfo;
 
 /* Ask every relay now if the last round is older than 10 s (cheap to call every frame). */

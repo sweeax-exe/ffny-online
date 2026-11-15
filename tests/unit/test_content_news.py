@@ -116,3 +116,21 @@ def test_launcher_takes_the_account_services_40_mib_files():
         sys.path.pop(0)
     assert compose.MAX_DELTA == 40 * 1024**2 and compose.MAX_RESULT >= compose.MAX_DELTA
     assert mods.MAX_FILE >= 40 * 1024**2
+
+
+def test_a_sync_answers_the_news_it_installs(setup, tmp_path):
+    """Build 84: every online page said NEW COMMUNITY CONTENT IS OUT with the pack already installed (a news.ini
+    from before the sync). A finished sync for that revision sets pending=0; the game also ignores a news.ini
+    that is not newer than content.ini (pc_content_news)."""
+    manager, key = setup
+    a_path, a = sync.base.package(tmp_path, name='first')
+    sync.ffny(key, a_path, a, order=1)
+    raw, sig = sync.publish(key, [a], 4)
+    names, row = news(manager, raw, sig)
+    assert row['pending'] == '1'
+    sync.run_sync(manager, raw, sig, {a['versions'][0]['archive']['sha256']: a_path})
+    c = configparser.ConfigParser(interpolation=None)
+    c.read(manager.root / 'news.ini', encoding='utf-8')
+    assert c['news']['pending'] == '0' and c['news']['revision'] == '4'
+    content_c = (Path(__file__).resolve().parents[2] / 'src/hooks/pc_content.c').read_text(encoding='utf-8')
+    assert 'if (pending > 0 && revision <= pc_content_revision())' in content_c

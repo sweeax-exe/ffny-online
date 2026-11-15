@@ -219,3 +219,16 @@ FFNYStudio-<version>-windows-x64.zip
 Upload the zip first and the manifest and `.sig` last, so a launcher never sees a manifest whose zip is missing. A
 launcher offers **Update Studio** when `build` is higher than the installed one. Older zips can be removed once the
 new manifest is up.
+
+## Why a PC lacks a pack (build 83)
+
+- `setup/mods.py sync` writes `<data>/mod-manager/sync-result.ini` (`result` ok/failed/cancelled, `kind`
+  clock/network/disk/catalogue/pack, a plain `reason`, `revision`, `packs`, `ids`, `skipped` for packs this
+  build cannot take yet). A refresh that failed and fell back on the cached catalogue is `failed`.
+- `mods.py check` (the running game's news check) writes `error=` and `kind=` into `news.ini` when it fails.
+- The game logs both at its start (`[CONTENT] last sync ok, revision 5, 1 pack` / `[CONTENT] last sync FAILED:
+  <reason>`, `[CONTENT] installed: ...`), F9 adds `[REPORT] content: ...`, and the online hub shows one line.
+  Launcher PLAY syncs once more when the last sync failed.
+- Every HTTPS call of `mods.py` retries once with `config/mods/isrg-roots.pem` (ISRG Root X1 and X2) after a
+  certificate failure: Python's `ssl` reads the Windows root store as it is and never fetches a missing root as
+  WinHTTP does. Signatures are checked as before.

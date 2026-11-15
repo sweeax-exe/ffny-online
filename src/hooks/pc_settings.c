@@ -1076,6 +1076,7 @@ int pc_settings_init(void)
      * import into it meanwhile), and the saves are backed up once a day (save-backups/). */
     if (have_root) saves_game_starts();
     graphics_mod_log_header();        /* [GRAPHICS]: the community pack on or off, for crash and F9 reports */
+    pc_content_log_header();          /* build 83 [CONTENT]: the last sync, the installed packs (crash and F9 reports) */
     custom_music_game_starts(have_root ? root : NULL);    /* the player's own songs, when there are any */
     /* What the picture runs with, for bug reports: input delay and frame pacing questions start here. */
     fprintf(stderr, "[SETTINGS] display: %s %dx%d, render scale %d, vsync %s, anti-aliasing %s, anisotropy %d, "

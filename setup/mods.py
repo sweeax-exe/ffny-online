@@ -564,7 +564,10 @@ def plain_reason(problems, skew=None):
         return 'disk', text[:300]
     if any(w in low for w in ('urlopen error', 'timed out', 'getaddrinfo', 'connection', 'unreachable',
                               'name or service', 'http error', 'unexpected catalogue response', 'ssl')):
-        return 'network', 'no connection to the content server (%s)' % text[:240]
+        inner = re.sub(r'^(Catalogue:\s*)+', '', text)
+        inner = re.sub(r'<urlopen error (.*)>', r'\1', inner)
+        inner = re.sub(r'\[(WinError|Errno) -?\d+\]\s*', '', inner).strip()
+        return 'network', 'no connection to the content server (%s)' % inner[:160]
     if text.startswith('Catalogue') or 'catalogue' in low.split(':', 1)[0]:
         return 'catalogue', text[:300]
     return 'pack', text[:300]
@@ -596,6 +599,7 @@ class Manager:
         self.message = ''
         self.prerelease = prerelease
         self.newer = {}         # build 83: raw sync problems -> plain words (a pack only a newer build takes)
+        self.notes = []         # build 84: what a sync did besides installing (an unowned folder adopted or moved aside)
 
     def cancelled(self):
         check(not (self.cancel_file and self.cancel_file.exists()), 'Operation cancelled; previous installation preserved')
@@ -741,7 +745,8 @@ class Manager:
             if old:
                 check(self.unchanged(target, old), 'Managed mod has local edits/missing files; preserve them before replacing')
             else:
-                check(not target.exists() and not linked(target), 'A local folder already uses this mod ID; it will not be overwritten')
+                check(not target.exists() and not linked(target),
+                      'A local folder already uses this mod ID; it will not be overwritten (%s)' % target)
             check(not linked(backup), 'Unsafe rollback folder')
             if backup.exists():
                 check(old and old.get('previous') and self.unchanged(backup, old['previous']),
@@ -811,6 +816,9 @@ class Manager:
                     items = sorted(m['id'] for m in self.trusted()['mods'] if m.get('bundle') == mod['bundle'])
                     receipt.update(bundle=mod['bundle'], bundle_name=mod['bundle_name'], bundle_items=items)
             self.cancelled()
+            if synced and self.take_unowned(mod_id, receipt):
+                self.progress('Installed ' + mod['name'])
+                return
             self.progress('Installing verified package')
             self.commit(mod_id, stage, receipt)
             self.progress(('Installed ' + mod['name']) if synced else
@@ -818,6 +826,42 @@ class Manager:
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
+
+    def take_unowned(self, mod_id, receipt):
+        """Build 84, a catalogue pack's folder <data>/mods/<id> is there but state.json does not own it (a copy by
+        hand, or a sync cut short, e.g. by the certificate failures before build 83), which used to block the pack
+        for good ("A local folder already uses this mod ID"):
+          (a) its files are exactly the signed package's: adopted into state.json as installed (True);
+          (c) it has local.json (the player's own pack from FFNY Studio): never touched; refused with its path;
+          (b) anything else: moved aside, never deleted, to <data>/mod-manager/replaced/<id>-<UTC time>, and the
+              signed package is installed as usual (False). The move is logged and named on the Content page."""
+        target = self.mods / mod_id
+        if mod_id in self.state()['installed'] or not (target.exists() or linked(target)):
+            return False
+        check(not linked(target), 'the folder %s is a link, not a pack folder; remove the link to get this pack' % target)
+        check(not target.is_file(), 'a file %s is in the way of this pack; move it away to get the pack' % target)
+        check(not (target / LOCAL_FILE).exists(),
+              'your own pack in %s uses the same id as this community pack; it is kept (give it another id to get both)'
+              % target)
+        with file_lock(self.root / 'runtime.lock'):
+            if self.unchanged(target, receipt):
+                state = self.state()
+                state['installed'][mod_id] = receipt
+                json_bytes(state)
+                atomic_json(self.root / 'state.json', state)
+                self.note('%s: the folder %s already held this exact pack; taken over as installed' % (mod_id, target))
+                return True
+            replaced = safe_dir(self.root / 'replaced')
+            aside = replaced / ('%s-%s' % (mod_id, dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')))
+            check(not aside.exists(), 'Unsafe replaced folder')
+            durable_rename(target, aside)
+            self.note('%s: an old folder %s that was not the signed pack was moved to %s' % (mod_id, target, aside))
+        return False
+
+    def note(self, text):
+        """Build 84: one line of what a sync did besides installing, for the Content page and the launcher log."""
+        self.notes.append(text)
+        print(json.dumps(dict(event='log', message=text)), file=sys.stderr, flush=True)
 
     def bundle_members(self, mod_id):
         """The installed synced mods of the pack ``mod_id`` names (the pack's id or one of its mods), else []."""
@@ -906,11 +950,14 @@ class Manager:
         self.write_content(index['revision'])
         self.compose_quietly(problems)
         self.write_sync_result('failed' if problems else 'ok', problems, index['revision'])
+        self.settle_news(index['revision'])
         count = sum(1 for r in self.state()['installed'].values() if r.get('synced'))
         message = 'Community content up to date: %d pack(s)' % count if not done else \
             'Community content synced: %d change(s), %d pack(s) installed' % (done, count)
         if problems:
             message += '. Not synced: ' + '; '.join(plain.get(p, p) for p in problems)
+        if self.notes:
+            message += '. ' + '; '.join(self.notes)
         self.progress(message)
 
     def sync_packs(self, index, problems):
@@ -1198,11 +1245,12 @@ class Manager:
             clean = lambda v: str(v).replace('\n', ' ').replace('\r', ' ')
             atomic_bytes(self.root / 'sync-result.ini', (
                 '; the last community content sync, written by setup/mods.py sync. Do not edit.\n[sync]\n'
-                'time=%s\nresult=%s\nkind=%s\nreason=%s\ndetail=%s\nskipped=%s\nrevision=%d\npacks=%d\nids=%s\n' % (
+                'time=%s\nresult=%s\nkind=%s\nreason=%s\ndetail=%s\nskipped=%s\nrevision=%d\npacks=%d\nids=%s\n'
+                'notes=%s\n' % (
                     dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), result, kind, clean(reason)[:300],
                     clean('; '.join(str(p) for p in problems))[:1000],
                     clean(', '.join(str(p).split(':', 1)[0] for p in skipped))[:500], revision, len(ids),
-                    clean(','.join(ids))[:1000])
+                    clean(','.join(ids))[:1000], clean('; '.join(getattr(self, 'notes', [])))[:1000])
             ).encode('utf-8'))
         except (ValueError, OSError, KeyError, TypeError):
             pass
@@ -1256,6 +1304,19 @@ class Manager:
         ).encode('utf-8'))
         self.message = '%d community pack change(s) waiting' % len(names) if names else 'Community content up to date'
         return names
+
+    def settle_news(self, revision):
+        """Build 84: a finished sync for catalogue ``revision`` answers the news a check found up to that revision:
+        news.ini then says pending=0 (the game also ignores a news.ini not newer than content.ini)."""
+        old = configparser.ConfigParser(interpolation=None)
+        try:
+            old.read(self.root / 'news.ini', encoding='utf-8')
+            if not old.has_section('news') or int(old.get('news', 'revision', fallback='0')) > revision:
+                return
+            atomic_bytes(self.root / 'news.ini', ('[news]\nchecked=%s\nrevision=%d\npending=0\nnames=\n' % (
+                old.get('news', 'checked', fallback=''), revision)).encode('utf-8'))
+        except (OSError, ValueError, configparser.Error):
+            pass
 
     def write_news_failure(self, error):
         """Build 83: a check that failed says so in news.ini (error= and kind=, plain words), keeping the last good

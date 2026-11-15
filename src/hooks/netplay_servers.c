@@ -206,6 +206,8 @@ static void run_round(void)
                     P.s[who].rooms = rd16(b + 14);
                     P.s[who].waiting = rd16(b + 16);
                     P.s[who].idle = rd16(b + 18);
+                    /* build 83 relays: the last two bytes (zero before) count this fingerprint's players */
+                    P.s[who].same = (b[11] & NETSERVER_SAME) ? rd16(b + 24) : -1;
                     LeaveCriticalSection(&g_cs);
                 }
             }
@@ -229,8 +231,8 @@ static void run_round(void)
     }
     for (i = 0; i < NETSERVER_COUNT; i++)
         if (P.s[i].state == NETSERVER_UP && P.rounds == 1)
-            fprintf(stderr, "[SERVERS] %s: %d ms, %d online, %d rooms, %d waiting (%d/%d answers)\n",
-                    P.s[i].name, P.s[i].ping_ms, P.s[i].online, P.s[i].rooms, P.s[i].waiting, answers[i], PROBES);
+            fprintf(stderr, "[SERVERS] %s: %d ms, %d online, %d on this build and content, %d rooms, %d waiting (%d/%d answers)\n",
+                    P.s[i].name, P.s[i].ping_ms, P.s[i].online, P.s[i].same, P.s[i].rooms, P.s[i].waiting, answers[i], PROBES);
     LeaveCriticalSection(&g_cs);
 }
 
