@@ -480,14 +480,14 @@ void page_title(ImDrawList *dl, const Frame &f, const char *title)
         float w = text_width(f, g_title, 12, line);
         rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
         text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
-        text(dl, f, g_hand, 11, 606, 30, ORANGE, "restart FFNY Online to try again", RIGHT, 0.8f);
+        text(dl, f, g_hand, 11, 606, 30, ORANGE, "start the game from the launcher again", RIGHT, 0.8f);
     } else if (content_news(nullptr, 0) > 0) {
         // build 82: new community content is out (the game's own catalogue check): announced the same way
         const char *line = "NEW COMMUNITY CONTENT IS OUT";
         float w = text_width(f, g_title, 12, line);
         rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
         text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
-        text(dl, f, g_hand, 11, 606, 30, ORANGE, "restart FFNY Online to get it", RIGHT, 0.8f);
+        text(dl, f, g_hand, 11, 606, 30, ORANGE, "close the game, start it from the launcher", RIGHT, 0.8f);
     }
 }
 
@@ -2085,7 +2085,9 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_hand, size, 50, size < 11 ? 50 : 54, ORANGE, problem, LEFT, 0.8f, 556);
     } else if (news > 0 && signed_in) {
         // build 82: new community packs: the rooms of players who have them take only PCs with the same packs
-        text(dl, f, g_title, 14, 50, 56, ORANGE, upper(NETPLAY_CONTENT_NEWS_LINE).c_str(), LEFT, 1.2f);
+        std::string news_line = upper(NETPLAY_CONTENT_NEWS_LINE);
+        text(dl, f, g_title, std::min(14.0f, fit_size(f, g_title, 14, news_line.c_str(), 556)), 50, 56, ORANGE,
+             news_line.c_str(), LEFT, 1.2f);
     } else if (signed_in) {
         // build 83: the ranked season's countdown (and the Turf War's), where the line is free
         std::string l = ranked_shown() ? season_countdown() : std::string();

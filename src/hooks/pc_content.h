@@ -138,11 +138,11 @@ int pc_content_problem(char *out, int size);
 /* Game start and F9: the content state as log lines ("[CONTENT] ..." / "[REPORT] content: ..."). */
 void pc_content_log_header(void);
 void pc_content_report_line(void);
-#define PC_CONTENT_FIX_LINE "Restart FFNY Online or check your internet/clock."
-#define PC_CONTENT_LOAD_LINE "Restart FFNY Online; if it stays, press F9 to send a report."
-#define PC_CONTENT_CLOCK_LINE "Set the date and time to automatic in Windows, then restart FFNY Online."
+#define PC_CONTENT_FIX_LINE "Close the game and start it from the launcher, or check your internet and clock."
+#define PC_CONTENT_LOAD_LINE "Close the game and start it from the launcher; if it stays, press F9 to send a report."
+#define PC_CONTENT_CLOCK_LINE "Set the date and time to automatic in Windows, then start the game from the launcher."
 /* The room list is empty while many are online on other content (the relay's STATUS Same, build 83). */
-#define PC_CONTENT_SPLIT_LINE "Players with different community content can't see your rooms: restart FFNY Online to update"
+#define PC_CONTENT_SPLIT_LINE "Players with different community content can't see your rooms: close the game and start it from the launcher to update"
 
 /* Build 82, the hub's NEW badge: a new fighter (front-end ID 100..127) or new venue (feID 28..63) from a pack the
  * team accepted less than PC_CONTENT_NEW_DAYS days ago, which this player has not picked yet. picked: the player

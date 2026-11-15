@@ -43,9 +43,9 @@ def test_start_log_and_f9_report_carry_the_content_state():
 
 
 def test_the_hub_line_texts():
-    assert PC_LINE('PC_CONTENT_FIX_LINE') == 'Restart FFNY Online or check your internet/clock.'
+    assert PC_LINE('PC_CONTENT_FIX_LINE') == 'Close the game and start it from the launcher, or check your internet and clock.'
     assert PC_LINE('PC_CONTENT_SPLIT_LINE') == ("Players with different community content can't see your rooms: "
-                                                'restart FFNY Online to update')
+                                                'close the game and start it from the launcher to update')
     assert '"Community content could not be %s%s%s. %s"' in CONTENT_C
     assert 'content_bad && signed_in' in SCREEN and 'COMMUNITY CONTENT NOT UPDATED' in SCREEN
     assert 'bool split = !n && content_split_shown();' in SCREEN       # FIND A ROOM
@@ -99,7 +99,7 @@ def test_installed_but_not_served_is_said_plainly():
     problem = CONTENT_C.split('int pc_content_problem(char *out, int size)')[1].split('\n}\n')[0]
     assert problem.index('g_load_problem[0]') < problem.index('pc_content_sync_result')     # it comes first
     assert 'Community content is installed but the game could not load it (%s). %s' in problem
-    assert PC_LINE('PC_CONTENT_LOAD_LINE') == 'Restart FFNY Online; if it stays, press F9 to send a report.'
+    assert PC_LINE('PC_CONTENT_LOAD_LINE') == 'Close the game and start it from the launcher; if it stays, press F9 to send a report.'
     # every new file read opens wide (UTF-8 paths), as build 83 made the rest of pc_content.c
     reader = CONTENT_C.split('static int read_ini_section')[1].split('\n}\n')[0]
     assert 'content_fopen(path, "rb")' in reader and ' fopen(' not in reader

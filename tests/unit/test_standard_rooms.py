@@ -48,7 +48,7 @@ def test_game_side_rules_bit_and_ranges():
     assert 'pc_content_file("venue.xml", composed, sizeof composed)' in DATA_C
     # ERROR 15 keeps the hub session and says the news line; the hub says it too
     assert 'code == 13 ||\n                            code == 15)' in NETPLAY_C
-    assert '"New community content is out: restart FFNY Online to get it"' in NETPLAY_H
+    assert '"New community content is out: close the game and start it from the launcher to get it"' in NETPLAY_H
     assert 'upper(NETPLAY_CONTENT_NEWS_LINE)' in SCREEN and '"NEW COMMUNITY CONTENT IS OUT"' in SCREEN
     for page in ('create-standard', 'room-standard', 'rooms-standard', 'fighters-standard', 'fighters-new',
                  'vote-new', 'hub-news'):

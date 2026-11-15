@@ -937,6 +937,7 @@ class Manager:
         self.write_content(index['revision'])
         self.compose_quietly(problems)
         self.write_sync_result('failed' if problems else 'ok', problems, index['revision'])
+        self.settle_news(index['revision'])
         count = sum(1 for r in self.state()['installed'].values() if r.get('synced'))
         message = 'Community content up to date: %d pack(s)' % count if not done else \
             'Community content synced: %d change(s), %d pack(s) installed' % (done, count)
@@ -1258,6 +1259,19 @@ class Manager:
         ).encode('utf-8'))
         self.message = '%d community pack change(s) waiting' % len(names) if names else 'Community content up to date'
         return names
+
+    def settle_news(self, revision):
+        """Build 84: a finished sync for catalogue ``revision`` answers the news a check found up to that revision:
+        news.ini then says pending=0 (the game also ignores a news.ini not newer than content.ini)."""
+        old = configparser.ConfigParser(interpolation=None)
+        try:
+            old.read(self.root / 'news.ini', encoding='utf-8')
+            if not old.has_section('news') or int(old.get('news', 'revision', fallback='0')) > revision:
+                return
+            atomic_bytes(self.root / 'news.ini', ('[news]\nchecked=%s\nrevision=%d\npending=0\nnames=\n' % (
+                old.get('news', 'checked', fallback=''), revision)).encode('utf-8'))
+        except (OSError, ValueError, configparser.Error):
+            pass
 
     def write_news_failure(self, error):
         """Build 83: a check that failed says so in news.ini (error= and kind=, plain words), keeping the last good

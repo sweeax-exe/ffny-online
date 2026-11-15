@@ -82,7 +82,7 @@ typedef struct NetRoomSettings {
 #define NETPLAY_MAX_BLOCKED      128
 /* Build 82: what the game says when new community content is out (the hub, and a join the relay refused for other
  * community packs, ERROR 15). */
-#define NETPLAY_CONTENT_NEWS_LINE "New community content is out: restart FFNY Online to get it"
+#define NETPLAY_CONTENT_NEWS_LINE "New community content is out: close the game and start it from the launcher to get it"
 
 /* The CPU level of a 3-Way's or Free for All's CPU fighters (build 67): the game's own CPU difficulty
  * (its Battle mode's Easy / Normal / Hard), counted from the default down. Online CPU fighters always

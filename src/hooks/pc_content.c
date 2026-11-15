@@ -279,7 +279,7 @@ int pc_content_news(char *names, int size)
     char path[1024], line[1200];
     const char *root = data_root(), *test = getenv("RECOMP_TEST_CONTENT_NEWS");
     FILE *f;
-    int pending = 0, in_section = 0;
+    int pending = 0, revision = 0, in_section = 0;
     if (names && size > 0) names[0] = 0;
     if (test && *test) {
         if (names && size > 0) snprintf(names, (size_t)size, "%s", atoi(test) > 0 ? "Doc Nine | The Block" : "");
@@ -294,9 +294,16 @@ int pc_content_news(char *names, int size)
         if (!in_section || !(eq = strchr(s, '='))) continue;
         *eq = 0;
         if (!strcmp(s, "pending")) pending = atoi(eq + 1);
+        else if (!strcmp(s, "revision")) revision = atoi(eq + 1);
         else if (!strcmp(s, "names") && names && size > 0) snprintf(names, (size_t)size, "%s", eq + 1);
     }
     fclose(f);
+    /* build 84: news only for a catalogue newer than the one the installed packs were synced for; an older
+     * news.ini (a check before the last sync, a copied data folder) says nothing */
+    if (pending > 0 && revision <= pc_content_revision()) {
+        if (names && size > 0) names[0] = 0;
+        return 0;
+    }
     return pending > 0 ? pending : 0;
 }
 

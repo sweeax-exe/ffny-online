@@ -4297,9 +4297,9 @@ static void on_packet(const uint8_t *b, int len)
             if (code == 8 && N.pend_len && N.pend[5] == T_TPICK) text = "That stage can't be picked now.";
             if (code == 15) {   /* build 82: the room has other community packs; most often new ones are out */
                 char problem[512];      /* build 83: the last sync failed (the hub line says why; error[] is short) */
-                text = pc_content_problem(problem, sizeof(problem)) ? "Your community content could not be updated: restart FFNY Online (see the online menu)."
+                text = pc_content_problem(problem, sizeof(problem)) ? "Your community content is not up to date: start the game from the launcher again."
                      : pc_content_news(NULL, 0) > 0 ? NETPLAY_CONTENT_NEWS_LINE "."
-                     : NETPLAY_CONTENT_NEWS_LINE " (that room has other community packs than yours).";
+                     : "That room has other community packs than yours: both need the same ones.";
                 if (N.lobby) pc_mods_check_start();     /* look again: the hub shows the news once it is known */
             }
             if (N.lobby && code == 12) {
