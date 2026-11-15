@@ -287,7 +287,10 @@ def validate_install(folder):
               'Not an FFNY delta: ' + relative)
     present = {p.relative_to(folder).as_posix() for p in folder.rglob('*.ffdelta')}
     check(present <= listed, 'Delta not listed in install.json')
-    return {'capabilities': ['content-v1'], 'texture_ids': [], 'wide_ids': []}
+    capabilities = ['content-v1']
+    if any(isinstance(op, dict) and op.get('op') == 'new-venue' and 'models' in op for op in info.get('ops', [])):
+        capabilities.append('venue-models-v1')      # a new venue's breakable objects (launchers from build 83)
+    return {'capabilities': capabilities, 'texture_ids': [], 'wide_ids': []}
 
 
 def validate_pack(folder):

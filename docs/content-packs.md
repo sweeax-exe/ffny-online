@@ -40,6 +40,15 @@ pack, or one of the two without the other, skips the pack (`ffnycontent/newvenue
 up to build 79 ignore the field: the venue installs and the copy keeps the template's far crowd (drawn only,
 never in the fight).
 
+A new venue may carry breakable objects (FFNY Studio beta.24): the op's optional `"models": ["V2BG_<code>_Z", ...]`
+(1 to 12, letters O..Z that the template's own stage models do not use) and, for each, the `add` of
+`assets/v2bg.viv|<model>.o` from the game's own breakable model `V2BG_13A_J.o` (its retail SHA-256), an ELF file
+renamed to the model. The new entity gets a `<model>` line for each, after the template's (the game draws no stage
+model its entity does not list). Any other `v2bg.viv` add named `V2BG_<code>_<O..Z>.o`, except the template's own
+stage model copied under the new code, skips the pack (`check_models`, `check_model`). The catalogue lists such a
+pack with `venue-models-v1` as well, which launchers from build 83 pass (`pc_mods.cpp`); older ones skip it (they
+ignored the field and would not draw the objects). Composer 5.
+
 On the player's PC the base of a path is `<data>/override/<path>` when it exists, else the dump
 (`--game-dir`, default `<data>/extracted`, else `./game`; the launcher passes its `game` junction resolved).
 Packs apply in catalogue order, minus replacements switched off; ops first, then entries. A pack whose delta

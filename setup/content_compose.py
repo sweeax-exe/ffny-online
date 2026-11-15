@@ -47,7 +47,7 @@ import struct
 from ffnycontent import clothing, cpparts, delta, loc, newfighter, newvenue, viv
 
 SCHEMA = 1
-COMPOSER = 4                    # bump when the output for the same inputs changes
+COMPOSER = 5                    # bump when the output for the same inputs changes
 TYPES = ('fighter-body', 'clothing', 'venue', 'new-fighter')
 OUT = 'content-files'
 LANG_DIR = 'lang'               # content-files/lang/<language pack>/<P>: the packs on top of that translation
@@ -430,10 +430,12 @@ def apply_pack(work, folder, info, fe_id=None):
         for name, blob in tables.items():
             work.replace(clothing.NAMES_ARCHIVE, name, blob)
     crowd = None
+    models = {}
     for op in info.get('ops', []):
         if op['op'] != 'new-venue':
             continue
         crowd = newvenue.check_crowd(op, info.get('entries', []))
+        models = newvenue.check_models(op, info.get('entries', []))
         if crowd and work.exists(newvenue.ICROWD_ARCHIVE, crowd):
             raise ComposeError('%s|%s exists already' % (newvenue.ICROWD_ARCHIVE, crowd))
         taken = set()
@@ -466,6 +468,8 @@ def apply_pack(work, folder, info, fe_id=None):
             raise ComposeError('the result of %s does not match install.json' % e['delta'])
         if crowd and rel == newvenue.ICROWD_ARCHIVE:
             newvenue.check_locator(base, result)
+        if rel == newvenue.VENUE_ARCHIVE and e['mode'] == 'add' and entry in models:
+            newvenue.check_model(result, models[entry])
         if e['mode'] == 'add':
             if work.exists(rel, entry):
                 raise ComposeError('%s exists already' % ('%s|%s' % (rel, entry) if entry else rel))
