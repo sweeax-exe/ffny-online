@@ -209,3 +209,21 @@ def test_names():
     assert "at most 11" in nf.name_problems("Doctor Octopus")[0]
     assert nf.name_problems("doc") and nf.name_problems("") and nf.name_problems(" Doc 2")
     assert nf.NEW_MODEL.match(nf.model_for("studio-doc-two"))
+
+
+def test_own_fighter_on_a_community_place_moves(tmp_path):
+    """A player's own new fighter (FFNY Studio's "Use in my game") at a place a community fighter now has: the
+    composed database gets both, each on its own feID (jackboy66, 2026-11-15: a local naruto at 117 beside the
+    community naruto at 117 was left out)."""
+    community = make_pack(tmp_path / "packs" / "studio-naruto", "V2IP_7N1A", "Naruto")
+    local = make_pack(tmp_path / "packs" / "my-studio-naruto", "V2IP_7N2A", "Naruto Two")
+    data = tmp_path / "data"
+    own = dict(record(local, "my-studio-naruto", 1 << 20, 117), local=True)
+    got = content_compose.compose(data, GAME, [record(community, "studio-naruto", 1, 117), own], off=(),
+                                  log=lambda t: None, languages=[], reserved={117})
+    assert got["applied"] == ["studio-naruto", "my-studio-naruto"] and not got["skipped"]
+    rows = nf.characters(composed(data, nf.SOD_PATH).read_bytes())
+    fes = [r["fe_id"] for r in rows]
+    assert len(fes) == len(set(fes))                                  # never two fighters on one feID
+    assert [(r["fe_id"], r["display"]) for r in rows[-2:]] == [(117, "Naruto"), (100, "Naruto Two")]
+    assert own["fighter_fe_id"] == 100

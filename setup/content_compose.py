@@ -565,6 +565,63 @@ def write_files_ini(new, applied, skipped, off, files, lang_files, lang_skipped)
         f.write('\n'.join(lines) + '\n')
 
 
+def new_fighter_op(folder):
+    """The new-fighter op of a pack folder's install.json, or None (none, or an unreadable file)."""
+    try:
+        return next((op for op in read_install(folder).get('ops', []) if op.get('op') == 'new-fighter'), None)
+    except PACK_ERRORS + (ComposeError,):
+        return None
+
+
+def settle_places(packs, reserved=(), log=print):
+    """One feID per new fighter, before composing. A community pack keeps its catalogue place (the account service
+    gives each its own; a second one on a place already given is left out). A player's own pack (``local``, FFNY
+    Studio's "Use in my game") keeps the place Studio chose while no community pack, no place of the signed
+    catalogue (``reserved``: a pack that is live but not synced yet) and no earlier own pack has it; else it moves
+    to the first free place in ``newfighter.PLACE_ORDER`` (100..123, the low places, 124..127), and with none
+    free it is left out. Changes ``packs`` in place: a moved pack's ``fighter_fe_id``, ``place_problem`` (the
+    sentence for the Content page) on one left out. Returns [(pack id, old place, new place)] of the moves."""
+    order = list(newfighter.PLACE_ORDER)
+    valid = set(order)
+    fighters = []
+    for p in packs:
+        op = new_fighter_op(p['folder']) if p.get('folder') else None
+        if op is not None:
+            place = p.get('fighter_fe_id') or op.get('fe_id')
+            fighters.append((p, place if isinstance(place, int) and not isinstance(place, bool) else None))
+    taken = {r for r in reserved if r in valid}
+    owner = {}
+    for p, place in fighters:
+        if p.get('local'):
+            continue
+        if place in owner:
+            p['place_problem'] = "its place %d is the pack %s's already" % (place, owner[place])
+            log('[compose] %s left out: %s' % (p['id'], p['place_problem']))
+        elif place is not None:
+            owner[place] = p['id']
+            taken.add(place)
+    moves = []
+    for p, place in fighters:
+        if not p.get('local'):
+            continue
+        if place in valid and place not in taken:
+            taken.add(place)
+            continue
+        free = next((f for f in order if f not in taken), None)
+        if free is None:
+            p['place_problem'] = ('every place for a new fighter is taken by the community fighters and your other '
+                                  'packs; switch one of your own packs off to make room')
+            log('[compose] %s left out: %s' % (p['id'], p['place_problem']))
+            continue
+        why = ('the community pack %s has %s now' % (owner[place], place) if place in owner else
+               'place %s is taken' % place if place is not None else 'it had no place')
+        log('[compose] %s: new fighter moved from place %s to %d (%s)' % (p['id'], place, free, why))
+        p['fighter_fe_id'] = free
+        taken.add(free)
+        moves.append((p['id'], place, free))
+    return moves
+
+
 def run_packs(bases, chosen, log, new=()):
     """Apply ``chosen`` on ``bases`` in order: (work, applied, skipped). ``new``: the IDs of the new-fighter packs
     whose thumbs carry NEW (``new_packs``)."""
@@ -573,6 +630,8 @@ def run_packs(bases, chosen, log, new=()):
     for p in chosen:
         snap = work.snapshot()
         try:
+            if p.get('place_problem'):
+                raise ComposeError(p['place_problem'])
             info = read_install(p['folder'])
             apply_pack(work, p['folder'], info, p.get('fighter_fe_id'), p['id'] in new)
             applied.append(p)
@@ -674,7 +733,8 @@ def read_files_ini(root):
 def inputs_key(game, packs, off, languages=(), new=()):
     raw = json.dumps([COMPOSER, str(Path(game).resolve()),
                       [[p['id'], p['version'], p['content_sha256'], p.get('fighter_fe_id', 0)]
-                       + ([p['bundle']] if p.get('bundle') else []) for p in packs],
+                       + ([p['bundle']] if p.get('bundle') else []) + (['left out'] if p.get('place_problem') else [])
+                       for p in packs],
                       sorted(off),
                       [[lang['id'], lang['stamp']] for lang in languages],
                       sorted(new)])
@@ -763,13 +823,14 @@ def unchanged(root, state, key, data, game):
             and all((out / LANG_DIR / i).joinpath(*PurePosixPath(f).parts).is_file() for i, f in files['lang']))
 
 
-def compose(data, game, packs, off=None, root=None, log=print, languages=None, today=None):
+def compose(data, game, packs, off=None, root=None, log=print, languages=None, today=None, reserved=()):
     """Compose ``packs`` ([{id, version, content_sha256, kind, order, folder, fighter_fe_id, reviewed, bundle,
     bundle_name}], every synced pack with an install.json; ``fighter_fe_id`` the catalogue's place of a new
     fighter, ``reviewed`` the catalogue's review date of the version (``new_packs``; ``today``: the UTC date it
     is measured from, now when None), ``bundle`` the pack of several mods it belongs to, applied all or none) for the player, and once more with each installed language pack (``languages``: the list
     ``language_packs`` makes, found when None). Returns {applied, skipped, files, lang_files, lang_skipped,
-    unchanged}."""
+    unchanged}. ``reserved``: the signed catalogue's new-fighter places (settle_places); a player's own new
+    fighter whose place another one has moves (its pack dict's ``fighter_fe_id`` changes: the caller keeps it)."""
     data = Path(data)
     root = Path(root) if root else data / 'mod-manager'
     root.mkdir(parents=True, exist_ok=True)
@@ -778,6 +839,7 @@ def compose(data, game, packs, off=None, root=None, log=print, languages=None, t
     packs = sorted(packs, key=lambda p: (p.get('order', 1 << 30), p['id']))
     switched = sorted(p['id'] for p in packs if p.get('kind') != 'content' and p['id'] in off)
     chosen = [p for p in packs if p['id'] not in switched]
+    settle_places(chosen, reserved, log)
     languages = language_packs(data, off, log) if languages is None else list(languages)
     fresh = new_packs(chosen, today)
     key = inputs_key(game, chosen, switched, languages, fresh)
