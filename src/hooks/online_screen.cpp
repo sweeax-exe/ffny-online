@@ -2095,11 +2095,17 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (!t.empty()) l += (l.empty() ? "" : "    -    ") + t;
         if (!l.empty()) text(dl, f, g_title, 14, 50, 56, CREAM, l.c_str(), LEFT, 1.2f, 556);
     } else {
+        // sign-in without Discord (a username and a password) is in the launcher and in F1 > Online, where a
+        // keyboard can type (pc_launcher_password.inc); here only the hint, while the service offers it
+        bool pw = account_password_offered(nullptr, nullptr, 0) != 0;
         const char *line = acc == ACCOUNT_WAITING ? "FINISH SIGNING IN WITH DISCORD IN YOUR BROWSER..."
-                         : acc == ACCOUNT_CHECKING ? "CHECKING YOUR DISCORD SIGN-IN..."
-                         : "SIGN IN WITH DISCORD TO FIGHT ONLINE";
+                         : acc == ACCOUNT_CHECKING ? "CHECKING YOUR SIGN-IN..."
+                         : pw ? "SIGN IN TO FIGHT ONLINE" : "SIGN IN WITH DISCORD TO FIGHT ONLINE";
         text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
-        if (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED) hint(dl, f, 50 + text_width(f, g_title, 14, line) + 14, 55, "y", "SIGN IN");
+        if (pw && (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED))
+            text(dl, f, g_hand, 9, 50, 67, with_alpha(CREAM, 0.8f), "NO DISCORD? SIGN IN WITHOUT IT IN THE LAUNCHER OR IN F1 > ONLINE",
+                 LEFT, 1.0f);
+        if (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED) hint(dl, f, 50 + text_width(f, g_title, 14, line) + 14, 55, "y", pw ? "DISCORD" : "SIGN IN");
         if (pad.y && (acc == ACCOUNT_OUT || acc == ACCOUNT_FAILED)) {
             account_sign_in();
             say("Your browser opens: sign in with Discord, then come back.");

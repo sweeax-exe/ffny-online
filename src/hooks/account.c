@@ -11,6 +11,8 @@
  * for the Windows user, so a settings file shared in a bug report carries no session.
  */
 #include "account.h"
+#include "account_pw.h"
+#include "anticheat.h"
 #include "pc_settings.h"
 
 #include <stdio.h>
@@ -38,6 +40,10 @@ static SRWLOCK g_lock = SRWLOCK_INIT;
 static volatile LONG g_state = ACCOUNT_OUT;
 static volatile LONG g_cancel;
 static char g_token[65], g_name[129], g_username[65], g_reason[160];
+/* How the account signs in (sign-in without Discord, account_password): with Discord, with a username and
+ * password (g_login), or both. Saved as the fourth line of account.dat ("d", "p", "dp"). */
+static int g_has_discord = 1, g_has_password;
+static char g_login[65];
 
 static void set_state(enum AccountState s) { InterlockedExchange(&g_state, (LONG)s); }
 
@@ -204,11 +210,12 @@ static void data_path(char *out, int size)
 
 static void save(void)
 {
-    char path[MAX_PATH], plain[300];
+    char path[MAX_PATH], plain[400];
     DATA_BLOB in, out = { 0 };
     FILE *f;
     AcquireSRWLockShared(&g_lock);
-    snprintf(plain, sizeof(plain), "%s\n%s\n%s\n", g_token, g_name, g_username);
+    snprintf(plain, sizeof(plain), "%s\n%s\n%s\n%s%s\n%s\n", g_token, g_name, g_username,
+             g_has_discord ? "d" : "", g_has_password ? "p" : "", g_login);
     ReleaseSRWLockShared(&g_lock);
     in.pbData = (BYTE *)plain;
     in.cbData = (DWORD)strlen(plain);
@@ -248,7 +255,7 @@ static int load(void)
     in.cbData = (DWORD)got;
     if (!got || !CryptUnprotectData(&in, NULL, NULL, NULL, NULL, CRYPTPROTECT_UI_FORBIDDEN, &out)) return 0;
     {
-        char plain[300];
+        char plain[400];
         char *a, *b, *c;
         int len = out.cbData < sizeof(plain) - 1 ? (int)out.cbData : (int)sizeof(plain) - 1;
         memcpy(plain, out.pbData, len);
@@ -265,6 +272,19 @@ static int load(void)
         snprintf(g_name, sizeof(g_name), "%s", b + 1);
         snprintf(g_username, sizeof(g_username), "%.64s", c + 1);
         { char *nl = strchr(g_username, '\n'); if (nl) *nl = 0; }
+        {   /* build 84 on: how it signs in, and the username (an older file: Discord) */
+            char *d = strchr(c + 1, '\n'), *e = d ? strchr(d + 1, '\n') : NULL;
+            g_has_discord = 1;
+            g_has_password = 0;
+            g_login[0] = 0;
+            if (d && e) {
+                *e = 0;
+                g_has_discord = strchr(d + 1, 'd') != NULL;
+                g_has_password = strchr(d + 1, 'p') != NULL;
+                snprintf(g_login, sizeof(g_login), "%.64s", e + 1);
+                { char *nl = strchr(g_login, '\n'); if (nl) *nl = 0; }
+            }
+        }
         ReleaseSRWLockExclusive(&g_lock);
         SecureZeroMemory(plain, sizeof(plain));
     }
@@ -276,7 +296,9 @@ static void forget(void)
     char path[MAX_PATH];
     AcquireSRWLockExclusive(&g_lock);
     SecureZeroMemory(g_token, sizeof(g_token));
-    g_name[0] = g_username[0] = 0;
+    g_name[0] = g_username[0] = g_login[0] = 0;
+    g_has_discord = 1;
+    g_has_password = 0;
     ReleaseSRWLockExclusive(&g_lock);
     data_path(path, sizeof(path));
     DeleteFileA(path);
@@ -287,6 +309,10 @@ static void take_account(const char *json)
     AcquireSRWLockExclusive(&g_lock);
     if (!json_str(json, "name", g_name, sizeof(g_name))) g_name[0] = 0;
     if (!json_str(json, "username", g_username, sizeof(g_username))) g_username[0] = 0;
+    /* an older service sends neither flag: a Discord account */
+    g_has_discord = strstr(json, "\"has_discord\"") ? account_pw_flag(json, "has_discord") : 1;
+    g_has_password = account_pw_flag(json, "has_password");
+    if (!json_str(json, "login", g_login, sizeof(g_login))) g_login[0] = 0;
     ReleaseSRWLockExclusive(&g_lock);
 }
 
@@ -338,13 +364,30 @@ static int sha256_hex(const char *text, char *out)
     return ok;
 }
 
-static DWORD WINAPI sign_in_thread(LPVOID unused)
+static DWORD WINAPI sign_in_thread(LPVOID param)
 {
     char secret[65], login[65], url[160], body[96], buf[4096];
-    int i, misses = 0;
-    (void)unused;
+    int i, misses = 0, link = (int)(INT_PTR)param;
     random_hex(secret);
     if (!sha256_hex(secret, login)) { set_reason("Windows could not start the sign-in."); set_state(ACCOUNT_FAILED); return 0; }
+    if (link) {     /* linking Discord to this signed-in account (server password_link.go): register it first */
+        char token[65], lb[96];
+        int status;
+        AcquireSRWLockShared(&g_lock);
+        memcpy(token, g_token, sizeof(token));
+        ReleaseSRWLockShared(&g_lock);
+        snprintf(lb, sizeof(lb), "{\"login\":\"%s\"}", login);
+        status = request(L"POST", L"/api/me/link/discord", token, lb, buf, sizeof(buf));
+        SecureZeroMemory(token, sizeof(token));
+        fprintf(stderr, "[ACCOUNT] link Discord: HTTP %d\n", status);
+        if (status != 200) {
+            char why[160] = "";
+            json_str(buf, "error", why, sizeof(why));
+            set_reason(why[0] ? why : "Discord could not be linked right now; try again later.");
+            set_state(ACCOUNT_IN);
+            return 0;
+        }
+    }
     snprintf(url, sizeof(url), ACCOUNT_URL "/auth/discord/start?login=%s", login);
     if ((INT_PTR)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL) <= 32) {
         set_reason("The browser did not open.");
@@ -374,18 +417,18 @@ static DWORD WINAPI sign_in_thread(LPVOID unused)
             return 0;
         }
         if (status == 404 || status == 410) {
-            char why[96] = "";
+            char why[160] = "";
             json_str(buf, "error", why, sizeof(why));
             set_reason(status == 410 && why[0] ? why : "The sign-in ran out; try again.");
-            set_state(ACCOUNT_FAILED);
+            set_state(link ? ACCOUNT_IN : ACCOUNT_FAILED);
             return 0;
         }
-        if (++misses >= 15) { set_reason("Cannot reach the FFNY Online account server."); set_state(ACCOUNT_FAILED); return 0; }
+        if (++misses >= 15) { set_reason("Cannot reach the FFNY Online account server."); set_state(link ? ACCOUNT_IN : ACCOUNT_FAILED); return 0; }
     }
     SecureZeroMemory(secret, sizeof(secret));
     SecureZeroMemory(body, sizeof(body));
-    if (g_cancel) { set_reason(""); set_state(ACCOUNT_OUT); }
-    else { set_reason("The sign-in ran out; try again."); set_state(ACCOUNT_FAILED); }
+    if (g_cancel) { set_reason(""); set_state(link ? ACCOUNT_IN : ACCOUNT_OUT); }
+    else { set_reason("The sign-in ran out; try again."); set_state(link ? ACCOUNT_IN : ACCOUNT_FAILED); }
     return 0;
 }
 
@@ -417,6 +460,168 @@ static void run(LPTHREAD_START_ROUTINE fn, void *param)
     if (t) CloseHandle(t);
 }
 
+/* ---- sign-in without Discord (server relay/accounts/password.go) ---- */
+
+static void pc_text(char out[33])
+{
+    unsigned char id[16];
+    if (ac_pc_id(id)) account_pw_hex16(id, out);
+    else out[0] = 0;
+}
+
+int account_password(enum AccountPwMode mode, const char *user, const char *pass, const char *code,
+                     char *why, int size)
+{
+    char body[1024], buf[4096], pc[33], token[65] = "";
+    const wchar_t *path = mode == ACCOUNT_PW_CREATE ? L"/auth/password/create" : mode == ACCOUNT_PW_RESET
+                        ? L"/auth/password/reset" : L"/auth/password/signin";
+    int status;
+    if (why && size > 0) why[0] = 0;
+    pc_text(pc);
+    if (account_pw_json(body, sizeof(body), user, pass, mode == ACCOUNT_PW_RESET ? code : NULL, pc) < 0) {
+        if (why) snprintf(why, size, "That is too long.");
+        return -1;
+    }
+    status = request(L"POST", path, NULL, body, buf, sizeof(buf));
+    SecureZeroMemory(body, sizeof(body));
+    fprintf(stderr, "[ACCOUNT] sign-in without Discord (%s): HTTP %d\n",
+            mode == ACCOUNT_PW_CREATE ? "new account" : mode == ACCOUNT_PW_RESET ? "reset" : "sign-in", status);
+    if ((status == 200 || status == 201) && json_str(buf, "token", token, sizeof(token)) && strlen(token) == 64) {
+        AcquireSRWLockExclusive(&g_lock);
+        memcpy(g_token, token, sizeof(token));
+        ReleaseSRWLockExclusive(&g_lock);
+        take_account(buf);
+        SecureZeroMemory(token, sizeof(token));
+        SecureZeroMemory(buf, sizeof(buf));
+        save();
+        set_reason("");
+        set_state(ACCOUNT_IN);
+        fprintf(stderr, "[ACCOUNT] signed in without Discord\n");
+        return status;
+    }
+    if (why && size > 0) {
+        if (!json_str(buf, "error", why, size) || !why[0])
+            snprintf(why, size, "%s", status == 0 ? "Cannot reach the FFNY Online account server. Check your connection."
+                                    : "That did not work; try again later.");
+    }
+    SecureZeroMemory(buf, sizeof(buf));
+    return status ? status : 0;
+}
+
+int account_password_status(int *create, char *forgot, int size)
+{
+    char buf[2048];
+    int status = request(L"GET", L"/auth/password/status", NULL, NULL, buf, sizeof(buf));
+    if (create) *create = status == 200 && account_pw_flag(buf, "create");
+    if (forgot && size > 0 && !(status == 200 && json_str(buf, "forgot", forgot, size))) forgot[0] = 0;
+    return status == 200 && account_pw_flag(buf, "enabled");
+}
+
+int account_set_password(const char *user_or_old, const char *pass, int adding, char *why, int size)
+{
+    char body[600], buf[4096], token[65];
+    int status;
+    if (why && size > 0) why[0] = 0;
+    if (g_state != ACCOUNT_IN) return -1;
+    if ((adding ? account_pw_json(body, sizeof(body), user_or_old, pass, NULL, NULL)
+                : account_pw_change_json(body, sizeof(body), user_or_old, pass)) < 0) return -1;
+    AcquireSRWLockShared(&g_lock);
+    memcpy(token, g_token, sizeof(token));
+    ReleaseSRWLockShared(&g_lock);
+    status = request(L"POST", L"/api/me/password", token, body, buf, sizeof(buf));
+    SecureZeroMemory(body, sizeof(body));
+    SecureZeroMemory(token, sizeof(token));
+    fprintf(stderr, "[ACCOUNT] %s: HTTP %d\n", adding ? "add a password" : "change the password", status);
+    if (status == 200) {
+        take_account(strstr(buf, "\"account\"") ? strstr(buf, "\"account\"") : buf);
+        save();
+        return status;
+    }
+    if (status == 401 && !strstr(buf, "\"code\"")) { forget(); set_reason("Your sign-in ran out; sign in again."); set_state(ACCOUNT_OUT); }
+    if (why && size > 0 && (!json_str(buf, "error", why, size) || !why[0]))
+        snprintf(why, size, "%s", status == 0 ? "Cannot reach the FFNY Online account server." : "That did not work; try again later.");
+    return status;
+}
+
+/* The service's offer, asked once in the background (account_password_offered). */
+static volatile LONG g_offer_asked, g_offer_known, g_offer_on, g_offer_create;
+static char g_offer_forgot[400];
+
+static DWORD WINAPI offer_thread(LPVOID unused)
+{
+    char forgot[400];
+    int create = 0, on;
+    (void)unused;
+    on = account_password_status(&create, forgot, sizeof(forgot));
+    AcquireSRWLockExclusive(&g_lock);
+    snprintf(g_offer_forgot, sizeof(g_offer_forgot), "%s", forgot);
+    ReleaseSRWLockExclusive(&g_lock);
+    InterlockedExchange(&g_offer_on, on);
+    InterlockedExchange(&g_offer_create, create);
+    InterlockedExchange(&g_offer_known, 1);
+    fprintf(stderr, "[ACCOUNT] sign-in without Discord offered: %d (new accounts %d)\n", on, create);
+    return 0;
+}
+
+int account_password_offered(int *create, char *forgot, int size)
+{
+    if (!InterlockedExchange(&g_offer_asked, 1)) run(offer_thread, NULL);
+    if (create) *create = g_offer_known && g_offer_create;
+    if (forgot && size > 0) {
+        AcquireSRWLockShared(&g_lock);
+        snprintf(forgot, size, "%s", g_offer_forgot);
+        ReleaseSRWLockShared(&g_lock);
+    }
+    return g_offer_known && g_offer_on;
+}
+
+void account_password_offer_refresh(void) { InterlockedExchange(&g_offer_asked, 0); }
+
+void account_link_discord(void)
+{
+    if (g_state != ACCOUNT_IN || g_has_discord) return;
+    g_cancel = 0;
+    set_reason("");
+    set_state(ACCOUNT_WAITING);
+    run(sign_in_thread, (void *)1);
+}
+
+int account_has_discord(void) { return g_has_discord; }
+int account_has_password(void) { return g_has_password; }
+
+void account_login(char *out, int size)
+{
+    AcquireSRWLockShared(&g_lock);
+    snprintf(out, size, "%s", g_login);
+    ReleaseSRWLockShared(&g_lock);
+}
+
+/* tests: RECOMP_TEST_PASSWORD="create|signin:username:password" signs in that way at start, only against a
+ * local test account service (RECOMP_ACCOUNT_SERVER on this PC); never with the saved session */
+static DWORD WINAPI test_password_thread(LPVOID unused)
+{
+    char spec[300], why[200];
+    const char *t = getenv("RECOMP_TEST_PASSWORD");
+    char *user, *pass;
+    int status;
+    (void)unused;
+    snprintf(spec, sizeof(spec), "%s", t);
+    user = strchr(spec, ':');
+    pass = user ? strchr(user + 1, ':') : NULL;
+    if (!user || !pass) { set_state(ACCOUNT_OUT); return 0; }
+    *user++ = 0;
+    *pass++ = 0;
+    status = account_password(!strcmp(spec, "create") ? ACCOUNT_PW_CREATE : ACCOUNT_PW_SIGNIN, user, pass, NULL,
+                              why, sizeof(why));
+    if (status != 200 && status != 201) {
+        fprintf(stderr, "[ACCOUNT] test password sign-in refused: %s\n", why);
+        set_reason(why);
+        set_state(ACCOUNT_FAILED);
+    }
+    SecureZeroMemory(spec, sizeof(spec));
+    return 0;
+}
+
 /* Start-up only reads the saved session: no network while the game boots, which is when the
  * runtime is most sensitive to other threads (docs/research/boot-intermittents.md). The session
  * is checked with the service the first time the online screens or the Online page need it. */
@@ -424,6 +629,14 @@ void account_init(void)
 {
     static LONG once;
     if (InterlockedExchange(&once, 1)) return;
+    {
+        const char *t = getenv("RECOMP_TEST_PASSWORD");
+        if (t && *t && account_test_server_local()) {
+            set_state(ACCOUNT_CHECKING);
+            run(test_password_thread, NULL);
+            return;
+        }
+    }
     if (load()) set_state(ACCOUNT_IN);
 }
 
@@ -789,6 +1002,17 @@ void account_init(void) {}
 void account_refresh(void) {}
 void account_sign_in(void) {}
 void account_take_renamed(const char *json) { (void)json; }
+int account_password(enum AccountPwMode mode, const char *user, const char *pass, const char *code, char *why, int size)
+{ (void)mode; (void)user; (void)pass; (void)code; if (why && size > 0) why[0] = 0; return -1; }
+int account_password_status(int *create, char *forgot, int size) { if (create) *create = 0; if (forgot && size > 0) forgot[0] = 0; return 0; }
+int account_set_password(const char *user_or_old, const char *pass, int adding, char *why, int size)
+{ (void)user_or_old; (void)pass; (void)adding; if (why && size > 0) why[0] = 0; return -1; }
+void account_link_discord(void) {}
+int account_password_offered(int *create, char *forgot, int size) { if (create) *create = 0; if (forgot && size > 0) forgot[0] = 0; return 0; }
+void account_password_offer_refresh(void) {}
+int account_has_discord(void) { return 1; }
+int account_has_password(void) { return 0; }
+void account_login(char *out, int size) { if (size > 0) out[0] = 0; }
 void account_cancel(void) {}
 void account_sign_out(void) {}
 void account_delete(void) {}
