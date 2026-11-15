@@ -159,7 +159,7 @@ bool ms_page(ImDrawList *dl, const Frame &f, ImVec2 display, const Pad &pad)
         if (pad.lb) MS.sel = std::max(0, MS.sel - 10);
         if (pad.rb) MS.sel = std::min(n - 1, MS.sel + 10);
         if (MS.sel >= n) MS.sel = n - 1;
-        const int visible = 9;
+        const int visible = 8;              // room under the list for the stat line (milestones_stat_hint)
         const float ly = py + 70, rh = 25;
         if (MS.sel < MS.top) MS.top = MS.sel;
         if (MS.sel >= MS.top + visible) MS.top = MS.sel - visible + 1;
@@ -214,6 +214,8 @@ bool ms_page(ImDrawList *dl, const Frame &f, ImVec2 display, const Pad &pad)
         rect(dl, f, px + 10, dy, pw - 20, 44, IM_COL32(255, 255, 255, 14), 6);
         text(dl, f, g_title, 12.5f, px + 22, dy + 6, WHITE, l1, LEFT, 1.0f, pw - 44);
         text(dl, f, g_hand, 12.5f, px + 22, dy + 25, ORANGE, l2, LEFT, 0.8f, pw - 44);
+        // what the bonus is worth: players expected milestones to raise a stat past what the styles allow
+        text(dl, f, g_title, 12, px + 22, dy + 52, YELLOW, milestones_stat_hint(), LEFT, 0.9f, pw - 44);
     }
     // the rule every player has to know
     const float hy = py + ph - 64;

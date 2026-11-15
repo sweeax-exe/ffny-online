@@ -192,3 +192,9 @@ int milestones_newly_reached(const MilestoneRow *before, int nb, const Milestone
     }
     return k;
 }
+
+const char *milestones_stat_hint(void)
+{
+    return "Your fighting styles set how high each stat can go. Milestones add a small bonus on top, and about "
+           "half of it is lost to rounding.";
+}

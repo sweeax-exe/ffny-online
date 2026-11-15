@@ -61,6 +61,10 @@ int milestones_reached(const MilestoneRow *rows, int n);
 /* 0..1: how far a row is (the smaller part when it has two conditions). */
 float milestones_fraction(const MilestoneRow *row);
 
+/* The page's plain line on what milestones do to a stat (owner, 2026-11-13): the styles set the cap, the
+ * milestone points are a small bonus on top, about half of which the game's rounding loses. */
+const char *milestones_stat_hint(void);
+
 /* "3,420": a count with thousands separators. */
 void milestones_count_text(uint32_t value, char *out, int size);
 
