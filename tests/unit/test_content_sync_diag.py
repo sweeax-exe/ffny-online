@@ -86,3 +86,20 @@ def test_a_sync_never_reports_ok_after_a_failed_refresh():
     sync = MODS.split('    def sync(self')[1].split('\n    def ')[0]
     assert "self.write_sync_result('failed' if problems else 'ok'" in sync
     assert "self.write_sync_result('failed', [reason])" in sync and "self.write_sync_result('cancelled'" in sync
+
+
+def test_installed_but_not_served_is_said_plainly():
+    """Build 83's data-folder bug (letters outside the ANSI code page): the sync was fine, the game served 0
+    community files and went online with another content set. If that ever shows again, the log, F9 and the hub
+    say so."""
+    start = CONTENT_C.split('void pc_content_start(')[1].split('\n}\n')[0]
+    assert 'composed && !g_file_count' in start and 'last.packs > 0' in start
+    assert '[CONTENT] PROBLEM: %d composed pack(s) but the game serves 0 community files' in start
+    assert '[CONTENT] PROBLEM: the sync installed %d pack(s)' in start
+    problem = CONTENT_C.split('int pc_content_problem(char *out, int size)')[1].split('\n}\n')[0]
+    assert problem.index('g_load_problem[0]') < problem.index('pc_content_sync_result')     # it comes first
+    assert 'Community content is installed but the game could not load it (%s). %s' in problem
+    assert PC_LINE('PC_CONTENT_LOAD_LINE') == 'Restart FFNY Online; if it stays, press F9 to send a report.'
+    # every new file read opens wide (UTF-8 paths), as build 83 made the rest of pc_content.c
+    reader = CONTENT_C.split('static int read_ini_section')[1].split('\n}\n')[0]
+    assert 'content_fopen(path, "rb")' in reader and ' fopen(' not in reader

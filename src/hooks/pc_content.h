@@ -139,6 +139,7 @@ int pc_content_problem(char *out, int size);
 void pc_content_log_header(void);
 void pc_content_report_line(void);
 #define PC_CONTENT_FIX_LINE "Restart FFNY Online or check your internet/clock."
+#define PC_CONTENT_LOAD_LINE "Restart FFNY Online; if it stays, press F9 to send a report."
 #define PC_CONTENT_CLOCK_LINE "Set the date and time to automatic in Windows, then restart FFNY Online."
 /* The room list is empty while many are online on other content (the relay's STATUS Same, build 83). */
 #define PC_CONTENT_SPLIT_LINE "Players with different community content can't see your rooms: restart FFNY Online to update"

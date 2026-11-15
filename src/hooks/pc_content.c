@@ -313,7 +313,7 @@ static int read_ini_section(const char *file, const char *section, void (*fn)(vo
     if (!root) return 0;
     snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "%s", root, file);
     snprintf(head, sizeof head, "[%s]", section);
-    if (!(f = fopen(path, "rb"))) return 0;
+    if (!(f = content_fopen(path, "rb"))) return 0;
     while (fgets(line, sizeof line, f)) {
         char *s = trim(line), *eq;
         if (*s == ';' || *s == '#') continue;
@@ -405,11 +405,22 @@ int pc_content_problem_text(const PcContentSync *sync, int have_sync, const PcCo
     return 1;
 }
 
+/* Build 84: the sync installed packs but this run serves none of them (build 83's data folder with letters outside
+ * the ANSI code page was one way): set by pc_content_start, "" when all is well. */
+static char g_load_problem[400];
+
 int pc_content_problem(char *out, int size)
 {
     PcContentSync sync;
     PcContentNews news;
-    int have = pc_content_sync_result(&sync);
+    int have;
+    if (g_load_problem[0]) {
+        if (out && size > 0)
+            snprintf(out, (size_t)size, "Community content is installed but the game could not load it (%s). %s",
+                     g_load_problem, PC_CONTENT_LOAD_LINE);
+        return 1;
+    }
+    have = pc_content_sync_result(&sync);
     pc_content_news_state(&news);
     return pc_content_problem_text(&sync, have, &news, pc_content_revision(), out, size);
 }
@@ -787,10 +798,32 @@ void pc_content_start(const char *root)
         if (v && !strcmp(v, "0")) { fprintf(stderr, "[CONTENT] off for this run (RECOMP_CONTENT=0)\n"); return; }
     }
     n = pc_content_list(packs, PC_CONTENT_MAX);
-    if (!n) { fprintf(stderr, "[CONTENT] no community packs installed\n"); return; }
+    if (!n) {
+        PcContentSync last;
+        fprintf(stderr, "[CONTENT] no community packs installed\n");
+        /* build 84: the launcher's sync says it installed some, yet this run finds none (the data folder) */
+        if (!(tex_root && *tex_root) && pc_content_sync_result(&last) && last.packs > 0 &&
+            !getenv("RECOMP_TEST_CONTENT_SYNC")) {
+            snprintf(g_load_problem, sizeof g_load_problem, "the launcher installed %d pack%s, the game found none",
+                     last.packs, last.packs == 1 ? "" : "s");
+            fprintf(stderr, "[CONTENT] PROBLEM: the sync installed %d pack(s) (%s) but the game found none under %s: "
+                    "it goes online with another content set\n", last.packs, last.ids, root ? root : "(no data folder)");
+        }
+        return;
+    }
 #if !defined(DEFJAM_APP)
     /* fighter bodies, clothing, venues: the launcher composed them; a test texture root holds only its own */
-    if (!(tex_root && *tex_root)) serve_composed_files(root ? root : data_root());
+    if (!(tex_root && *tex_root)) {
+        int composed = 0;
+        serve_composed_files(root ? root : data_root());
+        for (i = 0; i < n; i++) composed += packs[i].composed && packs[i].applied;
+        if (composed && !g_file_count) {    /* build 84: synced and composed, but no community file served */
+            snprintf(g_load_problem, sizeof g_load_problem, "%d pack%s ready, 0 community files served", composed,
+                     composed == 1 ? "" : "s");
+            fprintf(stderr, "[CONTENT] PROBLEM: %d composed pack(s) but the game serves 0 community files from %s: "
+                    "it goes online with another content set\n", composed, root ? root : "(no data folder)");
+        }
+    }
 #endif
     old = getenv("RECOMP_TEXTURE_PACKS");
     for (i = 0; i < n; i++) {
