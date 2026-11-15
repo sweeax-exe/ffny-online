@@ -32,6 +32,7 @@ recomp_func_t recomp_lookup(uint32_t va) { (void)va; return 0; }
 void cheats_start_game(uint32_t gamedata) { (void)gamedata; }  /* src/patches/cheats.c */
 void cheats_start_game_done(uint32_t gamedata) { (void)gamedata; }
 void new_fighters_start_game_done(uint32_t gamedata) { (void)gamedata; }
+void fighter_skins_start_game_done(uint32_t gd) { (void)gd; }      /* src/hooks/fighter_skins.c (build 85) */
 /* FFNY Online: dev_unlock.c asks whether a session is open (src/patches/online_guard.h). */
 #include "hooks/netplay.h"
 int netplay_active(void) { return 0; }
