@@ -475,6 +475,8 @@ def apply_pack(work, folder, info, fe_id=None):
             for op in info.get('ops', []):
                 if op['op'] == 'new-venue':
                     result = newvenue.repair_camera_bank(entry, result, op.get('code'))
+            # any added animation bank (Studio <= beta.24: alignment 1, no L231 trailer): the retail layout
+            result = newvenue.retail_bank_layout(result)
         if e['mode'] == 'add':
             if work.exists(rel, entry):
                 raise ComposeError('%s exists already' % ('%s|%s' % (rel, entry) if entry else rel))

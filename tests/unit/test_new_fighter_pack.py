@@ -77,6 +77,10 @@ def test_new_fighter_is_composed_from_the_catalogue_place(tmp_path):
     assert b"V2IP_109A" not in v2ip.read("V2IP_7K3A.o") and b"V2IP_7K3A" in v2ip.read("V2IP_7K3A.o")
     v2ta = viv.Archive(str(composed(data, nf.BANK_ARCHIVE)))
     assert v2ta.has("CE_7K3A.viv") and v2ta.has("CI_7K3A.viv")
+    for bank in ("CE_7K3A.viv", "CI_7K3A.viv"):          # the retail layout: 128-byte entries, the L231 trailer
+        inner = viv.Archive(v2ta.read(bank))
+        assert all(e.offset % 128 == 0 for e in inner.entries)
+        assert v2ta.read(bank)[inner.header_size - 8:inner.header_size] == b"L231\x00\x00\x00\x02"
     nis = viv.Archive(str(composed(data, nf.NIS_ARCHIVE)))
     entry = next(n for n in nis.names() if n.lower() == nf.INTRO_EXTRO.lower())
     assert b"V2IP_7K3A" in nis.read(entry) and b"CI_7K3A" in nis.read(entry)

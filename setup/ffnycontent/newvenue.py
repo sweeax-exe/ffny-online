@@ -35,6 +35,9 @@ ICROWD_ARCHIVE = "assets/icrowd.viv"
 CAMERA_ARCHIVE = "assets/v2ta.viv"
 CAMERA_BANK = re.compile(r"(BT4V|VI_)(\d\d[A-Z])(\d{0,2})\.viv", re.IGNORECASE)
 _BANK_SYMBOL = re.compile(rb"__AnimationBank:::(BT4V|VI_)(\d\d[A-Z])(\d{0,2})_")
+# every retail camera bank (105 in v2ta.viv): entries at 128-byte offsets, the directory ends in L231 + version 2
+BANK_ALIGN = 128
+BANK_TRAILER = b"L231\x00\x00\x00\x02"
 LOCATOR_ENTRY = re.compile(r"icl_\d\d[A-Z]\.o")
 LOCATOR_MIN, LOCATOR_MAX = 4 * 1024, 64 * 1024     # retail: 10640 to 20592 bytes
 
@@ -208,7 +211,8 @@ def repair_camera_bank(entry, data, code):
     naming the venue's own ``code``. FFNY Studio up to 0.1.0-beta.24 copied the template's bank with only the
     directory renamed, so the objects still said ``__AnimationBank:::BT4V03A_EYE``; a BLAZIN' on such a venue
     corrupted the game's heap and the game crashed after the fight (``sub_00029DE0``). The fix is the same-length
-    rename the new Studio makes; ``data`` is returned unchanged when it is not such a bank or is right already."""
+    rename the new Studio makes (the layout is ``retail_bank_layout``'s); ``data`` is returned unchanged when it is
+    not such a bank or is right already."""
     m = CAMERA_BANK.fullmatch(entry or "")
     if not m or m.group(2).upper() != (code or "").upper():
         return data
@@ -225,6 +229,27 @@ def repair_camera_bank(entry, data, code):
     fixed = _BANK_SYMBOL.sub(own_name, blob)
     if fixed == blob:
         return data
+    return viv.refpack_store(fixed) if wrapped else fixed
+
+
+def retail_bank_layout(data):
+    """An animation bank added to ``assets/v2ta.viv`` laid out as all 313 retail ones are: entries at 128-byte
+    offsets and the directory's ``L231`` + version 2 trailer (``viv.build_archive`` gives every retail bank back
+    byte for byte). FFNY Studio up to 0.1.0-beta.24 rebuilt the banks it copies (a new venue's ``BT4V``/``VI_``
+    cameras, a new fighter's ``CE_``/``CI_`` cinema banks) at alignment 1 or 4 without the trailer, and a BLAZIN'
+    on a venue with such a camera bank corrupted the game's heap even with the symbols renamed (crash after the
+    fight in ``sub_00029DE0``, 2026-11-15). Not a BIG archive, or laid out so already: ``data`` unchanged."""
+    wrapped = viv.is_refpack(data)
+    blob = viv.unwrap(data) if wrapped else data
+    if blob[:4] != b"BIGF":
+        return data
+    inner = viv.Archive(blob)
+    trailer = blob[inner.header_size - 8:inner.header_size]
+    if not inner.entries or (viv.entry_alignment(inner.entries) >= BANK_ALIGN and trailer[:4] == b"L231"):
+        return data
+    files = [(e.name, inner.raw(e)) for e in inner.entries]
+    fixed = viv.build_archive(files, magic=inner.magic, align=BANK_ALIGN, size_le=inner.size_le is not False,
+                              trailer=BANK_TRAILER)
     return viv.refpack_store(fixed) if wrapped else fixed
 
 

@@ -298,8 +298,11 @@ def model_banks(v2ta, template_model, model):
         files = [(re.sub(re.escape(old), new, e.name, flags=re.I),
                   viv.unwrap(inner.raw(e)).replace(b"_" + old.encode("latin-1"), b"_" + new.encode("latin-1")))
                  for e in inner.entries]
-        out.append(("%s%s.viv" % (prefix, new), viv.build_archive(files, magic=inner.magic,
-                                                                  size_le=bool(inner.size_le))))
+        # laid out as every retail bank (128-byte entries, the L231 trailer; newvenue.retail_bank_layout): at
+        # alignment 1 without the trailer a venue's camera bank corrupted the heap after a BLAZIN' (2026-11-15)
+        out.append(("%s%s.viv" % (prefix, new), viv.build_archive(files, magic=inner.magic, align=128,
+                                                                  size_le=bool(inner.size_le),
+                                                                  trailer=b"L231\x00\x00\x00\x02")))
     return out
 
 

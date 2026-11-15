@@ -334,6 +334,14 @@ def test_new_venue_camera_bank_symbols_are_renamed():
     fixed = newvenue.repair_camera_bank("BT4V28A.viv", old, "28A")
     assert len(fixed) == len(old) and b"03A" not in fixed and fixed == old.replace(b"BT4V03A", b"BT4V28A")
     assert newvenue.repair_camera_bank("BT4V28A.viv", fixed, "28A") == fixed       # right already: unchanged
+    # Studio's layout (alignment 1, no trailer) -> as every retail bank: 128-byte entries, the L231 trailer
+    laid = newvenue.retail_bank_layout(fixed)
+    assert laid == viv.build_archive([(e.name, viv.Archive(fixed).raw(e)) for e in viv.Archive(fixed).entries],
+                                     align=128, trailer=trailer)
+    assert all(e.offset % 128 == 0 for e in viv.Archive(laid).entries)
+    assert newvenue.retail_bank_layout(laid) == laid                                 # retail layout: unchanged
+    assert viv.unwrap(newvenue.retail_bank_layout(viv.refpack_store(fixed))) == laid
+    assert newvenue.retail_bank_layout(b"\x7fELF not an archive") == b"\x7fELF not an archive"
     wrapped = viv.refpack_store(old)
     assert viv.unwrap(newvenue.repair_camera_bank("BT4V28A.viv", wrapped, "28A")) == fixed
     vi = viv.build_archive([("VI_28A11_EYE.o", b"\x7fELF__AnimationBank:::VI_03A11_EYE\0"
