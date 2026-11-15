@@ -159,6 +159,26 @@ def test_catalogue_url_is_ours_and_local_http_only_for_tests():
     assert not mods.local_test_url('http://127.0.0.1:8095.evil.com/x')
 
 
+def test_index_v4_falls_back_to_v3_on_an_older_server(monkeypatch):
+    """Build 84 reads index-v4.json; an account service from before it answers 404 there, and the launcher reads
+    index-v3.json (the same catalogue without fighters at low places). Any other failure stays a failure."""
+    import urllib.error
+    served = {mods.CATALOGUE_URL_V3: b'v3', mods.CATALOGUE_URL_V3 + '.sig': b's3'}
+    asked = []
+
+    def fetch(url, limit):
+        asked.append(url)
+        if url not in served:
+            raise urllib.error.HTTPError(url, 404, 'Not Found', None, None)
+        return served[url]
+    monkeypatch.setattr(mods, 'fetch_small', fetch)
+    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v3', b's3', mods.CATALOGUE_URL_V3)
+    served.update({mods.CATALOGUE_URL: b'v4', mods.CATALOGUE_URL + '.sig': b's4'})
+    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v4', b's4', mods.CATALOGUE_URL)
+    with pytest.raises(urllib.error.HTTPError):       # another index (a local test catalogue) does not fall back
+        mods.fetch_index('https://play.defjam.online/updates/content/other.json')
+
+
 def body_package(tmp, game, name='new-body', new=b'modder body'):
     """A fighter-body pack as Studio submits it: install.json and one delta against the player's v2ip.viv."""
     import hashlib, io, zipfile

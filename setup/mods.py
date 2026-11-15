@@ -426,6 +426,17 @@ def fetch_small(url, limit):
         return data
 
 
+def fetch_index(url):
+    """(raw, signature, url) of a catalogue index. index-v4.json that the server does not have yet (404: an account
+    service from before build 84) falls back to index-v3.json, the same catalogue without fighters at low places."""
+    try:
+        return fetch_small(url, MAX_INDEX), fetch_small(url + '.sig', 64), url
+    except urllib.error.HTTPError as error:
+        if error.code != 404 or url != CATALOGUE_URL:
+            raise
+    return fetch_small(CATALOGUE_URL_V3, MAX_INDEX), fetch_small(CATALOGUE_URL_V3 + '.sig', 64), CATALOGUE_URL_V3
+
+
 def semver(value):
     match = contract.version(value.removeprefix('v'))
     pre = match[4]
@@ -510,8 +521,7 @@ class Manager:
     def refresh(self, url=CATALOGUE_URL):
         check(self.keys, 'Catalogue signing key has not been provisioned; local mods still work')
         self.progress('Checking project catalogue')
-        raw = fetch_small(url, MAX_INDEX)
-        signature = fetch_small(url + '.sig', 64)
+        raw, signature, url = fetch_index(url)
         previous = read_json(self.root / 'catalogue.json', {})
         # index.json, index-v2.json and index-v3.json share their revisions but not their bytes: the same revision
         # from another file is no change without a new revision (an older revision is still a rollback)
@@ -967,8 +977,7 @@ class Manager:
         The last sync's revision (content.ini) counts as handled: a pack that failed there is not news again."""
         url = url or local_catalogue_url() or CATALOGUE_URL
         check(self.keys, 'Catalogue signing key has not been provisioned')
-        raw = fetch_small(url, MAX_INDEX)
-        signature = fetch_small(url + '.sig', 64)
+        raw, signature, url = fetch_index(url)
         previous = read_json(self.root / 'catalogue.json', {})
         index = verify_index(raw, signature, self.keys, previous.get('revision', 0), None, fresh=True)
         names = []
