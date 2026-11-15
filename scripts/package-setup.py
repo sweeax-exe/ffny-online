@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PYTHON_VERSION = '3.13.5'
 PACKAGES = ['pyxbe==1.0.4', 'capstone==5.0.9', 'Pillow==12.3.0', 'numpy==2.5.2', 'cryptography==50.0.2', 'cffi==2.0.0', 'pycparser==2.23']
 MOD_SOURCES = ('setup/mods.py', 'setup/mod_catalogue.py', 'config/mods/catalogue-keys.json',
+               'config/mods/isrg-roots.pem',
                'setup/content_compose.py', 'setup/ffnycontent/__init__.py', 'setup/ffnycontent/clothing.py',
                'setup/ffnycontent/cpparts.py', 'setup/ffnycontent/delta.py', 'setup/ffnycontent/loc.py',
                'setup/ffnycontent/newvenue.py', 'setup/ffnycontent/sod.py', 'setup/ffnycontent/sodwrite.py',

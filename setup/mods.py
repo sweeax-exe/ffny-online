@@ -413,15 +413,67 @@ class SafeRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(request, fp, code, msg, headers, newurl)
 
 
+# Build 83: Let's Encrypt's own roots (ISRG Root X1 and X2, public certificates), shipped with the setup. Python's
+# ssl reads the Windows root store as it is and never asks Windows Update for a missing root the way WinHTTP
+# (the game's sign-in and updater) does, so on a PC whose store lacks ISRG Root X1 every catalogue and pack
+# download failed with CERTIFICATE_VERIFY_FAILED ("certificate has expired": the old DST Root CA X3 path) and
+# the PC silently kept its old packs. After such a failure the call is made again trusting only these roots, and
+# every later call of this run goes straight to them. Nothing else changes: the hostname is checked as before and
+# the catalogue and packs are still verified against our Ed25519 keys. FFNY Studio does the same (packsapi.py).
+ROOTS_PEM = Path(__file__).resolve().parents[1] / 'config/mods/isrg-roots.pem'
+_roots_only = False
+
+
+def cert_failure(error):
+    """A TLS certificate verification failure (urllib wraps it in URLError)."""
+    import ssl
+    reason = getattr(error, 'reason', error)
+    return isinstance(reason, ssl.SSLCertVerificationError) or 'CERTIFICATE_VERIFY_FAILED' in str(reason)
+
+
+def _opener(roots=False):
+    import ssl
+    handlers = [SafeRedirect()]
+    if roots:
+        handlers.append(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=str(ROOTS_PEM))))
+    return urllib.request.build_opener(*handlers)
+
+
 def open_url(url, headers=None):
+    global _roots_only
     contract.https(url)
-    return urllib.request.build_opener(SafeRedirect()).open(
-        urllib.request.Request(url, headers={'User-Agent': 'DefJamMods/1', 'Accept-Encoding': 'identity', **(headers or {})}), timeout=20)
+    request = urllib.request.Request(url, headers={'User-Agent': 'DefJamMods/1', 'Accept-Encoding': 'identity',
+                                                   **(headers or {})})
+    if _roots_only and ROOTS_PEM.is_file():
+        return _opener(roots=True).open(request, timeout=20)
+    try:
+        return _opener().open(request, timeout=20)
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, OSError) as error:
+        if not cert_failure(error) or not ROOTS_PEM.is_file():
+            raise
+        response = _opener(roots=True).open(request, timeout=20)
+        _roots_only = True
+        print(json.dumps(dict(event='log', message='TLS: the Windows root store lacks the server\'s root; '
+                              'using the shipped ISRG roots')), file=sys.stderr, flush=True)
+        return response
+
+
+# Build 83: the server's clock (its HTTP Date) from the last catalogue fetch, so a sync refused for "issued in the
+# future" or "expired" can say how far off the PC's clock is (None: not known).
+LAST_SERVER_DATE = None
 
 
 def fetch_small(url, limit):
+    global LAST_SERVER_DATE
     with open_url(url) as response:
         check(response.status == 200, 'Unexpected catalogue response')
+        try:
+            import email.utils
+            LAST_SERVER_DATE = email.utils.parsedate_to_datetime(response.headers.get('Date'))
+        except (TypeError, ValueError, IndexError):
+            LAST_SERVER_DATE = None
         data = response.read(limit + 1)
         check(len(data) <= limit, 'Catalogue response too large')
         return data
@@ -462,6 +514,48 @@ def verify_index(raw, signature, keys, highest=0, digest=None, now=None, fresh=F
     return index
 
 
+def clock_skew(now=None, server=None):
+    """Seconds the PC's clock is ahead of the server's (negative: behind), None when the server's is not known."""
+    server = LAST_SERVER_DATE if server is None else server
+    if server is None:
+        return None
+    if server.tzinfo is None:
+        server = server.replace(tzinfo=dt.timezone.utc)
+    now = now or dt.datetime.now(dt.timezone.utc)
+    return (now - server).total_seconds()
+
+
+def plain_reason(problems, skew=None):
+    """Build 83: (kind, text) for a failed sync or check, in words a player can act on. kind: 'clock' (the PC's
+    clock is off: the catalogue looks issued in the future or expired), 'network' (no answer from the server),
+    'disk' (no room or no access on this PC), 'catalogue' (another catalogue fault), 'pack' (one pack failed)."""
+    text = '; '.join(str(p) for p in problems)
+    low = text.lower()
+    if 'issued in the future' in low or 'catalogue expired' in low:
+        if skew is not None and abs(skew) >= 300:
+            hours = abs(skew) / 3600
+            amount = '%.0f hours' % hours if hours >= 2 else '%.0f minutes' % (abs(skew) / 60)
+            return 'clock', 'the PC clock is %s %s' % (amount, 'ahead' if skew > 0 else 'behind')
+        if 'issued in the future' in low:
+            return 'clock', 'the PC clock is behind (the catalogue looks issued in the future)'
+        return 'clock', 'the catalogue looks expired: the PC clock may be ahead'
+    if 'certificate_verify_failed' in low or 'certificate verify failed' in low:
+        # still refused with the shipped ISRG roots (open_url): most often the PC's clock, else a program that
+        # inspects HTTPS (antivirus, VPN, a company proxy)
+        return 'clock', ('the secure connection to the content server was refused (certificate %s): check that the '
+                         'PC date and time are right, or an antivirus/VPN scanning HTTPS' %
+                         ('expired' if 'expired' in low else 'not trusted'))
+    if any(w in low for w in ('no space', 'disk full', 'errno 28', 'permission denied', 'access is denied',
+                              'winerror 5', 'errno 13', 'winerror 112')):
+        return 'disk', text[:300]
+    if any(w in low for w in ('urlopen error', 'timed out', 'getaddrinfo', 'connection', 'unreachable',
+                              'name or service', 'http error', 'unexpected catalogue response', 'ssl')):
+        return 'network', 'no connection to the content server (%s)' % text[:240]
+    if text.startswith('Catalogue') or 'catalogue' in low.split(':', 1)[0]:
+        return 'catalogue', text[:300]
+    return 'pack', text[:300]
+
+
 class Manager:
     def __init__(self, data, runtime='0.0.0', capabilities=('textures-v1',), keys=None, cancel=None, prerelease=False,
                  game_dir=None):
@@ -487,6 +581,7 @@ class Manager:
         self.cancel_file = Path(cancel) if cancel else None
         self.message = ''
         self.prerelease = prerelease
+        self.newer = {}         # build 83: raw sync problems -> plain words (a pack only a newer build takes)
 
     def cancelled(self):
         check(not (self.cancel_file and self.cancel_file.exists()), 'Operation cancelled; previous installation preserved')
@@ -764,22 +859,27 @@ class Manager:
         """FFNY Online: every pack of the verified catalogue, installed for everyone in catalogue order.
         Only packs whose version or archive changed are downloaded; synced packs the catalogue no longer lists
         (or revoked) are removed. A pack that fails is left as it was and the others go on. Writes
-        content.ini for the game and the launcher's Content page."""
+        content.ini for the game and the launcher's Content page, and (build 83) sync-result.ini."""
         url = url or local_catalogue_url() or CATALOGUE_URL
         problems = []
+        plain = self.newer = {}     # build 83: the Content page's words for a raw problem (sync-result.ini keeps it raw)
         try:
             self.refresh(url)
         except (ValueError, OSError, urllib.error.URLError) as error:
-            # build 83: a plain line for the Content page instead of "<urlopen error [WinError 10061] ...>"
-            problems.append('the FFNY server could not be reached (%s); the packs you have stay as they are'
-                            % plain_network_error(error) if isinstance(error, (OSError, urllib.error.URLError))
-                            and not isinstance(error, ModError) else 'Catalogue: ' + str(error))
+            problems.append('Catalogue: ' + str(error))
+            if 'certificate' in str(error).lower():
+                plain[problems[-1]] = plain_reason(problems[-1:], clock_skew())[1]
+            elif isinstance(error, OSError):        # urllib.error.URLError too; not a signature or format fault
+                plain[problems[-1]] = ('the FFNY server could not be reached (%s); the packs you have stay as they are'
+                                       % plain_network_error(error))
         try:
             index = self.trusted(fresh=True)
         except (ValueError, OSError) as error:
             self.write_content()
             self.compose_quietly(problems)      # the player's own packs work without a catalogue too
-            raise ModError('; '.join(problems) or str(error)) from error
+            reason = '; '.join(problems) or str(error)
+            self.write_sync_result('failed', [reason])
+            raise ModError('; '.join(plain.get(p, p) for p in problems) or str(error)) from error
         try:
             done = self.sync_packs(index, problems)
         except ModError:
@@ -788,14 +888,16 @@ class Manager:
             self.drop_broken_bundles(problems)
             self.write_content(index['revision'])
             self.compose_quietly(problems)
+            self.write_sync_result('cancelled', problems, index['revision'])
             raise
         self.write_content(index['revision'])
         self.compose_quietly(problems)
+        self.write_sync_result('failed' if problems else 'ok', problems, index['revision'])
         count = sum(1 for r in self.state()['installed'].values() if r.get('synced'))
         message = 'Community content up to date: %d pack(s)' % count if not done else \
             'Community content synced: %d change(s), %d pack(s) installed' % (done, count)
         if problems:
-            message += '. Not synced: ' + '; '.join(problems)
+            message += '. Not synced: ' + '; '.join(plain.get(p, p) for p in problems)
         self.progress(message)
 
     def sync_packs(self, index, problems):
@@ -824,10 +926,10 @@ class Manager:
                     raise
                 if mod.get('bundle'):
                     reasons[mod['id']] = '%s: %s' % (mod['name'], error)     # reported for its pack below
-                elif self.needs_newer(mod):
-                    problems.append('%s needs a newer FFNY Online - update to get it' % (mod.get('name') or mod['id']))
                 else:
                     problems.append('%s: %s' % (mod['id'], error))
+                    if self.needs_newer(mod):     # build 83: the Content page names it in plain words
+                        self.newer[problems[-1]] = (mod.get('name') or mod['id']) + NEEDS_NEWER
         done += self.sync_bundles(ordered, wanted, reasons, problems)
         for mod_id, receipt in list(self.state()['installed'].items()):
             mod = next((m for m in index['mods'] if m['id'] == mod_id), None)
@@ -1023,6 +1125,42 @@ class Manager:
                 pass
         return re.sub(r'[\r\n]', ' ', str(self._fighter_names.get(fe_id, '')))[:40]
 
+    def write_sync_result(self, result, problems, revision=0):
+        """Build 83: <data>/mod-manager/sync-result.ini, the last sync's outcome for the game (pc_content.c logs it
+        at the start, the F9 report carries it, the online hub tells the player when it failed):
+
+            [sync]
+            time=<UTC>
+            result=ok | failed | cancelled
+            kind=<plain_reason's kind, "" when ok>
+            reason=<plain words, "" when ok>
+            detail=<the raw problems>
+            revision=<the catalogue revision content.ini was written for, 0 none>
+            packs=<synced packs installed>
+            ids=<their ids, comma-separated>
+            skipped=<packs this launcher cannot take yet (a newer build or capability), their ids>
+
+        A pack this launcher cannot take (choose's "No compatible" refusal) is skipped=, not a failure: the game's
+        news check leaves it out the same way. Never raises: a sync's own outcome must not be hidden by this file."""
+        try:
+            skipped = [p for p in problems if 'No compatible, nonrevoked version' in str(p)]
+            problems = [p for p in problems if p not in skipped]
+            if result == 'failed' and not problems:
+                result = 'ok'
+            kind, reason = plain_reason(problems, clock_skew()) if problems else ('', '')
+            ids = sorted(i for i, r in self.state()['installed'].items() if r.get('synced'))
+            clean = lambda v: str(v).replace('\n', ' ').replace('\r', ' ')
+            atomic_bytes(self.root / 'sync-result.ini', (
+                '; the last community content sync, written by setup/mods.py sync. Do not edit.\n[sync]\n'
+                'time=%s\nresult=%s\nkind=%s\nreason=%s\ndetail=%s\nskipped=%s\nrevision=%d\npacks=%d\nids=%s\n' % (
+                    dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), result, kind, clean(reason)[:300],
+                    clean('; '.join(str(p) for p in problems))[:1000],
+                    clean(', '.join(str(p).split(':', 1)[0] for p in skipped))[:500], revision, len(ids),
+                    clean(','.join(ids))[:1000])
+            ).encode('utf-8'))
+        except (ValueError, OSError, KeyError, TypeError):
+            pass
+
     def reviewed_dates(self):
         """{(mod id, version): the catalogue's review date} from the cached verified catalogue ({} without one)."""
         try:
@@ -1074,6 +1212,26 @@ class Manager:
         self.message = '%d community pack change(s) waiting' % len(names) if names else 'Community content up to date'
         return names
 
+    def write_news_failure(self, error):
+        """Build 83: a check that failed says so in news.ini (error= and kind=, plain words), keeping the last good
+        check's revision, pending and names, so the hub shows it and the F9 report carries it."""
+        old = configparser.ConfigParser(interpolation=None)
+        try:
+            old.read(self.root / 'news.ini', encoding='utf-8')
+        except (OSError, configparser.Error):
+            pass
+        get = lambda key, default: old.get('news', key, fallback=default) if old.has_section('news') else default
+        kind, reason = plain_reason([error], clock_skew())
+        clean = lambda v: str(v).replace('\n', ' ').replace('\r', ' ')
+        try:
+            atomic_bytes(self.root / 'news.ini', (
+                '[news]\nchecked=%s\nrevision=%s\npending=%s\nnames=%s\nkind=%s\nerror=%s\n' % (
+                    dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), clean(get('revision', '0'))[:12],
+                    clean(get('pending', '0'))[:12], clean(get('names', ''))[:1000], kind, clean(reason)[:300])
+            ).encode('utf-8'))
+        except OSError:
+            pass
+
     def view(self):
         state = self.state()
         rows, info = [], 'Catalogue has not been published yet; local mods remain available'
@@ -1123,6 +1281,9 @@ def new_venue_fe_id(install_json):
     except (OSError, ValueError, AttributeError):
         pass
     return 0
+
+
+NEEDS_NEWER = ' needs a newer FFNY Online - update to get it'     # a pack only a newer build takes
 
 
 def plain_network_error(error):
@@ -1224,7 +1385,8 @@ def main():
             # from the running game: no writer lock (a launcher's sync may hold it), only news.ini is written
             try:
                 manager.check_news()
-            except (ValueError, OSError, KeyError, TypeError, urllib.error.URLError) as error:
+            except (ValueError, OSError, KeyError, TypeError, ImportError, urllib.error.URLError) as error:
+                manager.write_news_failure(error)
                 return failure(error)
             print(json.dumps(dict(event='complete', message=manager.message)), flush=True)
             return 0
