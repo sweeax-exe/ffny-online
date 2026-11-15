@@ -38,7 +38,9 @@ import content_compose
 # fighter-places-v2); index-v3.json is the same catalogue without those, for launchers of builds 80..84, whose
 # check refuses a place outside 100..127; index-v3.json and up list the mods of a pack of several mods (with
 # "bundle" and "bundle_name"); index-v2.json is without pack items, for launchers of build 79; index.json also
-# leaves new fighters out, for launchers up to build 78. All share their revisions.
+# leaves new fighters out, for launchers up to build 78. All share their revisions. Build 85: index-v4.json also
+# lists the skins (new fighters the team accepted as an extra outfit of a stock fighter: "fighter_mode": "skin",
+# "skin_of", no place).
 CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v4.json'
 CATALOGUE_URL_V3 = 'https://play.defjam.online/updates/content/index-v3.json'
 CATALOGUE_URL_V2 = 'https://play.defjam.online/updates/content/index-v2.json'
@@ -810,6 +812,8 @@ class Manager:
                                bytes=version['archive']['unpacked_size'])
                 if 'fighter_fe_id' in mod:
                     receipt.update(fighter_fe_id=mod['fighter_fe_id'])
+                if mod.get('fighter_mode') == 'skin':
+                    receipt.update(fighter_mode='skin', skin_of=mod['skin_of'])
                 if 'bundle' in mod:
                     # one mod of a pack of several: the pack is installed and removed as one unit; its mods at
                     # this catalogue revision tell an interrupted sync's half pack (drop_broken_bundles)
@@ -975,6 +979,8 @@ class Manager:
                 if (installed and installed.get('version') == version['version']
                         and installed.get('archive_sha256') == version['archive']['sha256']
                         and installed.get('fighter_fe_id') == mod.get('fighter_fe_id')
+                        and installed.get('fighter_mode') == mod.get('fighter_mode')
+                        and installed.get('skin_of') == mod.get('skin_of')
                         and installed.get('bundle') == mod.get('bundle')
                         and installed.get('bundle_name') == mod.get('bundle_name')):
                     continue
@@ -1069,6 +1075,7 @@ class Manager:
                 pack = dict(id=mod_id, version=r.get('version', ''), content_sha256=r.get('content_sha256', ''),
                             kind=r.get('kind', 'replacement'), order=r.get('order', 0), folder=folder,
                             fighter_fe_id=r.get('fighter_fe_id', 0),
+                            fighter_mode=r.get('fighter_mode', ''), skin_of=r.get('skin_of'),
                             reviewed=reviewed.get((mod_id, r.get('version')), ''))
                 if r.get('bundle'):
                     # content_compose applies a pack of several mods whole or not at all
@@ -1176,6 +1183,9 @@ class Manager:
                         'description', 'fighter_fe_id', 'bundle', 'bundle_name'):
                 value = str(r.get(key, '')).replace('\n', ' ').replace('\r', ' ')[:500]
                 lines.append(key + '=' + value)
+            if r.get('fighter_mode') == 'skin':
+                # build 85: a skin, an extra outfit of the stock fighter skin_of (pc_content.c)
+                lines += ['fighter_mode=skin', 'skin_of=%d' % r.get('skin_of', -1)]
             # build 82: the day the team accepted this version (the hub's NEW badge) and a new venue's feID
             lines.append('reviewed=' + reviewed.get((mod_id, r.get('version')), ''))
             if (self.mods / mod_id / 'install.json').is_file():

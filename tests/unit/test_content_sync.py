@@ -154,7 +154,7 @@ def test_sync_moves_an_unowned_folder_aside(setup, tmp_path):
 
 
 def test_catalogue_url_is_ours_and_local_http_only_for_tests():
-    assert mods.CATALOGUE_URL == 'https://play.defjam.online/updates/content/index-v4.json'
+    assert mods.CATALOGUE_URL == 'https://play.defjam.online/updates/content/index-v4.json'   # build 85: skins
     assert mods.local_test_url('http://127.0.0.1:8095/updates/content/index.json')
     assert not mods.local_test_url('http://example.com:80/index.json')
     assert not mods.local_test_url('http://127.0.0.1.evil.com:80/x')

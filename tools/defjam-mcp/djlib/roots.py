@@ -107,7 +107,10 @@ def _content(root, content):
     art = os.path.join(content, "online-art", "fighters")
     new = [n for n in (os.listdir(art) if os.path.isdir(art) else [])
            if n.endswith(".png") and n[:-4].isdigit() and int(n[:-4]) in NEW_FIGHTER_PLACES]
-    if new:
+    # Build 85: a skin's picture, <data>/online-art/skins/<pack id>.png, the same way.
+    skins = os.path.join(content, "online-art", "skins")
+    skin_art = [n for n in (os.listdir(skins) if os.path.isdir(skins) else []) if n.endswith(".png")]
+    if new or skin_art:
         link = os.path.join(root, "online-art")
         if os.path.lexists(link) and is_link(link):
             src = os.path.realpath(link)
@@ -116,6 +119,10 @@ def _content(root, content):
         os.makedirs(os.path.join(link, "fighters"), exist_ok=True)
         for n in new:
             shutil.copy2(os.path.join(art, n), os.path.join(link, "fighters", n))
+        if skin_art:
+            os.makedirs(os.path.join(link, "skins"), exist_ok=True)
+            for n in skin_art:
+                shutil.copy2(os.path.join(skins, n), os.path.join(link, "skins", n))
 
 
 def create(name, fixture=None, partitions=False, data=None, content=None):

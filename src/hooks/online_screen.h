@@ -33,6 +33,11 @@ void draw_decor(ImDrawList *dl, ImVec2 display);
  * menu, no fight, no session, no room). exit_chip_at takes window pixels. RECOMP_TEST_OPEN_EXIT=1
  * (tests) opens it once at the first main menu. draw_exit_prompt: 0 still open, 1 NO, 2 YES. */
 bool exit_wanted();
+/* Build 85, skins (skins_ui.inc, fighter_skins.h): the game's own select screen picked a fighter with skins
+ * (offline): take_skin_window_request() is true once, then the overlay holds the game's input and draws
+ * draw_skin_window until it returns true (a look taken, or B: the fighter's own look). */
+bool take_skin_window_request();
+bool draw_skin_window(ImVec2 display);
 bool exit_chip_at(float x, float y);
 bool take_exit_test_request();
 void exit_prompt_begin();

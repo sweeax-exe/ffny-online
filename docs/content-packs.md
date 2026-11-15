@@ -111,6 +111,21 @@ retail screens hold an unused Crow 2's pictures (`thumb37`, `l_MS_37_*`, `38_2p/
 replace them, and `scripts/apt-patch.py` takes Crow 2's baked grid picture out of frames 37 and 186. The files share their
 revisions: a cached revision of another file is not "changed without a new revision".
 
+**Skins (build 85).** At review the team decides whether a new-fighter pack goes live as its own character (as
+above) or as a **skin**: an extra outfit of its template, the same gameplay with a new look. A skin takes no place:
+its catalogue entry has `"fighter_mode": "skin"` and `"skin_of": <the template's front-end ID>` and no
+`fighter_fe_id`, and the place the submission held is free again. Only `index-v4.json` lists skins (launchers up to
+build 84 read `index-v3.json`, which leaves them out). The launcher composes a skin like a new fighter without the
+Character row and the menu pictures (`content_compose.apply_skin`: the model files, entity, IntroExtro entry, camera
+banks, animation tags) and lists it in `content-files/files.ini` as `skin=<pack id>|<template feID>|<model>|<name>`,
+in catalogue order; its picture for the skin window is `<data>/online-art/skins/<pack id>.png` (from `art/body.png`).
+`content.ini` marks it `fighter_mode=skin` and `skin_of=<feID>`, and the content print counts a skin with its mode.
+In the game (`src/hooks/fighter_skins.c`) picking the template opens the skin window (Default plus each skin), on the
+hub's CHOOSE FIGHTER and over the game's own select screens; the slot's model is swapped at match start, everything
+else is the template's. A template's skins are numbered from 1 in catalogue order; online the number travels as
+READY's third byte and in START's skins trailer (CAPS bit 22), so the opponent and spectators load the same model.
+CPU fighters and random picks play Default. The last skin per fighter is kept in `<data>/skin-choices.ini`.
+
 A relay before this branch refuses the longer HELLO; it is sent only by a PC with `content` packs, so the relay
 goes out first. The relay answers a code join between different content sets with ERROR 15 (14 is the relay's "client not supported").
 

@@ -26,6 +26,7 @@
 #include "new_fighters.h"
 #include "fighter_gameplay.h"
 #include "fighter_voice.h"
+#include "fighter_skins.h"
 
 unsigned int defjam_fe_call(const char *command);                   /* recomp_manual.c */
 FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c: as the print reads it */
@@ -591,6 +592,7 @@ void new_fighters_get_next(void)
 
 void new_fighters_after_funccall(const char *text)
 {
+    fighter_skins_after_funccall(text);    /* build 85: a pick of a fighter with skins: the skin window */
     if (strcmp(text, "Game.ResetFighterList()")) return;
     if (new_fighters_list(NULL) <= 0) return;
     rebuild_list();

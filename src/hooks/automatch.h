@@ -18,6 +18,7 @@ typedef struct AutoMatch {
     int count;          /* fighters, 2..4 */
     int fighter[4];     /* Battle-mode ID (src/hooks/online_data.h) */
     int pad[4];         /* controller port, -1 for the CPU */
+    int skin[4];        /* build 85: the fighter's skin (fighter_skins.h): 0 its own look, 1.. a skin of it */
 } AutoMatch;
 
 /* Ask for a match; it starts at the next quiet moment on the main menu. */
