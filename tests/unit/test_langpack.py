@@ -241,9 +241,9 @@ void netplay_data_print_reset(void) {}
 
 int main(int argc, char **argv)
 {
-    RecompSetting settings[4];
+    RecompSetting settings[5];
     char path[2048];
-    size_t n = pc_language_settings(settings, 4);
+    size_t n = pc_language_settings(settings, 5);
     recomp_settings_register(settings, n);
     pc_language_start(argv[1], argv[2]);
     for (int i = 3; i < argc; i++) {

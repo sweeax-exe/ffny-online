@@ -9,8 +9,8 @@ static const char *const k_game[] = { "english", "french", NULL };
 size_t pc_language_settings(RecompSetting *out, size_t max)
 {
     size_t n = 0;
-    if (max < 4) return 0;
-    memset(out, 0, sizeof(*out) * 4);
+    if (max < 5) return 0;
+    memset(out, 0, sizeof(*out) * 5);
 #define ADD(...) do { RecompSetting s_ = { __VA_ARGS__ }; out[n++] = s_; } while (0)
     ADD("language", "pack", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_LANGUAGE_PACK", RECOMP_SETTING_RESTART,
         "Language mod: a folder in the mods folder with language.ini (the Mods page sets it); empty plays the "
@@ -26,6 +26,10 @@ size_t pc_language_settings(RecompSetting *out, size_t max)
     ADD("content", "off", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_CONTENT_OFF", RECOMP_SETTING_RESTART,
         "Community packs switched off on this PC (pack ids, comma-separated; the launcher's Content page sets "
         "it). Only retextures and language packs can be off; new fighters, clothing and venues are always on.");
+    /* Build 82's NEW badges (pc_content.c): a pack whose fighter or venue the player picked loses it. */
+    ADD("content", "picked", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+        "Community packs whose new fighter or venue you have picked (pack ids, newest first): they no longer show "
+        "NEW. The game writes it.");
 #undef ADD
     return n;
 }

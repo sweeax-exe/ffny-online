@@ -44,6 +44,7 @@
 #include "pc_content.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
+#include "patches/cheats.h"
 
 /* Picture shape: the console's 4:3, stretched, or widescreen (docs/widescreen); the widescreen
  * choices are indices 2.. and are read once at start-up (src/patches/widescreen.c). */
@@ -248,7 +249,8 @@ static RecompSetting g_display_settings[] = {
 
 /* The display table followed by the input tables (pc_input.c): one array, one
  * registration, one file. */
-static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16 + 16 + 4];
+/* + [language]/[content] (5) and [cheats] (5). */
+static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16 + 16 + 5 + 8];
 static size_t g_setting_count;
 
 static char g_path[MAX_PATH * 4];   /* empty: do not load or save */
@@ -541,6 +543,7 @@ void pc_settings_apply_display(void)
     }
     d3d8_present_set_vsync(pc_display("vsync", 1));
     picture_apply_settings();
+    cheats_apply_settings();      /* [cheats]: settings.ini or RECOMP_CHEAT_*; refused online */
 #if defined(_WIN32)
     /* Direct3D 11 only for now; the Vulkan renderer keeps its plain scale. */
     d3d8_present_set_post(pc_display("anti_aliasing", 1), pc_display("sharpen", 30));
@@ -985,7 +988,10 @@ int pc_settings_init(void)
         pc_input_settings(g_settings + DISPLAY_SETTING_COUNT, 64);
     g_setting_count += pc_ui_settings(g_settings + g_setting_count, 16);
     g_setting_count += pc_debug_settings(g_settings + g_setting_count, 16);
-    g_setting_count += pc_language_settings(g_settings + g_setting_count, 4);
+    g_setting_count += pc_language_settings(g_settings + g_setting_count, 5);
+    /* [cheats] was registered by the app only (pc_settings_catalog.c), so in the game every cheat read its
+     * default and the cheats did nothing (build 82). tests/unit/test_settings_registered.py */
+    g_setting_count += cheats_settings(g_settings + g_setting_count, 8);
     recomp_settings_register(g_settings, g_setting_count);
     recomp_settings_set_log(settings_log);
     read = g_path[0] ? recomp_settings_load(g_path) : 0;

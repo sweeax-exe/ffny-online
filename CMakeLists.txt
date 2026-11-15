@@ -154,11 +154,10 @@ file(GLOB HOOK_SOURCES       CONFIGURE_DEPENDS "src/hooks/*.c" "src/hooks/*.cpp"
 file(GLOB PATCH_SOURCES      CONFIGURE_DEPENDS "src/patches/*.c")
 # Upstream v1.1.1 parts FFNY Online does not build yet (upstream merge stage 1; see
 # docs/research/upstream-v1.1.1-merge.md): the settings catalogue shared with upstream's app (FFNY
-# keeps its own table in pc_settings.c), custom songs and the Beatbox, the [cheats] settings table
-# (cheats.c is built, inert and refused online), and options_volume.c (FFNY's options_audio.c
+# keeps its own table in pc_settings.c), custom songs and the Beatbox, and options_volume.c (FFNY's options_audio.c
 # already brings the saved volumes to the mixer).
 list(FILTER HOOK_SOURCES EXCLUDE REGEX "/(pc_settings_catalog\\.c|pc_songs\\.c|pc_songs_settings\\.c|song_convert\\.c|song_decoders\\.c|song_library\\.c)$")
-list(FILTER PATCH_SOURCES EXCLUDE REGEX "/(cheats_settings\\.c|options_volume\\.c|song_cursor\\.c|song_store\\.c)$")
+list(FILTER PATCH_SOURCES EXCLUDE REGEX "/(options_volume\\.c|song_cursor\\.c|song_store\\.c)$")
 # The source folder's own path, on the one file that reads it. Set on a whole target it is part of every
 # file's compile line, so a compiler cache misses them all whenever the folder changes (each update's does).
 set_property(SOURCE src/hooks/pc_mods.cpp APPEND PROPERTY COMPILE_DEFINITIONS
