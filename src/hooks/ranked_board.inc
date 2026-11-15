@@ -285,6 +285,10 @@ void draw_ranked_board(ImDrawList *dl, const Frame &f, const Pad &pad)
     glass(dl, f, 34, 78, 572, 328);
     std::string head = std::string("RANKED ") + netranked_mode_title(RB.mode);
     text(dl, f, g_title, 18, 48, 86, ORANGE, head.c_str(), LEFT, 1.3f);
+    {   // build 83: the season's countdown beside the mode
+        std::string c = season_countdown();
+        if (!c.empty()) text(dl, f, g_title, 10, 48 + text_width(f, g_title, 18, head.c_str()) + 14, 92, CREAM, c.c_str(), LEFT, 0.6f);
+    }
     int searching = s.valid ? s.counts[RB.mode] : shown ? d.searching : -1;
     float hx1 = 594;
     if (s.valid && s.off[RB.mode]) {
