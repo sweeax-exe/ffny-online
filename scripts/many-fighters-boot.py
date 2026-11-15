@@ -3,7 +3,7 @@
 # Copyright (c) 2026 sweeax-exe (FFNY Online)
 """Boot regression for many new fighters at once (the build-83 main-menu crash, 2026-11-15).
 
-    python scripts/many-fighters-boot.py [--count 8] [--out logs/many-fighters] [--fight]
+    python scripts/many-fighters-boot.py [--count 8] [--out logs/many-fighters] [--fight] [--fixture <save folder>]
 
 Makes ``--count`` new-fighter packs from the player's own dump, the way FFNY Studio writes them (a stock
 template's model under a new name, the op), installs them as synced packs in a content root and composes them
@@ -12,7 +12,8 @@ machine lock), with ``RECOMP_UNLOCK_ALL=1`` (the settings item "Unlock all fight
 fighter set over in build 83):
 
 1. boot to Battle (main menu music, the unlock routine on every screen change), the save kept;
-2. boot again on the save the first boot left (a save that ran over in build 83 crashed every later start);
+2. boot again on the save the first boot left, to the main menu and its music (a save that ran over in build 83
+   crashed every later start there);
 3. with ``--fight``, an offline fight with the last new fighter.
 
 Each step must reach its screen without a crash; the game's ``[SETS]`` lines are printed. The packs and the
@@ -103,7 +104,7 @@ def content_root(out, game, count):
     return root, places
 
 
-def dj(args, label):
+def dj(args, label, need=None):
     cmd = [sys.executable, str(ROOT / "tools" / "defjam-mcp" / "dj.py"), "scenario"] + args
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
     text = r.stdout[r.stdout.find("{"):] if "{" in r.stdout else "{}"
@@ -112,13 +113,15 @@ def dj(args, label):
     except ValueError:
         result = {"ok": False, "raw": r.stdout[-1500:] + r.stderr[-1500:]}
     log = ROOT / result["log"] if result.get("log") else None
-    lines = []
+    lines, text = [], ""
     if log and log.is_file():
-        for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith(("[SETS]", "[CRASH]", "[HANG]", "[UNLOCK] sub_")) or "  in sub_" in line:
+        text = log.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
+            if (line.startswith(("[SETS] save", "[SETS] the save", "[CRASH]", "[HANG]", "[UNLOCK] sub_"))
+                    or "  in sub_" in line):
                 lines.append(line)
     crashed = any(x.startswith(("[CRASH]", "[HANG]")) for x in lines)
-    ok = bool(result.get("ok")) and not crashed and not result.get("faults")
+    ok = bool(result.get("ok")) and not crashed and not result.get("faults") and (need is None or need in text)
     print(json.dumps({"step": label, "ok": ok, "log": result.get("log"), "faults": result.get("faults"),
                       "game": lines[:12]}))
     return ok, result
@@ -129,13 +132,16 @@ def main():
     ap.add_argument("--count", type=int, default=8, help="new fighters (6 or more ran the build-83 set over)")
     ap.add_argument("--out", default=str(ROOT / "logs" / "many-fighters"))
     ap.add_argument("--fight", action="store_true", help="also an offline fight with the last new fighter")
+    ap.add_argument("--fixture", help="a folder of save files for the first boot (a profile whose Options the "
+                    "game loads and saves; without one the copy may start with no save to load)")
     a = ap.parse_args()
     game = DATA / "extracted" if (DATA / "extracted" / "default.xbe").is_file() else ROOT / "game"
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     content, places = content_root(out, game, a.count)
     unlock = ["--env", "RECOMP_UNLOCK_ALL=1", "--content-root", str(content)]
-    ok1, _ = dj(["boot", "--goto", "battle", "--keep-roots"] + unlock, "boot")
+    first = ["--fixture", a.fixture] if a.fixture else []
+    ok1, _ = dj(["boot", "--goto", "battle", "--keep-roots"] + first + unlock, "boot")
     saved = out / "save-after-boot"
     if saved.exists():
         shutil.rmtree(saved)
@@ -144,7 +150,8 @@ def main():
         shutil.copytree(src, saved / "UserData")
     for path, _ in roots.listing():
         roots.destroy(path)
-    ok2, _ = dj(["boot", "--goto", "battle", "--fixture", str(saved)] + unlock, "boot-again")
+    # the main menu and its music on that save (the build-83 crash came at Audio.PlayMusic)
+    ok2, _ = dj(["boot", "--fixture", str(saved)] + unlock, "boot-again", need="Audio.PlayMusic()")
     ok3 = True
     if a.fight:
         ok3, _ = dj(["offline", "--f0", str(places[-1]), "--f1", "22", "--fixture", str(saved)] + unlock, "fight")

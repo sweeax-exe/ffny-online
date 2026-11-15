@@ -305,9 +305,11 @@ def exit_check(s, c, shots):
     return {"ok": bool(ok), "exit_code": code, "dumps": dumps, "steps": steps}
 
 
-def boot(timeout=240, turbo=False, extra_env=None, lock_timeout=None, log=None, keep_roots=False, goto=None):
+def boot(timeout=240, turbo=False, extra_env=None, lock_timeout=None, log=None, keep_roots=False, goto=None,
+         fixture=None):
     """To the main menu; with goto (story, battle, rewards, online, slotN) on to that entry by name, or
-    with goto 'exit' through the menu's EXIT prompt (exit_check) until the game quits."""
+    with goto 'exit' through the menu's EXIT prompt (exit_check) until the game quits. fixture: a folder of
+    save files copied over the copy's saves (as offline's)."""
     t0 = time.time()
     s = copies.Session("boot", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
     result = {"scenario": "boot", "ok": False}
@@ -326,7 +328,7 @@ def boot(timeout=240, turbo=False, extra_env=None, lock_timeout=None, log=None, 
             # control channel's presses, and the overlay reads VIEW from the pad itself
             env.pop("RECOMP_PAD_SCRIPT_VIRTUAL", None)
         env.update(extra_env or {})
-        c = s.launch(0, env=env, watch=WATCH + (EXIT_WATCH if goto == "exit" else []))
+        c = s.launch(0, env=env, watch=WATCH + (EXIT_WATCH if goto == "exit" else []), fixture=fixture)
         deadline = time.time() + timeout
         while time.time() < deadline and c.alive():
             s.poll()

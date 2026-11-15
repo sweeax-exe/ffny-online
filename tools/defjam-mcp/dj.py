@@ -96,7 +96,8 @@ def cmd_scenario(a):
                               extra_env=env, fixture=a.fixture, shots_every=a.shots_every,
                               shots_from=a.shots_from, **common)
     elif a.kind == "boot":
-        r = scenarios.boot(turbo=a.turbo, timeout=a.timeout or 240, extra_env=env, goto=a.goto, **common)
+        r = scenarios.boot(turbo=a.turbo, timeout=a.timeout or 240, extra_env=env, goto=a.goto, fixture=a.fixture,
+                           **common)
     elif a.kind == "roomchat":
         r = scenarios.room_chat(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out,
                                 rollback=a.rollback, **common)
