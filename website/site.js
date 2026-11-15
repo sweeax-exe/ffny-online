@@ -1,5 +1,5 @@
 /* defjam.online: the download button, the screenshot lightbox, the gameplay clip, the embers and the
-   ranked ladder (ranked.html) and the Turf War map (turf.html).
+   ranked ladder (ranked.html), the Turf War map (turf.html) and the Studio gallery (studio.html).
    Everything here is optional: without JS the button still points at the latest GitHub release. */
 (function () {
   'use strict';
@@ -650,9 +650,219 @@
     update();
   }
 
+  // ---- FFNY Studio community gallery (studio.html): the public, signed content catalogue ----
+  // The same file the launcher reads; only the fields shown here are used, and nothing is sent but the GET.
+  var CATALOGUE = 'https://play.defjam.online/updates/content/index-v3.json';
+  var PACKS_SHOWN = 12;
+
+  // A local preview may read a test catalogue next to the page: http://localhost:8000/studio.html?catalogue=test-40.json
+  function catalogueUrl() {
+    var host = window.location.hostname;
+    var m = /[?&]catalogue=([\w.-]+\.json)(?:&|$)/.exec(window.location.search);
+    return (m && (host === 'localhost' || host === '127.0.0.1')) ? m[1] : CATALOGUE;
+  }
+
+  var PACK_TYPES = {
+    'new-fighter': ['Fighter', 'fighter'],
+    'new-venue': ['Map', 'map'],
+    'venue': ['Map', 'map'],
+    'clothing': ['Clothing', 'clothing'],
+    'voice': ['Voice', 'other'],
+    'language': ['Language', 'other']
+  };
+  var PACK_ICONS = {
+    fighter: 'M12 2.5a3.2 3.2 0 1 1 0 6.4 3.2 3.2 0 0 1 0-6.4ZM7.2 10.6h9.6l2.4 5.6-2 .8-1.6-3.4v8.1h-2.4v-5.2h-2.4v5.2H8.4v-8.1L6.8 17l-2-.8 2.4-5.6Z',
+    map: 'M3 6.2 8.6 4l6.8 2.4L21 4.2v13.6l-5.6 2.2-6.8-2.4L3 19.8V6.2Zm6 .2v9.9l6 2.1V8.5L9 6.4Z',
+    clothing: 'M8.5 3.5 12 5.6l3.5-2.1 5.5 3.2-2 4.3-2.2-1v10.5H7.2V10l-2.2 1-2-4.3 5.5-3.2Z',
+    other: 'M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7L12 3Z'
+  };
+
+  function packType(type) {
+    var known = PACK_TYPES[type];
+    if (known) return { label: known[0], cls: known[1] };
+    var label = String(type || 'Pack').replace(/^new-/, '').replace(/-/g, ' ');
+    return { label: label.charAt(0).toUpperCase() + label.slice(1), cls: 'other' };
+  }
+
+  // A name made only of blank or unassigned characters reads as nothing; show a plain fallback instead.
+  function visibleText(s) {
+    s = typeof s === 'string' ? s.trim() : '';
+    try {
+      return new RegExp('[\\p{L}\\p{N}\\p{S}\\p{P}]', 'u').test(s) ? s : '';
+    } catch (e) {
+      return /\S/.test(s) ? s : '';
+    }
+  }
+
+  function livePacks(catalogue) {
+    var mods = (catalogue && catalogue.mods) || [];
+    var out = [];
+    mods.forEach(function (m) {
+      if (!m || m.kind !== 'content') return;
+      var revoked = m.revoked_versions || [];
+      var versions = (m.versions || []).filter(function (v) {
+        return v && v.channel !== 'beta' && revoked.indexOf(v.version) < 0;
+      });
+      if (!versions.length) return;
+      var v = versions[versions.length - 1];
+      var authors = (m.authors || []).map(visibleText).filter(Boolean);
+      var pic = typeof m.picture === 'string' ? m.picture : (typeof m.image === 'string' ? m.image : '');
+      out.push({
+        id: String(m.id || ''),
+        name: visibleText(m.name) || 'Untitled pack',
+        authors: authors,
+        type: packType(m.type),
+        version: String(v.version || ''),
+        reviewed: v.reviewed || '',
+        // only pictures from the content service itself (the site's CSP must allow it in img-src)
+        picture: /^https:\/\/play\.defjam\.online\//.test(pic) ? pic : '',
+        order: typeof m.order === 'number' ? m.order : 1e9
+      });
+    });
+    out.sort(function (a, b) { return (b.reviewed > a.reviewed ? 1 : b.reviewed < a.reviewed ? -1 : a.order - b.order); });
+    return out;
+  }
+
+  function svgIcon(path) {
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    var p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', path);
+    p.setAttribute('fill', 'currentColor');
+    svg.appendChild(p);
+    return svg;
+  }
+
+  function packCard(p, single) {
+    var li = el('li');
+    var card = el('article', 'glass pack');
+    var art = el('div', 'pack-art t-' + p.type.cls);
+    if (p.picture) {
+      var img = el('img');
+      img.src = p.picture;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      art.appendChild(img);
+    } else {
+      art.appendChild(svgIcon(PACK_ICONS[p.type.cls] || PACK_ICONS.other));
+      art.appendChild(el('span', 'pack-initial', p.name.charAt(0)));
+    }
+    var reviewed = p.reviewed ? new Date(p.reviewed + 'T00:00:00Z') : null;
+    if (reviewed && !isNaN(reviewed) && Date.now() - reviewed.getTime() < 14 * 864e5) {
+      art.appendChild(el('span', 'tag-new pack-new', 'New'));
+    }
+    card.appendChild(art);
+    var info = el('div', 'pack-info');
+    info.appendChild(el('span', 'pack-type', p.type.label));
+    info.appendChild(el('h3', null, p.name));
+    info.appendChild(el('p', 'pack-by', 'by ' + (p.authors.length ? p.authors.join(', ') : 'a community creator')));
+    var meta = [];
+    if (p.version) meta.push('v' + p.version);
+    if (p.reviewed) meta.push('live since ' + shortDate(p.reviewed + 'T00:00:00Z'));
+    if (meta.length) info.appendChild(el('p', 'pack-meta', meta.join(' · ')));
+    if (single) {
+      info.appendChild(el('p', 'pack-hint', 'Installed for every player by the launcher. Pick it in any room.'));
+    }
+    card.appendChild(info);
+    li.appendChild(card);
+    return li;
+  }
+
+  function setupStudioGallery() {
+    var msg = document.getElementById('gallery-msg');
+    var grid = document.getElementById('pack-grid');
+    var count = document.getElementById('gallery-count');
+    var filter = document.getElementById('pack-filter');
+    var moreWrap = document.getElementById('pack-more-wrap');
+    var more = document.getElementById('pack-more');
+    if (!msg || !grid) return;
+    if (!window.fetch) { msg.hidden = true; return; }
+    var packs = [];
+    var wanted = '';
+    var showAll = false;
+
+    function say(text, retry) {
+      msg.textContent = '';
+      var p = el('p', 'ladder-msg', text);
+      if (retry) {
+        var b = el('button', null, 'Try again');
+        b.type = 'button';
+        b.addEventListener('click', load);
+        p.appendChild(b);
+      }
+      msg.appendChild(p);
+      msg.hidden = false;
+    }
+
+    function render() {
+      var list = packs.filter(function (p) { return !wanted || p.type.label === wanted; });
+      var shown = showAll ? list : list.slice(0, PACKS_SHOWN);
+      grid.textContent = '';
+      var single = packs.length === 1;
+      grid.classList.toggle('single', single);
+      shown.forEach(function (p) { grid.appendChild(packCard(p, single)); });
+      grid.hidden = false;
+      moreWrap.hidden = shown.length >= list.length;
+      more.textContent = 'Show all ' + list.length;
+    }
+
+    function buildFilter() {
+      var labels = [];
+      packs.forEach(function (p) { if (labels.indexOf(p.type.label) < 0) labels.push(p.type.label); });
+      filter.textContent = '';
+      if (labels.length < 2 || packs.length < 6) { filter.hidden = true; return; }
+      [''].concat(labels).forEach(function (label) {
+        var b = el('button', null, label || 'All');
+        b.type = 'button';
+        b.setAttribute('aria-pressed', label === wanted ? 'true' : 'false');
+        b.addEventListener('click', function () {
+          wanted = label;
+          showAll = false;
+          Array.prototype.forEach.call(filter.children, function (c) { c.setAttribute('aria-pressed', c === b ? 'true' : 'false'); });
+          render();
+        });
+        filter.appendChild(b);
+      });
+      filter.hidden = false;
+    }
+
+    function load() {
+      say('Loading the community packs…');
+      fetch(catalogueUrl(), { credentials: 'omit', referrerPolicy: 'no-referrer' })
+        .then(function (r) { if (!r.ok) throw new Error('catalogue ' + r.status); return r.json(); })
+        .then(function (data) {
+          packs = livePacks(data);
+          if (!packs.length) {
+            grid.hidden = true;
+            count.hidden = true;
+            say('No community packs are live yet. Yours could be the first: see how to get access below.');
+            return;
+          }
+          msg.hidden = true;
+          count.textContent = '';
+          count.appendChild(el('b', null, String(packs.length)));
+          count.appendChild(document.createTextNode(packs.length === 1 ? ' pack live' : ' packs live'));
+          count.hidden = false;
+          buildFilter();
+          render();
+        })
+        .catch(function () {
+          grid.hidden = true;
+          say('The community packs could not be loaded right now. The launcher still installs every live pack for you.', true);
+        });
+    }
+
+    more.addEventListener('click', function () { showAll = true; render(); });
+    load();
+  }
+
   function start() {
     if (document.getElementById('ladder-panel')) { setupLadder(); return; }
     if (document.getElementById('turf-body')) { setupTurf(); return; }
+    if (document.getElementById('pack-grid')) { setupStudioGallery(); setupLightbox(); return; }
     loadRelease();
     loadTournaments();
     loadTurfTeaser();

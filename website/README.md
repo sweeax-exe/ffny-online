@@ -35,6 +35,24 @@ them straight into `dist/media/`. They are **not** in the owner-approved list of
 `scripts/check-source-tree.py`, so the tree check fails once they are tracked until the owner has
 approved them (and their fingerprints are added there).
 
+## FFNY Studio page (studio.html)
+
+`studio.html` presents FFNY Studio: what it makes (with screenshots), how a pack goes live (an inline SVG flow),
+the live community packs, access (closed beta, Discord role) and a short FAQ. Its pictures are WebP files (and the
+link-preview JPEG) in `website/media/studio/`, which `build.py` copies into `dist/media/studio/`. They show only
+Studio's own interface with the test fighter Shade 2 or empty maps, and our own city-block renders. Like the other
+feature pictures they are **not** in the owner-approved list of `scripts/check-source-tree.py`, so they stay out of
+git until the owner approves them and their fingerprints are added there.
+
+The gallery reads the public, signed content catalogue the launcher uses,
+`GET https://play.defjam.online/updates/content/index-v3.json` (no cookies sent), and shows each live pack's name,
+author, type, version and review date (a picture too, if the catalogue ever carries one from
+`https://play.defjam.online/`; the CSP would then need that origin in `img-src`). It handles no packs, one pack
+(a wide card) and many (a grid of 12 with "Show all" and a type filter). The browser can read the catalogue from
+`defjam.online` only when the content service answers it with `Access-Control-Allow-Origin: https://defjam.online`,
+as the tournaments API does; without that header the page shows "could not be loaded". A local preview can read a
+test catalogue placed next to the page: `http://localhost:8000/studio.html?catalogue=test-40.json`.
+
 ## The download button
 
 Without JavaScript the button opens the
