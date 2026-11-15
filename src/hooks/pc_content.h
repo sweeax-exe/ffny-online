@@ -43,13 +43,17 @@ typedef struct PcContentPack {
     int fighter_fe_id;      /* a new fighter's front-end ID (100..127), 0 none */
     int venue_fe_id;        /* build 82: a new venue's front-end ID (28..63), 0 none */
     char reviewed[16];      /* build 82: the day the team accepted this version, YYYY-MM-DD ("" unknown) */
+    int local;              /* the player's own pack (FFNY Studio's "Use in my game", local.json): switchable,
+                               never in the online print */
+    int online_ok;          /* local: it only changes how things look (textures), so it may stay on online */
 } PcContentPack;
 
 /* The installed catalogue packs in catalogue order (re-read on every call; content.ini is small).
  * Returns the count (at most max). */
 int pc_content_list(PcContentPack *out, int max);
 
-/* The settings.ini switch for a replacement pack ([content] off). Content packs cannot be off. */
+/* The settings.ini switch for a replacement pack or one of the player's own packs ([content] off). Community
+ * content packs cannot be off. */
 int pc_content_is_off(const char *id);
 void pc_content_set_off(const char *id, int off);
 
@@ -78,6 +82,13 @@ int pc_content_language_files(const char *id, char (*paths)[256], int max);
 
 /* RECOMP_OFFLINE_ONLY=1 (Studio's Test in a fight with an unreviewed pack): online is refused. */
 int pc_content_offline_only(void);
+
+/* The player's own packs that keep this PC offline: on, installed, and not only textures (new clothing,
+ * venues, fighters, venue props or collision: other PCs would not have them). Returns the count; names gets
+ * their names (", " between; may be NULL). Online is refused while it is not 0 (PC_CONTENT_LOCAL_LINE). */
+int pc_content_local_offline(char *names, int size);
+#define PC_CONTENT_LOCAL_LINE "Your own packs are on: they work offline only. Turn them off in the launcher (Content) to play online."
+
 
 /* Build 82: the host path of a game file the launcher composed and this run serves (content-files, e.g.
  * "venue.xml" with a new venue in it), so host code reads what the game reads. 0 when the file is not served. */
