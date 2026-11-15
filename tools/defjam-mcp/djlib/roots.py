@@ -95,6 +95,21 @@ def _content(root, content):
     files = os.path.join(content, "mod-manager", "content-files")
     if os.path.isdir(files):
         make_junction(os.path.join(root, "mod-manager", "content-files"), files)
+    # A new fighter's hub portrait: compose writes it to <data>/online-art/fighters/<feID>.png (feIDs 100..127).
+    # The root's online-art is a junction to <data>'s, never to be written: with such portraits in the content
+    # root it becomes a copy of it (about 6 MB) with them added, so the hub's fighter list shows them.
+    art = os.path.join(content, "online-art", "fighters")
+    new = [n for n in (os.listdir(art) if os.path.isdir(art) else [])
+           if n.endswith(".png") and n[:-4].isdigit() and 100 <= int(n[:-4]) <= 127]
+    if new:
+        link = os.path.join(root, "online-art")
+        if os.path.lexists(link) and is_link(link):
+            src = os.path.realpath(link)
+            remove_link(link)
+            shutil.copytree(src, link)
+        os.makedirs(os.path.join(link, "fighters"), exist_ok=True)
+        for n in new:
+            shutil.copy2(os.path.join(art, n), os.path.join(link, "fighters", n))
 
 
 def create(name, fixture=None, partitions=False, data=None, content=None):
