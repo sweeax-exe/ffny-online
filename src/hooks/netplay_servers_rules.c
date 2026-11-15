@@ -5,6 +5,7 @@
 
 #include <ctype.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 enum NetServerChoice netservers_parse_choice(const char *s)
@@ -80,4 +81,40 @@ int netservers_should_move(int my_relay, int my_age, int their_relay, int their_
     if (my_relay == their_relay) return 0;
     if (their_age > my_age + 2 || (their_age >= my_age - 2 && my_relay > their_relay)) return 1;
     return their_age >= QUICK_LAST_S;
+}
+
+/* ---- what players are shown for a relay (build 84) ------------------------------------------- */
+
+const char *netservers_known_name(const char *address)
+{
+    static const struct { const char *host, *name; } k_hosts[] = {
+        { "play.defjam.online", "Europe" }, { "49.12.78.32", "Europe" }, { "142.132.178.17", "Europe" },
+        { "na.defjam.online", "US East" }, { "5.161.206.134", "US East" },
+        { "west.defjam.online", "US West" }, { "5.78.214.178", "US West" },
+    };
+    char host[128];
+    const char *colon, *port = NULL;
+    size_t i, n;
+    if (!address) return NULL;
+    while (*address == ' ') address++;
+    colon = strrchr(address, ':');
+    n = colon ? (size_t)(colon - address) : strlen(address);
+    if (colon) port = colon + 1;
+    while (n && address[n - 1] == ' ') n--;
+    if (!n || n >= sizeof(host)) return NULL;
+    if (port && strcmp(port, "27777")) return NULL;
+    for (i = 0; i < n; i++) host[i] = (char)tolower((unsigned char)address[i]);
+    host[n] = 0;
+    for (i = 0; i < sizeof(k_hosts) / sizeof(k_hosts[0]); i++)
+        if (!strcmp(host, k_hosts[i].host)) return k_hosts[i].name;
+    return NULL;
+}
+
+int netservers_display(const char *address, char *out, int size)
+{
+    const char *name = netservers_known_name(address);
+    if (size <= 0) return 0;
+    if (name) snprintf(out, (size_t)size, "the %s server", name);
+    else snprintf(out, (size_t)size, "%s", address ? address : "");
+    return name != NULL;
 }

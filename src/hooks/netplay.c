@@ -894,6 +894,15 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     return TRUE;
 }
 
+/* What a player is shown for the relay: its region ("the US East server"), never our host and port;
+ * a custom address stays as typed. The real address stays in N.server_text, logs and reports. */
+static const char *server_shown(const char *address, char *buf, size_t size, int *ours)
+{
+    int k = netservers_display(address, buf, (int)size);
+    if (ours) *ours = k;
+    return buf;
+}
+
 static void set_status(const char *format, ...)
 {
     va_list args;
@@ -4084,7 +4093,7 @@ static void on_packet(const uint8_t *b, int len)
             if (N.lobby) {
                 if (N.state == NETPLAY_CONNECTING) {
                     InterlockedExchange(&N.state, NETPLAY_LOBBY);
-                    set_status("In the lobby of %s.", N.server_text);
+                    { char shown[160]; set_status("In the lobby of %s.", server_shown(N.server_text, shown, sizeof shown, NULL)); }
                     pc_input_online_ports();    /* a room of four needs a controller in every port */
                     netplay_lobby_list(0xFF);
                     /* what this client supports; the network thread repeats it until the relay
@@ -4357,7 +4366,7 @@ static void on_packet(const uint8_t *b, int len)
                 N.started = GetTickCount64();
                 memset(&N.roomv, 0, sizeof(N.roomv));
                 InterlockedExchange(&N.state, NETPLAY_CONNECTING);
-                set_status("Reconnecting to %s...", N.server_text);
+                { char shown[160]; set_status("Reconnecting to %s...", server_shown(N.server_text, shown, sizeof shown, NULL)); }
                 break;
             }
             if (code == 11) {
@@ -4493,12 +4502,17 @@ static DWORD WINAPI net_thread(LPVOID unused)
         if (N.state == NETPLAY_CONNECTING) {
             if (now - N.hello_sent >= 500) { send_hello(); N.hello_sent = now; }
             if (now - N.started > 10000) {
+                char shown[160];
+                int ours;
+                server_shown(N.server_text, shown, sizeof shown, &ours);
                 InterlockedExchange(&N.state, NETPLAY_FAILED);
+                fprintf(stderr, "[NETPLAY] no answer from %s\n", N.server_text);
                 if (N.lobby)
-                    set_status("No answer from the server %s. It may be down, or an older server without the "
-                               "online hub (play by code still works there).", N.server_text);
+                    set_status("No answer from %s%s. It may be down, or an older server without the "
+                               "online hub (play by code still works there).", ours ? "" : "the server ", shown);
                 else
-                    set_status("No answer from the server %s. Check the address and that it is running.", N.server_text);
+                    set_status("No answer from %s%s. %s", ours ? "" : "the server ", shown,
+                               ours ? "It may be down." : "Check the address and that it is running.");
             }
         }
         if (N.have_token && N.state != NETPLAY_FAILED) {
@@ -4894,7 +4908,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.match_count = 0;
     disarm_crash_report();
     LeaveCriticalSection(&g_cs);
-    if (resolve(server)) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("Cannot find the server %s.", server); return -1; }
+    if (resolve(server)) { InterlockedExchange(&N.state, NETPLAY_FAILED); { char shown[160]; int ours; server_shown(server, shown, sizeof shown, &ours); set_status("Cannot find %s%s.", ours ? "" : "the server ", shown); } return -1; }
     N.sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (N.sock == INVALID_SOCKET) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("No network socket."); return -1; }
     {   /* non-blocking: net_thread waits in select(), never in recv */
@@ -4904,7 +4918,7 @@ static int start(const char *server, const char *name, int creating, const char 
     N.stop = 0;
     N.hello_sent = 0;
     InterlockedExchange(&N.state, NETPLAY_CONNECTING);
-    set_status("Connecting to %s...", server);
+    { char shown[160]; set_status("Connecting to %s...", server_shown(server, shown, sizeof shown, NULL)); }
     N.thread = CreateThread(NULL, 0, net_thread, NULL, 0, NULL);
     if (N.thread) SetThreadPriority(N.thread, THREAD_PRIORITY_ABOVE_NORMAL);
     return N.thread ? 0 : -1;
