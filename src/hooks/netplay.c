@@ -1697,12 +1697,14 @@ static void assign_input(int on)
     unsigned mask = 0;
     int i, local = N.pos;
     if (!on) { xbox_HostInputSetNetplay(0, 0, 0, NULL); fight_input(); return; }
-    /* a spectator drives no fighter: its own pad goes on the first port no player uses; with four
-     * players on no port at all (build 84, toolkit: local slot -1). Until build 83 it sat on the fourth
-     * port, whose reads before the first step (the intros) were this PC's own presses instead of that
-     * fighter's: the watcher's picture parted from the fighters' (build 71), so fights of four were not
-     * watched live and an FFA rotation room's waiting players never saw a fight (Kirito, 2026-11-15). */
-    if (local < 0) local = N.players < 4 ? N.players : -1;
+    /* a spectator drives no fighter: its own pad goes on the first port no player uses. With four
+     * players it sits on the fourth port until the venue has loaded (the menus and the title before it
+     * still take its presses) and from then on no port at all (build 84, toolkit: local slot -1; the
+     * load point calls this again). Until build 83 it stayed on the fourth port, whose reads before the
+     * first step (the intros) were this PC's own presses instead of that fighter's: the watcher's picture
+     * parted from the fighters' (build 71), so fights of four were not watched live and an FFA rotation
+     * room's waiting players never saw a fight (Kirito, 2026-11-15). */
+    if (local < 0) local = N.players < 4 ? N.players : N.load_done ? -1 : 3;
     for (i = 0; i < N.players; i++)
         if (i != local) mask |= 1u << i;
     xbox_HostInputSetNetplayMulti(1, local, mask, remote_slot_state);
@@ -7349,6 +7351,7 @@ static void match_start_body(void)
      * the longest). */
     fight_input();
     N.load_done = 1;
+    if (N.watching && N.players >= 4 && N.lockstep) assign_input(1);  /* build 84: a watcher's pad off every port */
     fprintf(stderr, "[NETPLAY] match %08X starts in lockstep (%d players, delay %d); loaded in %.1f s since the START%s\n",
             N.match, N.players, N.delay, N.start_tick ? (GetTickCount64() - N.start_tick) / 1000.0 : -1.0,
             N.watching ? " (watching)" : "");

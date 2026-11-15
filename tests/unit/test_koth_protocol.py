@@ -249,7 +249,8 @@ def test_hill_watch_fight_of_four():
     # watched live; builds 71-83 kept the names screen for it, which in a room of five or more was every fight
     body = NETPLAY_C[NETPLAY_C.index('static void assign_input(int on)'):]
     body = body[:body.index('\n}\n')]
-    assert 'local = N.players < 4 ? N.players : -1;' in body
+    assert 'local = N.players < 4 ? N.players : N.load_done ? -1 : 3;' in body     # the menus before the load keep it
+    assert 'if (N.watching && N.players >= 4 && N.lockstep) assign_input(1);' in NETPLAY_C     # off every port at the load
     runs = NETPLAY_C[NETPLAY_C.index('static int hill_watch_runs('):]
     runs = runs[:runs.index('\n}\n')]
     assert 'if (count >= 4) return 0;' not in runs and 'RECOMP_HILL_WATCH_FOUR' in runs
