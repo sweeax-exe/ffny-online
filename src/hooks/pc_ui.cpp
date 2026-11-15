@@ -2517,8 +2517,8 @@ static void account_card(ImVec2 a, ImVec2 b, float s)
         card_line(dl, at, s, k_white, text, true);
         AccountNumbers n = account_numbers();
         char line[160];
-        const char *how = account_has_discord() ? "signed in with Discord" : "signed in without Discord";
-        if (!n.have) snprintf(line, sizeof(line), "%c%s", toupper((unsigned char)how[0]), how + 1);
+        const char *how = account_has_discord() ? "signed in with Discord" : "no Discord";
+        if (!n.have) snprintf(line, sizeof(line), "%s", account_has_discord() ? "Signed in with Discord" : "Signed in without Discord");
         else if (n.matches == 0) snprintf(line, sizeof(line), "No online matches yet  \xC2\xB7  %s", how);
         else if (n.rank > 0) snprintf(line, sizeof(line), "Rank %d  \xC2\xB7  %d wins  \xC2\xB7  %d losses", n.rank, n.wins, n.losses);
         else snprintf(line, sizeof(line), "%d wins  \xC2\xB7  %d losses", n.wins, n.losses);
