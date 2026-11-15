@@ -88,6 +88,7 @@ def cmd_scenario(a):
                              maintenance=a.maintenance, cpu_level=a.cpu_level, linger=a.linger, reports=a.reports,
                              fighter_rules=a.fighter_rules, max_ping=a.max_ping, room_menu=a.room_menu,
                              results_leave=a.results_leave, hill_pick=a.hill_pick, hill_idle=a.hill_idle,
+                             password=a.password,
                              banned_tier=[int(x) for x in a.banned_tier.split(",") if x.strip()] if a.banned_tier is not None else None,
                              **common)
     elif a.kind == "offline":
@@ -263,6 +264,9 @@ def main(argv=None):
     sc.add_argument("--rematch", action="store_true", help="online: matches after the first are Rematch from the results menu")
     sc.add_argument("--ranked", help="online: a ranked set (classic, open, classic,open or draft) against a local account service "
                                      "with test accounts (accounts -ranked -test-accounts)")
+    sc.add_argument("--password", action="store_true", help="online: sign-in without Discord; a local account "
+                    "service with -password, every copy signs in with a username and password (copy 0 makes its "
+                    "account in the game) and the matches count for those accounts")
     sc.add_argument("--reports", action="store_true", help="online: a local account service (test accounts, not "
                     "ranked) keeps the copies' F9 reports in <session>/reports (RECOMP_TEST_PICTURE_REPORT_STEP, "
                     "RECOMP_TEST_REPORT_NOTE); the result lists them")

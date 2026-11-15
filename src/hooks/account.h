@@ -69,6 +69,27 @@ int account_download(const char *path, unsigned long long from, int (*sink)(void
                      void *ctx, int *partial);
 /* 1 when RECOMP_ACCOUNT_SERVER names a test account service on this PC (127.0.0.1 or localhost). */
 int account_test_server_local(void);
+/* Sign-in without Discord (server relay/accounts/password.go). Each blocks for one request (call it off the
+ * game's threads). account_password: sign in, make an account, or set a new password with an admin's reset
+ * code; 200/201 signs in (saved like a Discord session), else why holds the service's plain-English reason.
+ * Returns the HTTP status, 0 unreachable, -1 not sent. */
+enum AccountPwMode { ACCOUNT_PW_SIGNIN, ACCOUNT_PW_CREATE, ACCOUNT_PW_RESET };
+int account_password(enum AccountPwMode mode, const char *user, const char *pass, const char *code, char *why, int size);
+/* Whether the service offers it now (1), and new accounts (*create); forgot gets the "ask an admin" text. */
+int account_password_status(int *create, char *forgot, int size);
+/* Signed in: adding (a Discord account) a username and password (user_or_old = the username), or changing
+ * the password (user_or_old = the current one). Returns the HTTP status. */
+int account_set_password(const char *user_or_old, const char *pass, int adding, char *why, int size);
+/* Signed in without Discord: link a Discord account in the browser (the state is ACCOUNT_WAITING meanwhile and
+ * goes back to ACCOUNT_IN, linked or not). */
+void account_link_discord(void);
+/* Non-blocking: whether the service offers sign-in without Discord (asked once in the background; 0 until
+ * the answer is in or when the switch is off), new accounts (*create) and the "ask an admin" text. */
+int account_password_offered(int *create, char *forgot, int size);
+void account_password_offer_refresh(void);  /* ask again at the next account_password_offered */
+int account_has_discord(void);      /* 1 for a Discord account (and before the first check) */
+int account_has_password(void);
+void account_login(char *out, int size);    /* the username of the sign-in without Discord, "" none */
 /* The launcher's Change name dialog: the service's answer to POST /api/me/name ({"account": ...})
  * becomes the shown and saved name. */
 void account_take_renamed(const char *json);

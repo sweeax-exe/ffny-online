@@ -1732,8 +1732,13 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
            rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None,
            linger=None, reports=False, fighter_rules=None, max_ping=None, banned_tier=None, room_menu=None,
-           results_leave=None, hill_pick=None, hill_idle=None):
-    """room_menu (build 73, King of the Hill or FFA rotation): "COPY@K:F", copy COPY presses START on the results of
+           results_leave=None, hill_pick=None, hill_idle=None, password=False):
+    """password (sign-in without Discord): a local account service with -password; copy N makes the account PwCopyN
+    with a username and password through its own sign-in code (RECOMP_TEST_PASSWORD; copy 1 signs in to an account
+    made over HTTP first, so both create and sign-in run), and the room's matches are reported as those accounts.
+    The result's `password` says what the service's file holds afterwards (the accounts, no Discord ids, Argon2id
+    hashes, the matches counted, no password in the file or its log).
+    room_menu (build 73, King of the Hill or FFA rotation): "COPY@K:F", copy COPY presses START on the results of
     its K-th fight (RECOMP_TEST_HILL_ROOM) and so goes to the room screen, where it picks fighter F (default 7);
     results_leave: "COPY@K", copy COPY holds START on the results of its K-th fight and leaves the room
     (RECOMP_TEST_HILL_LEAVE). The result's `room_menu` says what each did: the room screen reached, the pick in the
@@ -1843,6 +1848,20 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             result["params"]["rollback_max_ping"] = int(rollback_max_ping)
         tokens = {}
         note_copies = []
+        pw_secrets = {}
+        if password:
+            acc_port = relay_port + 100
+            s.accounts(acc_port, [], extra=["-password", "-official-ua", "FFNY-Online-Launcher/"])
+            relay_extra += ["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)]
+            pw_secrets = {i: "pw-e2e secret %d %d" % (i, int(time.time()) % 100000) for i in range(players)}
+            import urllib.request
+            for i in range(1, players):     # made over HTTP: these copies sign in, copy 0 makes its own
+                req = urllib.request.Request("http://127.0.0.1:%d/auth/password/create" % acc_port, method="POST",
+                                             data=json.dumps({"username": "PwCopy%d" % i, "password": pw_secrets[i]}).encode(),
+                                             headers={"Content-Type": "application/json",
+                                                      "User-Agent": "FFNY-Online-Launcher/1"})
+                urllib.request.urlopen(req, timeout=10).read()
+            result["params"]["password"] = True
         if ranked or reports:
             acc_port = relay_port + 100
             tokens = s.accounts(acc_port, ["Copy %d" % i for i in range(players)])
@@ -1949,6 +1968,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             if reports and not ranked:
                 env.update({"RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % (relay_port + 100),
                             "RECOMP_ACCOUNT_TEST_TOKEN": tokens["Copy %d" % i]})
+            if password:
+                env.update({"RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % (relay_port + 100),
+                            "RECOMP_TEST_PASSWORD": "%s:PwCopy%d:%s" % ("create" if i == 0 else "signin", i, pw_secrets[i])})
             for k, v in (extra_env or {}).items():     # NAME@N: only copy N gets it
                 name, _, only = k.partition("@")
                 if not only or (only.isdigit() and int(only) == i):
@@ -2172,6 +2194,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     finally:
         _finish(s, result, t0)
     analyses = {i: logparse.analyze_copy(logparse.read_text(p)) for i, p in logs.items()}
+    if password:
+        result["password"] = password_check(s.dir, logs, players, pw_secrets, problems)
     if spectate_after:
         result["late_spectators"] = late_spectator_check(analyses, players, spectators, problems)
     if leaver:
@@ -2218,6 +2242,51 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     result.update({"ok": ok and not problems, "stop": stop_reason, "matches": rows, "problems": problems,
                    "logs": [_relpath(p) for p in logs.values()], "shots": shots})
     return result
+
+
+def password_check(folder, logs, players, secrets, problems):
+    """After a password run: each copy signed in without Discord (its log), and the account service's file holds
+    the accounts PwCopyN without Discord ids, with Argon2id hashes and matches counted; no password anywhere in the
+    file, the service's log or the copies' logs."""
+    out = {"signed_in": [], "accounts": {}}
+    for i, p in logs.items():
+        text = logparse.read_text(p)
+        if "[ACCOUNT] signed in without Discord" in text:
+            out["signed_in"].append(i)
+        else:
+            problems.append("password: copy %d never signed in without Discord" % i)
+        if any(v in text for v in secrets.values()):
+            problems.append("password: a password is in copy %d's log" % i)
+    data, raw = None, ""
+    for _ in range(20):     # the service saves a moment after the last report
+        try:
+            raw = open(os.path.join(folder, "accounts.json"), encoding="utf-8").read()
+            data = json.loads(raw)
+        except (OSError, ValueError):
+            data = None
+        accs = {a.get("pw", {}).get("login"): a for a in (data or {}).get("accounts", []) if a.get("pw")}
+        if data and all(((accs.get("PwCopy%d" % i) or {}).get("stats") or {}).get("matches") for i in range(players)):
+            break
+        time.sleep(2)
+    for i in range(players):
+        a = accs.get("PwCopy%d" % i) if data else None
+        if not a:
+            problems.append("password: no account PwCopy%d in the service's file" % i)
+            continue
+        st = a.get("stats") or {}
+        out["accounts"]["PwCopy%d" % i] = {"id": a["id"], "discord_id": a.get("discord_id", ""),
+                                           "hash": a["pw"]["hash"].split("$")[1], "matches": st.get("matches", 0),
+                                           "wins": st.get("wins", 0), "nets": len(a.get("nets") or [])}
+        if a.get("discord_id") or not a["pw"]["hash"].startswith("$argon2id$") or not st.get("matches"):
+            problems.append("password: PwCopy%d has %s" % (i, out["accounts"]["PwCopy%d" % i]))
+    svc = ""
+    for name in os.listdir(folder):
+        if name.startswith("accounts") and name.endswith((".err", ".out")):
+            svc += open(os.path.join(folder, name), encoding="utf-8", errors="replace").read()
+    if any(v in raw or v in svc for v in secrets.values()):
+        problems.append("password: a password is in the service's file or log")
+    out["service_lines"] = [l for l in svc.splitlines() if "without Discord" in l][:6]
+    return out
 
 
 def cpu_check(logs, level, humans_out, leaver, problems, players=2):

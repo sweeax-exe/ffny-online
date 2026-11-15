@@ -136,6 +136,37 @@ hub match it is set by itself: after `START` every PC sends the others its ping 
 (worst of the last five), and all derive the same delay from the two slowest players, half of
 each round trip plus one step, between 2 and 10. A code match uses the host's setting.
 
+## Signing in without Discord
+
+Online fights need a signed-in FFNY Online account. Besides **Sign in with Discord**, the launcher's Account
+card offers **Without Discord** (and the overlay's Online page, F1, **Sign in without Discord...**) once the
+account service has it switched on (server `docs/password-accounts.md`; off by default, the game asks
+`GET /auth/password/status` and shows nothing while it is off). It is for players where Discord is blocked and
+for players without Discord.
+
+- **Sign in**, **New account** (a username of 3 to 16 letters, digits, `.`, `_` or `-`, which is also the first
+  FFNY name, and a password of 8 or more characters; no email), **Forgot password**: there is no email reset,
+  so an admin gives a one-time reset code (`/password-reset` in the bot) and the player enters it with a new
+  password.
+- Signed in: **Add password...** gives a Discord account a username and password (one account, both ways in);
+  **Password...** changes it (every other PC is signed out); **Link Discord...** links a Discord account to an
+  account without it, in the browser once.
+- A pad types on the dialog's own keyboard (d-pad, A types, X deletes, Y shift, START sends, B closes); a
+  keyboard types into the fields as usual. The in-game online hub only points there.
+- The request carries the PC fingerprint the match reports carry (`anticheat.c`, `ac_pc_id`), so the service
+  records the PC and network exactly as for a Discord session and refuses new accounts from a banned PC or
+  network. Nothing of it contacts discord.com: the sign-in goes to `play.defjam.online` only, and an account
+  without Discord has no Discord picture.
+- `account.dat` keeps, after the token, the name and the username, a fourth line (`d`, `p` or `dp`: how the
+  account signs in) and the username of the password sign-in; older builds read the first three lines as
+  before. The password itself is never stored or logged by the game.
+- Tests: `RECOMP_TEST_PASSWORD=create|signin:<username>:<password>` signs in that way at start, only with
+  `RECOMP_ACCOUNT_SERVER` on this PC; `RECOMP_LAUNCHER_PAGE=password` (`password-new`, `password-forgot`,
+  `password-change`) opens the dialog, `RECOMP_TEST_PW_FILL=user|password` fills it and
+  `RECOMP_TEST_PW_SUBMIT=1` presses its button. `python tools/defjam-mcp/dj.py scenario online --password`
+  runs two copies with such accounts in one room; `scripts/test-password-launcher.py` takes the launcher's
+  pictures against a local account service.
+
 ## How it works
 
 - **Menus:** each PC streams its player's controller to the other about 100 times a second; the
