@@ -88,7 +88,7 @@ def content_root(out, game, count):
         pid = "many-fighter-%d" % i
         model = "V2IP_7%s%sA" % ("ABCDEFGHJKLMNPQRSTUVWXYZ"[i % 24], "0123456789"[i // 24])
         files = make_pack(root / "mods" / pid, game, fe, model_of, model, "Copy %d" % i)
-        place = nf.FIRST_NEW_FE_ID + i
+        place = nf.PLACE_ORDER[i]          # 100..123, the low places, 124..127 (48)
         places.append(place)
         installed[pid] = dict(id=pid, folder=pid, version="0.1.0", name=pid, synced=True, kind="content",
                               type="new-fighter", order=i + 1, fighter_fe_id=place, files=files,
