@@ -22,6 +22,7 @@
 #include <thread>
 #include <vector>
 
+#include "imgui.h"
 #include "pc_ui_actions.h"
 extern "C" {
 #include "account.h"
@@ -702,6 +703,7 @@ std::chrono::steady_clock::time_point g_last_check;
 bool g_started;
 #if defined(_WIN32)
 Access g_access = ACCESS_UNKNOWN;       // the account's access (the closed test); unused on the public path
+std::atomic<HWND> g_launcher_window{nullptr};   // the launcher's window, noted by the home screen's frames
 bool g_was_signed_in;                   // launcher_starts watches the sign-in (the launcher's thread only)
 bool g_want_check;
 #endif
@@ -842,6 +844,7 @@ void launcher_starts()
 {
 #if defined(_WIN32)
     bool now_in = signed_in();
+    g_launcher_window = (HWND)ImGui::GetMainViewport()->PlatformHandleRaw;   // for the watcher of a started Studio
     if (!g_started) {
         g_started = true;
         g_was_signed_in = now_in;
@@ -955,6 +958,30 @@ bool still_starting()
 }
 #endif
 
+namespace
+{
+#if defined(_WIN32)
+// Waits for the Studio this launcher started (own handle, closed here). When it ends, the launcher comes back:
+// a minimised window is restored and put in front; where Windows refuses the focus, its taskbar button flashes.
+// Once per run. Nothing when the window is gone or hidden (the game runs, the launcher sits in the tray).
+void watch_studio_exit(HANDLE process)
+{
+    WaitForSingleObject(process, INFINITE);
+    CloseHandle(process);
+    HWND w = g_launcher_window.load();
+    if (!w || !IsWindow(w) || !IsWindowVisible(w)) return;
+    if (IsIconic(w)) ShowWindow(w, SW_RESTORE);
+    AllowSetForegroundWindow(GetCurrentProcessId());
+    SetForegroundWindow(w);
+    if (GetForegroundWindow() != w) {
+        FLASHWINFO fi = { sizeof(fi), w, FLASHW_ALL | FLASHW_TIMERNOFG, 3, 0 };
+        FlashWindowEx(&fi);
+    }
+    log_line("studio: closed, launcher back");
+}
+#endif
+} // namespace
+
 bool launch(std::string *error)
 {
 #if defined(_WIN32)
@@ -987,6 +1014,11 @@ bool launch(std::string *error)
     if (g_launched) CloseHandle(g_launched);
     g_launched = pi.hProcess;
     g_launched_at = std::chrono::steady_clock::now();
+    {
+        HANDLE mine = nullptr;      // the watcher's own copy: still_starting closes g_launched on its own schedule
+        if (DuplicateHandle(GetCurrentProcess(), pi.hProcess, GetCurrentProcess(), &mine, SYNCHRONIZE, FALSE, 0))
+            std::thread(watch_studio_exit, mine).detach();
+    }
     log_line("started " + c.version + " (pid " + std::to_string(pi.dwProcessId) + "): " + utf8(fs::path(cmd)));
     return true;
 #else
