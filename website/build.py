@@ -23,7 +23,7 @@ ROOT = HERE.parent
 
 # Page files, written with a short content hash on their CSS/JS references so a new upload is
 # never mixed with an old cached copy.
-PAGE = ['index.html', 'ranked.html', 'turf.html', 'style.css', 'site.js']
+PAGE = ['index.html', 'ranked.html', 'turf.html', 'studio.html', 'style.css', 'site.js']
 
 # dist path -> repository path. Every image must be in check-source-tree.py's approved list.
 ASSETS = {
@@ -81,13 +81,18 @@ def check_assets(approved):
 def local_refs(out):
     """Every local file the built page, stylesheet and script refer to."""
     refs = set()
-    for page in ('index.html', 'ranked.html', 'turf.html'):
+    for page in ('index.html', 'ranked.html', 'turf.html', 'studio.html'):
         html = (out / page).read_text(encoding='utf-8')
         refs.update(LOCAL_REF.findall(html))
         refs.update(CSS_URL.findall(html))
     refs.update(CSS_URL.findall((out / 'style.css').read_text(encoding='utf-8')))
     # "./" (ranked.html's link back to the start page) strips to nothing: the directory itself.
     return {r.lstrip('./') for r in refs if r.lstrip('./') and not r.startswith(('//', 'mailto'))}
+
+
+def studio_pictures():
+    folder = HERE / 'media/studio'
+    return sorted(folder.glob('*.webp')) + sorted(folder.glob('*.jpg')) if folder.is_dir() else []
 
 
 def build(out):
@@ -106,11 +111,17 @@ def build(out):
     # in the owner-approved list of scripts/check-source-tree.py: see website/README.md.
     for pic in sorted((HERE / 'media').glob('*.jpg')) + sorted((HERE / 'media').glob('*.svg')):
         shutil.copyfile(pic, out / 'media' / pic.name)
+    # The Studio page's pictures (website/media/studio/: WebP screenshots of Studio and renders of our own
+    # maps, plus its link-preview JPEG). Not owner-approved for the repository yet: see website/README.md.
+    for pic in studio_pictures():
+        (out / 'media/studio').mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(pic, out / 'media/studio' / pic.name)
     versions = {name: sha256(HERE / name)[:10] for name in ('style.css', 'site.js')}
     # The server lets browsers keep pictures for a week: a picture replaced under the same name
     # stayed old for visitors (2026-10-25), so every asset reference carries its content hash too.
     asset_versions = {dest: sha256(ROOT / src)[:10] for dest, src in ASSETS.items()}
     asset_versions.update({f'media/{p.name}': sha256(p)[:10] for p in (HERE / 'media').glob('*.jpg')})
+    asset_versions.update({f'media/studio/{p.name}': sha256(p)[:10] for p in studio_pictures()})
     for name in PAGE:
         text = (HERE / name).read_text(encoding='utf-8')
         if name.endswith('.html'):
