@@ -459,6 +459,7 @@ float hint(ImDrawList *dl, const Frame &f, float x, float y, const char *button,
 }
 
 int content_news(char *names, int size);
+bool content_problem(char *out, int size);
 // The page title in the corner, as the game writes MAIN MENU.
 void page_title(ImDrawList *dl, const Frame &f, const char *title)
 {
@@ -473,6 +474,13 @@ void page_title(ImDrawList *dl, const Frame &f, const char *title)
         rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
         text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "close the game: the launcher installs it", RIGHT, 0.8f);
+    } else if (content_problem(nullptr, 0)) {
+        // build 83: the last content sync (or the game's own check) failed: this PC may lack packs others have
+        const char *line = "COMMUNITY CONTENT NOT UPDATED";
+        float w = text_width(f, g_title, 12, line);
+        rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
+        text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
+        text(dl, f, g_hand, 11, 606, 30, ORANGE, "restart FFNY Online to try again", RIGHT, 0.8f);
     } else if (content_news(nullptr, 0) > 0) {
         // build 82: new community content is out (the game's own catalogue check): announced the same way
         const char *line = "NEW COMMUNITY CONTENT IS OUT";
@@ -1228,6 +1236,53 @@ int content_news(char *names, int size)
     if (names && size > 0) snprintf(names, (size_t)size, "%s", cached_names);
     return cached;
 }
+// Build 83: the last community content sync failed, or the game's own check did (pc_content_problem: sync-result.ini
+// and news.ini), as one plain line; read every 3 s. The gallery: only its own pages (RECOMP_TEST_CONTENT_SYNC).
+bool content_problem(char *out, int size)
+{
+    if (out && size > 0) out[0] = 0;
+    if (gallery_on() && !(G.page && (!strcmp(G.page, "hub-sync-failed") || !strcmp(G.page, "rooms-sync-failed"))))
+        return false;
+    static unsigned long long read_at;
+    static bool cached;
+    static char line[512];
+    unsigned long long now = GetTickCount64();
+    if (!read_at || now - read_at > 3000) {
+        read_at = now;
+        cached = pc_content_problem(line, sizeof(line)) != 0;
+    }
+    if (out && size > 0) snprintf(out, (size_t)size, "%s", cached ? line : "");
+    return cached;
+}
+// Build 83: players this PC cannot meet because their community content differs: online minus the relays' STATUS
+// Same (players with exactly this PC's fingerprint), on the hub's relay or, with All servers, on every relay that
+// says it. -1 when no relay says (relays before build 83).
+int servers(NetServerInfo *out);
+int connected_server();
+bool all_servers();
+int other_content_players(int *same_out)
+{
+    NetServerInfo sv[NETSERVER_COUNT];
+    servers(sv);
+    int here = connected_server(), online = 0, same = 0, known = 0;
+    for (int i = 0; i < NETSERVER_COUNT; i++) {
+        if ((!all_servers() && i != here) || sv[i].state != NETSERVER_UP || !(sv[i].flags & NETSERVER_SAME) ||
+            sv[i].same < 0)
+            continue;
+        online += sv[i].online;
+        same += sv[i].same;
+        known = 1;
+    }
+    if (same_out) *same_out = same;
+    return known ? std::max(0, online - same) : -1;
+}
+// The room list or the player list is empty while many are online: is it the content split? At least three others,
+// and more than the players on this PC's content.
+bool content_split_shown()
+{
+    int same = 0, other = other_content_players(&same);
+    return other >= 3 && other > same;
+}
 // A fighter this room's FIGHTER RULES leave out (the relay names them in ROOM; NETPLAY_CREATED_FIGHTER for
 // created fighters). Out of a room, none.
 bool fighter_blocked(const NetRoom &r, int id)
@@ -1807,6 +1862,8 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (n == 0)
         text(dl, f, g_title, 14, 320, 200, GREY, all ? "Nobody with this version on any server right now." :
              "Nobody else with this version right now.", CENTER, 1.0f);
+    if (n <= 1 && content_split_shown())    // build 83: only this PC listed while many are online
+        text(dl, f, g_hand, 13, 320, 228, ORANGE, PC_CONTENT_SPLIT_LINE ".", CENTER, 0.8f);
     if (!all && here >= 0) {    // the other servers' players, from their STATUS
         std::string more;
         for (int i = 0; i < NETSERVER_COUNT; i++) {
@@ -2014,12 +2071,18 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (us >= UPDATER_AVAILABLE && us <= UPDATER_STARTED) updater_info(&newer, nullptr, 0, nullptr, 0);
     }
     bool outdated = updater_local_build() > 0 && newer > updater_local_build();
-    char news_names[256];
+    char news_names[256], problem[512];
     int news = content_news(news_names, sizeof(news_names));
+    bool content_bad = content_problem(problem, sizeof(problem));
     if (outdated) {
         char line[96];
         snprintf(line, sizeof(line), "BUILD %d IS OUT: UPDATE IN THE LAUNCHER TO PLAY ONLINE", newer);
         text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
+    } else if (content_bad && signed_in) {
+        // build 83: the last sync failed (e.g. the PC's root store or clock), so this PC may lack packs the others
+        // have and see none of their rooms: the reason in plain words, on one line where it fits
+        float size = std::max(9.0f, fit_size(f, g_hand, 13, problem, 556));
+        text(dl, f, g_hand, size, 50, size < 11 ? 50 : 54, ORANGE, problem, LEFT, 0.8f, 556);
     } else if (news > 0 && signed_in) {
         // build 82: new community packs: the rooms of players who have them take only PCs with the same packs
         text(dl, f, g_title, 14, 50, 56, ORANGE, upper(NETPLAY_CONTENT_NEWS_LINE).c_str(), LEFT, 1.2f);
@@ -2411,11 +2474,18 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
     page_title(dl, f, "FIND A ROOM");
     if (all) text(dl, f, g_hand, 14, 54, 58, ORANGE, "All servers: the lowest ping first.", LEFT, 0.8f);
     online_count(dl, f);
+    // build 83: nobody's rooms show while many are online: most of them have other community content
+    bool split = !n && content_split_shown();
     if (n) glass(dl, f, 36, 76, 290, (std::min(n, 6) - 1) * 52 + 44 + 20);
-    else glass(dl, f, 36, 112, 290, 76);
+    else glass(dl, f, 36, 112, 290, split ? 124 : 76);
     if (!n) {
         text(dl, f, g_title, 16, 60, 130, GREY, all ? "No open rooms on any server." : "No open rooms right now.");
         text(dl, f, g_hand, 14, 60, 156, ORANGE, "Quick match, or open one yourself.", LEFT, 0.8f);
+        if (split) {
+            char problem[512];
+            text(dl, f, g_hand, 13, 60, 182, CREAM,
+                 content_problem(problem, sizeof(problem)) ? problem : PC_CONTENT_SPLIT_LINE ".", LEFT, 0.8f, 250);
+        }
     }
     int top = std::max(0, std::min(S.rooms_sel - 2, n - 6));
     for (int i = top; i < n && i < top + 6; i++) {
@@ -4695,6 +4765,9 @@ void gallery_step()
                                          "fighters-new", "vote-new", "hub-news",
                                          // build 83: the hub fighter search (a query; one nothing matches)
                                          "fighters-search", "fighters-search-none",
+                                         // build 83: the last content sync failed (RECOMP_TEST_CONTENT_SYNC=<reason>), and the
+                                         // empty room list while most players have other community content
+                                         "hub-sync-failed", "rooms-split", "rooms-sync-failed",
                                          // build 66: FFA rotation (its room, called, watching, its door)
                                          "rot", "rot-up", "rot-watch", "rot-fight", "create-rot", "hub-rot", "versus-rot",
                                          // build 70: the spectator HUD over a watched fight (the line, up next,
@@ -4975,6 +5048,15 @@ void gallery_step()
         S.vote_sel = 1;
     }
     else if (p == "hub-news") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
+    else if (p == "hub-sync-failed") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
+    else if (p == "rooms-split" || p == "rooms-sync-failed") {     // 22 on Europe, 1 of them on this PC's content
+        S.page = ROOMS;
+        S.rooms_sel = 0;
+        G.rooms.clear();
+        G.servers[NETSERVER_EU].online = 22;
+        G.servers[NETSERVER_EU].same = 1;
+        G.servers[NETSERVER_EU].flags |= NETSERVER_SAME;
+    }
     else if (p == "code") { S.page = CODE; snprintf(S.code, sizeof(S.code), "GTE4AQ"); S.code_pos = 3; }
     else if (p.compare(0, 6, "create") == 0) {     // every venue; -3, -6: two presets; -1: one venue
         S.page = SETTINGS;

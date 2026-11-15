@@ -550,7 +550,10 @@ def plain_reason(problems, skew=None):
         return 'disk', text[:300]
     if any(w in low for w in ('urlopen error', 'timed out', 'getaddrinfo', 'connection', 'unreachable',
                               'name or service', 'http error', 'unexpected catalogue response', 'ssl')):
-        return 'network', 'no connection to the content server (%s)' % text[:240]
+        inner = re.sub(r'^(Catalogue:\s*)+', '', text)
+        inner = re.sub(r'<urlopen error (.*)>', r'\1', inner)
+        inner = re.sub(r'\[(WinError|Errno) -?\d+\]\s*', '', inner).strip()
+        return 'network', 'no connection to the content server (%s)' % inner[:160]
     if text.startswith('Catalogue') or 'catalogue' in low.split(':', 1)[0]:
         return 'catalogue', text[:300]
     return 'pack', text[:300]

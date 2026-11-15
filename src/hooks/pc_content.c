@@ -300,6 +300,176 @@ int pc_content_news(char *names, int size)
     return pending > 0 ? pending : 0;
 }
 
+/* ---- build 83: the last sync and check (sync-result.ini, news.ini), for the log, F9 and the hub ---- */
+
+/* Calls fn(key, value) for each key of [section] in <data>/mod-manager/<file>; 0 when the file is not there. */
+static int read_ini_section(const char *file, const char *section, void (*fn)(void *, const char *, const char *),
+                            void *ctx)
+{
+    char path[1024], line[1400], head[64];
+    const char *root = data_root();
+    FILE *f;
+    int in_section = 0;
+    if (!root) return 0;
+    snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "%s", root, file);
+    snprintf(head, sizeof head, "[%s]", section);
+    if (!(f = fopen(path, "rb"))) return 0;
+    while (fgets(line, sizeof line, f)) {
+        char *s = trim(line), *eq;
+        if (*s == ';' || *s == '#') continue;
+        if (*s == '[') { in_section = !strcmp(s, head); continue; }
+        if (!in_section || !(eq = strchr(s, '='))) continue;
+        *eq = 0;
+        fn(ctx, trim(s), trim(eq + 1));
+    }
+    fclose(f);
+    return 1;
+}
+
+#define COPY_FIELD(dst, v) snprintf((dst), sizeof(dst), "%s", (v))
+
+static void sync_field(void *ctx, const char *k, const char *v)
+{
+    PcContentSync *s = (PcContentSync *)ctx;
+    if (!strcmp(k, "result")) COPY_FIELD(s->result, v);
+    else if (!strcmp(k, "kind")) COPY_FIELD(s->kind, v);
+    else if (!strcmp(k, "reason")) COPY_FIELD(s->reason, v);
+    else if (!strcmp(k, "time")) COPY_FIELD(s->time, v);
+    else if (!strcmp(k, "ids")) COPY_FIELD(s->ids, v);
+    else if (!strcmp(k, "skipped")) COPY_FIELD(s->skipped, v);
+    else if (!strcmp(k, "revision")) s->revision = atoi(v);
+    else if (!strcmp(k, "packs")) s->packs = atoi(v);
+}
+
+int pc_content_sync_result(PcContentSync *out)
+{
+    const char *test = getenv("RECOMP_TEST_CONTENT_SYNC");
+    memset(out, 0, sizeof *out);
+    if (test && *test) {
+        strcpy(out->result, "failed");
+        COPY_FIELD(out->kind, strstr(test, "clock") ? "clock" : "network");
+        COPY_FIELD(out->reason, test);
+        strcpy(out->time, "2026-11-15T12:00:00Z");
+        return 1;
+    }
+    return read_ini_section("sync-result.ini", "sync", sync_field, out);
+}
+
+static void news_field(void *ctx, const char *k, const char *v)
+{
+    PcContentNews *n = (PcContentNews *)ctx;
+    if (!strcmp(k, "revision")) n->revision = atoi(v);
+    else if (!strcmp(k, "pending")) n->pending = atoi(v);
+    else if (!strcmp(k, "checked")) COPY_FIELD(n->checked, v);
+    else if (!strcmp(k, "kind")) COPY_FIELD(n->kind, v);
+    else if (!strcmp(k, "error")) COPY_FIELD(n->error, v);
+}
+
+int pc_content_news_state(PcContentNews *out)
+{
+    memset(out, 0, sizeof *out);
+    out->known = read_ini_section("news.ini", "news", news_field, out);
+    if (!out->error[0]) out->kind[0] = 0;
+    return out->known;
+}
+
+static void revision_field(void *ctx, const char *k, const char *v)
+{
+    if (!strcmp(k, "revision")) *(int *)ctx = atoi(v);
+}
+
+int pc_content_revision(void)
+{
+    int revision = 0;
+    read_ini_section("content.ini", "content", revision_field, &revision);
+    return revision;
+}
+
+int pc_content_problem_text(const PcContentSync *sync, int have_sync, const PcContentNews *news, int installed,
+                            char *out, int size)
+{
+    const char *what = NULL, *reason = "", *kind = "";
+    if (!out || size <= 0) return 0;
+    out[0] = 0;
+    if (have_sync && sync && !strcmp(sync->result, "failed")) {
+        /* a good check after that sync saw no change to make: the content is current after all (the sync may
+         * have failed on its catalogue fetch while the cached catalogue was the newest) */
+        int fine = news && news->known && !news->error[0] && news->pending == 0 && news->revision <= installed &&
+                   strcmp(news->checked, sync->time) > 0;
+        if (!fine) { what = "updated"; reason = sync->reason; kind = sync->kind; }
+    }
+    if (!what && news && news->known && news->error[0]) { what = "checked"; reason = news->error; kind = news->kind; }
+    if (!what) return 0;
+    snprintf(out, (size_t)size, "Community content could not be %s%s%s. %s", what, *reason ? ": " : "", reason,
+             !strcmp(kind, "clock") ? PC_CONTENT_CLOCK_LINE : PC_CONTENT_FIX_LINE);
+    return 1;
+}
+
+int pc_content_problem(char *out, int size)
+{
+    PcContentSync sync;
+    PcContentNews news;
+    int have = pc_content_sync_result(&sync);
+    pc_content_news_state(&news);
+    return pc_content_problem_text(&sync, have, &news, pc_content_revision(), out, size);
+}
+
+/* The print at the game's start (pc_content_log_header, main thread): the F9 report's thread names it without
+ * touching pc_content_print's buffer. The packs do not change while the game runs. */
+static uint32_t g_print_at_start;
+
+/* "revision 5, 1 pack (studio-d-mob-2), print F3245300"; any thread (its own pack buffer). */
+static void content_state(char *out, size_t size)
+{
+    PcContentPack *packs = (PcContentPack *)malloc(sizeof(PcContentPack) * PC_CONTENT_MAX);
+    char ids[1024] = "";
+    int n = packs ? pc_content_list(packs, PC_CONTENT_MAX) : 0, i, o = 0;
+    for (i = 0; i < n && o < (int)sizeof ids - 1; i++)
+        o += snprintf(ids + o, sizeof ids - (size_t)o, "%s%s%s", i ? ", " : "", packs[i].id,
+                      packs[i].composed && !packs[i].applied ? " (not applied)" : "");
+    free(packs);
+    snprintf(out, size, "revision %d, %d pack%s%s%s%s, print %08X", pc_content_revision(), n, n == 1 ? "" : "s",
+             n ? " (" : "", ids, n ? ")" : "", (unsigned)g_print_at_start);
+}
+
+static void sync_line(char *out, size_t size, const char *prefix)
+{
+    PcContentSync s;
+    if (!pc_content_sync_result(&s))
+        snprintf(out, size, "%sno sync result (a launcher before build 83 or never synced)", prefix);
+    else if (!strcmp(s.result, "ok"))
+        snprintf(out, size, "%slast sync ok, revision %d, %d pack%s%s%s (%s)", prefix, s.revision, s.packs,
+                 s.packs == 1 ? "" : "s", s.skipped[0] ? "; skipped for this build: " : "", s.skipped, s.time);
+    else
+        snprintf(out, size, "%slast sync %s: %s (%s; revision %d, %d pack%s, %s)", prefix,
+                 !strcmp(s.result, "cancelled") ? "CANCELLED (PLAY NOW)" : "FAILED", s.reason[0] ? s.reason : "?",
+                 s.kind[0] ? s.kind : "-", s.revision, s.packs, s.packs == 1 ? "" : "s", s.time);
+}
+
+void pc_content_log_header(void)
+{
+    char line[1400], state[1200];
+    g_print_at_start = pc_content_print();
+    sync_line(line, sizeof line, "");
+    content_state(state, sizeof state);
+    fprintf(stderr, "[CONTENT] %s\n[CONTENT] installed: %s\n", line, state);
+}
+
+void pc_content_report_line(void)
+{
+    char line[1400], state[1200], problem[512];
+    PcContentNews news;
+    sync_line(line, sizeof line, "");
+    content_state(state, sizeof state);
+    pc_content_news_state(&news);
+    fprintf(stderr, "[REPORT] content: %s; %s; check: %s", state, line,
+            !news.known ? "none yet" : news.error[0] ? "FAILED" : "ok");
+    if (news.known) fprintf(stderr, " (revision %d, %d pending%s%s, %s)", news.revision, news.pending,
+                            news.error[0] ? ", " : "", news.error, news.checked);
+    fprintf(stderr, "\n");
+    if (pc_content_problem(problem, sizeof problem)) fprintf(stderr, "[REPORT] content problem shown: %s\n", problem);
+}
+
 /* Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's days_from_civil). */
 static long days_from_civil(int y, int m, int d)
 {

@@ -12,6 +12,7 @@
  * (accounts/server.go) says the same.
  */
 #include "bug_report.h"
+#include "pc_content.h"
 
 #if defined(_WIN32)
 #include "account.h"
@@ -337,6 +338,7 @@ static DWORD WINAPI send_thread(LPVOID param)
 
     if (!job->log[0]) {
         Sleep(2500);                /* the frame after F9 and its draws (nv2a_pb_dump_next_frame) */
+        pc_content_report_line();   /* build 83: the content state now, in the log the report sends */
         fflush(stderr);
         if (!own_log(job->log, sizeof(job->log))) job->log[0] = 0;
     }

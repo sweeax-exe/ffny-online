@@ -45,8 +45,16 @@ static bool content_play_gate(bool pressed)
         g_content_play_skip = true;
         return false;
     }
+    // build 83: the last sync failed (a catalogue fetch or a download: the network, the PC's root store, its clock):
+    // one more try before the game starts, once per launcher run, whatever its age
+    static bool retried_failed;
+    bool failed_retry = false;
+    if (pressed && !retried_failed && !pcui::mod_busy()) {
+        PcContentSync last;
+        if (pc_content_sync_result(&last) && !strcmp(last.result, "failed")) failed_retry = retried_failed = true;
+    }
     if (pressed && !pcui::mod_busy() && content_sync_allowed() && !pcui::mod_recovery_needed() &&
-        (!g_content_synced_once || ui_ticks() - g_content_sync_started > 2 * 60000)) {
+        (!g_content_synced_once || failed_retry || ui_ticks() - g_content_sync_started > 2 * 60000)) {
         g_content_next_sync = 0;                    // a fresh look at the catalogue before the game starts
         g_content_synced_once = false;
         content_sync_tick();
