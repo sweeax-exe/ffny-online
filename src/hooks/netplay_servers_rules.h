@@ -57,6 +57,16 @@ unsigned netservers_scope(enum NetServerChoice c, int cur, int search_s, unsigne
  * QUICK_LAST_S (its player cannot come). */
 int netservers_should_move(int my_relay, int my_age, int their_relay, int their_age);
 
+/* ---- what players are shown (build 84) ---------------------------------------------------------
+ * Players never see our relays' host or port: status lines say "the US East server". */
+
+/* "Europe", "US East" or "US West" when `address` is one of our relays (host name or IP, with or
+ * without port 27777); NULL for anything else (a custom relay, shown as typed). */
+const char *netservers_known_name(const char *address);
+/* The player-facing text for a server address: "the US East server" for ours, the address as it was
+ * typed for a custom one. Returns 1 for one of ours, 0 for a custom address. */
+int netservers_display(const char *address, char *out, int size);
+
 #ifdef __cplusplus
 }
 #endif

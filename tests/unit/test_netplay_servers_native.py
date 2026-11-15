@@ -32,6 +32,19 @@ int main(void)
         const char *back = netservers_choice_text(c);
         printf("parse|%s|%d|%s|%d\n", k_texts[i], (int)c, back ? back : "-", netservers_choice_relay(c));
     }
+    {
+        static const char *const shown[] = {
+            "play.defjam.online:27777", "PLAY.defjam.online", "49.12.78.32:27777", "49.12.78.32",
+            "142.132.178.17", "na.defjam.online:27777", "na.defjam.online", "5.161.206.134:27777",
+            "5.161.206.134", "west.defjam.online:27777", "5.78.214.178", "5.78.214.178:27777",
+            "127.0.0.1:27900", "relay.example.org", "play.defjam.online:27900", "na.defjam.online.evil.org", "",
+        };
+        for (i = 0; i < (int)(sizeof(shown) / sizeof(shown[0])); i++) {
+            char out[160];
+            int ours = netservers_display(shown[i], out, sizeof(out));
+            printf("shown|%s|%d|%s\n", shown[i], ours, out);
+        }
+    }
     printf("parse-null|%d\n", (int)netservers_parse_choice(NULL));
     for (i = 0; i < NETSERVER_COUNT; i++)
         printf("relay|%d|%d|%d\n", i, (int)netservers_relay_choice(i), netservers_partner(i));
@@ -173,3 +186,20 @@ def test_the_older_side_goes_once_the_younger_room_waited_40_s(rows):
     # this PC on Europe, its room 60 s old; a US West room of 39 s: not yet; of 40 s: go
     assert move[(EU, 60, WEST, 39)] == 0
     assert move[(EU, 60, WEST, 40)] == 1
+
+
+def test_players_see_regions_not_addresses(rows):
+    shown = {r[0]: (r[1], r[2]) for r in by(rows, 'shown')}
+    eu, east, west = 'the Europe server', 'the US East server', 'the US West server'
+    expect = {
+        'play.defjam.online:27777': eu, 'PLAY.defjam.online': eu, '49.12.78.32:27777': eu, '49.12.78.32': eu,
+        '142.132.178.17': eu, 'na.defjam.online:27777': east, 'na.defjam.online': east,
+        '5.161.206.134:27777': east, '5.161.206.134': east, 'west.defjam.online:27777': west,
+        '5.78.214.178': west, '5.78.214.178:27777': west,
+    }
+    for address, text in expect.items():
+        assert shown[address] == ('1', text), address
+    # a custom address, another port or a look-alike name stays as typed
+    for address in ('127.0.0.1:27900', 'relay.example.org', 'play.defjam.online:27900',
+                    'na.defjam.online.evil.org', ''):
+        assert shown[address] == ('0', address), address

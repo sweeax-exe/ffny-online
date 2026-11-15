@@ -380,7 +380,7 @@ static DWORD WINAPI sign_in_thread(LPVOID unused)
             set_state(ACCOUNT_FAILED);
             return 0;
         }
-        if (++misses >= 15) { set_reason("Cannot reach play.defjam.online."); set_state(ACCOUNT_FAILED); return 0; }
+        if (++misses >= 15) { set_reason("Cannot reach the FFNY Online account server."); set_state(ACCOUNT_FAILED); return 0; }
     }
     SecureZeroMemory(secret, sizeof(secret));
     SecureZeroMemory(body, sizeof(body));
