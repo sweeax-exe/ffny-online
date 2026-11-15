@@ -223,6 +223,136 @@ void sub_0005AF80(void)
     }
     sub_0005AF80_gen();
 }
+/* The unlocked-fighter and unlocked-venue sets of the game's global record (sub_000144B0 lays them out at
+ * record + 0x1C and + 0x08 as {capacity, count, pointer to the saved count, pointer to the ids}: 80 fighters,
+ * ids at + 0x12E0; 30 venues, ids at + 0x1268) have no room check. The insert (sub_00016810, thiscall, one
+ * argument: a pointer to the id) adds one id past the count whatever the capacity, and the developers' unlock
+ * routine sub_000158F0 ([debug] unlock_all, RECOMP_UNLOCK_ALL) inserts every row of the Character and Venue
+ * tables, run again on every screen change. The stock game has 75 fighters and 24 venues; each new fighter is
+ * one more Character row, so with more than five (build 83: six community fighters, 81 rows) the 81st id went
+ * over the song store's buffers right after the fighter ids (record + 0x1420: song states, then keys, the
+ * order counter and the item containers at + 0x14E4), which the song code wrote back, so the next run found the
+ * id missing and inserted it again one slot further: corrupted songs and heap, a crash under
+ * Audio.PlayMusic at the main menu or a hang while a fight loads (2026-11-15, docs/research/new-fighters.md).
+ * An insert into a full set is refused here: the id stays out (a new fighter does not need it, its select
+ * cell answers LOCK=1 itself, new_fighters.c), nothing past the set is written. Every caller (the unlock
+ * routine, the story's rewards sub_00015B80, BuyCharacter, BuyVenue) uses these two sets. */
+static void id_set_full(uint32_t set, uint32_t id)
+{
+    static unsigned refused;
+    refused++;
+    if (refused <= 4 || (refused & (refused - 1)) == 0)
+        fprintf(stderr, "[SETS] the set at %08X holds %u of %u ids: id %08X left out (%u so far)\n", set,
+                MEM32(set + 4), MEM32(set), id, refused);
+}
+extern void sub_00016810_gen(void);
+void sub_00016810(void)
+{
+    uint32_t set = g_ecx;
+    if (MEM32(set + 4) >= MEM32(set)) {
+        id_set_full(set, MEM32(MEM32(g_esp + 4)));
+        g_esp += 8;     /* ret 4: the return address and the id pointer */
+        return;
+    }
+    sub_00016810_gen();
+}
+/* The load (sub_00014540, thiscall on the record, ret 4) copies the saved record (record + 0x4C .. + 0x14DC)
+ * back over the live one, the saved counts and the song store's buffers included. A save written while the
+ * sets ran over (build 83 with unlock_all and six or more new fighters) brings the damage back at every start,
+ * with or without the packs: a count above the capacity, so every later unlock run wrote further past the
+ * set, and song states and keys that are fighter ids or junk, which the playlist builders (sub_00020C40,
+ * sub_00020D70) turn into name pointers of -1 that sub_0003CFF0 reads and sub_0003DA40 frees: the crash
+ * under Audio.PlayMusic at the main menu (RIP in sub_0003CFF0 or sub_001E9F90, 2026-11-15). So after the load:
+ *   - a count above the capacity is taken down to it (the saved count too);
+ *   - a fighter set a venue overflow reached (venue ids at its start) keeps only the ids of its own table;
+ *   - the song store (sub_00013340 builds it at record + 0x30 from the Song table: states record + 0x1420,
+ *     keys + 0x1444, 36 of each, the order counter + 0x14D4) gets back the keys it had before the load when a
+ *     saved key is none of them, and every song starts again as never arranged (state 0: the game arranges it
+ *     itself, on) when the keys were damaged or the fighter set had run over its states. A sound save is left
+ *     as it is. */
+#define REC_VENUES 0x08u
+#define REC_FIGHTERS 0x1Cu
+#define REC_SONG_STATES 0x1420u
+#define REC_SONG_KEYS 0x1444u
+#define REC_SONG_NEXT 0x14D4u
+#define SONG_SLOTS 36u
+static int id_set_clamp(uint32_t set, const char *what)
+{
+    uint32_t cap = MEM32(set), count = MEM32(set + 4), saved = MEM32(set + 8);
+    if (!cap || count <= cap)
+        return 0;
+    fprintf(stderr, "[SETS] the save says %u unlocked %s, the game holds %u: taken down to %u\n", count, what, cap,
+            cap);
+    MEM32(set + 4) = cap;
+    if (saved)
+        MEM32(saved) = cap;
+    return 1;
+}
+/* Keeps the ids of the set's most common table (id >> 24), sorted as sub_00017000 searches them. */
+static void id_set_own_table(uint32_t set)
+{
+    uint32_t count = MEM32(set + 4), ids = MEM32(set + 0xC), saved = MEM32(set + 8), kept = 0, i, j;
+    unsigned seen[256] = {0}, best = 0;
+    if (!ids || !count || count > MEM32(set))
+        return;
+    for (i = 0; i < count; i++)
+        seen[MEM32(ids + 4 * i) >> 24]++;
+    for (i = 1; i < 256; i++)
+        if (seen[i] > seen[best])
+            best = i;
+    for (i = 0; i < count; i++) {
+        uint32_t id = MEM32(ids + 4 * i);
+        if (id >> 24 != best)
+            continue;
+        for (j = kept; j > 0 && (MEM32(ids + 4 * (j - 1)) & 0xFF7FFFFFu) > (id & 0xFF7FFFFFu); j--)
+            MEM32(ids + 4 * j) = MEM32(ids + 4 * (j - 1));
+        MEM32(ids + 4 * j) = id;
+        kept++;
+    }
+    if (kept == count)
+        return;
+    for (i = kept; i < count; i++)
+        MEM32(ids + 4 * i) = 0xFFFFFFFFu;
+    fprintf(stderr, "[SETS] %u id(s) of another table left the fighter set (%u kept)\n", count - kept, kept);
+    MEM32(set + 4) = kept;
+    if (saved)
+        MEM32(saved) = kept;
+}
+extern void sub_00014540_gen(void);
+void sub_00014540(void)
+{
+    uint32_t record = g_ecx, keys[SONG_SLOTS], i, j, bad = 0, have = 0;
+    int fighters_over, venues_over;
+    for (i = 0; i < SONG_SLOTS; i++) {
+        keys[i] = MEM32(record + REC_SONG_KEYS + 4 * i);
+        have += keys[i] != 0xFFFFFFFFu;
+    }
+    sub_00014540_gen();
+    fprintf(stderr, "[SETS] save loaded: %u of %u fighters, %u of %u venues unlocked; %u song key(s) before\n",
+            MEM32(record + REC_FIGHTERS + 4), MEM32(record + REC_FIGHTERS), MEM32(record + REC_VENUES + 4),
+            MEM32(record + REC_VENUES), have);
+    fighters_over = id_set_clamp(record + REC_FIGHTERS, "fighters");
+    venues_over = id_set_clamp(record + REC_VENUES, "venues");
+    if (venues_over)
+        id_set_own_table(record + REC_FIGHTERS);
+    for (i = 0; have && i < SONG_SLOTS; i++) {
+        uint32_t k = MEM32(record + REC_SONG_KEYS + 4 * i);
+        int known = k == 0xFFFFFFFFu;
+        for (j = 0; j < SONG_SLOTS && !known; j++)
+            known = keys[j] == k;
+        bad += !known;
+    }
+    if (bad || fighters_over) {
+        if (bad)
+            for (i = 0; i < SONG_SLOTS; i++)
+                MEM32(record + REC_SONG_KEYS + 4 * i) = keys[i];
+        for (i = 0; i < SONG_SLOTS; i++)
+            MEM8(record + REC_SONG_STATES + i) = 0;
+        MEM32(record + REC_SONG_NEXT) = 0;
+        fprintf(stderr, "[SETS] the save's song list was damaged (%u unknown key(s)%s): every song starts again "
+                        "as never arranged\n", bad, fighters_over ? ", fighter ids over its states" : "");
+    }
+}
 /* The audio subsystem's per-frame update (cdecl (frame), called directly by every screen's update:
  * sub_00079B60 and five others). It walks the game's cue queue and voices (sub_0003D560 ->
  * sub_0003C320, sub_00036FB0, sub_00030AC0, sub_0001D030) and calls into the sound engine directly
