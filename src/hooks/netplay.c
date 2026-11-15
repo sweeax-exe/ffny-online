@@ -1547,8 +1547,9 @@ static void intro_update(void)
     if (!intro_window()) { g_intro_state = 0xFFFFFFFFu; return; }
     st = MEM32(G_LOGIC_STATE);
     if (N.watching && N.players >= 4) {
-        /* a watcher of a fight of four: its own pad reads on the fourth fighter's port until the first step
-         * (assign_input), so a face button pressed now can cut that fighter's intro short on this PC alone */
+        /* a watcher of a fight of four: until build 83 its own pad read on the fourth fighter's port until the
+         * first step, so a face button pressed now cut that fighter's intro short on this PC alone; since
+         * build 84 it is on no port (assign_input) and a press here is harmless (tests read the line) */
         static uint32_t told;
         XBOX_INPUT_STATE ls;
         int k, down = 0;
@@ -1557,7 +1558,7 @@ static void intro_update(void)
             for (k = 0; k < 8; k++) if (ls.Gamepad.bAnalogButtons[k] > 30) down = 1;
         if (down && told != N.match) {
             told = N.match;
-            fprintf(stderr, "[NETPLAY] watching: this PC's pad pressed during the intros (pre-fight state %d), on the fourth "
+            fprintf(stderr, "[NETPLAY] watching: this PC's pad pressed during the intros (pre-fight state %d), on no "
                     "fighter's port\n", (int)st);
         }
     }
@@ -1696,9 +1697,12 @@ static void assign_input(int on)
     unsigned mask = 0;
     int i, local = N.pos;
     if (!on) { xbox_HostInputSetNetplay(0, 0, 0, NULL); fight_input(); return; }
-    /* a spectator drives no fighter: its own pad goes on the first port no player uses (with four
-     * players the fourth, which the fight's entries override; spectator-mode.md 9) */
-    if (local < 0) local = N.players < 4 ? N.players : 3;
+    /* a spectator drives no fighter: its own pad goes on the first port no player uses; with four
+     * players on no port at all (build 84, toolkit: local slot -1). Until build 83 it sat on the fourth
+     * port, whose reads before the first step (the intros) were this PC's own presses instead of that
+     * fighter's: the watcher's picture parted from the fighters' (build 71), so fights of four were not
+     * watched live and an FFA rotation room's waiting players never saw a fight (Kirito, 2026-11-15). */
+    if (local < 0) local = N.players < 4 ? N.players : -1;
     for (i = 0; i < N.players; i++)
         if (i != local) mask |= 1u << i;
     xbox_HostInputSetNetplayMulti(1, local, mask, remote_slot_state);
@@ -3534,12 +3538,12 @@ static int hill_watch_runs(uint32_t seed, const int *slots, int count)
         SPECTATOR_HERE() || N.hill_room_req)
         return 0;
     for (i = 0; i < count; i++) if (slots[i] == N.roomv.you) return 0;     /* a fighter gets START */
-    /* Build 71: not a fight of four (an FFA rotation room of five or more). This PC's pad has to sit on a
-     * port (the toolkit's netplay input has no "none"), and with four fighters every port is one: the
-     * watcher's own presses reached the fourth fighter's intro on its PC alone, and its picture went out of
-     * sync at step 120-240 in three of four five-copy runs (logs/dj/20261110-061005-online, -060501-online).
-     * Such a fight keeps the names screen until the toolkit can leave the pad off every port. */
-    if (count >= 4) return 0;
+    /* Builds 71-83 kept the names screen for a fight of four (an FFA rotation room of five or more): this
+     * PC's pad sat on the fourth fighter's port, its presses reached that fighter's intro here alone and the
+     * picture went out of sync (logs/dj/20261110-061005-online, -060501-online). Since build 84 a watcher's
+     * pad is on no port (assign_input), so a fight of four is watched live like the others.
+     * RECOMP_HILL_WATCH_FOUR=0 (tests): the old rule. */
+    if (count >= 4 && getenv("RECOMP_HILL_WATCH_FOUR") && atoi(getenv("RECOMP_HILL_WATCH_FOUR")) == 0) return 0;
     /* this PC's own fight still runs here (not decided yet); decided, on its results, the watch waits for the
      * menus (on_start_as defers it as it defers a START there) */
     if (N.match_live && !N.watching && !N.koth_results) return 0;
