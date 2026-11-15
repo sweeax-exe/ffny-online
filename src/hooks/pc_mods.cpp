@@ -141,6 +141,11 @@ static bool helper_args(const std::string &command, const std::string &id, std::
     // New fighters' own voice lines (build 80, setup/fightervoice.py: .sch/.asf banks composed into speech2.viv).
     // The account service marks such packs voice-v1; without it every launcher skipped them.
     args.insert(args.end(), {"--capability", "voice-v1"});
+    // More than five new fighters (build 84): the game's unlocked-fighter set holds 80 ids and the stock game
+    // has 75, so with [debug] unlock_all a sixth new fighter wrote past it (build 83 crash, recomp_manual.c
+    // sub_00016810). The account service marks new-fighter packs fighter-sets-v1 from build 84 on, so a build-83
+    // launcher never composes more than the ones it already had.
+    args.insert(args.end(), {"--capability", "fighter-sets-v1"});
     {
         auto game = fs::current_path(error) / "game";
         if (!error && fs::is_directory(game, error)) {

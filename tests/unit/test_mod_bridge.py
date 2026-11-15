@@ -146,3 +146,12 @@ def test_launcher_offers_the_voice_capability():
     src = (Path(__file__).resolve().parents[2] / 'src' / 'hooks' / 'pc_mods.cpp').read_text(encoding='utf-8')
     for cap in ('language-v1', 'content-v1', 'voice-v1'):
         assert '{"--capability", "%s"}' % cap in src
+
+
+def test_launcher_offers_the_fighter_sets_capability():
+    """Build 84 keeps the unlocked-fighter set inside its 80 ids (recomp_manual.c sub_00016810); the account
+    service marks new-fighter packs fighter-sets-v1 so a build-83 launcher, whose game overflowed the set with a
+    sixth new fighter, never composes more of them (2026-11-15 crash at the main menu)."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / 'src' / 'hooks' / 'pc_mods.cpp').read_text(encoding='utf-8')
+    assert '{"--capability", "fighter-sets-v1"}' in src
