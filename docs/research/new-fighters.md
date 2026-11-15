@@ -95,6 +95,12 @@ import into the copied files (Fighters page), unchanged: the copy only proves th
   index, and the load crashes (0xFFFFFFF0); 200 and 254 hang in `Game.GetMatchInfo`. So the grid thumbnail
   sprite (frames feID and feID + 150), the 80-entry unlock set and the 128-entry list array are not the limit:
   outfits use the template cell's thumbnail, the unlock set is not used, and 74 + 28 fits in 128.
+* **The 80-entry unlock set was a limit after all (build 83 crash, 2026-11-15).** The select screens never use it, but
+  the developers' unlock routine `sub_000158F0` (`[debug] unlock_all`) inserts every Character row, and the insert
+  `sub_00016810` has no room check: with six new fighters (81 rows) the 81st id went over the song store's buffers
+  right after the set (record + 0x1420), one slot further on every screen change, and into the save (main-menu crash
+  under `Audio.PlayMusic`). Since build 84 the insert refuses a full set and the load repairs a save that ran over
+  (`recomp_manual.c`, `sub_00016810` / `sub_00014540`); the venue set (30, 24 stock) is guarded the same way.
 * **+20 cheaply**: the unused feIDs below 98 (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86..90, 94..97; leave out
   40, 41, 52 and 78, the fighter.xml IDs the hub maps to Teck, Santos, O.E and Erick Sermon). Needs the hooks and
   the hub to take a list of "new" IDs instead of the range 100..127. **48** in all, 122 of the list array's 128.
