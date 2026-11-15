@@ -67,6 +67,9 @@ def test_the_python_lists():
     assert all(nf.place_index(x) is None for x in STOCK + OLD_IDS + [CREATED, 128, -1, True])
     assert list(_module("apt_patch", ROOT / "scripts/apt-patch.py").CHOOSEF_PLACES) == PLACES
     assert list(_module("online_art", ROOT / "scripts/online-art.py").NEW_FIGHTER_PLACES) == PLACES
+    roots = (ROOT / "tools/defjam-mcp/djlib/roots.py").read_text(encoding="utf-8")
+    m = re.search(r"NEW_FIGHTER_PLACES = tuple\(range\(100, 128\)\) \+ \(([\d,\s]+)\)", roots)
+    assert m and ints(m.group(1)) == LOW
     scen = (ROOT / "tools/defjam-mcp/djlib/scenarios.py").read_text(encoding="utf-8")
     m = re.search(r"blocked\.update\(list\(range\(100, 128\)\) \+ \[([\d,\s]+)\]\)", scen)
     assert m and ints(m.group(1)) == LOW
