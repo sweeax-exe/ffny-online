@@ -42,6 +42,7 @@
 #include "discord_presence.h"
 #include "pc_language.h"
 #include "pc_content.h"
+#include "content_update_logic.h"
 #include "patches/widescreen.h"
 #include "patches/picture.h"
 #include "patches/cheats.h"
@@ -724,6 +725,33 @@ static BOOL CALLBACK find_running(HWND w, LPARAM out)
     return TRUE;
 }
 
+/* Build 86: a whole-word flag on this process's command line (CU_FLAG, "--content-update"). */
+static int has_cmd_flag(const wchar_t *flag)
+{
+    const WCHAR *cmd = GetCommandLineW(), *p = cmd ? wcsstr(cmd, flag) : NULL;
+    size_t n = wcslen(flag);
+    while (p) {
+        if ((p == cmd || p[-1] == L' ' || p[-1] == L'\t') && (!p[n] || p[n] == L' ' || p[n] == L'\t')) return 1;
+        p = wcsstr(p + n, flag);
+    }
+    return 0;
+}
+
+/* Build 86: the launcher UPDATE NOW starts comes up while the game that started it is still closing: it waits for
+ * that copy's lock (up to 20 s) instead of showing it and exiting. 1 when the lock is this process's. */
+static int one_instance_wait(const WCHAR *name)
+{
+    ULONGLONG until = GetTickCount64() + 20000;
+    for (;;) {
+        g_single_instance = CreateMutexW(NULL, FALSE, name);
+        if (!g_single_instance || GetLastError() != ERROR_ALREADY_EXISTS) return 1;
+        if (GetTickCount64() >= until) return 0;
+        CloseHandle(g_single_instance);
+        g_single_instance = NULL;
+        Sleep(200);
+    }
+}
+
 static void one_instance_only(const char *root)
 {
     const char *cmd = GetCommandLineA();
@@ -732,7 +760,12 @@ static void one_instance_only(const char *root)
     if (cmd && strstr(cmd, "--launcher-child")) return;     /* the launcher holds it for us */
     if (may_run_beside_another()) return;
     instance_mutex_name(root, name, sizeof name / sizeof name[0]);
-    g_single_instance = CreateMutexW(NULL, FALSE, name);
+    if (has_cmd_flag(CU_FLAG)) {
+        if (one_instance_wait(name)) return;
+        fprintf(stderr, "[UI] UPDATE NOW: the closing copy still runs after 20 s\n");
+    } else {
+        g_single_instance = CreateMutexW(NULL, FALSE, name);
+    }
     if (!g_single_instance || GetLastError() != ERROR_ALREADY_EXISTS) return;
     fprintf(stderr, "[UI] FFNY Online is already running: showing it, this copy exits\n");
     fflush(stderr);
@@ -761,6 +794,38 @@ void pc_settings_capture_start(void)
         FreeEnvironmentStringsW(env);
     }
     if (!GetCurrentDirectoryW(MAX_PATH * 2, g_start_dir)) g_start_dir[0] = 0;
+}
+
+/* Build 86, UPDATE NOW: starts "<exe> <this command line, launcher switches out> --launcher --content-update" with
+ * the environment and directory this process was started with (content_update_logic.h). The one-copy lock is
+ * let go first: the new launcher waits for this process to end (one_instance_wait). 1 when it started. */
+int pc_settings_start_content_update(void)
+{
+    static WCHAR exe[32768];
+    const WCHAR *line = GetCommandLineW();
+    size_t n = wcslen(line) + 64;
+    WCHAR *cmd;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    int ok;
+    if (!GetModuleFileNameW(NULL, exe, 32768)) return 0;
+    cmd = (WCHAR *)malloc(n * sizeof(WCHAR));
+    if (!cmd || !cu_launcher_command(line, cmd, n)) { free(cmd); return 0; }
+    if (g_single_instance) { CloseHandle(g_single_instance); g_single_instance = NULL; }
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    ok = CreateProcessW(exe, cmd, NULL, NULL, FALSE, g_start_env ? CREATE_UNICODE_ENVIRONMENT : 0, g_start_env,
+                        g_start_dir[0] ? g_start_dir : NULL, &si, &pi) != 0;
+    free(cmd);
+    if (!ok) {
+        fprintf(stderr, "[UI] UPDATE NOW: the launcher could not be started (error %lu)\n", (unsigned long)GetLastError());
+        return 0;
+    }
+    fprintf(stderr, "[UI] UPDATE NOW: the launcher starts in update mode (%lu)\n", (unsigned long)pi.dwProcessId);
+    fflush(stderr);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return 1;
 }
 
 /* After the launcher, the game runs in a fresh process, started exactly as with the launcher
@@ -810,6 +875,8 @@ static void start_game_process(int reopen_launcher)
         WaitForSingleObject(pi.hProcess, INFINITE);
         graphics_mod_settled();
         GetExitCodeProcess(pi.hProcess, &code);
+        /* build 86: the game closed for UPDATE NOW: the launcher, in update mode, gets the content */
+        if (cu_after_child_exit(code) && pc_settings_start_content_update()) ExitProcess(0);
         ExitProcess(code);
     }
     /* In the background meanwhile (tray icon, update checks); when the game closes the launcher
@@ -818,25 +885,31 @@ static void start_game_process(int reopen_launcher)
     graphics_mod_settled();         /* the proxy is parked before the launcher opens again */
     /* the reopened launcher takes the one-copy lock itself */
     if (g_single_instance) { CloseHandle(g_single_instance); g_single_instance = NULL; }
-    n = wcslen(line) + 32;
+    /* build 86: the game closed for UPDATE NOW (content_update.c): the launcher opens in update mode (it presses
+     * PLAY once the new content is in); otherwise as it was started, without the update mode */
+    GetExitCodeProcess(pi.hProcess, &code);
+    int for_update = cu_after_child_exit(code);
+    n = wcslen(line) + 64;
     cmd = (WCHAR *)malloc(n * sizeof(WCHAR));
+    if (cmd && !(for_update ? cu_launcher_command(line, cmd, n) : cu_reopen_command(line, cmd, n))) {
+        free(cmd);
+        cmd = NULL;
+    }
     if (cmd) {
-        swprintf(cmd, n, L"%ls --launcher", line);
         memset(&si, 0, sizeof(si));
         si.cb = sizeof(si);
         PROCESS_INFORMATION again;
         if (CreateProcessW(exe, cmd, NULL, NULL, FALSE, g_start_env ? CREATE_UNICODE_ENVIRONMENT : 0,
                            g_start_env, g_start_dir[0] ? g_start_dir : NULL, &si, &again)) {
-            fprintf(stderr, "[UI] the game closed%s: the launcher opens again\n",
-                    update ? " with an update waiting" : "");
+            fprintf(stderr, "[UI] the game closed%s: the launcher opens again%s\n",
+                    update ? " with an update waiting" : "", for_update ? " for UPDATE NOW" : "");
             fflush(stderr);
             CloseHandle(again.hThread);
             CloseHandle(again.hProcess);
         }
         free(cmd);
     }
-    GetExitCodeProcess(pi.hProcess, &code);
-    ExitProcess(code);
+    ExitProcess(for_update ? 0 : code);
 }
 #endif
 

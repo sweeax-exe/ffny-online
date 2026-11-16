@@ -56,6 +56,7 @@
 #include "pc_input.h"
 #include "pc_content.h"
 #include "pc_mods.h"
+#include "content_update.h"
 #include "fight_hud.h"
 #include "fighter_skins.h"
 #include "start_countdown.h"
@@ -4337,6 +4338,7 @@ static void on_packet(const uint8_t *b, int len)
                      : pc_content_news(NULL, 0) > 0 ? NETPLAY_CONTENT_NEWS_LINE "."
                      : "That room has other community packs than yours: both need the same ones.";
                 if (N.lobby) pc_mods_check_start();     /* look again: the hub shows the news once it is known */
+                if (pc_content_news(NULL, 0) > 0) content_update_note_refusal();    /* build 86: UPDATE NOW offered */
             }
             if (N.lobby && code == 12) {
                 /* build 46 relays: this player's created fighter has stats Story mode never gives (a

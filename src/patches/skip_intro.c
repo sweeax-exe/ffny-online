@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include "recomp/gen/recomp_types.h"
 #include "recomp_settings.h"
+#include "hooks/content_update.h"
 
 extern void sub_00055640(void);  /* Controller.ControllerBootup, ret 8; arguments unused */
 extern void sub_0003DE20(void);  /* AudioInit(full), cdecl: shuts a prior init down first, then loads the config */
@@ -36,7 +37,8 @@ void defjam_skip_intro_enter(void)
     selected = 1;
     /* Read the effective file/environment setting after the launcher. Subsequent
      * overlay edits affect the next process, never an in-progress Story/movie. */
-    if (!recomp_settings_get("debug", "skip_intro", 0))
+    /* Build 86: a run UPDATE NOW started (content_update.c) skips them too: the movies were seen minutes ago. */
+    if (!recomp_settings_get("debug", "skip_intro", 0) && !content_update_restarted())
         return;
     if (MEM32(frontend + 0x9C) != 0) {
         fprintf(stderr, "[STARTUP] skip_intro: first screen was not legal1; leaving it unchanged\n");

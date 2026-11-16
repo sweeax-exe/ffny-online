@@ -18,6 +18,11 @@ int pc_settings_init(void);
  * after the launcher (see start_game_process in pc_settings.c). */
 void pc_settings_capture_start(void);
 
+/* Build 86, UPDATE NOW (content_update.c): Windows, starts the launcher in update mode ("--launcher
+ * --content-update") with this process's start environment, after letting go of the one-copy lock; 1 when it
+ * started. */
+int pc_settings_start_content_update(void);
+
 /* The command line, for the options that are not settings (--launcher, --no-launcher). Off
  * Windows only: there the program is started through main, which has it. */
 void pc_settings_set_args(int argc, char **argv);

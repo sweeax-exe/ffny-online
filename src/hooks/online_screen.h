@@ -42,6 +42,11 @@ bool exit_chip_at(float x, float y);
 bool take_exit_test_request();
 void exit_prompt_begin();
 int draw_exit_prompt(ImVec2 display);
+/* Build 86, UPDATE NOW (content_update.c): "NEW COMMUNITY CONTENT IS OUT" with UPDATE NOW and LATER, the overlay's
+ * popup on the main menu (main_menu: closes when the menu goes away) and inside the online screens (the hub's Y,
+ * a room refused for other packs). draw_update_prompt: 0 still open, 1 LATER, 2 UPDATE NOW taken, 3 the menu went. */
+void update_prompt_begin(const char *where);
+int draw_update_prompt(ImVec2 display, bool main_menu);
 
 /* MILESTONES (build 79, milestones_ui.inc): on the Battle user-ID screen and in the Story crib, a chip
  * (VIEW MILESTONES) that the pad's VIEW or a click opens into the profile's milestone progress. The

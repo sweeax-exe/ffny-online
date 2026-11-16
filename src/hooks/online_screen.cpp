@@ -62,6 +62,7 @@
 #include "fighter_skins.h"
 #include "pc_content.h"
 #include "pc_mods.h"
+#include "content_update.h"
 #include "music_library.h"
 #include "pc_launcher_music.h"
 #include <time.h>
@@ -488,7 +489,7 @@ void page_title(ImDrawList *dl, const Frame &f, const char *title)
         float w = text_width(f, g_title, 12, line);
         rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
         text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
-        text(dl, f, g_hand, 11, 606, 30, ORANGE, "close the game, start it from the launcher", RIGHT, 0.8f);
+        text(dl, f, g_hand, 11, 606, 30, ORANGE, "UPDATE NOW on the hub (Y): the game comes back by itself", RIGHT, 0.8f);
     }
 }
 
@@ -1218,29 +1219,16 @@ float room_tag(ImDrawList *dl, const Frame &f, float right, float y, const char 
     return w;
 }
 // Build 82: new community content is out (pc_content_news, after the game's own catalogue check): the count of
-// changes, 0 none. The check runs when the hub opens and every ten minutes while an online page is up.
+// changes, 0 none. Build 86: the check runs every ten minutes in any menu while signed in, and on the online pages
+// (content_update_frame, from the overlay); the news is read every 3 s (content_update_news).
 int content_news(char *names, int size)
 {
-    if (gallery_on()) {     // the gallery: only its news page shows it (RECOMP_TEST_CONTENT_NEWS)
+    if (gallery_on()) {     // the gallery: only its news pages show it (RECOMP_TEST_CONTENT_NEWS)
         int n = G.page && !strcmp(G.page, "hub-news") ? pc_content_news(names, size) : 0;
         if (!n && names && size > 0) names[0] = 0;
         return n;
     }
-    static unsigned long long last_check;
-    unsigned long long now = GetTickCount64();
-    if (!gallery_on() && (!last_check || now - last_check > 10 * 60 * 1000ull)) {
-        last_check = now;
-        pc_mods_check_start();
-    }
-    static unsigned long long read_at;
-    static int cached;
-    static char cached_names[256];
-    if (!read_at || now - read_at > 3000) {
-        read_at = now;
-        cached = pc_content_news(cached_names, sizeof(cached_names));
-    }
-    if (names && size > 0) snprintf(names, (size_t)size, "%s", cached_names);
-    return cached;
+    return content_update_news(names, size);
 }
 // Build 83: the last community content sync failed, or the game's own check did (pc_content_problem: sync-result.ini
 // and news.ini), as one plain line; read every 3 s. The gallery: only its own pages (RECOMP_TEST_CONTENT_SYNC).
@@ -2091,9 +2079,13 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_hand, size, 50, size < 11 ? 50 : 54, ORANGE, problem, LEFT, 0.8f, 556);
     } else if (news > 0 && signed_in) {
         // build 82: new community packs: the rooms of players who have them take only PCs with the same packs
+        // build 86: UPDATE NOW on Y (or a click on its hint): the game closes, the launcher gets them and starts it again
         std::string news_line = upper(NETPLAY_CONTENT_NEWS_LINE);
-        text(dl, f, g_title, std::min(14.0f, fit_size(f, g_title, 14, news_line.c_str(), 556)), 50, 56, ORANGE,
-             news_line.c_str(), LEFT, 1.2f);
+        float size = std::min(14.0f, fit_size(f, g_title, 14, news_line.c_str(), 440));
+        text(dl, f, g_title, size, 50, 56, ORANGE, news_line.c_str(), LEFT, 1.2f);
+        float hx = 50 + text_width(f, g_title, size, news_line.c_str()) + 14;
+        float hw = hint(dl, f, hx, 55, "y", "UPDATE NOW");
+        if (pad.y || mouse_click(f, hx, 53, hw, 20)) online_screen::update_prompt_begin("hub");
     } else if (signed_in) {
         // build 83: the ranked season's countdown (and the Turf War's), where the line is free
         std::string l = ranked_shown() ? season_countdown() : std::string();
@@ -5590,6 +5582,9 @@ bool decor_wanted()
 ImVec4 g_exit_chip;                 // the chip's rectangle in window pixels, as last drawn
 long long g_exit_chip_ms = 0;       // when it was last drawn
 struct ExitPrompt { int sel = 1; long long opened = 0; } X;     // sel 0 YES, 1 NO
+// build 86: the UPDATE NOW prompt (sel 0 UPDATE NOW, 1 LATER)
+struct UpdatePrompt { bool open = false, test_done = false; int sel = 0; long long opened = 0; char where[64] = "";
+                      char refused[160] = ""; } UP;
 
 bool exit_wanted()
 {
@@ -5737,6 +5732,96 @@ int draw_exit_prompt(ImVec2 display)
     fprintf(stderr, "[UI] exit prompt: %s\n", choose == 0 ? "yes, quitting" : "no");
     fflush(stderr);
     return choose == 0 ? 2 : 1;
+}
+
+// ---- UPDATE NOW (build 86, content_update.c) -------------------------------------------------------
+// "NEW COMMUNITY CONTENT IS OUT" with UPDATE NOW and LATER: the main menu's popup (the overlay opens it once per
+// news and after each fight), the hub's Y, and a room refused for other packs (ERROR 15). The pad: left/right and
+// A, B is LATER; the keyboard and the mouse as in the exit prompt. UPDATE NOW is refused in a fight, a match or a
+// room's countdown (the line says why; LATER closes it). RECOMP_TEST_UPDATE_ANSWER=now|later answers after 2.5 s.
+
+void update_prompt_begin(const char *where)
+{
+    UP = UpdatePrompt();
+    UP.open = true;
+    UP.opened = now_ms();
+    snprintf(UP.where, sizeof(UP.where), "%s", where ? where : "?");
+    fprintf(stderr, "[UI] UPDATE NOW prompt opened (%s)\n", UP.where);
+    fflush(stderr);
+}
+
+int draw_update_prompt(ImVec2 display, bool main_menu)
+{
+    if (main_menu && !exit_wanted() && !gallery_on()) {
+        fprintf(stderr, "[UI] UPDATE NOW prompt: closed, the main menu is gone\n");
+        return 3;
+    }
+    if (!UP.opened) update_prompt_begin(main_menu ? "main menu" : "online screens");
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    Frame f = menu_frame(display);
+    char names[256], line[300];
+    int n = gallery_on() ? pc_content_news(names, sizeof(names)) : content_news(names, sizeof(names));
+    dl->AddRectFilled(ImVec2(0, 0), display, IM_COL32(0, 0, 0, 160));
+    const float px = 130, py = 140, pw = 380, ph = 200;
+    glass(dl, f, px, py, pw, ph, 14, IM_COL32(10, 10, 13, 255), 0.88f);
+    rect(dl, f, px, py, 6, ph, RED, 3);
+    text(dl, f, g_title, 22, 320, py + 16, CREAM, "NEW COMMUNITY CONTENT IS OUT", CENTER, 1.6f);
+    snprintf(line, sizeof(line), "%d new pack%s%s%s", n, n == 1 ? "" : "s", names[0] ? ": " : "", names);
+    text(dl, f, g_hand, std::max(10.0f, fit_size(f, g_hand, 15, line, 340)), 320, py + 46, ORANGE, line, CENTER, 1.0f, 340);
+    const char *say_line = UP.refused[0] ? UP.refused : "Update now? The game closes, gets them and comes back by itself.";
+    text(dl, f, g_body, std::max(9.0f, fit_size(f, g_body, 12, say_line, 340)), 320, py + 76,
+         UP.refused[0] ? RED : with_alpha(CREAM, 0.9f), say_line, CENTER, 0.6f, 340);
+    const float by = py + 112, bh = 34, bw = 150;
+    const float bx[2] = { 320 - 10 - bw, 320 + 10 };
+    const char *label[2] = { "UPDATE NOW", "LATER" };
+    int choose = -1;
+    for (int i = 0; i < 2; i++) {
+        if (mouse_pick(f, bx[i], by, bw, bh)) UP.sel = i;
+        if (mouse_click(f, bx[i], by, bw, bh)) choose = i;
+        bool sel = UP.sel == i;
+        glass(dl, f, bx[i], by, bw, bh, 7, sel ? RED : IM_COL32(10, 10, 13, 255), sel ? 0.92f : 0.6f);
+        text(dl, f, g_title, 18, bx[i] + bw / 2, by + 7, sel ? WHITE : GREY, label[i], CENTER, 1.2f);
+    }
+    float hx = px + 120;
+    hx += hint(dl, f, hx, py + ph - 28, "a", "SELECT");
+    hint(dl, f, hx, py + ph - 28, "b", "LATER");
+
+    auto pressed = [](std::initializer_list<ImGuiKey> keys) {
+        for (ImGuiKey k : keys) if (ImGui::IsKeyPressed(k, false)) return true;
+        return false;
+    };
+    bool settled = now_ms() - UP.opened > 400;      // not the press that opened it
+    if (settled) {
+        if (pressed({ ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadLStickLeft, ImGuiKey_LeftArrow, ImGuiKey_A })) UP.sel = 0;
+        if (pressed({ ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickRight, ImGuiKey_RightArrow, ImGuiKey_D })) UP.sel = 1;
+        if (pressed({ ImGuiKey_Tab })) UP.sel ^= 1;
+        if (pressed({ ImGuiKey_GamepadFaceDown, ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Space, ImGuiKey_K }))
+            choose = UP.sel;
+        if (pressed({ ImGuiKey_GamepadFaceRight, ImGuiKey_Escape, ImGuiKey_Backspace, ImGuiKey_L })) choose = 1;
+    } else {
+        choose = -1;
+    }
+    {   // tests: RECOMP_TEST_UPDATE_ANSWER=now|later
+        static const char *test = getenv("RECOMP_TEST_UPDATE_ANSWER");
+        if (test && *test && now_ms() - UP.opened > 2500 && !UP.test_done) {
+            UP.test_done = true;
+            choose = !strcmp(test, "later") ? 1 : 0;
+            fprintf(stderr, "[UI] UPDATE NOW prompt (test): %s\n", choose ? "LATER" : "UPDATE NOW");
+        }
+    }
+    if (choose < 0) return 0;
+    if (choose == 1) {
+        fprintf(stderr, "[UI] UPDATE NOW prompt: later\n");
+        return 1;
+    }
+    if (gallery_on()) return 0;
+    char why[160];
+    if (content_update_request(UP.where, why, sizeof(why)) != CU_OK) {
+        snprintf(UP.refused, sizeof(UP.refused), "%s", why);
+        UP.sel = 1;
+        return 0;
+    }
+    return 2;
 }
 
 // ---- MILESTONES (build 79, milestones_ui.inc) ------------------------------------------------------
@@ -6053,7 +6138,8 @@ const char *shot_label()
 
 bool take_open_request()
 {
-    if (!g_open_req.exchange(0)) return false;
+    // build 86: started again by UPDATE NOW: back where the player pressed it, the online hub
+    if (!g_open_req.exchange(0) && !(exit_wanted() && content_update_take_open_hub())) return false;
     S = State();
     S.opened = GetTickCount64();
     C.open = C.kb = C.menu = false;
@@ -6103,6 +6189,13 @@ bool draw_unguarded(ImVec2 display)
         return keep;
     }
     if (!(net_state() == NETPLAY_CONNECTED && net_in_lobby())) chat_draw(dl, f, display);
+    if (UP.open) {      // build 86: over the page and the chat
+        int answer = draw_update_prompt(display, false);
+        if (answer) {
+            content_update_offer_answer(answer == 1);
+            UP.open = false;
+        }
+    }
     // the quick-chat wheel over the page or the chat window (gallery: the picture alone)
     if (QW.open && QW.where != QW_FIGHT) {
         C.mouse_off = !QW.gallery;
@@ -6121,6 +6214,9 @@ bool draw_pages(ImVec2 display)
     // the first frame takes no choice: the A that opened the screens is still down
     if (GetTickCount64() - S.opened < 250) pad = Pad();
     if (C.open) pad = Pad();       // the chat window has the input
+    if (UP.open) pad = Pad();      // build 86: the UPDATE NOW prompt has it
+    if (!gallery_on() && !UP.open && content_update_take_refusal_offer() && content_news(nullptr, 0) > 0)
+        update_prompt_begin("refused for other community packs");     // ERROR 15 with news out
     if ((QW.open && QW.where != QW_FIGHT && !QW.gallery) || (C.kb && C.kb_kind == KB_QUICK)) pad = Pad();   // the wheel, or the QUICK CHAT page's keyboard
     if (gallery_on()) {
         gallery_step();
@@ -6430,6 +6526,8 @@ void prepare(void *) {}
 bool decor_wanted() { return false; }
 void draw_decor(ImDrawList *, ImVec2) {}
 bool exit_wanted() { return false; }
+void update_prompt_begin(const char *) {}
+int draw_update_prompt(ImVec2, bool) { return 1; }
 bool exit_chip_at(float, float) { return false; }
 bool take_exit_test_request() { return false; }
 void exit_prompt_begin() {}
