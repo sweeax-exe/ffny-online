@@ -48,7 +48,7 @@ import struct
 from ffnycontent import clothing, cpparts, delta, fighterart, loc, newfighter, newvenue, viv
 
 SCHEMA = 1
-COMPOSER = 7                    # bump when the output for the same inputs changes
+COMPOSER = 8                    # bump when the output for the same inputs changes (8: row names just above the top)
 NEW_DAYS = 14                   # a new fighter's select thumbs carry NEW for this long after its review
 HUB_ART = ('online-art', 'fighters')    # <data>/online-art/fighters/<feID>.png: the online hub's portraits
 SKIN_ART = ('online-art', 'skins')      # <data>/online-art/skins/<pack id>.png: a skin's picture in the skin window
