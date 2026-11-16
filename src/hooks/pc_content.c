@@ -227,6 +227,9 @@ int pc_content_list(PcContentPack *out, int max)
             else if (!strcmp(k, "template_fe_id")) p->template_fe_id = atoi(v);
             else if (!strcmp(k, "fighter_mode")) p->skin = !strcmp(v, "skin");
             else if (!strcmp(k, "skin_of")) p->skin_of = atoi(v);
+            else if (!strcmp(k, "official")) p->official = atoi(v) == 1;
+            else if (!strcmp(k, "rts_map")) p->rts_map = atoi(v) == 1;
+            CONTENT_TEXT(venue_code);
 #undef CONTENT_TEXT
         }
     }

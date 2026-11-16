@@ -36,8 +36,9 @@ typedef struct OwHudView {
 int ow_hud_view(OwHudView *out);
 
 /* the pure rules, also unit-tested (tests/unit/test_openworld_rules.py builds openworld_rules.c alone) */
+#define OW_SPAWN_MAX 16      /* spawn points of a map (bigarena.json; Knox and Jam has 16) */
 typedef struct OwSpawnCtx {
-    float spawn_x[8], spawn_z[8];
+    float spawn_x[OW_SPAWN_MAX], spawn_z[OW_SPAWN_MAX];
     int spawns;
     float live_x[4], live_z[4];
     int lives;
@@ -47,6 +48,19 @@ int ow_rules_pick_spawn(const OwSpawnCtx *c);
 int ow_rules_winner(const int score[4], const int deaths[4], uint32_t present);
 int ow_rules_next_loser(const int score[4], const int deaths[4], uint32_t present, int winner, uint32_t done);
 float ow_rules_yaw_to_centre(float x, float z);
+/* "spawns": [[x, z], ...] of a bigarena json (Studio's assets/bigarena.json) -> up to max points; 0 none */
+int ow_rules_parse_spawns(const char *json, float *x, float *z, int max);
+/* GET /api/features: "run_the_streets" true 1, false 0, missing -1; reason gets "reason" ("" none) */
+int ow_rules_features_answer(const char *json, char *reason, int size);
+/* Camera-relative controls: the stick (x right, y up as the pad gives it) turned by the camera's heading, where
+ * heading 0 is the stock view (looking along -Z, the game's own stick directions) and grows as the camera turns
+ * clockwise seen from above; the length is kept, so a full push stays full. */
+void ow_rules_stick_turn(float heading_deg, float *x, float *y);
+/* The heading of a camera looking from eye to at (x, z), in the same sense: 0 looking along -Z. */
+float ow_rules_view_heading(float eye_x, float eye_z, float at_x, float at_z);
+
+/* Run the Streets (rts.c, openworld.c): the overlays and the voice read these. */
+int ow_rts_active(void);    /* a Run the Streets fight runs on this PC (offline or online) */
 
 #ifdef __cplusplus
 }

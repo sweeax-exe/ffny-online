@@ -642,7 +642,8 @@ static void crowd_guard(uint32_t crowd)
 void sub_000DB870_enter(void) { defjam_test_crowd_update(); defjam_crowd_update(); crowd_guard(g_ecx); }
 /* The per-fighter pad reader: RECOMP_TEST_INPUT replaces what it is about to read, and so
  * does online play, with the entry both PCs agreed on for this step. */
-void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); netplay_on_pad_read(MEM32(g_esp + 4)); }
+void ow_pad_read(uint32_t actor);     /* Big Arena "behind" camera: the stick turned by the camera (openworld.c) */
+void sub_001BAA00_enter(void) { defjam_test_input(MEM32(g_esp + 4)); ow_pad_read(MEM32(g_esp + 4)); netplay_on_pad_read(MEM32(g_esp + 4)); }
 /* Rollback (src/hooks/rollback.c). The main loop's dt read is the first call of every game
  * update, so its entry is the clean point between two updates: save, load and re-run there.
  * The audio subsystem's start-up brackets the memory the sound engine and its mixer thread

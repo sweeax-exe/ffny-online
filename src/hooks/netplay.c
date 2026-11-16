@@ -4346,6 +4346,19 @@ static void on_packet(const uint8_t *b, int len)
                 text = ping_why;
             }
             if (code == 8 && N.pend_len && N.pend[5] == T_TPICK) text = "That stage can't be picked now.";
+            {   /* build 86: a relay's own sentence for a refusal (Run the Streets: closed test, sign in, the check),
+                 * after the code; "not allowed" alone keeps the client's own text */
+                static char said[200];
+                int k, n = 0;
+                int tl = len > 8 ? (int)b[7] : 0;      /* ERROR: code, then the text with its length byte */
+                if (tl > len - 8) tl = len - 8;
+                if (code == 8 && tl > 0 && !(tl == 11 && !memcmp(b + 8, "not allowed", 11))) {
+                    for (k = 8; k < 8 + tl && n < (int)sizeof(said) - 1; k++)
+                        if (b[k] >= 0x20 && b[k] < 0x7F) said[n++] = (char)b[k];
+                    said[n] = 0;
+                    if (n >= 12) text = said;
+                }
+            }
             if (code == 15) {   /* build 82: the room has other community packs; most often new ones are out */
                 char problem[512];      /* build 83: the last sync failed (the hub line says why; error[] is short) */
                 text = pc_content_problem(problem, sizeof(problem)) ? "Your community content is not up to date: start the game from the launcher again."

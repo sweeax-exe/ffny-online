@@ -50,6 +50,9 @@ typedef struct PcContentPack {
     char template_name[48]; /* ... and that fighter's name ("D-Mob"), "" unknown */
     int skin;               /* build 85: a new fighter the team accepted as a skin (fighter_mode=skin) */
     int skin_of;            /* ... the stock fighter it is an outfit of (its front-end ID), -1 none */
+    int official;           /* build 86: an official map of the FFNY team (catalogue kind "official-map"), always on */
+    int rts_map;            /* ... a Run the Streets map (openworld rts.c loads it) */
+    char venue_code[8];     /* ... its venue's code ("28A": V2BG_28A), "" unknown */
 } PcContentPack;
 
 /* Build 85, skins: a new-fighter pack the team accepted as an extra outfit of a stock fighter (same gameplay, new

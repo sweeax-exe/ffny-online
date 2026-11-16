@@ -48,6 +48,8 @@
 #include "patches/cheats.h"
 #include "recomp_settings.h"
 #include "openworld.h"
+#include "netplay.h"
+#include "rts.h"
 
 #define ACTORS      0x003B92E0u
 #define STRIDE      0x12E8u
@@ -353,10 +355,16 @@ typedef struct {
     uint32_t time_limit_steps;
     float spawn_scale;              /* the spawn ring for this venue's walls (1: the Big Arena template's) */
     uint32_t blazin;                /* BLAZIN' moves allowed (else the meter stops short of full) */
+    uint32_t rts;                   /* a Run the Streets fight (offline from its page, online from its room) */
+    uint32_t spawn_hash;            /* the map's spawn points (SP, set at the set-up from the content every PC shares) */
 } BigArena;
 static BigArena BA;
 typedef char ow_state_fits[sizeof(BigArena) <= OW_STATE_BYTES ? 1 : -1];
 
+/* The map's spawn points for this fight (rts_spawns: the pack's bigarena json or the official map's own), read at
+ * the set-up from the content files, which the room's content print makes the same on every PC; their hash is in
+ * BA, so a PC with other points shows in the checksum. 0 points: the ring (k_spawn) scaled to the walls. */
+static struct { int n; float x[OW_SPAWN_MAX], z[OW_SPAWN_MAX]; } SP;
 static struct { int camera; int camera_set; } BAcfg;    /* host only: the follow camera (0 stock, 1 follow, 2 behind) */
 static const char *const k_ba_camera[] = { "stock", "follow", "behind", NULL };
 
@@ -379,37 +387,71 @@ static int ba_env_on(const char *name)
     return v && *v && *v != '0';
 }
 
-/* The match set-up (sub_001A4D90's entry): is this fight a Big Arena, and its rules. */
+/* The match set-up (sub_001A4D90's entry): is this fight a Big Arena, and its rules.
+ * Run the Streets: offline from its page (rts_offline_start, the rules from [openworld]), online from a Run the
+ * Streets room (the room's mode, which every PC of the fight has from ROOM; fixed rules, never a PC's own settings).
+ * Otherwise [openworld] big_arena (tests and the Studio template), offline only (RECOMP_OW_ONLINE_TEST=1: online). */
 void ow_match_start(void)
 {
     int want = recomp_settings_get("openworld", "big_arena", 0) != 0;
-    int online = netplay_active();
+    int online = netplay_active(), rts = 0, i;
     memset(&BA, 0, sizeof BA);
     memset(BA.last_hit, -1, sizeof BA.last_hit);
-    if (online && want && !ba_env_on("RECOMP_OW_ONLINE_TEST")) {
-        /* milestone 1: the mode is offline only; online needs the room option in START (milestone 2) */
-        fprintf(stderr, "[BIGARENA] online fight: Big Arena stays off (offline only until the room option)\n");
-        want = 0;
+    SP.n = 0;
+    if (online) {
+        rts = netplay_rts_match();
+        if (rts) want = 1;
+        else if (want && !ba_env_on("RECOMP_OW_ONLINE_TEST")) {
+            fprintf(stderr, "[BIGARENA] online fight: Big Arena stays off (only in Run the Streets rooms)\n");
+            want = 0;
+        }
+    } else if (rts_offline_fight_starts()) {
+        rts = want = 1;
     }
-    if (want && cheats_in_story()) want = 0;
+    if (want && cheats_in_story()) want = rts = 0;
     if (want && (MEM8(0x003B907Eu) & 2u)) {
         fprintf(stderr, "[BIGARENA] a team fight: Big Arena stays off (free for all only)\n");
-        want = 0;
+        want = rts = 0;
     }
     BAcfg.camera = recomp_settings_get("openworld", "camera", 1);
     BAcfg.camera_set = 1;
     C.have = 0;
     if (!want) return;
     BA.on = 1;
-    BA.score_limit = (uint16_t)recomp_settings_get("openworld", "score_limit", 5);
-    BA.respawn_steps = (uint16_t)(60 * recomp_settings_get("openworld", "respawn_seconds", 3));
-    BA.time_limit_steps = 60u * (uint32_t)recomp_settings_get("openworld", "time_limit", 300);
+    BA.rts = (uint32_t)rts;
+    if (online && rts) {            /* the same rules on every PC: none of a PC's own settings */
+        BA.score_limit = 5;
+        BA.respawn_steps = 180;
+        BA.time_limit_steps = 60u * 300u;
+    } else {
+        BA.score_limit = (uint16_t)recomp_settings_get("openworld", "score_limit", 5);
+        BA.respawn_steps = (uint16_t)(60 * recomp_settings_get("openworld", "respawn_seconds", 3));
+        BA.time_limit_steps = 60u * (uint32_t)recomp_settings_get("openworld", "time_limit", 300);
+    }
     BA.winner = 0xFF;
-    BA.blazin = recomp_settings_get("openworld", "blazin", 0) != 0;
-    fprintf(stderr, "[BIGARENA] on: first to %u knockouts, back after %u steps, time limit %u steps, camera %s%s\n",
-            BA.score_limit, BA.respawn_steps, BA.time_limit_steps, k_ba_camera[BAcfg.camera % 3],
-            online ? " (online test)" : "");
+    /* BLAZIN': on in Run the Streets (the Studio-venue BLAZIN' crash was fixed in build 83, re-tested for build 86);
+     * the [openworld] blazin setting for the other Big Arena fights */
+    BA.blazin = rts ? 1u : recomp_settings_get("openworld", "blazin", 0) != 0;
+    if (rts) {
+        RtsMap m;
+        if (rts_map(&m)) SP.n = rts_spawns(&m, SP.x, SP.z, OW_SPAWN_MAX);
+        {
+            uint32_t h = 2166136261u;
+            const uint8_t *p = (const uint8_t *)SP.x;
+            for (i = 0; i < (int)sizeof SP.x; i++) h = (h ^ p[i]) * 16777619u;
+            p = (const uint8_t *)SP.z;
+            for (i = 0; i < (int)sizeof SP.z; i++) h = (h ^ p[i]) * 16777619u;
+            BA.spawn_hash = h ^ (uint32_t)SP.n;
+        }
+        fprintf(stderr, "[RTS] Run the Streets fight%s on %s (feID %d): %d spawn points (hash %08X)\n",
+                online ? " (online)" : "", m.code[0] ? m.code : "?", m.fe_id, SP.n, BA.spawn_hash);
+    }
+    fprintf(stderr, "[BIGARENA] on: first to %u knockouts, back after %u steps, time limit %u steps, camera %s, "
+            "BLAZIN' %s%s\n", BA.score_limit, BA.respawn_steps, BA.time_limit_steps, k_ba_camera[BAcfg.camera % 3],
+            BA.blazin ? "on" : "off", online ? (rts ? " (Run the Streets room)" : " (online test)") : "");
 }
+
+int ow_rts_active(void) { return BA.on && BA.rts; }
 
 static uint32_t ba_present(void)
 {
@@ -440,11 +482,17 @@ static void ba_revive(int s, int pick_spawn)
     if (pick_spawn) {
         OwSpawnCtx c;
         int k, i;
-        memset(&c, 0, sizeof c);
         float sc = BA.spawn_scale > 0.0f ? BA.spawn_scale : 1.0f;
-        for (i = 0; i < 8; i++) { c.spawn_x[i] = k_spawn[i][0] * sc; c.spawn_z[i] = k_spawn[i][1] * sc; }
-        c.spawns = 8;
-        c.safe = 140.0f * sc;
+        memset(&c, 0, sizeof c);
+        if (SP.n > 0) {             /* the map's own points (streets), at their place: no ring scale */
+            for (i = 0; i < SP.n; i++) { c.spawn_x[i] = SP.x[i]; c.spawn_z[i] = SP.z[i]; }
+            c.spawns = SP.n;
+            c.safe = 140.0f;
+        } else {
+            for (i = 0; i < 8; i++) { c.spawn_x[i] = k_spawn[i][0] * sc; c.spawn_z[i] = k_spawn[i][1] * sc; }
+            c.spawns = 8;
+            c.safe = 140.0f * sc;
+        }
         for (k = 0; k < 4; k++) {
             if (k == s || !present(k) || (MEM16(rec(k) + 0x932u) & ENDED)) continue;
             c.live_x[c.lives] = MEMF(rec(k) + 0x44u);
@@ -845,4 +893,40 @@ void ow_match_update(uint32_t match)
         last = st;
         since = now;
     }
+}
+
+/* ---------------------------------------------------------------- camera-relative controls */
+/* The "follow" camera keeps the stock heading (it looks along -Z like the game's own camera), so the stick already
+ * moves the fighter away from the camera when pushed up: nothing to turn. The "behind" camera turns with the
+ * fighter; there the local player's left stick is turned by the camera's heading before the step reads it
+ * (sub_001BAA00's entry, before netplay.c takes the poll as this PC's entry), so the entry every PC simulates is
+ * the turned one and the fight stays the same everywhere. Only the stick: the D-pad keeps the stock directions.
+ * Tests: RECOMP_OW_STICK_TURN=<degrees> turns by a fixed heading in any Big Arena fight (to measure). */
+#define PAD_TABLE_OW 0x003B8F48u
+void ow_pad_read(uint32_t actor)
+{
+    static float last_x[4], last_y[4];
+    static int fixed = -1000;
+    int slot, local;
+    uint32_t base;
+    float x, y, heading;
+    if (!BA.on || netplay_rerunning()) return;
+    if (actor < ACTORS || actor >= ACTORS + 4u * STRIDE || (actor - ACTORS) % STRIDE) return;
+    slot = (int)((actor - ACTORS) / STRIDE);
+    local = netplay_local_slot();
+    if (local < 0) local = netplay_active() ? -1 : 0;
+    if (slot != local) return;
+    if (fixed == -1000) { const char *v = getenv("RECOMP_OW_STICK_TURN"); fixed = v && *v ? atoi(v) : -999; }
+    if (fixed != -999 && !ffny_online_locked()) heading = (float)fixed;
+    else if (C.have && C.behind) heading = ow_rules_view_heading(C.eye[0], C.eye[2], C.at[0], C.at[2]);
+    else return;
+    base = PAD_TABLE_OW + (uint32_t)slot * 0x20u;
+    x = MEMF(base + 8u);
+    y = MEMF(base + 12u);
+    if (x == last_x[slot] && y == last_y[slot]) return;     /* turned already (a second read of the same poll) */
+    ow_rules_stick_turn(heading, &x, &y);
+    MEMF(base + 8u) = x;
+    MEMF(base + 12u) = y;
+    last_x[slot] = x;
+    last_y[slot] = y;
 }
