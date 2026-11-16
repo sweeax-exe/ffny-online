@@ -3710,6 +3710,7 @@ bool g_exit = false;                // the overlay shows the main menu's QUIT FF
 bool g_cupd = false;                // build 86: the main menu's "New community content is out" popup
 std::atomic<bool> g_exit_req{false};    // ESC or a click on the EXIT chip (window thread)
 bool g_ms = false;                  // the overlay shows MILESTONES (the user-ID screen, the Story crib)
+bool g_community = false;           // the overlay shows the community window (MORE on a select screen)
 bool g_skin = false;                // build 85: the overlay shows the skin window over a select screen
 std::atomic<bool> g_ms_req{false};      // a click on the MILESTONES chip (window thread)
 std::atomic<int> g_menu_eats_back{0};   // the title reads no BACK (VIEW) on the main menu (game thread)
@@ -3829,7 +3830,7 @@ void set_open(bool open)
     if (g_open.load() == open) return;
     g_open = open;
     g_just_opened = open;
-    if (!open) g_online = g_exit = g_ms = g_skin = g_cupd = false;
+    if (!open) g_online = g_exit = g_ms = g_skin = g_cupd = g_community = false;
     if (open) { g_hold_input = false; xbox_HostInputSetUiActive(1); }
     else g_hold_input = true;           // released in release_input_when_idle
 #if !defined(_WIN32)
@@ -4565,6 +4566,9 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
             set_open(true);
             g_cupd = true;
             online_screen::update_prompt_begin("main menu");
+        } else if (!g_open.load() && !g_note.open && !toggled && online_screen::take_community_window_request()) {
+            set_open(true);
+            g_community = true;
         } else if (!g_open.load() && !g_note.open && !toggled && online_screen::exit_wanted() &&
             (req || view_press || online_screen::take_exit_test_request())) {
             set_open(true);
@@ -4689,6 +4693,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
             content_update_offer_answer(answer == 1);
             close_request = true;
         }
+    } else if (g_community) {
+        if (!g_note.open && online_screen::draw_community_window(io.DisplaySize)) close_request = true;
     } else if (g_exit) {
         int answer = g_note.open ? 0 : online_screen::draw_exit_prompt(io.DisplaySize);
         if (answer == 2 && g_window) {

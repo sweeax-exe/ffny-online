@@ -9,6 +9,7 @@
 #include <time.h>
 #include "online_data.h"
 #include "new_fighters.h"
+#include "fighter_banks.h"
 #include "pc_content.h"
 #include "rts.h"
 #if defined(_WIN32)
@@ -316,6 +317,10 @@ const char *online_fighter_name(int id)
         const OnlineFighter *nf;
         int n = online_new_fighters(&nf);
         for (i = 0; i < n; i++) if (nf[i].id == id) return nf[i].name;
+    }
+    if (id >= FB_FIRST_LOGICAL) {   /* build 86: a community fighter beyond the places, by its number */
+        const FighterBanksEntry *e = fighter_banks_find(id);
+        if (e && e->name[0]) return e->name;
     }
     /* 99 is a created fighter (NETPLAY_CREATED_FIGHTER): My Stats' last fights said "Fighter 99" (Discord, 2026-11-03) */
     if (id == 99) return "Created Fighter";

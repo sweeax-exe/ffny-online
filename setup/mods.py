@@ -41,7 +41,8 @@ import content_compose
 # leaves new fighters out, for launchers up to build 78. All share their revisions. Build 85: index-v4.json also
 # lists the skins (new fighters the team accepted as an extra outfit of a stock fighter: "fighter_mode": "skin",
 # "skin_of", no place). Build 86: index-v5.json is everything plus the FFNY team's official maps (kind official-map,
-# rts_map, venue_fe_id; their versions need official-map-v1); index-v4.json is the same without them.
+# rts_map, venue_fe_id; their versions need official-map-v1) and the community fighters beyond the places, by their
+# fighter number (1000 and up, mod_catalogue.fighter_number); index-v4.json leaves both out for launchers of build 85.
 CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v5.json'
 CATALOGUE_URL_V4 = 'https://play.defjam.online/updates/content/index-v4.json'
 CATALOGUE_URL_V3 = 'https://play.defjam.online/updates/content/index-v3.json'

@@ -38,6 +38,10 @@ bool exit_wanted();
  * draw_skin_window until it returns true (a look taken, or B: the fighter's own look). */
 bool take_skin_window_request();
 bool draw_skin_window(ImVec2 display);
+/* Community fighters beyond the places (community_ui.inc, fighter_banks.h): the select grid's MORE cell asks for
+ * the paged list; the overlay holds the game's input and draws it until it returns true (a fighter taken or B). */
+bool take_community_window_request();
+bool draw_community_window(ImVec2 display);
 bool exit_chip_at(float x, float y);
 bool take_exit_test_request();
 void exit_prompt_begin();

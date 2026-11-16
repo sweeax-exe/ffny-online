@@ -203,6 +203,8 @@ class Session:
         if rollback:
             args.append("-rollback")
         args += list(extra)
+        # DJ_RELAY_EXTRA: more relay flags for a feature under test (build 86: "-unlimited -unlimited-numbers 1000,1001")
+        args += os.environ.get("DJ_RELAY_EXTRA", "").split()
         tag = "relay%d" % len(self.relays)
         p = subprocess.Popen(args, stdout=open(os.path.join(self.dir, tag + ".out"), "wb"),
                              stderr=open(os.path.join(self.dir, tag + ".err"), "wb"),
@@ -232,6 +234,8 @@ class Session:
                 "-test-accounts", ",".join(names),
                 # F9 reports from the copies (RECOMP_TEST_PICTURE_REPORT_SECS) land in the session's folder
                 "-reports", os.path.join(self.dir, "reports")] + list(extra)
+        # DJ_ACCOUNTS_EXTRA: more account-service flags (build 86: "-test-fighter-numbers 1000,1007")
+        args += os.environ.get("DJ_ACCOUNTS_EXTRA", "").split()
         tag = "accounts%d" % len(self.relays)
         p = subprocess.Popen(args, stdout=open(os.path.join(self.dir, tag + ".out"), "wb"),
                              stderr=open(os.path.join(self.dir, tag + ".err"), "wb"),

@@ -48,6 +48,11 @@ void new_fighters_blazins(void);
  * voice number becomes the fighter's own when its row asks for it and the files are there; and a log of the bank
  * lines looked up (sub_001393F0_enter: RECOMP_SPEECH_LOG=1, always for own voices). */
 void new_fighters_voice(void);
+
+/* The select grid's shelf of community fighters beyond the places (fighter_banks.h): their IDs, last played
+ * first, at most max; and a fighter just played (it moves to the front). */
+int new_fighters_shelf(int *ids, int max);
+void new_fighters_shelf_played(int id);
 void new_fighters_speech_line(uint32_t hdr, uint32_t index);
 
 #ifdef __cplusplus

@@ -57,6 +57,10 @@ every internal pointer there is an absolute offset):
     change; the screens' own program, pictures and stock frames stay byte-identical. Patched once: a
     pack only adds its thumb files. These three entries are optional: one that does not match its
     hashes stays as it is and the tool says so (`note: ... left as it is`), the menu patch is kept;
+    patch version 6 adds to the same screens the pictures of the community fighters beyond the places
+    (front-end ID 1000 and up, past thumbAll's frames): the screen's main action is copied to the end of
+    the .apt with a call after each of the grid's three gotoAndStop calls to a function of its own that,
+    for such an ID, loads `thumbs/thumb<ID>[off].swf` by URL (see build_choosef_grid);
   * the `.apt` is re-laid out in its BIGF (other inner files byte-identical),
     wrapped as a literal-only RefPack stream, appended to the archive copy, and
     its directory record and the header total size are updated.
@@ -102,10 +106,11 @@ NEW_POS = (-61.0, 95.5)           # bottom-left cell: its poster's centre (-62.5
                                   # (+1.5, +1.5) offset every other slot's hit target has
 
 NEW_CLIP_NAME = "mmOnline"
-PATCH_VERSION = 5                 # 1: slot 6 + Focus/Open; 2: + per-frame Online.Tick();
+PATCH_VERSION = 6                 # 1: slot 6 + Focus/Open; 2: + per-frame Online.Tick();
                                   # 3: + the ONLINE poster painted into the poster wall textures;
                                   # 4: + the same per-frame Online.Tick() on battle/cmtype;
-                                  # 5: + the community fighters' grid pictures on battle/chooseF2/3/4
+                                  # 5: + the community fighters' grid pictures on battle/chooseF2/3/4;
+                                  # 6: + grid pictures by URL for fighters beyond the places (ID 1000 and up)
 CLIP_EVENT_ENTERFRAME = 0x02
 PLACE_HAS_CLIP_ACTIONS = 0x80
 CMD_TICK = "Online.Tick()"
@@ -1090,6 +1095,304 @@ def verify_choosef_apt(apt, new_apt, info):
     return "%d frame actions appended (%d bytes, %d baked picture(s) removed), no existing byte changed but their "         "frame records" % (len(records), len(new_apt) - len(apt), len(info["baked"]))
 
 
+# --------------------------- battle/chooseF2/3/4 (patch version 6): community fighters beyond the places in the grid
+#
+# A cell's grid picture is a frame of thumbAll: gotoAndStop(<feID> + 150) in CThumbGrid's redraw and deselect, and
+# gotoAndStop(<feID> + 1) in select (1-based). A community fighter beyond the places has a front-end ID of 1000 and
+# up (src/hooks/fighter_banks.h): past the sprite's 300 frames, so the call does nothing and the cell keeps frame 0
+# (feID 0's picture). Right after each of those three calls the patch calls a function of its own,
+#
+#     function nfCommunityThumb(nfC, nfI, nfS) {
+#         if (nfI < 1000) return;                       // every other cell: as before
+#         nfC.gotoAndStop(279);                         // an empty frame (no picture, no action)
+#         nfC.attachMovie("emptyClip", "nfThumb", 2);   // as the places' frame actions (patch version 5)
+#         nfC.nfThumb._x = -18.5;  nfC.nfThumb._y = -18.5;
+#         loadMovie("thumbs/thumb" + nfI + nfS + ".swf", nfC.nfThumb);
+#     }
+#
+# with the cell's clip, its ID and "off" (redraw, deselect) or "" (select): the picture is loaded by its URL, so any ID
+# has one (screens/thumbs/thumb<ID>.big and thumb<ID>off.big, which the composer writes for every such fighter). The
+# function is defined at the end of the screen's main frame action. The action is copied to the end of the .apt with
+# the four insertions (each a multiple of 4 bytes, so every aligned operand keeps its alignment), every branch and
+# function size that spans one is re-computed, and the frame's action item points at the copy; the original bytes
+# stay where they are.
+
+CHOOSEF_GRID_FUNC = "nfCommunityThumb"
+CHOOSEF_GRID_EMPTY_FRAME = 279          # 1-based: frame 278, after the RemoveObject of frame 249 and no action
+CHOOSEF_GRID_FIRST_ID = 1000
+OP_SUBTRACT, OP_LESS2, OP_GETMEMBER_STACK, OP_CALLFUNCPOP, OP_PUSHSHORT = 0x0B, 0x48, 0x4E, 0x5B, 0xB6
+OP_PUSHCONSTWORD, OP_PUSHCONSTBYTE, OP_PUSHVALUEOFVAR, OP_GETNAMEDMEMBER = 0xA3, 0xA2, 0xAE, 0xAF
+OP_DEFINELOCAL = 0x3C
+
+
+def _main_action(apt, const):
+    """(item address, block start) of the main timeline's frame-0 action that defines CThumbGrid."""
+    movie = struct.unpack_from("<I", const, 0x14)[0]
+    nframes, frames = u32(apt, movie + 8), u32(apt, movie + 12)
+    strings = const_strings(const)
+    for f in range(min(nframes, 1)):
+        n, ip = struct.unpack_from("<II", apt, frames + 8 * f)
+        for k in range(n):
+            item = u32(apt, ip + 4 * k)
+            if u32(apt, item) != 1:
+                continue
+            start = u32(apt, item + 4)
+            ins = decode(apt, start)
+            if any(i.op == OP_DEFFUNC and i.vals[0] and cstr(apt, i.vals[0]) == "CThumbGrid" for i in ins):
+                return item, start, ins, strings
+    raise PatchError("no main frame action defines CThumbGrid")
+
+
+def _grid_sites(apt, ins, strings):
+    """The three gotoAndStop calls of a grid cell: [(after address, clip-expression bytes, id-expression bytes,
+    suffix)]."""
+    slots = pool_slots(apt, ins)
+
+    def name(i):
+        return strings[slots[i.vals[0]]] if i.vals[0] < len(slots) else None
+
+    def raw(seq):
+        return b"".join(apt[i.addr:i.nxt] for i in seq)
+
+    sites = []
+
+    def walk(body):
+        for j, i in enumerate(body):
+            if i.op == OP_DEFFUNC:
+                b, size = i.body
+                walk(decode(apt, b, b + size))
+            if i.op != OP_CALLNAMEDMETHODPOP or name(i) != "gotoAndStop":
+                continue
+            before = body[:j]
+            # the clip: thumbClip (redraw), or this.sTargetClip + ".thumbNails.thumb" + clipNum (select, deselect)
+            if len(before) >= 2 and before[-2].op == OP_PUSHCONSTWORD and name(before[-2]) == "thumbClip":
+                clip = before[-2:]
+            elif (len(before) >= 8 and [x.op for x in before[-8:]] == [OP_PUSHTHISVAR, OP_GETNAMEDMEMBER,
+                  OP_PUSHCONSTWORD, OP_ADD2, OP_PUSHCONSTWORD, OP_GETVARIABLE, OP_ADD2, OP_GETVARIABLE]
+                  and name(before[-6]) == ".thumbNails.thumb" and name(before[-4]) == "clipNum"):
+                clip = before[-8:]
+            else:
+                continue
+            rest = before[:-len(clip)]
+            if len(rest) < 4 or rest[-1].op != OP_PUSHONE:
+                continue
+            frame = rest[:-1]
+            if (len(frame) >= 10 and frame[-3].op == OP_PUSHCONSTWORD and name(frame[-3]) == "CHAR_SELECTED_OFFSET"
+                    and frame[-2].op == OP_GETVARIABLE and frame[-1].op == OP_ADD2):
+                idexpr = frame[:-3]
+                # redraw: aCharacters[charNum].getID() (7 instructions); deselect: charFrame
+                if (len(idexpr) >= 7 and [x.op for x in idexpr[-7:]] == [OP_PUSHZERO, OP_PUSHVALUEOFVAR,
+                        OP_PUSHCONSTWORD, OP_GETVARIABLE, OP_GETMEMBER_STACK, OP_PUSHCONSTBYTE, OP_CALLMETHOD]
+                        and name(idexpr[-1 - 1]) == "getID"):
+                    sites.append((i.nxt, raw(clip), raw(idexpr[-7:]), "off"))
+                elif idexpr[-2].op == OP_PUSHCONSTWORD and name(idexpr[-2]) == "charFrame" \
+                        and idexpr[-1].op == OP_GETVARIABLE:
+                    sites.append((i.nxt, raw(clip), raw(idexpr[-2:]), "off"))
+            elif (len(frame) >= 3 and frame[-2].op == OP_PUSHCONSTWORD and name(frame[-2]) == "charFrame"
+                  and frame[-1].op == OP_GETVARIABLE and frame[-3].op == OP_DEFINELOCAL):
+                # select: charFrame = getID() + 1 just before; the ID is charFrame - 1
+                sites.append((i.nxt, raw(clip), raw(frame[-2:]) + bytes([OP_PUSHONE, OP_SUBTRACT]), ""))
+    walk(ins)
+    if len(sites) != 3 or sorted(s[3] for s in sites) != ["", "off", "off"]:
+        raise PatchError("the grid's picture calls are not the three expected (%d found)" % len(sites))
+    return sites
+
+
+def _relocate(apt, start, ins, inserts):
+    """The action block from `start` with `inserts` [(old address, bytes)] spliced in (each before the instruction
+    at that address, a multiple of 4 bytes long), every branch and function size re-computed. Returns (bytes,
+    new-address function for an old instruction address, given the new start)."""
+    end = ins[-1].nxt
+    inserts = sorted(inserts)
+    for p, code in inserts:
+        if len(code) % 4 or not start <= p < end:
+            raise PatchError("internal: insertion at 0x%X" % p)
+
+    def moved(x, inclusive):
+        return (x - start) + sum(len(c) for p, c in inserts if (p <= x if inclusive else p < x))
+
+    out = bytearray()
+    last = start
+    for p, code in inserts:
+        out += apt[last:p] + code
+        last = p
+    out += apt[last:end]
+
+    def fix(body):
+        for i in body:
+            if i.op in (OP_BRANCH, OP_IF):
+                at = align(i.addr + 1, 4)
+                new_end = moved(i.addr, True) + (i.nxt - i.addr)
+                off = moved(i.target, False) - new_end
+                struct.pack_into("<i", out, moved(i.addr, True) + (at - i.addr), off)
+            elif i.op == OP_DEFFUNC:
+                b, size = i.body
+                new_size = moved(b + size, True) - moved(b, True)
+                struct.pack_into("<I", out, moved(i.addr, True) + (i.vals[4] - i.addr), new_size)
+                fix(decode(apt, b, b + size))
+            elif i.op in (0x94, 0x8F, 0x87, 0x8A, 0x9F, 0x81):
+                if any(i.addr < p < i.nxt + 64 for p, _ in inserts):
+                    raise PatchError("opcode 0x%02X near an insertion is not handled" % i.op)
+    fix(ins)
+    return bytes(out), moved
+
+
+def _asm_site(at, clip, idexpr, suffix_ptr, func_ptr):
+    a = Asm(at)
+    a.op_u32(OP_PUSHSTRING, suffix_ptr)                 # nfS
+    a.buf += idexpr                                     # nfI (no aligned operands: copied as they are)
+    a.buf += clip                                       # nfC
+    a.op(OP_PUSHBYTE, 3)
+    a.op_u32(OP_PUSHSTRING, func_ptr)
+    a.op(OP_CALLFUNCPOP)
+    a.pad_to_multiple_of_4()
+    return bytes(a.buf)
+
+
+def _asm_function(at, sp):
+    """DefineFunction nfCommunityThumb(nfC, nfI, nfS), its body as in the comment above."""
+    a = Asm(at)
+    a.buf.append(OP_DEFFUNC)
+    a.align_to(4)
+    size_at = len(a.buf) + 12
+    a.buf += struct.pack("<IIII", sp["func"], 3, sp["params"], 0) + FUNC_MARKER
+    body = len(a.buf)
+
+    def var(n):
+        a.op_u32(OP_PUSHSTRING, sp[n])
+        a.op(OP_GETVARIABLE)
+
+    var("nfI")
+    a.op(OP_PUSHSHORT)
+    a.buf += struct.pack("<h", CHOOSEF_GRID_FIRST_ID)
+    a.op(OP_LESS2)
+    branch = a.op_u32(OP_IF, 0)
+    after = len(a.buf)
+    a.op(OP_PUSHSHORT)
+    a.buf += struct.pack("<h", CHOOSEF_GRID_EMPTY_FRAME)
+    a.op(OP_PUSHONE)
+    var("nfC")
+    a.op_u32(OP_PUSHSTRING, sp["gotoAndStop"])
+    a.op(OP_CALLMETHODPOP)
+    a.op(OP_PUSHBYTE, CHOOSEF_DEPTH)
+    a.op_u32(OP_PUSHSTRING, sp["clip"])
+    a.op_u32(OP_PUSHSTRING, sp["empty"])
+    a.op(OP_PUSHBYTE, 3)
+    var("nfC")
+    a.op_u32(OP_PUSHSTRING, sp["attachMovie"])
+    a.op(OP_CALLMETHODPOP)
+    for prop in ("_x", "_y"):
+        var("nfC")
+        a.op_u32(OP_PUSHSTRING, sp["clip"])
+        a.op(OP_GETMEMBER_STACK)
+        a.op_u32(OP_PUSHSTRING, sp[prop])
+        a.op(OP_PUSHFLOAT)
+        a.buf += struct.pack("<f", CHOOSEF_ORIGIN)
+        a.op(OP_SETMEMBER)
+    a.op_u32(OP_PUSHSTRING, sp["prefix"])
+    var("nfI")
+    a.op(OP_ADD2)
+    var("nfS")
+    a.op(OP_ADD2)
+    a.op_u32(OP_PUSHSTRING, sp["ext"])
+    a.op(OP_ADD2)
+    var("nfC")
+    a.op_u32(OP_PUSHSTRING, sp["clip"])
+    a.op(OP_GETMEMBER_STACK)
+    a.op(OP_GETURL2)
+    end = len(a.buf)
+    a.patch_u32(branch, end - after)
+    a.patch_u32(size_at, end - body)
+    a.pad_to_multiple_of_4()
+    return bytes(a.buf)
+
+
+def build_choosef_grid(apt, const):
+    """The community fighters' grid pictures by URL (patch version 6). `apt` may already carry the places' frame
+    actions (build_choosef_apt). Returns (new .apt, info)."""
+    if len(apt) % 4:
+        raise PatchError("the .apt length %d is not a multiple of 4" % len(apt))
+    item, start, ins, strings = _main_action(apt, const)
+    sites = _grid_sites(apt, ins, strings)
+    end = ins[-1].nxt
+    if ins[-1].op != OP_END:
+        raise PatchError("the main action does not end with End")
+    pos = len(apt)
+    data = bytearray()
+
+    def put_str(text):
+        at = pos + len(data)
+        data.extend(text.encode("latin-1") + b"\x00")
+        return at
+
+    sp = {k: put_str(v) for k, v in (("func", CHOOSEF_GRID_FUNC), ("nfC", "nfC"), ("nfI", "nfI"), ("nfS", "nfS"),
+                                      ("off", "off"), ("on", ""), ("gotoAndStop", "gotoAndStop"),
+                                      ("clip", CHOOSEF_CLIP_NAME), ("empty", CHOOSEF_EMPTY_NAME),
+                                      ("attachMovie", "attachMovie"), ("_x", "_x"), ("_y", "_y"),
+                                      ("prefix", "thumbs/thumb"), ("ext", ".swf"))}
+    while (pos + len(data)) % 4:
+        data.append(0)
+    sp["params"] = pos + len(data)
+    data += struct.pack("<3I", sp["nfC"], sp["nfI"], sp["nfS"])
+    # the copy keeps the block's address modulo 4, so every aligned operand keeps its padding
+    while (pos + len(data)) % 4 != start % 4:
+        data.append(0)
+    new_start = pos + len(data)
+    inserts = [(after, _asm_site(after, clip, idexpr, sp["off"] if sfx else sp["on"], sp["func"]))
+               for after, clip, idexpr, sfx in sites]
+    inserts.append((ins[-1].addr, _asm_function(ins[-1].addr, sp)))
+    block, moved = _relocate(apt, start, ins, inserts)
+    new_apt = bytearray(apt) + data + block
+    while len(new_apt) % 4:
+        new_apt.append(0)
+    struct.pack_into("<I", new_apt, item + 4, new_start)
+    info = dict(item=item, start=start, end=end, new_start=new_start, sites=[s[0] for s in sites],
+                inserted=sum(len(c) for _, c in inserts), strings=sp, moved=moved)
+    return bytes(new_apt), info
+
+
+def verify_choosef_grid(apt, new_apt, info):
+    """The copy decodes to its exact end with every function body to its size and every branch on an instruction;
+    it is the original instruction for instruction (branch offsets and sizes aside) plus the four insertions; the
+    only original bytes changed are the action item's pointer."""
+    item, start, new_start = info["item"], info["start"], info["new_start"]
+    for off in range(0, len(apt), 4):
+        if apt[off:off + 4] != new_apt[off:off + 4] and off != item + 4:
+            raise PatchError("original .apt bytes changed unexpectedly at 0x%X" % off)
+    old = decode(apt, start)
+    new, nfun = verify_block(new_apt, new_start)
+    _, old_fun = verify_block(apt, start)
+    if nfun != old_fun + 1:
+        raise PatchError("function count %d, expected %d" % (nfun, old_fun + 1))
+
+    def flat(buf, ins):
+        out = []
+        for i in ins:
+            if i.op == OP_DEFFUNC:
+                b, size = i.body
+                out.append((i.op, i.vals[0], i.vals[1], i.vals[2]))
+                out += flat(buf, decode(buf, b, b + size))
+                out.append(("end",))
+            elif i.op in (OP_BRANCH, OP_IF):
+                out.append((i.op,))
+            else:
+                out.append((i.op,) + tuple(i.vals))
+        return out
+    a, b = flat(apt, old), flat(new_apt, new)
+    calls = sum(1 for x in b if x[0] == OP_CALLFUNCPOP) - sum(1 for x in a if x[0] == OP_CALLFUNCPOP)
+    if calls != 3:
+        raise PatchError("expected three new calls, found %d" % calls)
+    # the original sequence is a subsequence of the new one
+    k = 0
+    for x in b:
+        if k < len(a) and x == a[k]:
+            k += 1
+    if k != len(a):
+        raise PatchError("the copied action lost original instructions (%d of %d matched)" % (k, len(a)))
+    return "grid pictures by URL: %d bytes inserted at 0x%s, main action copied to 0x%X" % (
+        info["inserted"], ", 0x".join("%X" % s for s in info["sites"]), new_start)
+
+
 def choosef_patcher(entry_name):
     """The Plan patcher of one select screen: raw (RefPack) entry -> (new raw entry, report lines)."""
     movie, payload_sha, apt_sha, const_sha, sprite = CHOOSEF_ENTRIES[entry_name]
@@ -1102,8 +1405,10 @@ def choosef_patcher(entry_name):
         apt, const = files.get(movie + ".apt"), files.get(movie + ".const")
         if apt is None or const is None or sha(apt) != apt_sha or sha(const) != const_sha:
             raise PatchError("%s.apt/.const do not match the expected hashes" % movie)
-        new_apt, info = build_choosef_apt(apt, const, sprite)
-        lines = ["verify %s.apt: %s" % (movie, verify_choosef_apt(apt, new_apt, info))]
+        places_apt, info = build_choosef_apt(apt, const, sprite)
+        lines = ["verify %s.apt: %s" % (movie, verify_choosef_apt(apt, places_apt, info))]
+        new_apt, grid = build_choosef_grid(places_apt, const)
+        lines.append("verify %s.apt: %s" % (movie, verify_choosef_grid(places_apt, new_apt, grid)))
         new_payload = rebuild_bigf(payload, {movie + ".apt": new_apt})
         new_files = inner_files(new_payload)
         if list(new_files) != list(files):

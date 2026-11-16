@@ -503,7 +503,7 @@ def test_new_packs_and_the_inputs_key():
     assert cc.new_packs(packs, today) == {"fresh", "today", "last-day", "ahead"}
     assert cc.new_packs(packs, datetime.date(2026, 11, 14)) == {"fresh", "today", "ahead"}
     assert cc.new_packs([{"id": "no-date", "fighter_fe_id": 101}], today) == set()
-    assert cc.NEW_DAYS == 14 and cc.COMPOSER == 8     # 7: build 85 (6 skins, 7 the 48 places), 8 row names (fix)
+    assert cc.NEW_DAYS == 14 and cc.COMPOSER == 9     # 7: build 85 (6 skins, 7 the 48 places), 8 row names (fix), 9 banks
     plain = cc.inputs_key("game", packs, [])
     assert plain == cc.inputs_key("game", packs, [], (), set()) != cc.inputs_key("game", packs, [], (), {"fresh"})
     assert cc.inputs_key("game", packs, [], (), {"a", "b"}) == cc.inputs_key("game", packs, [], (), ["b", "a"])
