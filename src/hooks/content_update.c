@@ -17,6 +17,7 @@
 #include <string.h>
 #include <windows.h>
 #include "content_update.h"
+#include "content_release.h"
 #include "account.h"
 #include "memcard_fast.h"
 #include "netplay.h"
@@ -170,9 +171,13 @@ static void close_for_update(void)
 void content_update_frame(int online_page)
 {
     unsigned long long now = now_ms();
-    int in_fight = netplay_in_fight();
+    int in_fight = netplay_in_fight(), check;
     cu_offer_frame(&g_offer, in_fight);
-    if (cu_check_due(g_last_check, now, in_fight, account_state() == ACCOUNT_IN, online_page)) {
+    check = cu_check_due(g_last_check, now, in_fight, account_state() == ACCOUNT_IN, online_page);
+    /* build 87: the release schedule is asked with the check (content_release.c, no timer of its own); a release
+     * time that has just passed is a check of its own, so UPDATE NOW takes over from "NEW CONTENT AT ..." */
+    if (content_release_frame(check, in_fight)) check = 1;
+    if (check) {
         g_last_check = now;
         pc_mods_check_start();          /* one at a time; the news shows once it wrote news.ini */
     }

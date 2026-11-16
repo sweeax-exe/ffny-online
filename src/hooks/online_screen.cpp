@@ -69,6 +69,7 @@
 #include "pc_content.h"
 #include "pc_mods.h"
 #include "content_update.h"
+#include "content_release.h"
 #include "music_library.h"
 #include "pc_launcher_music.h"
 #include <time.h>
@@ -469,6 +470,7 @@ float hint(ImDrawList *dl, const Frame &f, float x, float y, const char *button,
 
 int content_news(char *names, int size);
 bool content_problem(char *out, int size);
+bool content_release(char *head, int head_size, char *detail, int detail_size);
 // The page title in the corner, as the game writes MAIN MENU.
 void page_title(ImDrawList *dl, const Frame &f, const char *title)
 {
@@ -497,6 +499,17 @@ void page_title(ImDrawList *dl, const Frame &f, const char *title)
         rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
         text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "UPDATE NOW on the hub (Y): the game comes back by itself", RIGHT, 0.8f);
+    } else {
+        // build 87: community content to come (the daily release window): when, on this PC's clock, and what;
+        // nothing to do yet, so it comes last. Once its time has passed, the notice above takes over.
+        char head[64], detail[224];
+        if (content_release(head, sizeof(head), detail, sizeof(detail))) {
+            float w = text_width(f, g_title, 12, head);
+            rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
+            text(dl, f, g_title, 12, 606, 11, WHITE, head, RIGHT, 1.0f);
+            float size = std::max(8.0f, fit_size(f, g_hand, 11, detail, 330));
+            text(dl, f, g_hand, size, 606, 30, ORANGE, detail, RIGHT, 0.8f);
+        }
     }
 }
 
@@ -1269,6 +1282,17 @@ int content_news(char *names, int size)
         return n;
     }
     return content_update_news(names, size);
+}
+// Build 87: community content is scheduled for the next release window (content_release.c): the notice's two
+// lines, "NEW CONTENT AT 17:00" and "3 new fighters, 1 skin - in 2h 15m". The gallery: its own page, a fixed sample.
+bool content_release(char *head, int head_size, char *detail, int detail_size)
+{
+    if (gallery_on()) {
+        if (!(G.page && !strcmp(G.page, "hub-release"))) return false;
+        content_release_sample_lines(head, head_size, detail, detail_size);
+        return true;
+    }
+    return content_release_lines(head, head_size, detail, detail_size) != 0;
 }
 // Build 83: the last community content sync failed, or the game's own check did (pc_content_problem: sync-result.ini
 // and news.ini), as one plain line; read every 3 s. The gallery: only its own pages (RECOMP_TEST_CONTENT_SYNC).
@@ -5252,6 +5276,8 @@ void gallery_step()
                                          // RECOMP_TEST_CONTENT_NEW=all and RECOMP_TEST_CONTENT_NEWS=2)
                                          "create-standard", "room-standard", "rooms-standard", "fighters-standard",
                                          "fighters-new", "vote-new", "hub-news",
+                                         // build 87: content to come at the next release window ("NEW CONTENT AT 17:00")
+                                         "hub-release",
                                          // build 86: QUICK MATCH set to original fighters only (One on One, King of the
                                          // Hill), Ranked's skins choice
                                          "hub-original", "hub-koth-original", "ranked-modes-original",
@@ -5586,6 +5612,7 @@ void gallery_step()
         S.vote_sel = 1;
     }
     else if (p == "hub-news") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
+    else if (p == "hub-release") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
     else if (p == "hub-sync-failed") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
     else if (p == "rooms-split" || p == "rooms-sync-failed") {     // 22 on Europe, 1 of them on this PC's content
         S.page = ROOMS;
