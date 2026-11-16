@@ -53,6 +53,8 @@
 #include "hooks/memcard_fast.h"
 #include "patches/picture.h"
 #include "patches/cheats.h"
+#include "patches/song_trace.h"     /* RECOMP_SONG_TRACE */
+#include "patches/song_shuffle.h"   /* the shuffled playlist, evenly */
 #include "patches/online_guard.h"   /* cheats refused while online */
 #include "patches/menu_geometry.h"
 #include "hooks/dynload_guard.h"
@@ -352,6 +354,18 @@ void sub_00014540(void)
         fprintf(stderr, "[SETS] the save's song list was damaged (%u unknown key(s)%s): every song starts again "
                         "as never arranged\n", bad, fighters_over ? ", fighter ids over its states" : "");
     }
+}
+/* The shuffled music playlist builder (thiscall on the profile's song store, (names[] out, count* out),
+ * ret 8; the menus' sub_0003DA40 and sub_0003DF9C, the fights' sub_0001F7E0). Its collision rule (the lowest
+ * free slot) puts songs from the first half of the Song table at the front of the list nearly every time, so
+ * late songs such as "Get It Now" almost never played (retail bug, 2026-11-16 report). The game's builder
+ * runs as it is; its list is then reordered evenly on the host: src/patches/song_shuffle.c. */
+extern void sub_00020D70_gen(void);
+void sub_00020D70(void)
+{
+    uint32_t names = MEM32(g_esp + 4), count_ptr = MEM32(g_esp + 8);
+    sub_00020D70_gen();
+    song_shuffle_after_build(names, count_ptr);
 }
 /* The audio subsystem's per-frame update (cdecl (frame), called directly by every screen's update:
  * sub_00079B60 and five others). It walks the game's cue queue and voices (sub_0003D560 ->
@@ -1116,6 +1130,7 @@ void sub_00077040_enter(void)
 {
     screen_swap_guard();
     dev_module_manager_enter();
+    song_trace_tick();          /* RECOMP_SONG_TRACE only: src/patches/song_trace.c */
     if (!ffny_online_locked())
         cheats_game_tick();     /* Story cheats, src/patches/cheats.c; never online */
 }
