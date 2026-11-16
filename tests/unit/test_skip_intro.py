@@ -33,6 +33,7 @@ void cheats_start_game(uint32_t gamedata) { (void)gamedata; }  /* src/patches/ch
 void cheats_start_game_done(uint32_t gamedata) { (void)gamedata; }
 void new_fighters_start_game_done(uint32_t gamedata) { (void)gamedata; }
 void fighter_skins_start_game_done(uint32_t gd) { (void)gd; }      /* src/hooks/fighter_skins.c (build 85) */
+int content_update_restarted(void) { return 0; }    /* src/hooks/content_update.c (build 86): no UPDATE NOW restart */
 /* FFNY Online: dev_unlock.c asks whether a session is open (src/patches/online_guard.h). */
 #include "hooks/netplay.h"
 int netplay_active(void) { return 0; }
