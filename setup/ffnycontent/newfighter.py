@@ -72,6 +72,7 @@ STOCK_ROWS = 75
 FIRST_LOGICAL = 1000        # community fighters beyond the places (unlimited.py): bound to a bank per match
 LAST_LOGICAL = 0x7FFFFFFF
 MORE_ID = 999999            # the select grid's MORE cell, never a fighter (src/hooks/fighter_banks.h)
+THUMB_FALLBACK = 55         # Doc: the grid thumbs of a fighter beyond the places whose template has none
 
 
 class FighterError(ValueError):
@@ -625,6 +626,11 @@ def apply_op(files, op, fe_id, pictures=True, pack=None, new=False, logical=Fals
         edits.append(("loose", ANIM_TAGS, None, add_anim_tags(tags, template, model)))
     if pictures:
         copies = picture_copies(_View(files, SCREENS_ARCHIVE), template_fe_id, fe_id, replace_existing=True)
+        if logical and not any("/thumbs/" in n.lower() for n, _ in copies):
+            # a template without grid thumbs of its own (feID 58): Doc's, so the cell is not empty (a place
+            # fighter's cell shows its template's baked picture instead)
+            copies += [(n, d) for n, d in picture_copies(_View(files, SCREENS_ARCHIVE), THUMB_FALLBACK, fe_id,
+                                                         replace_existing=True) if "/thumbs/" in n.lower()]
         if pack is not None:
             try:
                 art = fighterart.load_art(pack)

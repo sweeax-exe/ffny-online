@@ -229,3 +229,16 @@ def test_grid_pictures_by_url_patch():
     for name in ap.CHOOSEF_ENTRIES:
         new_raw, lines = ap.choosef_patcher(name)(screens.raw(screens.find(name)))
         assert any("grid pictures by URL: 308 bytes inserted" in line for line in lines), lines
+
+
+@needs_dump
+def test_a_template_without_thumbs_gets_docs(tmp_path):
+    """A fighter beyond the places whose template has no grid thumbs of its own (feID 58) gets Doc's, so its shelf
+    cell is not empty (2026-11-16, the 60-cell shelf)."""
+    bases = cc.Bases(tmp_path, GAME)
+    work = cc.Work(bases)
+    rows = {r["fe_id"]: r for r in nf.characters(work.current(nf.SOD_PATH))}
+    op = nf.make_op(58, rows[58]["model"], "V2IP_7ZZA", "Syn Thumb")
+    cc.apply_new_fighter(work, op, 1000)
+    added = {n.lower() for n, _ in work.archives[nf.SCREENS_ARCHIVE.lower()][2]}
+    assert "screens/thumbs/thumb1000.big" in added and "screens/thumbs/thumb1000off.big" in added
