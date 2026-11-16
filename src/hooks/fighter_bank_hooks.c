@@ -23,6 +23,13 @@ static int g_bound[FB_BANKS] = { -1, -1, -1, -1 };
 static uint32_t g_checked_base;     /* the loaded database whose bank rows were checked */
 static volatile int g_window_req, g_window_slot;
 
+/* RECOMP_BANKS_OFF=answers,movies (tests): leave that part out. */
+static int part_off(const char *part)
+{
+    const char *e = getenv("RECOMP_BANKS_OFF");
+    return e && strstr(e, part) != NULL;
+}
+
 static uint8_t *read_all(const char *name, size_t *size, int *overridden)
 {
     FILE *f = netplay_open_fight_file(name, overridden);
@@ -221,16 +228,16 @@ int fighter_banks_bind(int slot, int id)
 int fighter_banks_after_call(const char *command, const char *answer, char *out, size_t out_size)
 {
     static const char *const info_keys[] = { "0", "1", "2", "3" };
-    static const char *const summary_keys[] = { "fid" };
-    int from[FB_BANKS], to[FB_BANKS], n = 0, k, info;
-    if (!g_ready || !answer || ffny_online_locked()) return 0;
-    info = !strcmp(command, "Game.GetMatchInfo()");
-    if (!info && strncmp(command, "Game.GetMatchSummary(", 21)) return 0;
+    int from[FB_BANKS], to[FB_BANKS], n = 0, k;
+    /* Game.GetMatchInfo() only: the loading screen takes its pictures by these IDs. Game.GetMatchSummary(n) keeps
+     * the bank's fid: answered with a fighter's own ID the result screen stopped presenting (0 fps after the
+     * summary, 2026-11-16, logs/dj/20261116-110206-offline; with the bank's ID, 20261116-110907-offline, fine). */
+    if (!g_ready || !answer || ffny_online_locked() || part_off("answers")) return 0;
+    if (strcmp(command, "Game.GetMatchInfo()")) return 0;
     for (k = 0; k < FB_BANKS; k++)
         if (g_bound[k] >= 0) { from[n] = FB_FIRST_BANK + k; to[n] = g_fb[g_bound[k]].id; n++; }
     if (!n) return 0;
-    return fighter_banks_rewrite_fields(answer, info ? info_keys : summary_keys, info ? 4 : 1, from, to, n, out,
-                                        out_size);
+    return fighter_banks_rewrite_fields(answer, info_keys, 4, from, to, n, out, out_size);
 }
 
 /* ---- the FuncCall hook's two calls (recomp_manual.c funccall_hook: cdecl, the command at g_esp + 4) ---- */
@@ -265,7 +272,7 @@ void fighter_banks_funccall_after(const char *text)
     static uint32_t answer_buf;
     char answer[600], out[600];
     uint32_t a = g_eax, i, buf;
-    if (a < 0x10000u || !g_ready || (strcmp(text, "Game.GetMatchInfo()") && strncmp(text, "Game.GetMatchSummary(", 21)))
+    if (a < 0x10000u || !g_ready || strcmp(text, "Game.GetMatchInfo()"))
         return;
     for (i = 0; i < sizeof answer - 1 && MEM8(a + i); i++) answer[i] = (char)MEM8(a + i);
     answer[i] = 0;
@@ -294,7 +301,7 @@ void fighter_banks_movie_load(uint32_t name_arg)
     char name[160], out[192];
     int map[FB_BANKS], k, any = 0;
     uint32_t p, i, buf;
-    if (!g_ready || ffny_online_locked()) return;
+    if (!g_ready || ffny_online_locked() || part_off("movies")) return;
     for (k = 0; k < FB_BANKS; k++) {
         map[k] = g_bound[k] >= 0 ? g_fb[g_bound[k]].id : -1;
         any |= map[k] >= 0;

@@ -90,9 +90,10 @@ int fighter_banks_before_call(const char *command, char *out, size_t out_size);
  * record for a bound bank's row, else record. caller: the lookup's return address, for the log. */
 uint32_t fighter_banks_record(uint32_t database, uint32_t record, uint32_t caller);
 
-/* A front-end answer after the game made it: Game.GetMatchInfo() ("0=<fighter>&1=..") and
- * Game.GetMatchSummary(n) ("..&fid=<fighter>&..") name a bound bank by its fighter's own ID, so the loading, versus
- * and result screens load that fighter's pictures. Returns 1 with the new answer in out. */
+/* A front-end answer after the game made it: Game.GetMatchInfo() ("0=<fighter>&1=..") names a bound bank by its
+ * fighter's own ID, so the loading screen loads that fighter's pictures. Game.GetMatchSummary keeps the bank's ID
+ * (the result screen stops with a fighter's own; its pictures come from fighter_banks_movie_load). Returns 1 with
+ * the new answer in out. */
 int fighter_banks_after_call(const char *command, const char *answer, char *out, size_t out_size);
 
 /* The FuncCall hook (recomp_manual.c): before the game runs a command (text is changed to the command it runs,
