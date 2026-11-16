@@ -323,6 +323,15 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                  * room's content print (server docs/unlimited-fighters-online.md) */
 /* build 86: a community fighter number (1000 and up; not the select grid's MORE cell) */
 static int is_number(int fighter) { return fighter >= FB_FIRST_LOGICAL && fighter != FB_MORE_ID; }
+/* Build 86: a community fighter beyond the places (fighter_banks.h, 1000 and up) on the wire: READY's byte is its
+ * template (the stock fighter it was made from: what a relay plays that cannot keep the number), the number follows
+ * the skin byte. Without the community fighter on this PC: Doc. */
+static int unl_template(int number)
+{
+    const FighterBanksEntry *e = fighter_banks_find(number);
+    return e && e->template_fe_id >= 0 && e->template_fe_id < 0xFF ? e->template_fe_id : 55;
+}
+
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -4633,7 +4642,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
                               CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED |
-                              CAPS_UNLIMITED); n += 4;
+                              (getenv("RECOMP_TEST_NO_UNLIMITED") ? 0u : CAPS_UNLIMITED)); n += 4;   /* tests: an older game */
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -5671,6 +5680,7 @@ void netplay_lobby_ranked_ex(int fighter, unsigned modes, int primary)
     if (primary < 0 || primary >= NETRANK_MODES) primary = NETRANK_CLASSIC;
     modes |= 1u << primary;
     if (fighter == 99 && primary != NETRANK_OPEN) fighter = 55;    /* a created fighter plays in Open only */
+    if (is_number(fighter)) fighter = unl_template(fighter);        /* build 86: ranked is stock only (RANKED's byte) */
     EnterCriticalSection(&g_cs);
     N.rk_fighter = fighter;
     N.rk_modes = modes & 7u;
@@ -5837,15 +5847,6 @@ int netplay_lobby_skins(void)
     on = relay_has(CAPS_SKINS);
     LeaveCriticalSection(&g_cs);
     return on;
-}
-
-/* Build 86: a community fighter beyond the places (fighter_banks.h, 1000 and up) on the wire: READY's byte is its
- * template (the stock fighter it was made from: what a relay plays that cannot keep the number), the number follows
- * the skin byte. Without the community fighter on this PC: Doc. */
-static int unl_template(int number)
-{
-    const FighterBanksEntry *e = fighter_banks_find(number);
-    return e && e->template_fe_id >= 0 && e->template_fe_id < 0xFF ? e->template_fe_id : 55;
 }
 
 void netplay_lobby_ready_skin(int ready, int fighter, int skin)

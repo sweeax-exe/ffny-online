@@ -203,6 +203,8 @@ class Session:
         if rollback:
             args.append("-rollback")
         args += list(extra)
+        # DJ_RELAY_EXTRA: more relay flags for a feature under test (build 86: "-unlimited -unlimited-numbers 1000,1001")
+        args += os.environ.get("DJ_RELAY_EXTRA", "").split()
         tag = "relay%d" % len(self.relays)
         p = subprocess.Popen(args, stdout=open(os.path.join(self.dir, tag + ".out"), "wb"),
                              stderr=open(os.path.join(self.dir, tag + ".err"), "wb"),
