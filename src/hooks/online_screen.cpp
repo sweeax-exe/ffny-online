@@ -2425,10 +2425,10 @@ void draw_rts_setup(ImDrawList *dl, const Frame &f, const Pad &pad, bool have_ma
         int t, k;
         ow_rules_rts_decode(rules, &t, &k);
         int secs = ow_rules_rts_seconds(t), kos = ow_rules_rts_kos(k);
-        std::string d = "You and " + std::to_string(S.rts_cpus) + " CPU fighters loose on the block. Knocked out? Back on a "
-                        "street corner in three seconds. First to " + std::to_string(kos) + " knockouts wins" +
-                        (secs > 0 ? ", or the most knockouts when the " + std::to_string(secs / 60) +
-                                        " minutes are up: the clock is on the score plate, and you hear about the last 30 seconds."
+        std::string d = "You and " + std::to_string(S.rts_cpus) + " CPU fighters on the block. First to " +
+                        std::to_string(kos) + " knockouts wins" +
+                        (secs > 0 ? ", or the most when the " + std::to_string(secs / 60) +
+                                        " minutes are up. The clock is on the score plate."
                                   : ". No time limit: the KO target ends it.");
         door_text(dl, f, &tex("ui/online_icon.png"), "VS CPU", rts_rules_tag(rules).c_str(), d.c_str());
     }
@@ -3295,7 +3295,8 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
             venues_y = 178;
         }
     }
-    venue_showcase(dl, f, s, 356 + dx, venues_y, 214, (g_game_door ? 438 : DOOR_Y + DOOR_H - 6) - venues_y);
+    if (!rts)       // a Run the Streets room plays the relay's map: no venues to show
+        venue_showcase(dl, f, s, 356 + dx, venues_y, 214, (g_game_door ? 438 : DOOR_Y + DOOR_H - 6) - venues_y);
     if (pad.a && rows_of[S.settings_sel] == R_OPEN) {
         if (S.settings_edit) { netplay_lobby_settings(&s); S.page = HUB; say("Settings saved; everyone readies again."); }
         else { netplay_lobby_create(&s); say("Opening the room..."); S.page = HUB; }
