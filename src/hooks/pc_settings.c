@@ -249,6 +249,14 @@ static RecompSetting g_display_settings[] = {
     { "openworld", "blazin", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_OW_BLAZIN", 0,
       "Big Arena: BLAZIN' moves. Off for now: a BLAZIN' on a map built with FFNY Studio crashes the game after the "
       "fight (being fixed)." },
+    { "openworld", "free_roam", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OW_FREE_ROAM", 0,
+      "Run the Streets / Big Arena: out of combat your fighter walks freely and faces where it goes; a fight button "
+      "next to someone, a hit, or White/Black (or a right-stick flick) to lock on brings the fight stance back. "
+      "Online always on." },
+    { "openworld", "roam_seconds", RECOMP_SETTING_INT, 3, 1, 15, NULL, "RECOMP_OW_ROAM_SECONDS", 0,
+      "Free roam: seconds without a fight button or a hit before your fighter walks freely again (online 3)." },
+    { "openworld", "roam_speed", RECOMP_SETTING_INT, 100, 50, 200, NULL, "RECOMP_OW_ROAM_SPEED", 0,
+      "Free roam: walking speed in percent of the game's (online 100)." },
     { "openworld", "camera", RECOMP_SETTING_ENUM, 1, 0, 0, k_ow_camera, "RECOMP_OW_CAMERA", 0,
       "Big Arena camera: follow (your fighter, from above and behind; the stick works as always), behind (over the "
       "shoulder, turns with your fighter) or stock (the game's own fight camera, which loses fighters far apart). "

@@ -46,6 +46,19 @@ int main(void)
            ow_rules_next_loser(a, d, 0xF, 2, (1u << 3) | 1u), ow_rules_next_loser(a, d, 0xF, 2, 0xB));
     printf("yaw|%.1f|%.1f|%.1f|%.1f\n", ow_rules_yaw_to_centre(0, -260), ow_rules_yaw_to_centre(260, 0),
            ow_rules_yaw_to_centre(0, 260), ow_rules_yaw_to_centre(0, 0));
+    {   /* free roam: who a fighter at the origin facing +z (yaw 0) locks on to */
+        static const float cx[4] = { 0.0f, 40.0f, -100.0f, 0.0f }, cz[4] = { 0.0f, 200.0f, 50.0f, -60.0f };
+        float y = -1.0f;
+        int n[9], k;
+        static const unsigned nib[9] = { 1, 9, 8, 10, 2, 6, 4, 5, 3 };
+        printf("roam|%d|%d|%d|%d|%.1f|%.1f\n", ow_rules_roam_pick(0, 0, 0, cx, cz, 0xE, 300, 60, 140),
+               ow_rules_roam_pick(0, 0, 180, cx, cz, 0xE, 300, 60, 140),
+               ow_rules_roam_pick(0, 0, 180, cx, cz, 0x6, 300, 60, 40),
+               ow_rules_roam_pick(0, 0, 0, cx, cz, 0x0, 300, 60, 140),
+               ow_rules_angle_diff(170, -170), ow_rules_angle_diff(-90, 90));
+        for (k = 0; k < 9; k++) { y = -1.0f; n[k] = ow_rules_nibble_heading(nib[k], &y) ? (int)y : 999; }
+        printf("nib|%d|%d|%d|%d|%d|%d|%d|%d|%d\n", n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8]);
+    }
     return 0;
 }
 '''
@@ -78,6 +91,15 @@ def test_spawn_pick(out):
     assert out[('pick', 'north')][2] == '1'         # tie between 1 and 7: the lower index
     # no point is safe (400): the one farthest from its nearest fighter, a diagonal
     assert out[('pick', 'crowd')][2] in ('1', '3', '5', '7')
+
+
+def test_free_roam_pick_and_headings(out):
+    # facing +z: slot 1 (40, 200) is in the cone; facing -z: slot 3 (0, -60) is right in front;
+    # facing -z without slot 3: nobody in the cone, nearest within 40: nobody; no candidates: -1
+    assert out['roam'][1:5] == ['1', '3', '-1', '-1']
+    assert float(out['roam'][5]) == pytest.approx(20.0) and abs(float(out['roam'][6])) == pytest.approx(180.0)
+    # the walker's table (0x2EF510) by nibble: up 180, up-right 135, right 90, ..., up-left -135; up+down none
+    assert out['nib'][1:] == ['180', '135', '90', '45', '0', '-45', '-90', '-135', '999']
 
 
 def test_winner_and_loser_order(out):
