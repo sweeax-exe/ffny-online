@@ -186,15 +186,12 @@ def set_venue_modes(blob, fe_id, modes):
 
 
 def _row_name(base, above):
-    """``base`` or ``base`` + a suffix whose name hash is above ``above`` (rows are found by a sorted hash, and
-    a new row must sort last so the existing rows keep their index, which is their saved ID)."""
-    if name_hash(base) > above:
-        return base
-    for n in range(1, 1 << 20):
-        name = "%s %d" % (base, n)
-        if name_hash(name) > above:
-            return name
-    raise ValueError("no row name found")
+    """A name for a new row whose hash is just above ``above`` (rows are found by a sorted hash, and a new row must
+    sort last so the existing rows keep their index, which is their saved ID). Build 86: ``sodwrite.name_above``,
+    as for new fighters (fix/row-names): the first name above the floor, whatever its hash, used up the room above
+    the table after about 13 new venues ("no row name found")."""
+    from .sodwrite import name_above     # sodwrite imports this module
+    return name_above(base, above)
 
 
 def append_venue(blob, template_fe_id, fe_id, filename, display, name=""):

@@ -805,3 +805,18 @@ def test_validate_install_asks_for_venue_models_v1(tmp_path):
                                                      "ops": [{k: v for k, v in MODELS_OP.items() if k != "models"}]}),
                                          encoding="utf-8")
     assert mods.validate_install(folder)["capabilities"] == ["content-v1"]
+
+
+def test_all_36_new_venue_places_compose():
+    """Build 86: every new venue place 28..63 can be filled. The Venue rows' names took the first suffix whose hash
+    lay anywhere above the table's top, which used the room up after about 13 venues ("no row name found");
+    sod._row_name now hashes just above it (sodwrite.name_above, as the fighters' rows since build 85)."""
+    from ffnycontent import sod as sodmod
+    above, names = 0x10000000, []
+    for k in range(36):
+        name = sodmod._row_name("Studio V2BG_%dA" % (28 + k), above)
+        assert sodmod.name_hash(name) > above and sodmod.name_hash(name) - above <= 4096, (name, above)
+        above = sodmod.name_hash(name)
+        names.append(name)
+    assert len(set(names)) == 36
+    assert sodmod._row_name("x", 0xFFFFF000) and sodmod.name_hash(sodmod._row_name("x", 0xFFFFF000)) > 0xFFFFF000
