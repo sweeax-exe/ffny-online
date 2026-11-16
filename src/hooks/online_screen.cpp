@@ -5096,6 +5096,7 @@ void gallery_step()
     G.maint_secs = -1;
     QW.open = QW.gallery = false;
     S.skin_open = false;                // build 85: the skin window only on its own page
+    S.unl_open = false;                 // build 86: the community window only on its own page
     G.rollback = G.rb_must = false;
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
     G.crew = NetCrew();
@@ -6454,7 +6455,7 @@ bool draw_pages(ImVec2 display)
             S.ranked_pick = false;
         }
         if (S.page == HUB) S.ranked_pick = false;
-        if (S.page == FIGHTERS) {
+        if (S.page == FIGHTERS && !S.unl_open) {     // build 86: the community window has its own hints
             float hx = 54;
             hx += hint(dl, f, hx, 420, "a", "PICK");
             if (S.fighters_cp >= 0) hx += hint(dl, f, hx, 420, "y", "ONLINE NAME");     // a created fighter's card
