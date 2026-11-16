@@ -3467,8 +3467,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             for (int i = 0; i < fighter_banks_count(); i++) if (fighter_banks_at(i)->id == saved) S.unl_sel = i;
             S.unl_opened = GetTickCount64();
             { Pad none = {}; community_test_keys(none, true); }
-            fprintf(stderr, "[BANKS] hub: MORE: the community window, %d fighters, on %d
-", fighter_banks_count(), S.unl_sel);
+            fprintf(stderr, "[BANKS] hub: MORE: the community window, %d fighters, on %d\n", fighter_banks_count(), S.unl_sel);
         } else if (!S.random_pick && pick_cp < 0 && !no_skins && list[pick].id < 98 && fighter_skins_count(list[pick].id) > 0) {
             // build 85: a fighter with skins: the skin window first, on the look played last with it
             S.skin_open = true;
