@@ -267,7 +267,7 @@ bool rts_world_draw_impl(ImDrawList *dl, ImVec2 display, bool draw)
     }
     std::vector<RtsBubble> lines = rts_bubbles(v);
     uint32_t talking = rts_talking(v);
-    if (lines.empty() && !talking) return false;
+    if (lines.empty() && !talking && v.lock_target < 0) return false;
     if (!draw) return true;
     rts_world_paint(dl, display, v, lines, talking);
     return true;
@@ -327,6 +327,32 @@ void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, con
                               py + (0.5f - ny * 0.5f) * ph);
             }
             fprintf(stderr, "%s\n", line);
+        }
+    }
+    // Free roam: the lock marker, a chevron pointing down over the local fighter's target (solid red when locked
+    // on purpose, a thin white outline while just engaged); under the bubbles
+    if (v.lock_target >= 0 && v.lock_target != v.local) {
+        int s = v.lock_target;
+        float p[3] = { v.pos[s][0], v.pos[s][1] + RTS_HEAD + 3.0f, v.pos[s][2] }, nx, ny;
+        if (rts_project(&rv, p, &nx, &ny) == 1) {
+            float sx = px + (nx * 0.5f + 0.5f) * pw, sy = py + (0.5f - ny * 0.5f) * ph;
+            float ax = (sx - f.o.x) / f.sx, ay = (sy - f.o.y) / f.sy;
+            float bob = 1.5f * sinf((float)(now % 1000ull) * 0.00628f);
+            ImVec2 a = f.p(ax - 8, ay - 16 + bob), b = f.p(ax + 8, ay - 16 + bob), c = f.p(ax, ay - 4 + bob);
+            bool locked = v.roam_mode == OW_ROAM_LOCKED;
+            if (locked) {
+                dl->AddTriangleFilled(a, b, c, IM_COL32(235, 40, 40, 235));
+                dl->AddTriangle(a, b, c, IM_COL32(20, 0, 0, 220), 1.5f * f.sx);
+            } else {
+                dl->AddTriangle(a, b, c, IM_COL32(255, 255, 255, 200), 1.5f * f.sx);
+            }
+            static int logged = -1;
+            int key = s * 4 + v.roam_mode;
+            if (logged != key && !gallery_on()) {
+                logged = key;
+                fprintf(stderr, "[OWROAM] lock marker over fighter %d (%s) at %.0f,%.0f (menu units)\n", s,
+                        locked ? "locked" : "engaged", (double)ax, (double)ay);
+            }
         }
     }
     for (int oi = 0; oi < 4; oi++) {
@@ -899,6 +925,8 @@ void rts_gallery_page(ImDrawList *dl, ImVec2 display)
         memcpy(v.pos, pos, sizeof pos);
         v.present = 0xF;
         v.local = 0;
+        v.roam_mode = OW_ROAM_LOCKED;      // free roam's lock marker over fighter 1
+        v.lock_target = 1;
         unsigned long long now = GetTickCount64();
         std::vector<RtsBubble> lines;
         auto add = [&](int fi, const char *name, const char *text, unsigned ago) {

@@ -12,7 +12,8 @@
  *                           state (+0x30), cached floor height (+0x3A4), primary opponent slot.
  * RECOMP_OW_TELEPORT=list   tests only, never online: "<step>@<slot>=<x>,<z>" puts a fighter at x,z at that fight
  *                           step; "<step>@all=<dx>,<dz>" moves every fighter by dx,dz; "<step>@spread=<d>" puts the
- *                           fighters on a square of side d around the mean of their positions. ';' separates entries.
+ *                           fighters on a square of side d around the mean of their positions; "<step>@<slot>=@<other>,
+ *                           <dx>,<dz>" puts it next to another fighter. ';' separates entries.
  * RECOMP_OW_KO=<step>:<slot> tests, never online: that fighter is knocked out at that fight step (zero health, the
  *                           knockout state 0x18 through sub_001B5420, as test_telemetry.c's ko_step).
  * RECOMP_OW_REVIVE=<steps>  tests, never online: a fighter that has been "ended" (+0x932 bit 0x200) for <steps>
@@ -178,6 +179,15 @@ static void teleport_step(void)
                 if (present(s)) { MEMF(rec(s) + 0x44u) = mx + sx[s] * d; MEMF(rec(s) + 0x4Cu) = mz + sz[s] * d; }
             fprintf(stderr, "[OWTELE] step %lld: fighters spread on a square of side %.1f around %.1f,%.1f\n",
                     s_fight_step, d, mx, mz);
+        } else if (eq[1] == '@') {     /* "<step>@<slot>=@<other>,<dx>,<dz>": next to another fighter */
+            float dx = 0, dz = 0;
+            int o = -1;
+            s = atoi(who);
+            sscanf(eq + 2, "%d,%f,%f", &o, &dx, &dz);
+            if (s < 0 || s > 3 || o < 0 || o > 3 || !present(s) || !present(o)) continue;
+            MEMF(rec(s) + 0x44u) = MEMF(rec(o) + 0x44u) + dx;
+            MEMF(rec(s) + 0x4Cu) = MEMF(rec(o) + 0x4Cu) + dz;
+            fprintf(stderr, "[OWTELE] step %lld: slot %d put next to slot %d (%+.1f,%+.1f)\n", s_fight_step, s, o, dx, dz);
         } else {
             float x = 0, z = 0;
             s = atoi(who);
@@ -368,6 +378,14 @@ typedef struct {
     uint8_t unlimited;              /* no time limit: time_limit_steps is the safety end */
     uint8_t pad2;
     uint32_t end_step;              /* the step the end came at */
+    /* free roam (ow_roam_input): a human fighter out of combat walks free and faces where it goes */
+    uint8_t roam_on, roam_pad[3];
+    uint16_t roam_steps;            /* calm steps (no fight button, no hit) before an engaged fighter walks free */
+    uint16_t roam_speed;            /* walking speed while free, percent of the game's */
+    uint8_t roam_mode[4];           /* OW_ROAM_FREE, _ENGAGED, _LOCKED */
+    int8_t roam_pending[4];         /* a hit while free: engage this attacker at the slot's next input (-1 none) */
+    uint32_t roam_last[4];          /* the step of the slot's last fight button or hit */
+    uint8_t roam_turn[4];           /* steps left of the turn toward a target just locked on to */
 } BigArena;
 static BigArena BA;
 typedef char ow_state_fits[sizeof(BigArena) <= OW_STATE_BYTES ? 1 : -1];
@@ -460,6 +478,18 @@ void ow_match_start(void)
         BA.time_limit_steps = 60u * (uint32_t)recomp_settings_get("openworld", "time_limit", 300);
     }
     BA.winner = 0xFF;
+    /* free roam: the same on every PC online (on, 3 s, the game's speed); offline [openworld] free_roam,
+     * roam_seconds and roam_speed */
+    memset(BA.roam_pending, -1, sizeof BA.roam_pending);
+    if (online) {
+        BA.roam_on = 1;
+        BA.roam_steps = 180;
+        BA.roam_speed = 100;
+    } else {
+        BA.roam_on = recomp_settings_get("openworld", "free_roam", 1) != 0;
+        BA.roam_steps = (uint16_t)(60 * recomp_settings_get("openworld", "roam_seconds", 3));
+        BA.roam_speed = (uint16_t)recomp_settings_get("openworld", "roam_speed", 100);
+    }
     /* BLAZIN': on in Run the Streets (the Studio-venue BLAZIN' crash was fixed in build 83, re-tested for build 86);
      * the [openworld] blazin setting for the other Big Arena fights */
     BA.blazin = rts ? 1u : recomp_settings_get("openworld", "blazin", 0) != 0;
@@ -478,9 +508,10 @@ void ow_match_start(void)
                 online ? " (online)" : "", m.code[0] ? m.code : "?", m.fe_id, SP.n, BA.spawn_hash);
     }
     fprintf(stderr, "[BIGARENA] on: first to %u knockouts, back after %u steps, time limit %u steps%s, camera %s, "
-            "BLAZIN' %s%s\n", BA.score_limit, BA.respawn_steps, BA.time_limit_steps,
-            BA.unlimited ? " (no time limit: the safety end)" : "", k_ba_camera[BAcfg.camera % 3],
-            BA.blazin ? "on" : "off", online ? (rts ? " (Run the Streets room)" : " (online test)") : "");
+            "BLAZIN' %s, free roam %s (after %u calm steps, speed %u%%)%s\n", BA.score_limit, BA.respawn_steps,
+            BA.time_limit_steps, BA.unlimited ? " (no time limit: the safety end)" : "", k_ba_camera[BAcfg.camera % 3],
+            BA.blazin ? "on" : "off", BA.roam_on ? "on" : "off", BA.roam_steps, BA.roam_speed,
+            online ? (rts ? " (Run the Streets room)" : " (online test)") : "");
     if (rts) {
         char rt[48];
         ow_rules_rts_text(BA.rules, rt, (int)sizeof rt);
@@ -548,6 +579,8 @@ static void ba_revive(int s, int pick_spawn)
     if (h >= 0x10000u && h < 0x84000000u) { MEM8(h + 0x1104u) = 0; MEMF(h + 0x1108u) = 0.0f; }
     BA.down[s] = 0;
     BA.last_hit[s] = -1;
+    BA.roam_mode[s] = OW_ROAM_FREE;     /* back on the street: free until it fights */
+    BA.roam_pending[s] = -1;
     BA.protect_until[s] = BA.step + ARENA_PROTECT;
     if (!netplay_rerunning())
         fprintf(stderr, "[BIGARENA] step %u: slot %d back at %.0f,%.0f (flags %04X->%04X, hp %.1f, state %u)\n",
@@ -687,7 +720,215 @@ void ow_hit(uint32_t attacker, uint32_t defender)
     if (!BA.on) return;
     a = slot_of_record(attacker);
     d = slot_of_record(defender);
-    if (a >= 0 && d >= 0 && a != d) BA.last_hit[d] = (int8_t)a;
+    if (a >= 0 && d >= 0 && a != d) {
+        BA.last_hit[d] = (int8_t)a;
+        if (BA.roam_on) {           /* a hit is a fight for both: the calm starts again, a free one engages */
+            BA.roam_last[a] = BA.roam_last[d] = BA.step;
+            if (BA.roam_mode[d] == OW_ROAM_FREE) BA.roam_pending[d] = (int8_t)a;
+            if (BA.roam_mode[a] == OW_ROAM_FREE) BA.roam_pending[a] = (int8_t)d;
+        }
+    }
+}
+
+/* ---------------------------------------------------------------- free roam */
+/* In the stock game a fighter always faces its target (record +0x00): the per-step cache sub_001A4A30 writes before
+ * the state handlers (+0x838 the angle, +0x834 the distance, from the pair tables 0x3C04A8 / 0x3C04E8 that
+ * sub_001B3EA0 fills), the walker sub_001CAC40 turns +0x54 toward +0x838 (sub_001B3E10) and moves in the stick's
+ * world direction (the nibble's angle from the table at 0x2EF510), choosing forward, strafe or back by the difference
+ * to the latched target angle +0x3EC. Free roam rewrites that cache for a free human fighter at sub_001BA800's entry
+ * (after the cache, before the handlers): the angle becomes the stick's direction (or the fighter's own facing when
+ * the stick rests) and the distance far, so it turns to where it walks and walks forward. Its target stays on the
+ * nearest standing fighter, so the game's own retarget (sub_001C9610, when the target is down) never turns it.
+ *
+ *   free -> engaged: a fight button (0x30F0) with a fighter within ROAM_ENGAGE_RANGE (that one becomes the target),
+ *                    or a hit given or taken (the other one becomes the target);
+ *   free/engaged -> locked: White or Black (the game's target switch, sub_001C99B0) or a right-stick flick (its
+ *                    gesture, sub_001C9DF0 -> state 0x55): the fighter best in front within ROAM_PICK_RANGE, else the
+ *                    nearest within ROAM_PICK_NEAR; the press goes on as a flick so the fighter gestures at it, and it turns to face it. Nobody
+ *                    there: the press is dropped. While locked White/Black switch as in the game;
+ *   engaged -> free: roam_steps without a fight button, a hit or a standing fighter within ROAM_CALM_NEAR;
+ *   locked -> free:  White and Black together, or the target farther than ROAM_LOCK_DROP;
+ *   locked -> engaged: the target is knocked out.
+ * CPU fighters keep the game's own targeting. Everything is read from the fight's records and inputs and kept in BA
+ * (saved, loaded and checksummed with it), so every PC computes the same. */
+#define ROAM_ACTIONS        0x30F0u     /* the face buttons and triggers as the handlers see them (+0x9F0) */
+#define ROAM_SELECT         0x0300u     /* White, Black: the target switch */
+#define ROAM_FLICK          0x20000u    /* the right stick pushed (newly) */
+#define ROAM_PICK_RANGE     300.0f      /* ~26 m (11.7 units a metre) */
+#define ROAM_PICK_CONE      60.0f
+#define ROAM_PICK_NEAR      140.0f      /* ~12 m all around */
+#define ROAM_ENGAGE_RANGE   70.0f       /* ~6 m: a fight button engages a fighter this close, in front */
+#define ROAM_ENGAGE_NEAR    45.0f       /* ~4 m all around */
+#define ROAM_LOCK_DROP      470.0f      /* ~40 m */
+#define ROAM_CALM_NEAR      45.0f       /* ~4 m: a standing fighter this close keeps an engaged one engaged */
+#define ROAM_TURN_STEPS     30          /* the turn to a target just locked on to: at most this many steps */
+#define ROAM_TURN_RATE      12.0f       /* degrees a step */
+#define PAIR_DIST           0x003C04E8u
+#define PAIR_ANGLE          0x003C04A8u
+
+static const char *const k_roam_name[3] = { "free", "engaged", "locked" };
+
+static int target_slot(uint32_t r) { return slot_of_record(MEM32(r)); }
+
+/* Fighters a slot can take as its target: in the fight, not itself, not out; with standing_only also not down. */
+static uint32_t roam_candidates(int s, int standing_only)
+{
+    uint32_t m = 0;
+    int k;
+    for (k = 0; k < 4; k++) {
+        uint16_t fl;
+        if (k == s || !present(k)) continue;
+        fl = MEM16(rec(k) + 0x932u);
+        if (fl & ENDED) continue;
+        if (standing_only && (fl & 0x400u)) continue;
+        m |= 1u << k;
+    }
+    return m;
+}
+
+static int roam_pick(int s, float range, float cone, float near_, int standing_only)
+{
+    float cx[4], cz[4];
+    uint32_t r = rec(s);
+    int k;
+    for (k = 0; k < 4; k++) { cx[k] = MEMF(rec(k) + 0x44u); cz[k] = MEMF(rec(k) + 0x4Cu); }
+    return ow_rules_roam_pick(MEMF(r + 0x44u), MEMF(r + 0x4Cu), MEMF(r + 0x54u), cx, cz,
+                              roam_candidates(s, standing_only), range, cone, near_);
+}
+
+/* The slot's target becomes c, and this step's cache with it (as sub_001A4A30 wrote it: self * 4 + target). */
+static void roam_set_target(uint32_t r, int s, int c)
+{
+    uint32_t i = (uint32_t)s * 4u + (uint32_t)c;
+    MEM32(r) = rec(c);
+    MEMF(r + 0x834u) = MEMF(PAIR_DIST + 4u * i);
+    MEMF(r + 0x838u) = MEMF(PAIR_ANGLE + 4u * i);
+}
+
+static void roam_log(int s, int from, int to, const char *why, int target)
+{
+    if (netplay_rerunning() || from == to) return;
+    fprintf(stderr, "[OWROAM] step %u: slot %d %s -> %s (%s), target %d, at %.0f,%.0f yaw %.0f\n", BA.step, s,
+            k_roam_name[from % 3], k_roam_name[to % 3], why, target, (double)MEMF(rec(s) + 0x44u),
+            (double)MEMF(rec(s) + 0x4Cu), (double)MEMF(rec(s) + 0x54u));
+}
+
+void ow_roam_input(uint32_t r)
+{
+    int s = slot_of_record(r), c, t;
+    uint32_t pressed, held;
+    uint8_t m, m0;
+    const char *why = "";
+    float yaw;
+    if (!BA.on || !BA.roam_on || s < 0 || !present(s)) return;
+    if (MEM8(r + 0x937u) & 1u) return;                         /* a CPU: the game's own targeting */
+    if (BA.ending || (MEM16(r + 0x932u) & ENDED)) return;      /* the end, or out until it comes back */
+    m = m0 = BA.roam_mode[s];
+    pressed = MEM32(r + 0x9F0u);
+    held = MEM32(r + 0x9E0u);
+    c = BA.roam_pending[s];
+    BA.roam_pending[s] = -1;
+    if (c >= 0 && m == OW_ROAM_FREE && (roam_candidates(s, 0) & (1u << c))) {
+        roam_set_target(r, s, c);
+        m = OW_ROAM_ENGAGED;
+        why = "hit";
+    }
+    if ((held & ROAM_SELECT) == ROAM_SELECT && (pressed & ROAM_SELECT)) {
+        if (m != OW_ROAM_FREE) { m = OW_ROAM_FREE; why = "White+Black"; }
+        pressed &= ~(ROAM_SELECT | ROAM_FLICK);
+    } else if ((pressed & (ROAM_SELECT | ROAM_FLICK)) && m != OW_ROAM_LOCKED) {
+        c = roam_pick(s, ROAM_PICK_RANGE, ROAM_PICK_CONE, ROAM_PICK_NEAR, 0);
+        if (c >= 0) {
+            roam_set_target(r, s, c);
+            m = OW_ROAM_LOCKED;
+            why = (pressed & ROAM_SELECT) ? "target button" : "right stick";
+            BA.roam_last[s] = BA.step;
+            BA.roam_turn[s] = ROAM_TURN_STEPS;
+            pressed = (pressed & ~ROAM_SELECT) | ROAM_FLICK;   /* the game's own gesture at it (state 0x55) */
+        } else {
+            pressed &= ~(ROAM_SELECT | ROAM_FLICK);           /* nobody near: no turn toward a far fighter */
+        }
+    }
+    if (pressed & ROAM_ACTIONS) {
+        BA.roam_last[s] = BA.step;
+        if (m == OW_ROAM_FREE) {
+            c = roam_pick(s, ROAM_ENGAGE_RANGE, 90.0f, ROAM_ENGAGE_NEAR, 0);
+            if (c >= 0) { roam_set_target(r, s, c); m = OW_ROAM_ENGAGED; why = "fight button"; }
+        }
+    }
+    if (m == OW_ROAM_ENGAGED) {
+        /* someone standing right next to it is a fight too, hits or not (a CPU that blocks and circles) */
+        c = roam_pick(s, 0.0f, 0.0f, ROAM_CALM_NEAR, 1);
+        if (c >= 0) BA.roam_last[s] = BA.step;
+        else if (BA.step - BA.roam_last[s] >= BA.roam_steps) { m = OW_ROAM_FREE; why = "calm"; }
+    }
+    if (m == OW_ROAM_LOCKED) {
+        t = target_slot(r);
+        if (t < 0 || t == s || !present(t) || (MEM16(rec(t) + 0x932u) & ENDED)) {
+            m = OW_ROAM_ENGAGED;
+            BA.roam_last[s] = BA.step;
+            why = "target out";
+        } else if (MEMF(PAIR_DIST + 4u * ((uint32_t)s * 4u + (uint32_t)t)) > ROAM_LOCK_DROP) {
+            m = OW_ROAM_FREE;
+            why = "target far";
+        }
+    }
+    MEM32(r + 0x9F0u) = pressed;
+    BA.roam_mode[s] = m;
+    roam_log(s, m0, m, why, target_slot(r));
+    if (m != OW_ROAM_FREE) {
+        /* just locked on: face the target (the game turns an idle fighter only when it is more than 80 degrees
+         * off, and its gesture state 0x55 does not turn), up to ROAM_TURN_RATE degrees a step, while it stands or
+         * gestures and the stick rests */
+        uint32_t st = MEM32(r + 0x30u);
+        t = target_slot(r);
+        if (BA.roam_turn[s] && t >= 0 && (st == 1u || st == 0x55u) && !(held & 0xFu)) {
+            float want = MEMF(PAIR_ANGLE + 4u * ((uint32_t)s * 4u + (uint32_t)t));
+            float d = ow_rules_angle_diff(MEMF(r + 0x54u), want);
+            if (d > ROAM_TURN_RATE) d = ROAM_TURN_RATE;
+            if (d < -ROAM_TURN_RATE) d = -ROAM_TURN_RATE;
+            MEMF(r + 0x54u) = MEMF(r + 0x54u) + d;
+            BA.roam_turn[s]--;
+            if (d > -0.5f && d < 0.5f) BA.roam_turn[s] = 0;
+        } else {
+            BA.roam_turn[s] = 0;
+        }
+        return;
+    }
+    BA.roam_turn[s] = 0;
+    /* free and standing: the game's idle turn toward the target (state 1, sub_001CAC40 without a direction: more
+     * than 80 degrees off -> +0x910 bits 0/1, +0x81C the target's angle) is held off by its own cool-down, bit 1
+     * with the timer +0x90C (cleared when the timer passes 10 steps, 0x29F7B0), so once the fighter fights again the
+     * game turns it after that short wait. A turn already started ends where the fighter faces. */
+    if (MEM8(r + 0x910u) & 1u) MEMF(r + 0x81Cu) = MEMF(r + 0x54u);
+    MEM8(r + 0x910u) = (uint8_t)(MEM8(r + 0x910u) | 2u);
+    MEMF(r + 0x90Cu) = 0.0f;
+    /* free: the target on the nearest standing fighter (quiet for the game's retarget), the cache on the stick */
+    t = target_slot(r);
+    c = roam_pick(s, 0.0f, 0.0f, 1e9f, 1);
+    if (c >= 0 && c != t) MEM32(r) = rec(c);
+    MEMF(r + 0x834u) = 1000.0f;
+    MEMF(r + 0x838u) = ow_rules_nibble_heading(held, &yaw) ? yaw : MEMF(r + 0x54u);
+}
+
+/* sub_001CAC40's entry (cdecl record, held bits, speed): a free fighter walks at roam_speed percent. */
+void ow_roam_walk(void)
+{
+    uint32_t r = MEM32(g_esp + 4);
+    int s = slot_of_record(r);
+    if (!BA.on || !BA.roam_on || s < 0 || BA.roam_speed == 100 || BA.roam_mode[s] != OW_ROAM_FREE) return;
+    if (MEM8(r + 0x937u) & 1u) return;
+    MEMF(g_esp + 12) = MEMF(g_esp + 12) * ((float)BA.roam_speed / 100.0f);
+}
+
+int ow_roam_view(int slot, int *mode, int *target)
+{
+    *mode = OW_ROAM_FREE;
+    *target = -1;
+    if (!BA.on || !BA.roam_on || slot < 0 || slot > 3 || !present(slot)) return 0;
+    *mode = BA.roam_mode[slot];
+    *target = *mode == OW_ROAM_FREE ? -1 : target_slot(rec(slot));
+    return 1;
 }
 
 /* sub_001A50B0's entry (record, delta, ...): no damage in the respawn protection; tests offline:

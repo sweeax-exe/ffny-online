@@ -198,3 +198,59 @@ int ow_rules_rts_text(int byte, char *out, int size)
     if (s > 0) return snprintf(out, (size_t)size, "%d MIN  -  FIRST TO %d", s / 60, ow_rules_rts_kos(k));
     return snprintf(out, (size_t)size, "NO TIME LIMIT  -  FIRST TO %d", ow_rules_rts_kos(k));
 }
+
+/* Free roam (Run the Streets): the shortest turn from a to b in degrees, -180..180. */
+float ow_rules_angle_diff(float a, float b)
+{
+    float d = fmodf(b - a, 360.0f);
+    if (d > 180.0f) d -= 360.0f;
+    if (d < -180.0f) d += 360.0f;
+    return d;
+}
+
+/* Free roam: the fighter a roaming fighter at x,z facing yaw (degrees; forward is (sin, cos)) locks on to. Among the
+ * candidates (bit per slot in cand) within range and cone degrees of the facing, the best by angle off the facing
+ * plus a little for distance; else the nearest within near_. Ties go to the lower slot. -1: none. */
+int ow_rules_roam_pick(float x, float z, float yaw, const float cx[4], const float cz[4], uint32_t cand, float range,
+                       float cone, float near_)
+{
+    int s, best = -1, close = -1;
+    float best_score = 1e30f, close_d = 1e30f;
+    for (s = 0; s < 4; s++) {
+        float dx, dz, d, off, score;
+        if (!(cand & (1u << s))) continue;
+        dx = cx[s] - x;
+        dz = cz[s] - z;
+        d = sqrtf(dx * dx + dz * dz);
+        if (d <= near_ && d < close_d) { close = s; close_d = d; }
+        if (d > range) continue;
+        off = d > 0.001f ? fabsf(ow_rules_angle_diff(yaw, atan2f(dx, dz) * 57.2957795f)) : 0.0f;
+        if (off > cone) continue;
+        score = off + 30.0f * d / (range > 0.0f ? range : 1.0f);
+        if (score < best_score) { best = s; best_score = score; }
+    }
+    return best >= 0 ? best : close;
+}
+
+/* Free roam: the world heading (the record's +0x54 sense) the game's eight-way direction nibble walks to. The
+ * walker (sub_001CAC40) maps the nibble through sub_001BAB90 to an index into the table at 0x2EF510
+ * (180, 135, 90, 45, 0, -45, -90, -135): up 180 (-Z, away from the north camera), right 90, down 0, left -90.
+ * Returns 0 and leaves *yaw for no direction (or both of a pair pressed). */
+int ow_rules_nibble_heading(uint32_t nibble, float *yaw)
+{
+    static const float table[8] = { 180.0f, 135.0f, 90.0f, 45.0f, 0.0f, -45.0f, -90.0f, -135.0f };
+    int idx;
+    switch (nibble & 0xFu) {
+    case 1: idx = 0; break;
+    case 9: idx = 1; break;
+    case 8: idx = 2; break;
+    case 10: idx = 3; break;
+    case 2: idx = 4; break;
+    case 6: idx = 5; break;
+    case 4: idx = 6; break;
+    case 5: idx = 7; break;
+    default: return 0;
+    }
+    *yaw = table[idx];
+    return 1;
+}

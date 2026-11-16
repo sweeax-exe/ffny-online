@@ -46,6 +46,19 @@ int main(void)
            ow_rules_next_loser(a, d, 0xF, 2, (1u << 3) | 1u), ow_rules_next_loser(a, d, 0xF, 2, 0xB));
     printf("yaw|%.1f|%.1f|%.1f|%.1f\n", ow_rules_yaw_to_centre(0, -260), ow_rules_yaw_to_centre(260, 0),
            ow_rules_yaw_to_centre(0, 260), ow_rules_yaw_to_centre(0, 0));
+    {   /* free roam: who a fighter at the origin facing +z (yaw 0) locks on to */
+        static const float cx[4] = { 0.0f, 40.0f, -100.0f, 0.0f }, cz[4] = { 0.0f, 200.0f, 50.0f, -60.0f };
+        float y = -1.0f;
+        int n[9], k;
+        static const unsigned nib[9] = { 1, 9, 8, 10, 2, 6, 4, 5, 3 };
+        printf("roam|%d|%d|%d|%d|%.1f|%.1f\n", ow_rules_roam_pick(0, 0, 0, cx, cz, 0xE, 300, 60, 140),
+               ow_rules_roam_pick(0, 0, 180, cx, cz, 0xE, 300, 60, 140),
+               ow_rules_roam_pick(0, 0, 180, cx, cz, 0x6, 300, 60, 40),
+               ow_rules_roam_pick(0, 0, 0, cx, cz, 0x0, 300, 60, 140),
+               ow_rules_angle_diff(170, -170), ow_rules_angle_diff(-90, 90));
+        for (k = 0; k < 9; k++) { y = -1.0f; n[k] = ow_rules_nibble_heading(nib[k], &y) ? (int)y : 999; }
+        printf("nib|%d|%d|%d|%d|%d|%d|%d|%d|%d\n", n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8]);
+    }
     return 0;
 }
 '''
@@ -80,6 +93,15 @@ def test_spawn_pick(out):
     assert out[('pick', 'crowd')][2] in ('1', '3', '5', '7')
 
 
+def test_free_roam_pick_and_headings(out):
+    # facing +z: slot 1 (40, 200) is in the cone; facing -z: slot 3 (0, -60) is right in front;
+    # facing -z without slot 3: nobody in the cone, nearest within 40: nobody; no candidates: -1
+    assert out['roam'][1:5] == ['1', '3', '-1', '-1']
+    assert float(out['roam'][5]) == pytest.approx(20.0) and abs(float(out['roam'][6])) == pytest.approx(180.0)
+    # the walker's table (0x2EF510) by nibble: up 180, up-right 135, right 90, ..., up-left -135; up+down none
+    assert out['nib'][1:] == ['180', '135', '90', '45', '0', '-45', '-90', '-135', '999']
+
+
 def test_winner_and_loser_order(out):
     # scores 2 3 3 0, knocked out 1 2 1 0: slots 1 and 2 tie on 3, slot 2 was knocked out less
     assert out['winner'][1:] == ['2', '0', '0']     # all level: slot 0; only slots 0 and 3: slot 0 (2 > 0)
@@ -106,6 +128,34 @@ def test_state_goes_with_rollback_and_the_checksum():
     assert 'typedef char ow_state_fits[sizeof(BigArena) <= OW_STATE_BYTES ? 1 : -1];' in ow
     # 0 while off: the checksum of every other fight is unchanged
     assert re.search(r'uint32_t ow_state_hash\(void\)\s*\{[^}]*if \(!BA\.on\) return 0;', ow)
+
+
+def test_state_holds_the_round_rules_and_free_roam_without_holes():
+    """Build 87 put two branches' fields in one state: the round rules (rules, end_kind, unlimited, end_step) and free
+    roam (roam_*). The checksum runs over every byte of the struct, so the layout may have no padding the compiler
+    chose (a hole's bytes are whatever memcpy left), and it has to fit the room each rollback save keeps."""
+    ow = read('src/hooks/openworld.c')
+    state = re.search(r'typedef struct \{(.*?)\} BigArena;', ow, re.S).group(1)
+    state = re.sub(r'/\*.*?\*/', '', state, flags=re.S)
+    sizes = {'uint32_t': 4, 'int32_t': 4, 'float': 4, 'uint16_t': 2, 'int16_t': 2, 'uint8_t': 1, 'int8_t': 1}
+    offset, names = 0, []
+    for decl in filter(None, (d.strip() for d in state.split(';'))):
+        kind, rest = decl.split(None, 1)
+        size = sizes[kind]
+        for item in rest.split(','):
+            m = re.fullmatch(r'\s*(\w+)(?:\[(\d+)\])?\s*', item)
+            assert offset % size == 0, f'{m.group(1)} at {offset} needs padding before it'
+            offset += size * int(m.group(2) or 1)
+            names.append(m.group(1))
+    assert offset % 4 == 0, 'padding at the end'
+    for field in ('rules', 'end_kind', 'unlimited', 'end_step', 'roam_on', 'roam_steps', 'roam_speed', 'roam_mode',
+                  'roam_pending', 'roam_last', 'roam_turn', 'spawn_hash'):
+        assert names.count(field) == 1, field
+    room = int(re.search(r'#define OW_STATE_BYTES (\d+)', read('src/hooks/openworld.h')).group(1))
+    assert offset == 132 and offset <= room
+    # both sets are zeroed at a fight's start and hashed whole
+    assert 'memset(&BA, 0, sizeof BA);' in ow
+    assert 'for (i = 0; i < sizeof BA; i++) h = (h ^ p[i]) * 16777619u;' in ow
 
 
 def test_offline_only_and_hooks():

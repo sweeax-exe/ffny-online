@@ -25,6 +25,8 @@ typedef struct RtsSocialView {
     float pos[4][3];        /* the fighters' positions (feet) */
     uint32_t present;       /* fighter slots in the fight (bit per slot) */
     int local;              /* this PC's fighter, -1 none (a spectator or a watcher: the camera's target hears) */
+    int roam_mode;          /* the local fighter's free roam mode (OW_ROAM_*; free when free roam is off) */
+    int lock_target;        /* its target while engaged or locked (the lock marker), -1 none */
     unsigned long long at_ms;   /* GetTickCount64 of the copy */
 } RtsSocialView;
 

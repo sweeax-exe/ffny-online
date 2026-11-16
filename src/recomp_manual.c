@@ -86,6 +86,12 @@ void sub_001A50B0_enter(void)
         cheats_health_change(); /* [cheats] infinite_health, no_regen (src/patches/cheats.c); never online */
     ow_health_change();
 }
+void ow_roam_input(uint32_t rec);     /* Run the Streets free roam: the target cache and inputs (openworld.c) */
+void ow_roam_walk(void);              /* Run the Streets free roam: the walking speed (openworld.c) */
+/* sub_001BA800 (the input history) runs for each fighter right after sub_001A4A30 cached its target's angle and
+ * distance (+0x838/+0x834) and before the state handlers; sub_001CAC40 is the walker (record, held bits, speed). */
+void sub_001BA800_enter(void) { ow_roam_input(MEM32(g_esp + 4)); }
+void sub_001CAC40_enter(void) { ow_roam_walk(); }
 void sub_001A6870_enter(void)
 {
     if (defjam_test_observations_enabled())

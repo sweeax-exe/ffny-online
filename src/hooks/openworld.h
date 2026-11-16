@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define OW_STATE_BYTES 96   /* room for the Big Arena state in each rollback save (netplay.c) */
+#define OW_STATE_BYTES 160  /* room for the Big Arena state in each rollback save (netplay.c): 132 used in build 87 */
 
 /* rollback: the Big Arena state goes with every save and comes back with every load */
 void ow_state_save(uint8_t out[OW_STATE_BYTES]);
@@ -85,6 +85,20 @@ int ow_rules_rts_time_index(int seconds);                       /* 300/600/900/0
 int ow_rules_rts_ko_index(int kos);
 int ow_rules_rts_limit_steps(int byte);                         /* the fight's end in steps (the safety one without a limit) */
 int ow_rules_rts_text(int byte, char *out, int size);           /* "10 MIN  -  FIRST TO 10" */
+/* Free roam (openworld.c): out of combat a human fighter walks free and faces where it goes; see ow_roam_*. */
+float ow_rules_angle_diff(float a, float b);
+int ow_rules_roam_pick(float x, float z, float yaw, const float cx[4], const float cz[4], uint32_t cand, float range,
+                       float cone, float near_);
+int ow_rules_nibble_heading(uint32_t nibble, float *yaw);
+#define OW_ROAM_FREE    0       /* no target: walks where the stick points and faces that way */
+#define OW_ROAM_ENGAGED 1       /* fighting (attacked or hit): the game's own target, back to free after the calm */
+#define OW_ROAM_LOCKED  2       /* a target chosen on purpose (White/Black or the right stick): kept until dropped */
+/* The overlay (rts_social.c): this slot's roam mode and its target slot (-1 none); 0 when free roam is off. */
+int ow_roam_view(int slot, int *mode, int *target);
+/* The fight step's hooks (recomp_manual.c): sub_001BA800's entry (the record, after the target's angle and distance
+ * are cached at +0x838/+0x834 and before the state handlers run) and the walker sub_001CAC40's entry (speed). */
+void ow_roam_input(uint32_t rec);
+void ow_roam_walk(void);
 
 /* Run the Streets (rts.c, openworld.c): the overlays and the voice read these. */
 int ow_rts_active(void);    /* a Run the Streets fight runs on this PC (offline or online) */

@@ -139,6 +139,10 @@ void rts_social_camera(void)
     v->local = netplay_local_slot();
     if (v->local < 0 && !netplay_active()) v->local = 0;     /* offline: pad 0's fighter */
     if (v->local >= 4 || (v->local >= 0 && !(v->present & (1u << v->local)))) v->local = -1;
+    v->roam_mode = OW_ROAM_FREE;
+    v->lock_target = -1;
+    if (v->local >= 0) ow_roam_view(v->local, &v->roam_mode, &v->lock_target);
+    if (v->lock_target >= 0 && !(v->present & (1u << v->lock_target))) v->lock_target = -1;
     v->at_ms = now_ms();
     cam_log(v);
     s_shown = w;
