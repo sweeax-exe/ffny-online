@@ -11,7 +11,9 @@
 extern "C" {
 #endif
 
-/* The map is 1170 units for 100 m: one metre is about 11.7 units. */
+/* The map is 1170 units for 100 m: one metre is about 11.7 units. A fighter's head is about 13 units over its
+ * position (measured against the picture, build 86): the bubbles' tails end just over the head. */
+#define RTS_HEAD_UNITS      15.0f
 #define RTS_UNITS_PER_M     11.7f
 #define RTS_VOICE_FULL_M    5.0f        /* full volume up to here */
 #define RTS_VOICE_SILENT_M  28.0f       /* silent from here on */

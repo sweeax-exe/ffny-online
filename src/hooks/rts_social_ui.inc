@@ -21,7 +21,7 @@
 // types TEXT and sends it (then closes 4 s later).
 
 const ImU32 SPEAK_GREEN = IM_COL32(120, 224, 120, 255);
-const float RTS_HEAD = 26.0f;       // world units above a fighter's feet: over the head
+const float RTS_HEAD = RTS_HEAD_UNITS;     // world units above a fighter's feet: just over the head
 
 struct RtsBubble {
     int fighter = -1;
@@ -179,6 +179,8 @@ void rts_speaker(ImDrawList *dl, const Frame &f, float x, float y, float size, f
     (void)dark;
 }
 
+std::vector<ImVec4> g_rts_placed;      // this frame's bubbles (menu units: x0, y0, x1, y1)
+
 // One bubble: its tail's tip at (ax, ay) (menu units), or at the edge with an arrow toward `dir` when off the
 // screen. Returns its top. Short lines (an emote, "GG") are drawn big.
 float rts_bubble(ImDrawList *dl, const Frame &f, float ax, float ay, const RtsBubble &b, float alpha, bool tailed, bool edge,
@@ -196,6 +198,16 @@ float rts_bubble(ImDrawList *dl, const Frame &f, float ax, float ay, const RtsBu
     float x = ax - w / 2, y = ay - tail - h;
     x = std::max(lo_x, std::min(x, hi_x - w));
     y = std::max(lo_y, y);
+    // clear of the bubbles already placed this frame (fighters close together): up above the one it would cover
+    float y0 = y;
+    for (int pass = 0; pass < 6; pass++) {
+        bool moved = false;
+        for (const ImVec4 &r : g_rts_placed)
+            if (x < r.z && x + w > r.x && y < r.w && y + h > r.y) { y = r.y - h - 3; moved = true; }
+        if (!moved) break;
+    }
+    g_rts_placed.push_back(ImVec4(x, y, x + w, y + h));
+    bool lifted = y < y0 - 1.0f;
     // a pop as it comes in
     float pop = alpha < 1.0f && GetTickCount64() - b.at < 200 ? 0.9f + 0.1f * alpha : 1.0f;
     float cx = x + w / 2, cy = y + h / 2;
@@ -205,7 +217,12 @@ float rts_bubble(ImDrawList *dl, const Frame &f, float ax, float ay, const RtsBu
     rect(dl, f, bx, by, bw, bh, with_alpha(fill, 0.86f * alpha), 7);
     dl->AddRect(f.p(bx, by), f.p(bx + bw, by + bh), with_alpha(b.mine ? RED : IM_COL32(255, 255, 255, 60), alpha), 7 * f.s(), 0,
                 std::max(1.0f, 0.8f * f.s()));
-    if (tailed) {       // the tail, down to the head
+    if (tailed && lifted) {     // lifted over another bubble: a thin line down to the head
+        float tx = std::max(bx + 10, std::min(ax, bx + bw - 10));
+        dl->AddLine(f.p(tx, by + bh), f.p(ax, ay - 2), with_alpha(b.mine ? RED : IM_COL32(255, 255, 255, 140), 0.8f * alpha),
+                    std::max(1.0f, 1.0f * f.s()));
+        dl->AddCircleFilled(f.p(ax, ay - 2), 1.8f * f.s(), with_alpha(b.mine ? RED : IM_COL32(255, 255, 255, 200), alpha), 8);
+    } else if (tailed) {        // the tail, down to the head
         float tx = std::max(bx + 10, std::min(ax, bx + bw - 10));
         ImVec2 tri[3] = { f.p(tx - 5, by + bh - 0.5f), f.p(tx + 5, by + bh - 0.5f), f.p(ax, by + bh + tail) };
         dl->AddConvexPolyFilled(tri, 3, with_alpha(fill, 0.86f * alpha));
@@ -254,6 +271,7 @@ bool rts_world_draw_impl(ImDrawList *dl, ImVec2 display, bool draw)
 void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, const std::vector<RtsBubble> &lines, uint32_t talking)
 {
     Frame f = menu_frame(display);
+    g_rts_placed.clear();
     float px, py, pw, ph;
     rts_picture(display, px, py, pw, ph);
     // the picture's box in the menu's units, with a margin
@@ -274,6 +292,37 @@ void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, con
         dist[s] = dx * dx + dz * dz;
     }
     std::sort(order, order + 4, [&](int a, int b) { return dist[a] > dist[b]; });
+    static const bool marks = getenv("RECOMP_RTS_DEBUG_MARKS") != nullptr;     // tests: where each fighter projects
+    if (marks) {
+        static const ImU32 cols[4] = { IM_COL32(255, 60, 60, 255), IM_COL32(60, 255, 60, 255), IM_COL32(60, 160, 255, 255),
+                                       IM_COL32(255, 255, 60, 255) };
+        for (int s = 0; s < 4; s++) {
+            if (!(v.present & (1u << s))) continue;
+            static const float hs[3] = { 0.0f, 16.0f, RTS_HEAD };
+            for (float hgt : hs) {
+                float p[3] = { v.pos[s][0], v.pos[s][1] + hgt, v.pos[s][2] }, nx, ny;
+                if (rts_project(&rv, p, &nx, &ny) != 1) continue;
+                ImVec2 c(px + (nx * 0.5f + 0.5f) * pw, py + (0.5f - ny * 0.5f) * ph);
+                float r = hgt == 0.0f ? 7.0f : 4.0f;
+                dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), cols[s], 2.0f);
+                dl->AddLine(ImVec2(c.x, c.y - r), ImVec2(c.x, c.y + r), cols[s], 2.0f);
+            }
+        }
+        static unsigned long long logged;
+        if (GetTickCount64() - logged > 2000) {
+            logged = GetTickCount64();
+            char line[400];
+            int n = snprintf(line, sizeof line, "[RTSMARK] picture %.0f,%.0f %.0fx%.0f display %.0fx%.0f |", px, py, pw, ph, display.x, display.y);
+            for (int s = 0; s < 4 && n < (int)sizeof line - 40; s++) {
+                if (!(v.present & (1u << s))) continue;
+                float p[3] = { v.pos[s][0], v.pos[s][1], v.pos[s][2] }, nx = 0, ny = 0;
+                rts_project(&rv, p, &nx, &ny);
+                n += snprintf(line + n, sizeof line - (size_t)n, " f%d feet %.0f,%.0f", s, px + (nx * 0.5f + 0.5f) * pw,
+                              py + (0.5f - ny * 0.5f) * ph);
+            }
+            fprintf(stderr, "%s\n", line);
+        }
+    }
     for (int oi = 0; oi < 4; oi++) {
         int s = order[oi];
         if (!(v.present & (1u << s))) continue;
@@ -570,6 +619,7 @@ bool rts_dock_draw(ImDrawList *dl, ImVec2 display)
             if (ImGui::IsKeyPressed(ImGuiKey_Backspace, true)) erase_back(FC.draft, FC.cursor);
         }
         bool close = ImGui::IsKeyPressed(ImGuiKey_Escape, false) || (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) && !kb_just);
+        if (RS.test_step) close = false;    // a test's dock: the test bot's pad (its B) is not the player's
         if (close) {
             FC.typing = FC.pad = false;
             fprintf(stderr, "[RTSDOCK] closed\n");

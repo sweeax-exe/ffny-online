@@ -9,6 +9,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "netplay.h"
 #include "openworld.h"
+#include "fight_hud.h"
 #include "rts_social.h"
 #include "rts_social_rules.h"
 #include "patches/widescreen.h"
@@ -46,12 +47,14 @@ static volatile int s_shown;
 static int s_lens_logged;
 static float s_lens_last;
 
-/* The scene's lens: the viewport the render camera is applied to (sub_000443D0: slot 4 of the view list at
- * 0x2FB148) holds the camera's horizontal field of view at 4:3 (+0x0C); the widescreen patch widens it (Hor+) for the
- * full-screen view exactly so (ws_view_params), and the picture's aspect is then the canvas's, else 4:3. */
+/* The scene's lens: the view the render camera is applied to (sub_000443D0: slot 4 of the view list at 0x2FB148)
+ * has its viewport at +0x34, which holds the camera's horizontal field of view at 4:3 (+0x0C, set by sub_000190C0);
+ * the widescreen patch widens it (Hor+) for the full-screen view exactly so (ws_view_params), and the picture's
+ * aspect is then the canvas's, else 4:3. Checked against the projection the viewport builds (its device view +0x40:
+ * m00 = cot(fov / 2) 2.532, m11 = m00 * aspect 4.501 at fov 43.1 and 16:9, build 86 test run). */
 static void scene_lens(float *fov, float *aspect)
 {
-    uint32_t vp = MEM32(VIEWS + 4u * 4u);
+    uint32_t view = MEM32(VIEWS + 4u * 4u), vp = view >= 0x10000u ? MEM32(view + 0x34u) : 0u;
     float f = vp >= 0x10000u ? MEMF(vp + 0x0Cu) : 0.0f, a = ws_aspect();
     if (!(f > 1.0f && f < 179.0f)) f = 30.0f;
     if (a > 0.0f) {
@@ -78,6 +81,32 @@ int rts_social_on(void)
     return test && ow_hud_view(&hv) && hv.on;
 }
 
+/* RECOMP_RTS_CAM_LOG=1: the camera, the lens and where the local fighter's feet and head land, every 3 s */
+static void cam_log(const RtsSocialView *v)
+{
+    static int on = -1;
+    static unsigned long long at;
+    RtsView rv;
+    float feet[3], head[3], fx = 0, fy = 0, hx = 0, hy = 0;
+    int s = v->local >= 0 ? v->local : 0;
+    if (on < 0) on = env_on("RECOMP_RTS_CAM_LOG");
+    if (!on || !v->on || v->at_ms - at < 3000u) return;
+    at = v->at_ms;
+    memcpy(rv.eye, v->eye, sizeof rv.eye);
+    memcpy(rv.at, v->at, sizeof rv.at);
+    memcpy(rv.up, v->up, sizeof rv.up);
+    rv.fov_deg = v->fov_deg;
+    rv.aspect = v->aspect;
+    memcpy(feet, v->pos[s], sizeof feet);
+    memcpy(head, v->pos[s], sizeof head);
+    head[1] += RTS_HEAD_UNITS;
+    rts_project(&rv, feet, &fx, &fy);
+    rts_project(&rv, head, &hx, &hy);
+    fprintf(stderr, "[RTSCAM] eye %.1f,%.1f,%.1f at %.1f,%.1f,%.1f fov %.2f aspect %.3f | fighter %d feet %.3f,%.3f head %.3f,%.3f\n",
+            (double)v->eye[0], (double)v->eye[1], (double)v->eye[2], (double)v->at[0], (double)v->at[1], (double)v->at[2],
+            (double)v->fov_deg, (double)v->aspect, s, (double)fx, (double)fy, (double)hx, (double)hy);
+}
+
 void rts_social_camera(void)
 {
     RtsSocialView *v;
@@ -91,7 +120,11 @@ void rts_social_camera(void)
     v = &s_buf[w];
     memset(v, 0, sizeof *v);
     st = MEM32(MATCH_STATE);
-    v->on = st == 5 || st == 7 || st == 8;
+    {   /* the fight runs and its HUD is up: not the intros, the knockout's end or the results */
+        FightHudView hv;
+        fight_hud_view(&hv);
+        v->on = (st == 5 || st == 7 || st == 8) && hv.live;
+    }
     for (i = 0; i < 3; i++) { v->eye[i] = MEMF(RCAM + 0x10u + 4u * i); v->at[i] = MEMF(RCAM + 0x20u + 4u * i); }
     for (i = 0; i < 3; i++) v->up[i] = MEMF(RCAM + 0x30u + 4u * i);
     scene_lens(&v->fov_deg, &v->aspect);
@@ -107,6 +140,7 @@ void rts_social_camera(void)
     if (v->local < 0 && !netplay_active()) v->local = 0;     /* offline: pad 0's fighter */
     if (v->local >= 4 || (v->local >= 0 && !(v->present & (1u << v->local)))) v->local = -1;
     v->at_ms = now_ms();
+    cam_log(v);
     s_shown = w;
 }
 
