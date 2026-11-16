@@ -31,6 +31,8 @@ def main():
     ap.add_argument('pack', type=Path)
     ap.add_argument('--id', default='official-knox-and-jam')
     ap.add_argument('--game-dir', type=Path, default=REPO / 'game')
+    ap.add_argument('--bigarena', type=Path, help="the map's bigarena.json to put into <out>/mods/<id>/ (as the "
+                    "official-maps publish does), e.g. built from the Studio project's spawns")
     ap.add_argument('--fighter-light', help="light the fighters like this retail venue (the new-venue op's "
                     "fighter_light, e.g. 01B: Hunt's Point after hours, night); default: the pack's own")
     a = ap.parse_args()
@@ -67,6 +69,8 @@ def main():
     if r.returncode:
         print(r.stderr[-2000:], file=sys.stderr)
         sys.exit('compose failed')
+    if a.bigarena:
+        shutil.copyfile(a.bigarena, folder / 'bigarena.json')
     ini = mm / 'content.ini'
     text = ini.read_text(encoding='utf-8')
     section = '[pack.%s]' % a.id

@@ -1474,6 +1474,27 @@ Pad read_pad()
     p.lt = any({ ImGuiKey_GamepadL2 }, true);       // FIGHTERS: the previous first letter
     p.rt = any({ ImGuiKey_GamepadR2 }, true);       // FIGHTERS: the next first letter
     p.keys = true;
+    {   // tests: RECOMP_TEST_OVERLAY_PAD="r,r,a,..." presses these (u d l r a b x y) one at a time, 0.7 s apart,
+        // from 3 s after the first read: the online screens driven like a pad (Run the Streets' menu test)
+        static const char *script = (const char *)-1;
+        static unsigned long long t0, next;
+        if (script == (const char *)-1) script = getenv("RECOMP_TEST_OVERLAY_PAD");
+        if (script && *script) {
+            unsigned long long now = GetTickCount64();
+            if (!t0) { t0 = now; next = now + 3000; }
+            if (now >= next) {
+                while (*script == ',' || *script == ' ') script++;
+                char c = *script;
+                if (c) {
+                    script++;
+                    next = now + 700;
+                    p.up |= c == 'u'; p.down |= c == 'd'; p.left |= c == 'l'; p.right |= c == 'r';
+                    p.a |= c == 'a'; p.b |= c == 'b'; p.x |= c == 'x'; p.y |= c == 'y';
+                    fprintf(stderr, "[UI] test pad: %c (page %d)\n", c, (int)S.page);
+                }
+            }
+        }
+    }
     return p;
 }
 
@@ -6381,6 +6402,29 @@ bool draw_pages(ImVec2 display)
         }
         if (st == NETPLAY_LOBBY) S.fallback_tried = false;
         ranked_tick(room);
+    }
+    {   // tests: RECOMP_TEST_OPEN_ONLINE=rts opens RUN THE STREETS itself (with access), connected or not
+        static int once;
+        const char *v = getenv("RECOMP_TEST_OPEN_ONLINE");
+        if (!once && v && !strcmp(v, "rts") && !gallery_on() && rts_access()) { once = 1; open_rts(); }
+    }
+    // RUN THE STREETS' VS CPU needs no relay: its page and its fighter pick work without a connection.
+    if (!room.in_room && !gallery_on() && (S.page == RTS || (S.page == FIGHTERS && S.rts_pick)) &&
+        net_state() != NETPLAY_LOBBY) {
+        if (S.page == RTS) {
+            draw_rts(dl, f, pad);
+        } else {
+            bool chosen = false;
+            int fighter = 0;
+            draw_fighters(dl, f, pad, &chosen, &fighter);
+            if (chosen) { S.rts_pick = false; rts_fighter_chosen(fighter); }
+            float hx = 54;
+            hx += hint(dl, f, hx, 420, "a", "PICK");
+            hint(dl, f, hx, 420, "b", "BACK");
+        }
+        draw_status(dl, f);
+        if (g_rts_close) { g_rts_close = false; return false; }
+        return !(pad.b && S.page == HUB);
     }
     // The picker works without a connection: a server that does not answer is left from here.
     if (S.page == SERVERS && !room.in_room && st != NETPLAY_CONNECTED) {
