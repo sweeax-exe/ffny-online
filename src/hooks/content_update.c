@@ -10,7 +10,8 @@
  *     composes and starts it again, back to the main menu and the online hub (content_update_logic.h). Never in a
  *     fight, a match or a room's countdown.
  * Test switches: RECOMP_TEST_CONTENT_NEWS=<n> fakes the news (pc_content_news), RECOMP_TEST_CONTENT_POPUP=0 keeps
- * the popup away, RECOMP_TEST_UPDATE_NOW_DRY=1 logs what UPDATE NOW would do instead of closing the game. */
+ * the popup away, RECOMP_TEST_UPDATE_NOW_DRY=1 logs what UPDATE NOW would do instead of closing the game,
+ * RECOMP_TEST_CONTENT_TOAST_MS=<ms> keeps the corner notice up longer (pictures). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -137,6 +138,8 @@ static void close_for_update(void)
                 child ? "FFUD" : "0", child ? "let the waiting launcher open in update mode"
                                             : "start the launcher in update mode itself");
         fflush(stderr);
+        InterlockedExchange(&g_requested, 0);      /* the run goes on: the next offer can be tested too */
+        done = 0;
         return;
     }
 #if defined(_WIN32)
@@ -206,8 +209,14 @@ void content_update_offer_answer(int later)
 
 int content_update_toast(char *out, int size, int in_menu)
 {
+    const char *test_ms = getenv("RECOMP_TEST_CONTENT_TOAST_MS");     /* tests: a longer notice */
     int news = g_requested ? 0 : content_update_news(NULL, 0);
-    if (!cu_offer_toast(&g_offer, news, in_menu, now_ms())) return 0;
+    unsigned long long now = now_ms();
+    int shown = cu_offer_toast(&g_offer, news, in_menu, now);
+    if (!shown && test_ms && in_menu && news > 0 && g_offer.toast_at &&
+        now < g_offer.toast_at + (unsigned long long)atoi(test_ms))
+        shown = 1;
+    if (!shown) return 0;
     if (out && size > 0)
         snprintf(out, (size_t)size, "New community content is out (%d pack%s). UPDATE NOW: on the main menu or the "
                  "online hub.", news, news == 1 ? "" : "s");
