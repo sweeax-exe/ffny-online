@@ -60,23 +60,51 @@ def availability(db):
     return out
 
 
-def name_above(base, floor, limit=500000):
-    """``base`` or ``base`` + a short suffix whose hash is above ``floor``: new rows can only be appended in
-    hash order, so their names must hash above every existing row of the table."""
-    if name_hash(base) > floor:
+NAME_WINDOW = 1 << 12      # a new row name's hash lies at most this far above the floor
+SUFFIX = 7                 # letters after ``_``; 26**7 tails cover every residue well (33**7 > 2**32)
+_INV33 = pow(33, -1, 1 << 32)
+
+
+def _tail_for(prefix_hash, target):
+    """The 7 letters ``t`` with ``name_hash(prefix + t) == target`` (``prefix_hash`` the prefix's hash), or None.
+
+    Each letter adds then multiplies by 33, so ``hash = 33 * (P * 33**6 + sum c_i * 33**(7 - i)) mod 2**32``. 33
+    is odd, hence invertible mod 2**32: the letters' sum is fixed mod 2**32, and of its few lifts below 33**7 the
+    first whose base-33 digits are all 0..25 (``a``..``z``) is the tail. No search over strings."""
+    m = 1 << 32
+    want = (target * _INV33 - prefix_hash * 33 ** (SUFFIX - 1) - 97 * sum(33 ** j for j in range(SUFFIX))) % m
+    for v in range(want, 33 ** SUFFIX, m):
+        digits = []
+        for _ in range(SUFFIX):
+            v, d = divmod(v, 33)
+            if d > 25:
+                break
+            digits.append(d)
+        else:
+            return "".join(chr(97 + d) for d in reversed(digits))
+    return None
+
+
+def name_above(base, floor, window=NAME_WINDOW):
+    """``base``, or ``base_`` + 7 letters, whose hash is just above ``floor``: new rows can only be appended in
+    hash order, so their names must hash above every existing row of the table.
+
+    The hash is the smallest one above ``floor`` that a tail reaches (almost always ``floor + 1``), and never more
+    than ``window`` above it: each new row uses up only a few values of the room left above the table (Character
+    about 68 million, Clothing about 9.9 million on the retail database), so 48 fighters and thousands of items fit
+    and every PC derives the same names. ``base`` itself is kept when its hash already lies in that window."""
+    h = name_hash(base)
+    if floor < h <= floor + window:
         return base
-    # each character multiplies the hash by 33, so a short suffix only reaches the low bits: seven letters, the
-    # fastest-changing first, reach all 32 (33**7 > 2**32)
-    letters = "abcdefghijklmnopqrstuvwxyz"
-    for i in range(1, limit):
-        suffix, n = "", i
-        while n:
-            n, k = divmod(n, 26)
-            suffix += letters[k]
-        name = "%s_%s" % (base, suffix.ljust(7, "a"))
-        if name_hash(name) > floor:
-            return name
-    raise ValueError("no name above %08x found for %r" % (floor, base))
+    prefix = name_hash(base + "_")
+    for target in range(floor + 1, min(floor + window, 0xFFFFFFFF) + 1):
+        tail = _tail_for(prefix, target)
+        if tail is not None:
+            return "%s_%s" % (base, tail)
+    if floor >= 0xFFFFFFFF - window:
+        raise ValueError("no room left in the game's database for another new row (its names already reach "
+                         "%08x, the top); switch some packs off" % floor)
+    raise ValueError("no row name within %d of %08x for %r" % (window, floor, base))
 
 
 class SodEditor:

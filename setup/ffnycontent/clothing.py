@@ -30,9 +30,10 @@ def text_hash(kind, text, salt=""):
 
 
 def row_name_for(hint, floor):
-    """The row name an item op gets: the pack's hint when its hash is above every Clothing key today, else
-    ``name_above(<the hint's stem>, floor)``, so packs made against the same database combine in order."""
-    if sod.name_hash(hint) > floor:
+    """The row name an item op gets: the pack's hint when its hash lies just above every Clothing key today
+    (within ``sodwrite.NAME_WINDOW``), else ``name_above(<the hint's stem>, floor)``, so packs made against the
+    same database combine in order and no hint far up the range uses up the room above the table."""
+    if floor < sod.name_hash(hint) <= floor + sodwrite.NAME_WINDOW:
         return hint
     m = re.fullmatch(r"(.+?)_[a-z]{7}", hint)
     return sodwrite.name_above(m.group(1) if m else hint, floor)
