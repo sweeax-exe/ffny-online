@@ -54,6 +54,12 @@ PLACES_CAPABILITY = "fighter-places-v2"     # a pack at a low place: launchers f
 PLACE_ORDER = PLACES[:24] + LOW_PLACES + PLACES[24:28]
 
 
+def is_logical(fe_id):
+    """A community fighter beyond the places: a logical front-end ID (``unlimited.py``), 1000 and up."""
+    return isinstance(fe_id, int) and not isinstance(fe_id, bool) and FIRST_LOGICAL <= fe_id <= LAST_LOGICAL and \
+        fe_id != MORE_ID
+
+
 def is_place(fe_id):
     """Whether ``fe_id`` is a new fighter's place (``PLACES``)."""
     return isinstance(fe_id, int) and not isinstance(fe_id, bool) and fe_id in PLACES
@@ -63,6 +69,9 @@ def place_index(fe_id):
     """The index of place ``fe_id`` in ``PLACES`` (0..47: its own voice number is 40 + it), or None."""
     return PLACES.index(fe_id) if is_place(fe_id) else None
 STOCK_ROWS = 75
+FIRST_LOGICAL = 1000        # community fighters beyond the places (unlimited.py): bound to a bank per match
+LAST_LOGICAL = 0x7FFFFFFF
+MORE_ID = 999999            # the select grid's MORE cell, never a fighter (src/hooks/fighter_banks.h)
 
 
 class FighterError(ValueError):
@@ -501,7 +510,7 @@ def op_problems(op, allow_fe_id=False):
         out.append("model must be V2IP_7xxA")
     if "fe_id" in op and allow_fe_id:
         f = op["fe_id"]
-        if not is_place(f):
+        if not is_place(f) and not is_logical(f):
             out.append("fe_id must be a new fighter's place (%d..%d, %s)" % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID,
                                                                             ", ".join(map(str, LOW_PLACES))))
     out += ["name: " + p for p in name_problems(op.get("name"))]
@@ -548,7 +557,7 @@ class _View:
         return self.files.current(self.rel, name)
 
 
-def apply_op(files, op, fe_id, pictures=True, pack=None, new=False):
+def apply_op(files, op, fe_id, pictures=True, pack=None, new=False, logical=False, taken_models=()):
     """The edits of one new-fighter op on the player's files as the packs so far left them: [(where, path,
     entry, bytes)], ``where`` "loose" (a whole file, entry None), "replace" or "add" (an archive entry; plain bytes,
     the caller stores them). ``files`` gives ``current(path, entry="")`` (bytes; a missing file or entry raises
@@ -557,11 +566,18 @@ def apply_op(files, op, fe_id, pictures=True, pack=None, new=False):
     menu art, ``art/body.png``, ``art/head.png`` and ``art/name.png``: KeyError or OSError for one it does not
     have, and the pictures that art would fill stay the template's). ``new`` stamps NEW on the select grid's two
     thumbs (a pack with head art only). Raises FighterError when the op does not fit (the ID or the model is
-    taken, no such template, art of the wrong size)."""
+    taken, no such template, art of the wrong size).
+
+    ``logical``: a community fighter beyond the places (``fe_id`` its logical ID, ``unlimited.py``): no Character
+    row; the edits end with ("logical", None, None, record) for ``unlimited.add_records``, and an own voice stays
+    the template's (a bank has no voice number of its own yet). ``taken_models``: models of earlier logical
+    fighters."""
     problems = op_problems(op, allow_fe_id=True)
     if problems:
         raise FighterError(problems[0])
-    if not is_place(fe_id):
+    if logical and not is_logical(fe_id):
+        raise FighterError("a community fighter beyond the places needs an ID of %d and up" % FIRST_LOGICAL)
+    if not logical and not is_place(fe_id):
         raise FighterError("a new fighter needs its place (front-end ID %d..%d or %s)"
                            % (FIRST_NEW_FE_ID, LAST_NEW_FE_ID, ", ".join(map(str, LOW_PLACES))))
     template_fe_id, template, model, name = op["template_fe_id"], op["template_model"], op["model"], op["name"]
@@ -569,12 +585,14 @@ def apply_op(files, op, fe_id, pictures=True, pack=None, new=False):
     rows = {r["fe_id"]: r for r in characters(sod_blob)}
     if template_fe_id not in rows or rows[template_fe_id]["model"].upper() != template.upper():
         raise FighterError("%s is not fighter %d of your game" % (template, template_fe_id))
-    if any(r["model"].upper() == model.upper() for r in rows.values()):
+    if any(r["model"].upper() == model.upper() for r in rows.values()) or \
+            model.upper() in {m.upper() for m in taken_models}:
         raise FighterError("the model %s is another fighter's already" % model)
     edits = []
     words = gameplay_words(op["gameplay"]) if "gameplay" in op else None
     voice = (op.get("gameplay") or {}).get("voice") or {}
-    if voice.get("mode") == "own":
+    if voice.get("mode") == "own" and logical:
+        voice = {}          # phase 1: a bank plays the template's voice
         # the own voice: its five files at N = 40 + its place index in the speech archive, and N in word 21
         if pack is None:
             raise FighterError("this new fighter's own voice needs the pack's voice files")
@@ -587,8 +605,9 @@ def apply_op(files, op, fe_id, pictures=True, pack=None, new=False):
                 rows[template_fe_id]["words"][W_SPEECH], fe_id, voice["lines"], pack)]
         except (fightervoice.VoiceError, KeyError, OSError) as e:
             raise FighterError("voice: %s" % e)
-    sod_out, _, _ = append_character(sod_blob, template_fe_id, fe_id, name, name, model, edits=words)
-    edits.append(("loose", SOD_PATH, None, sod_out))
+    if not logical:
+        sod_out, _, _ = append_character(sod_blob, template_fe_id, fe_id, name, name, model, edits=words)
+        edits.append(("loose", SOD_PATH, None, sod_out))
     edits.append(("loose", ENTITY_XML, None, add_entity(files.current(ENTITY_XML), template, model)))
     nis = next((n for n in files.names(NIS_ARCHIVE) if n.lower() == INTRO_EXTRO.lower()), None)
     if nis is None:
@@ -615,6 +634,9 @@ def apply_op(files, op, fe_id, pictures=True, pack=None, new=False):
                 copies = [(n, fighterart.paint_picture(n, data, art, new=new)) for n, data in copies]
         there = {n.lower() for n in files.names(SCREENS_ARCHIVE)}
         edits += [("replace" if n.lower() in there else "add", SCREENS_ARCHIVE, n, data) for n, data in copies]
+    if logical:
+        edits.append(("logical", None, None, {"id": fe_id, "template_fe_id": template_fe_id, "name": name,
+                                              "model": model, "edits": dict(words or {})}))
     return edits
 
 
