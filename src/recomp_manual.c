@@ -92,6 +92,21 @@ void ow_roam_walk(void);              /* Run the Streets free roam: the walking 
  * distance (+0x838/+0x834) and before the state handlers; sub_001CAC40 is the walker (record, held bits, speed). */
 void sub_001BA800_enter(void) { ow_roam_input(MEM32(g_esp + 4)); }
 void sub_001CAC40_enter(void) { ow_roam_walk(); }
+/* The fight HUD's clock, top centre (thiscall (hud), no stack arguments; called by the HUD's update sub_000B5710
+ * only): it writes the match's minutes and seconds (0x3BE0EC / 0x3BE0F0, counting up; "5:00 minus them" in the
+ * game's timed matches) at the hud.xsh locator text_time (+0x5FC / +0x600) and runs the flash of its last seconds.
+ * Build 87: a Run the Streets fight leaves it out, because the score plate's round clock counts down to the
+ * room's time limit (fight_hud_ui.inc) and two clocks running opposite ways confused the first testers. Every other
+ * fight draws it as before. RECOMP_RTS_GAME_CLOCK=1 keeps it (tests). */
+int ow_rts_active(void);
+extern void sub_000B54E0_gen(void);
+void sub_000B54E0(void)
+{
+    static int keep = -1;
+    if (keep < 0) keep = getenv("RECOMP_RTS_GAME_CLOCK") != NULL;
+    if (!keep && ow_rts_active()) { g_esp += 4; return; }
+    sub_000B54E0_gen();
+}
 void sub_001A6870_enter(void)
 {
     if (defjam_test_observations_enabled())

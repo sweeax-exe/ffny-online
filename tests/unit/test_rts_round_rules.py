@@ -128,6 +128,20 @@ def test_plate_clock_notice_and_time():
     assert hud.index('fh_callout(dl, f, 228, (float)since / 1500.0f, 92, "TIME!");') < hud.index('" WINS"')
 
 
+def test_only_the_plates_clock_in_a_run_the_streets_fight():
+    """Build 87: the game's own clock (top centre, counting up) is left out of a Run the Streets fight, where the
+    plate's clock counts down. The wrapper returns as the function does (thiscall, no stack arguments: the return
+    address only) and runs the game's own body in every other fight."""
+    manual = read('src/recomp_manual.c')
+    assert 'extern void sub_000B54E0_gen(void);' in manual
+    body = re.search(r'void sub_000B54E0\(void\)\n\{(.*?)\n\}\n', manual, re.S).group(1)
+    assert 'if (!keep && ow_rts_active()) { g_esp += 4; return; }' in body
+    assert body.rstrip().endswith('sub_000B54E0_gen();')
+    assert 'getenv("RECOMP_RTS_GAME_CLOCK")' in body
+    # Run the Streets only: not every Big Arena fight, not the online screens
+    assert 'int ow_rts_active(void) { return BA.on && BA.rts; }' in read('src/hooks/openworld.c')
+
+
 def test_room_settings_and_vs_cpu():
     ui = read('src/hooks/online_screen.cpp')
     assert '"TIME LIMIT", "KO TARGET"' in ui
