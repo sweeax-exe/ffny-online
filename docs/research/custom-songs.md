@@ -58,6 +58,23 @@ Other traces of cut or renamed music:
   strictly in order and wraps. Shuffle is a one-time reorder when the list is built, not a random pick per
   song. The list lives in a fixed array of **36 entries x 16 bytes** at 0x33E798; there is no bound check
   (a 37th entry overwrites the count), and ids longer than 15 characters overflow.
+- **The shuffle is lopsided (retail bug, fixed 2026-11-16).** `sub_00020D70` collects the songs that are on
+  in Song-table order (the name-hash rank: "Let's Go" 0 ... "Get it Now" 16 ... "Anything Goes" 31) and puts
+  song i at slot `rand() % n`; a taken slot sends it to the **lowest free slot**. The first collisions come
+  after a few songs, so the front of the list nearly always holds songs of the first half of the table: with
+  32 songs on, place 16 starts the list about 1 time in 700 and places 20+ practically never (a model of the
+  rule, `tests/unit/test_song_shuffle_native.py`). The menus build their list once and restart it at its first
+  song whenever their music starts (`sub_00049250`: `sub_0003CF70(1, 0, 0)` in shuffled mode), and a fight
+  rarely gets past its first songs, so late songs ("Get It Now", "Afterhours", "Walk With Me", "Anything
+  Goes", "Dragon House") almost never played unless the others were off (a player's report, 2026-11-16). The
+  F9 logs agree: across 381 player logs the songs a default profile has on load roughly in the order the model
+  gives (What's Happenin', Flipside, Pump, Make It Hurt, Get Into It most; the later ranks least).
+  `src/patches/song_shuffle.c` (wrapper in `recomp_manual.c`) lets the game's builder run unchanged (its
+  allocations and its n draws from the game's generator) and then reorders the list's name pointers with a
+  Fisher-Yates shuffle on a host generator. `RECOMP_SONG_SHUFFLE=retail` keeps the game's order;
+  `RECOMP_SONG_TRACE=1` logs the playlists and the song store (`src/patches/song_trace.c`).
+  Never-arranged songs (state 0) are the locked ones (the 16 a new profile lacks, unlocked by the Extras song
+  codes or the launcher's Unlock all); no builder lists them.
 - **Front end**: the jukebox list, filtered by `cribfilt1c.fx`, when the jukebox is on.
 - **Fights** (`sub_0001F2D0`, `sub_0001F7E0`): the playlist is [the match's primary song, an optional
   second song, then the jukebox list]. The primary song comes from the match setup and defaults to
