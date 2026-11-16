@@ -220,11 +220,14 @@ game build.
   composed=1
   venue_fe_id=28
   venue_code=28A
+  bigarena=1
   ```
 
   **The interface for Run the Streets:** the map to load is the `[pack.*]` section with `official=1` and
   `rts_map=1` whose `composed=1` pack is applied (`files.ini`); `venue_fe_id` and `venue_code` name the venue
-  (`V2BG_<venue_code>`). With several, the lowest `order` wins. None: Run the Streets has no map on this PC.
+  (`V2BG_<venue_code>`); `bigarena=1` says the pack folder `<data>/mods/<id>/bigarena.json` holds its layout
+  (`{"version": 1, "mode": "bigarena", "size": [w, d], "spawns": [[x, z], ...]}`, Studio's `SPAWN_*` points; read
+  it defensively). With several, the lowest `order` wins. None: Run the Streets has no map on this PC.
 - **Original fighters only / STANDARD ONLY.** An official map is a venue, never a fighter or a skin, so it never
   makes a pick "community". Its venue is a new venue, which STANDARD ONLY rooms leave out of their vote, and that is
   wanted: it is a Run the Streets map, loaded by that mode whatever the room's setting.

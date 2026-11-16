@@ -1215,6 +1215,10 @@ class Manager:
                     code = new_venue_code(self.mods / mod_id / 'install.json')
                     if code and r.get('official'):
                         lines.append('venue_code=' + code)      # build 86: the official map's venue, e.g. 28A
+                    if r.get('official') and (self.mods / mod_id / 'bigarena.json').is_file():
+                        # its Big Arena layout (size, spawn points; Studio's mapbasics.bigarena_info) in the pack
+                        # folder <data>/mods/<id>/bigarena.json, the same bytes on every PC (in the content hash)
+                        lines.append('bigarena=1')
                 template = new_fighter_template_fe_id(self.mods / mod_id / 'install.json')
                 if template:
                     # build 83: the Content page says where the new fighter is ("in D-Mob's spot")

@@ -42,6 +42,8 @@ def official_package(tmp, version='0.1.0', rts=True, result=None):
     info, deltas = install_json(result or b"\x7fELF" + (b"knox and jam %s" % version.encode()) * 30)
     entries = {MAP_ID + '/install.json': json.dumps(info).encode()}
     entries.update({MAP_ID + '/' + k: v for k, v in deltas.items()})
+    entries[MAP_ID + '/bigarena.json'] = json.dumps({"version": 1, "mode": "bigarena", "size": [1000.0, 1000.0],
+                                                     "spawns": [[0.0, -260.0], [260.0, 0.0]]}).encode()
     path = tmp / ('%s-%s.zip' % (MAP_ID, version))
     with zipfile.ZipFile(path, 'w') as z:
         for k, v in entries.items():
@@ -120,6 +122,7 @@ def test_sync_installs_the_official_map_always_on(setup, tmp_path):
     # kind=content for the game (always on, in the content print); official=1 and the map's venue for Run the Streets
     assert ini['kind'] == 'content' and ini['type'] == 'venue' and ini['official'] == '1' and ini['rts_map'] == '1'
     assert ini['venue_fe_id'] == '28' and ini['venue_code'] == '28A' and ini['composed'] == '1'
+    assert ini['bigarena'] == '1' and (manager.mods / MAP_ID / 'bigarena.json').is_file()
     composed = manager.composed_packs()
     assert [(p['id'], p['kind']) for p in composed] == [(MAP_ID, 'official-map')]
 
