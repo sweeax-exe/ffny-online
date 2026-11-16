@@ -331,6 +331,9 @@ static struct { int on, behind, slot; float dist, height; int have; float eye[3]
 #define DEFEAT_BITS (0x01u | 0x04u | 0x10u | 0x20u | 0x80u | 0x200u | 0x400u)
 #define ARENA_PROTECT 120u                      /* steps of respawn protection (2 s) */
 #define ARENA_LOSER_GAP 20u                     /* steps between the losers going down at the end */
+#define ARENA_TIME_HOLD 180u                    /* TIME!: 3 s of TIME! and the winner, everyone held, before the losers go down */
+#define END_SCORE 1u                            /* BA.end_kind: the KO target was reached */
+#define END_TIME  2u                            /* BA.end_kind: the clock ran out (or the safety end without a limit) */
 
 /* The spawn ring of the Studio "Big Arena" template (studio: ffnystudio/mapbasics.py BIGARENA_SPAWNS, the same
  * eight points): radius 260 around the centre (22 m), inside its walls at +-585. */
@@ -358,6 +361,13 @@ typedef struct {
     uint32_t blazin;                /* BLAZIN' moves allowed (else the meter stops short of full) */
     uint32_t rts;                   /* a Run the Streets fight (offline from its page, online from its room) */
     uint32_t spawn_hash;            /* the map's spawn points (SP, set at the set-up from the content every PC shares) */
+    /* build 87: Run the Streets' round rules (the room's, from START online; the VS CPU page's offline) and how the
+     * fight ended; checksummed with the rest, so PCs that disagree on the rules show at once */
+    uint8_t rules;                  /* the rules byte (ow_rules_rts_*), 0 the defaults */
+    uint8_t end_kind;               /* END_SCORE, END_TIME; 0 not over */
+    uint8_t unlimited;              /* no time limit: time_limit_steps is the safety end */
+    uint8_t pad2;
+    uint32_t end_step;              /* the step the end came at */
 } BigArena;
 static BigArena BA;
 typedef char ow_state_fits[sizeof(BigArena) <= OW_STATE_BYTES ? 1 : -1];
@@ -424,10 +434,26 @@ void ow_match_start(void)
     if (rts) BAcfg.camera = 1;
     BA.on = 1;
     BA.rts = (uint32_t)rts;
-    if (online && rts) {            /* the same rules on every PC: none of a PC's own settings */
-        BA.score_limit = 5;
+    if (online && rts) {            /* the same rules on every PC: the room's, from START; none of a PC's own settings */
+        int t, k;
+        BA.rules = (uint8_t)netplay_rts_rules();
+        ow_rules_rts_decode(BA.rules, &t, &k);
+        BA.score_limit = (uint16_t)ow_rules_rts_kos(k);
         BA.respawn_steps = 180;
-        BA.time_limit_steps = 60u * 300u;
+        BA.time_limit_steps = (uint32_t)ow_rules_rts_limit_steps(BA.rules);
+        BA.unlimited = t == OW_RTS_TIME_NONE;
+    } else if (rts) {               /* VS CPU: the page's choice (rts.c); tests may shorten the clock */
+        int t, k, test_secs = env_int("RECOMP_RTS_TEST_SECONDS", 0);
+        BA.rules = (uint8_t)rts_offline_rules();
+        ow_rules_rts_decode(BA.rules, &t, &k);
+        BA.score_limit = (uint16_t)ow_rules_rts_kos(k);
+        BA.respawn_steps = 180;
+        BA.time_limit_steps = (uint32_t)ow_rules_rts_limit_steps(BA.rules);
+        BA.unlimited = t == OW_RTS_TIME_NONE;
+        if (test_secs > 0 && !ffny_online_locked()) {
+            BA.time_limit_steps = 60u * (uint32_t)test_secs;
+            fprintf(stderr, "[RTS] RECOMP_RTS_TEST_SECONDS (tests): the clock ends after %d s\n", test_secs);
+        }
     } else {
         BA.score_limit = (uint16_t)recomp_settings_get("openworld", "score_limit", 5);
         BA.respawn_steps = (uint16_t)(60 * recomp_settings_get("openworld", "respawn_seconds", 3));
@@ -451,9 +477,15 @@ void ow_match_start(void)
         fprintf(stderr, "[RTS] Run the Streets fight%s on %s (feID %d): %d spawn points (hash %08X)\n",
                 online ? " (online)" : "", m.code[0] ? m.code : "?", m.fe_id, SP.n, BA.spawn_hash);
     }
-    fprintf(stderr, "[BIGARENA] on: first to %u knockouts, back after %u steps, time limit %u steps, camera %s, "
-            "BLAZIN' %s%s\n", BA.score_limit, BA.respawn_steps, BA.time_limit_steps, k_ba_camera[BAcfg.camera % 3],
+    fprintf(stderr, "[BIGARENA] on: first to %u knockouts, back after %u steps, time limit %u steps%s, camera %s, "
+            "BLAZIN' %s%s\n", BA.score_limit, BA.respawn_steps, BA.time_limit_steps,
+            BA.unlimited ? " (no time limit: the safety end)" : "", k_ba_camera[BAcfg.camera % 3],
             BA.blazin ? "on" : "off", online ? (rts ? " (Run the Streets room)" : " (online test)") : "");
+    if (rts) {
+        char rt[48];
+        ow_rules_rts_text(BA.rules, rt, (int)sizeof rt);
+        fprintf(stderr, "[RTS] round rules %02X: %s\n", BA.rules, rt);
+    }
 }
 
 int ow_rts_active(void) { return BA.on && BA.rts; }
@@ -624,7 +656,11 @@ static void bigarena_step(void)
         if (limit && w >= 0) {
             BA.ending = 1;
             BA.winner = (uint8_t)w;
-            BA.next_loser_at = BA.step + 30u;     /* half a second for the winning blow to land */
+            BA.end_kind = (uint8_t)(limit == 1 ? END_SCORE : END_TIME);
+            BA.end_step = BA.step;
+            /* the KO target: half a second for the winning blow to land; the clock: TIME! and the winner first,
+             * everyone held at rest and unhurt (ow_pad_hold, ow_health_change), then the losers go down */
+            BA.next_loser_at = BA.step + (limit == 1 ? 30u : ARENA_TIME_HOLD);
             if (!netplay_rerunning())
                 fprintf(stderr, "[BIGARENA] step %u: %s, slot %d wins | scores %u %u %u %u | knocked out %u %u %u %u\n",
                         BA.step, limit == 1 ? "score limit" : "time limit", w, BA.score[0], BA.score[1], BA.score[2],
@@ -667,6 +703,7 @@ void ow_health_change(void)
     delta = MEMF(g_esp + 8);
     if (delta >= 0.0f) return;
     if (!BA.ending && BA.step < BA.protect_until[s]) { MEMF(g_esp + 8) = 0.0f; return; }
+    if (BA.ending && BA.end_kind == END_TIME) { MEMF(g_esp + 8) = 0.0f; return; }    /* TIME!: nobody is hurt any more */
     if (mult < 0.0f) { const char *v = getenv("RECOMP_OW_TEST_DAMAGE"); mult = v && *v ? (float)atof(v) : 0.0f; }
     if (mult > 0.0f && !ffny_online_locked()) MEMF(g_esp + 8) = delta * mult;
 }
@@ -739,7 +776,11 @@ int ow_hud_view(OwHudView *out)
         if (s != out->leader && (out->present & (1u << s)) && score[s] == score[out->leader]) out->leader = -1;
     out->ending = BA.ending;
     out->winner = BA.winner < 4 ? BA.winner : -1;
-    out->seconds_left = BA.time_limit_steps ? (int)((BA.time_limit_steps > BA.step ? BA.time_limit_steps - BA.step : 0) / 60u) : -1;
+    out->steps_left = BA.time_limit_steps ? (int)(BA.time_limit_steps > BA.step ? BA.time_limit_steps - BA.step : 0) : -1;
+    out->seconds_left = out->steps_left >= 0 ? (out->steps_left + 59) / 60 : -1;     /* 0:00 only once it is up */
+    out->unlimited = BA.unlimited;
+    out->time_up = BA.ending && BA.end_kind == END_TIME;
+    out->end_step = BA.end_step;
     s = netplay_local_slot();
     out->local = s >= 0 && s < 4 ? s : 0;
     out->step = BA.step;
@@ -935,4 +976,20 @@ void ow_pad_read(uint32_t actor)
     MEMF(base + 12u) = y;
     last_x[slot] = x;
     last_y[slot] = y;
+}
+
+/* sub_001BAA00's entry, after netplay.c put this step's entry in place (and the start countdown's hold): once the
+ * clock has ended a Big Arena fight (TIME!), every fighter's pad words are at rest, the CPU's too, so nobody lands a
+ * blow while TIME! and the winner show. Decided from BA, the same on every PC at the same step. */
+void ow_pad_hold(uint32_t actor)
+{
+    uint32_t slot, pad, base, i;
+    if (!BA.on || !BA.ending || BA.end_kind != END_TIME) return;
+    if (actor < ACTORS || actor >= ACTORS + 4u * STRIDE || (actor - ACTORS) % STRIDE) return;
+    slot = MEM32(actor + 0x28u);
+    if (slot >= 8u) return;
+    pad = MEM32(0x003B9098u + slot * 4u);       /* the pad entry of the controller slot (start_countdown.c) */
+    if (pad >= 4u) return;
+    base = PAD_TABLE_OW + pad * 0x20u;
+    for (i = 0; i < 7u; i++) MEM32(base + i * 4u) = 0;
 }

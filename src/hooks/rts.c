@@ -226,6 +226,23 @@ int rts_offline_start(int fighter, int skin, int cpus, const int *cpu_fighters)
 
 int rts_offline_armed(void) { return s_armed != 0; }
 
+/* build 87: VS CPU's round rules, the page's TIME LIMIT and KO TARGET ([openworld] rts_time_limit in minutes, 0 none,
+ * and rts_ko_target; RECOMP_RTS_TIME_LIMIT / RECOMP_RTS_KO_TARGET in tests), as the rules byte */
+int rts_offline_rules(void)
+{
+    int minutes = recomp_settings_get("openworld", "rts_time_limit", 10);
+    int kos = recomp_settings_get("openworld", "rts_ko_target", 10);
+    return ow_rules_rts_encode(ow_rules_rts_time_index(minutes * 60), ow_rules_rts_ko_index(kos));
+}
+
+void rts_offline_set_rules(int rules)
+{
+    int t, k;
+    ow_rules_rts_decode(rules, &t, &k);
+    recomp_settings_set("openworld", "rts_time_limit", ow_rules_rts_seconds(t) / 60);
+    recomp_settings_set("openworld", "rts_ko_target", ow_rules_rts_kos(k));
+}
+
 int rts_offline_fight_starts(void)
 {
     /* tests: RECOMP_RTS_TEST_FIGHT=1 (with RECOMP_RTS_ACCESS=1) makes every offline fight on the map a Run the

@@ -45,6 +45,10 @@ int rts_offline_armed(void);
 /* The match set-up (openworld.c): this offline fight is a Run the Streets one (and marks the fights as begun). */
 int rts_offline_fight_starts(void);
 void rts_main_menu(void);
+/* Build 87: VS CPU's round rules (the time limit and the KO target the page shows) as the rules byte of openworld.h
+ * (ow_rules_rts_*), kept in [openworld] rts_time_limit / rts_ko_target; openworld.c reads it at the set-up. */
+int rts_offline_rules(void);
+void rts_offline_set_rules(int rules);
 
 #ifdef __cplusplus
 }
