@@ -12,8 +12,10 @@
  * stats and gameplay words. Bank s is only ever slot s's, so the same fighter in two slots (a mirror match) uses
  * two banks. The binding is a pure function of the lineup: each slot's last set-up.
  *
- * Offline only: while this PC is online a logical ID is refused (the slot gets the fighter's template, the stock
- * fighter it was made from) and no bank is redirected. */
+ * Online (build 86, phase 2): a logical ID is refused (the slot gets the fighter's template, the stock fighter it
+ * was made from) and no bank is redirected, except in a match whose START named community fighters by number (the
+ * relay's CAPS_UNLIMITED, netplay.c): automatch sets that lineup up as offline (fighter_banks_online_lineup), so every
+ * PC of the match, spectators included, binds bank s to slot s's fighter from the same START. */
 #ifndef DEFJAM_FIGHTER_BANKS_H
 #define DEFJAM_FIGHTER_BANKS_H
 
@@ -80,6 +82,10 @@ const FighterBanksEntry *fighter_banks_for_fe(int fe_id);
  * a logical fighter becomes one with the slot's bank (offline) or the fighter's template (online, refused), and the
  * bank is bound. Returns 1 and the command to run in out, else 0 (run it as it is). */
 int fighter_banks_before_call(const char *command, char *out, size_t out_size);
+
+/* Build 86: automatch, before it sets a match up: 1 when this PC is online and the lineup (START's) names community
+ * fighters, so their set-ups bind banks and the banks are redirected until the next set-up; 0 otherwise. */
+void fighter_banks_online_lineup(int on);
 
 /* The record lookup's result (sub_000BE760: thiscall on the database, out[0] the record): the bound fighter's
  * record for a bound bank's row, else record. caller: the lookup's return address, for the log. */

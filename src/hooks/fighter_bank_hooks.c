@@ -23,6 +23,21 @@ static int g_bound[FB_BANKS] = { -1, -1, -1, -1 };
 static uint32_t g_checked_base;     /* the loaded database whose bank rows were checked */
 static volatile int g_window_req, g_window_slot;
 static int g_listing;               /* Game.ResetFighterList runs: the bank rows read as themselves */
+static volatile int g_online_lineup;    /* build 86: online, the match being set up (automatch) names community
+                                         * fighters: START carried their numbers (CAPS_UNLIMITED), every PC of the
+                                         * match binds the same banks; kept until the next set-up */
+
+void fighter_banks_online_lineup(int on)
+{
+    if (on != g_online_lineup)
+        fprintf(stderr, "[BANKS] online lineup %s\n", on ? "with community fighters: banks bind as offline"
+                                                          : "without community fighters");
+    g_online_lineup = on;
+}
+
+/* A bank may not be bound or redirected now: this PC is online and the match's lineup is not one START gave
+ * community fighters (fighter_banks_online_lineup). */
+static int locked(void) { return ffny_online_locked() && !g_online_lineup; }
 
 /* RECOMP_BANKS_OFF=answers,movies (tests): leave that part out. */
 static int part_off(const char *part)
@@ -156,7 +171,7 @@ int fighter_banks_before_call(const char *command, char *out, size_t out_size)
         replacement = 55;
         fprintf(stderr, "[BANKS] slot %d: no community fighter %d here (%s); the slot plays Doc\n", slot, id,
                 g_ready ? "not installed" : "no fighter side file");
-    } else if (ffny_online_locked()) {
+    } else if (locked()) {
         replacement = e->template_fe_id;
         fprintf(stderr, "[BANKS] slot %d: community fighter %d \"%s\" is offline only; online the slot plays its "
                 "template feID %d\n", slot, id, e->name, replacement);
@@ -184,7 +199,7 @@ uint32_t fighter_banks_record(uint32_t database, uint32_t record, uint32_t calle
     for (k = 0; k < FB_BANKS; k++) {
         const FighterBanksEntry *e;
         if (g_bound[k] < 0 || record - base != g_bank_off[k]) continue;
-        if (ffny_online_locked() || g_listing) return record;
+        if (locked() || g_listing) return record;
         e = &g_fb[g_bound[k]];
         if (g_checked_base != base) {
             /* the loaded file is the file (the game adds its base to every offset): check it is ours */
@@ -301,7 +316,7 @@ void fighter_banks_movie_load(uint32_t name_arg)
     char name[160], out[192];
     int map[FB_BANKS], k, any = 0;
     uint32_t p, i, buf;
-    if (!g_ready || ffny_online_locked() || part_off("movies")) return;
+    if (!g_ready || locked() || part_off("movies")) return;
     for (k = 0; k < FB_BANKS; k++) {
         map[k] = g_bound[k] >= 0 ? g_fb[g_bound[k]].id : -1;
         any |= map[k] >= 0;

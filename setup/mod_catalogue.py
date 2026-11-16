@@ -34,6 +34,19 @@ TYPES = ('fighter-texture', 'fighter-body', 'fighter-model', 'clothing', 'venue'
 # fighters at those places out, and would refuse them); setup/ffnycontent/newfighter.py PLACES has the same list.
 FIGHTER_FE_IDS = tuple(range(100, 128)) + (5, 15, 29, 37, 39, 42, 49, 53, 63, 66, 79, 86, 87, 88, 89, 90, 94, 95, 96,
                                            97)
+# Build 86: a community fighter beyond the places has a FIGHTER NUMBER instead, 1000 and up, given once by the
+# account service and never reused (index-v5.json only: launchers of build 85 and older read index-v4.json, which
+# leaves numbered fighters out, and would refuse the whole index for one). 999999 is the select grid's MORE cell.
+FIRST_FIGHTER_NUMBER = 1000
+LAST_FIGHTER_NUMBER = 0x7FFFFFFF
+MORE_CELL = 999999
+
+
+def fighter_number(value):
+    """Whether ``value`` is a community fighter's number (a numbered new fighter's ``fighter_fe_id``)."""
+    return type(value) is int and FIRST_FIGHTER_NUMBER <= value <= LAST_FIGHTER_NUMBER and value != MORE_CELL
+
+
 # a new fighter the team accepted as a SKIN (an extra outfit of a stock fighter, same gameplay, new look) has no
 # place: "fighter_mode": "skin" and "skin_of": the template's front-end ID (index-v4.json only: launchers of build
 # 84 and older read index-v3.json, which leaves skins out, and would refuse a new fighter without a place)
@@ -57,7 +70,8 @@ def ffny_mod(mod):
                 and 'fighter_fe_id' not in mod, 'Invalid skin')
     elif mod.get('type') == 'new-fighter' or 'fighter_fe_id' in mod:
         require(mod.get('type') == 'new-fighter' and type(mod.get('fighter_fe_id')) is int
-                and mod['fighter_fe_id'] in FIGHTER_FE_IDS, 'Invalid new fighter place')
+                and (mod['fighter_fe_id'] in FIGHTER_FE_IDS or fighter_number(mod['fighter_fe_id'])),
+                'Invalid new fighter place')
     if 'language' in mod:
         require(isinstance(mod['language'], str) and re.fullmatch(r'[a-z]{2,3}(-[A-Za-z0-9]{2,8})?', mod['language']),
                 'Invalid language code')

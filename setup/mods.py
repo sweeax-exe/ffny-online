@@ -40,8 +40,10 @@ import content_compose
 # "bundle" and "bundle_name"); index-v2.json is without pack items, for launchers of build 79; index.json also
 # leaves new fighters out, for launchers up to build 78. All share their revisions. Build 85: index-v4.json also
 # lists the skins (new fighters the team accepted as an extra outfit of a stock fighter: "fighter_mode": "skin",
-# "skin_of", no place).
-CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v4.json'
+# "skin_of", no place). Build 86: index-v5.json also lists the community fighters beyond the places, by their fighter
+# number (1000 and up, mod_catalogue.fighter_number); index-v4.json leaves them out for launchers of build 85.
+CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v5.json'
+CATALOGUE_URL_V4 = 'https://play.defjam.online/updates/content/index-v4.json'
 CATALOGUE_URL_V3 = 'https://play.defjam.online/updates/content/index-v3.json'
 CATALOGUE_URL_V2 = 'https://play.defjam.online/updates/content/index-v2.json'
 CATALOGUE_URL_V1 = 'https://play.defjam.online/updates/content/index.json'
@@ -485,14 +487,17 @@ def fetch_small(url, limit):
 
 
 def fetch_index(url):
-    """(raw, signature, url) of a catalogue index. index-v4.json that the server does not have yet (404: an account
-    service from before build 85) falls back to index-v3.json, the same catalogue without fighters at low places."""
-    try:
-        return fetch_small(url, MAX_INDEX), fetch_small(url + '.sig', 64), url
-    except urllib.error.HTTPError as error:
-        if error.code != 404 or url != CATALOGUE_URL:
-            raise
-    return fetch_small(CATALOGUE_URL_V3, MAX_INDEX), fetch_small(CATALOGUE_URL_V3 + '.sig', 64), CATALOGUE_URL_V3
+    """(raw, signature, url) of a catalogue index. An index the server does not have yet (404) falls back to the one
+    before it: index-v5.json (an account service from before build 86) to index-v4.json, the same catalogue without
+    numbered fighters; index-v4.json (before build 85) to index-v3.json, without fighters at low places."""
+    chain = [CATALOGUE_URL, CATALOGUE_URL_V4, CATALOGUE_URL_V3]
+    while True:
+        try:
+            return fetch_small(url, MAX_INDEX), fetch_small(url + '.sig', 64), url
+        except urllib.error.HTTPError as error:
+            if error.code != 404 or url not in chain[:-1]:
+                raise
+            url = chain[chain.index(url) + 1]
 
 
 def semver(value):

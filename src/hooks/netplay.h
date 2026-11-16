@@ -370,6 +370,9 @@ void netplay_lobby_ready(int ready, int fighter);
  * to a relay that answered CAPS_SKINS (else as netplay_lobby_ready). netplay_lobby_skins: the relay takes skins. */
 void netplay_lobby_ready_skin(int ready, int fighter, int skin);
 int netplay_lobby_skins(void);
+/* Build 86: the relay takes community fighters beyond the places by number (NETPLAY_CAP_UNLIMITED): a fighter of
+ * 1000 and up (fighter_banks.h) goes to netplay_lobby_ready as it is; the room and START name it by its number. */
+int netplay_lobby_unlimited(void);
 void netplay_lobby_vote(int choice);
 void netplay_lobby_leave(void);
 /* King of the Hill: give up this PC's place in the line (to the back; a king gives up the crown).

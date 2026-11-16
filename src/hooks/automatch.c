@@ -20,6 +20,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "automatch.h"
 #include "fighter_skins.h"
+#include "fighter_banks.h"
 #include "netplay.h"
 #include "online_screen.h"
 #include "created_fighter.h"
@@ -241,6 +242,12 @@ static void run_sequence(void)
      * Nothing in the fight reads it (docs/research/summary-cpu-tag.md). */
     for (i = 0; i < m->count; i++) call("Controller.ControllerReturn(%d)", i);
     call("Game.ResetFighterList()");
+    {   /* build 86: online, a lineup with community fighters (START's numbers, CAPS_UNLIMITED) binds the banks as
+         * offline; every PC of the match sets up the same lineup (fighter_banks.h) */
+        int unl = 0;
+        for (i = 0; i < m->count; i++) unl |= m->fighter[i] >= FB_FIRST_LOGICAL && m->fighter[i] != FB_MORE_ID;
+        fighter_banks_online_lineup(unl);     /* offline it changes nothing */
+    }
     created_fighter_begin();
     for (i = 0; i < m->count; i++) {
         int fighter = m->fighter[i];

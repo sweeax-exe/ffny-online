@@ -61,6 +61,7 @@
 #include "season_search.h"
 #include "fighter_skins.h"
 #include "fighter_banks.h"
+#include "new_fighters.h"
 #include "pc_content.h"
 #include "pc_mods.h"
 #include "music_library.h"
@@ -563,7 +564,13 @@ void silhouette(ImDrawList *dl, const Frame &f, float x, float y, float w, float
 bool portrait(ImDrawList *dl, const Frame &f, int id, float x, float y, float w, float h, ImU32 tint = IM_COL32_WHITE)
 {
     if (id == NETPLAY_CREATED_FIGHTER) { silhouette(dl, f, x, y, w, h, tint); return true; }
-    const Tex &t = fighter_tex(id);
+    const Tex *own = &fighter_tex(id);
+    if ((!own->srv || own->w <= 0 || own->h <= 0) && id >= FB_FIRST_LOGICAL) {
+        // build 86: a community fighter beyond the places without a hub portrait of its own: its template's
+        const FighterBanksEntry *e = fighter_banks_find(id);
+        if (e) own = &fighter_tex(e->template_fe_id);
+    }
+    const Tex &t = *own;
     if (!t.srv || t.w <= 0 || t.h <= 0) return false;
     float v = std::min(1.0f, (t.w / t.h) / (w * f.sx / (h * f.sy)));
     return image(dl, f, t, x, y, w, h, tint, ImVec2(0, 0), ImVec2(1, v));
@@ -930,6 +937,10 @@ struct State {
     bool skin_open = false;
     int skin_fe = -1, skin_sel = 0, pick_skin = 0;
     ULONGLONG skin_opened = 0;
+    // build 86: the community window over CHOOSE FIGHTER (community_ui.inc), from the grid's MORE card
+    bool unl_open = false;
+    int unl_sel = 0;
+    ULONGLONG unl_opened = 0;
     uint32_t watch_hidden = 0;      // King of the Hill: the fight whose watching screen B closed
     unsigned long long give_up_at = 0, lb_since = 0;    // King of the Hill: LB gave up the spot; LB held since
     bool lb_long_done = false;      // the long LB press has acted
@@ -1562,6 +1573,7 @@ int cycle_index(const std::vector<int> &cycle, int type)
 static int saved_fighter()
 {
     int id = online_fighter_id(recomp_settings_get("online", "fighter", 55));
+    if (id >= FB_FIRST_LOGICAL && !fighter_banks_find(id)) return 55;     // build 86: a community fighter no longer here
     return id == NETPLAY_CREATED_FIGHTER && !cp_available() ? 55 : id;
 }
 
@@ -2971,6 +2983,22 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
 const int FIGHTER_RANDOM = -2;
 bool crew_room(const NetRoom &r, NetCrew *out);    // crew_ui.inc: a crew battle's room
 std::vector<int> g_grid_cp;
+bool tset_room(const NetRoom &r, NetTSet *out);       // tset_ui.inc
+
+// Build 86: whether CHOOSE FIGHTER offers community fighters beyond the places (fighter_banks.h) here: this PC has
+// some, the relay takes fighter numbers (NETPLAY_CAP_UNLIMITED), and the room (or the search) is not ranked, a
+// tournament set, a crew battle, STANDARD ONLY or without created fighters. The relay checks the same and more (every
+// member of the room must have a game that knows them); a pick it cannot keep plays its template.
+bool community_numbers_here(const NetRoom &r)
+{
+    if (fighter_banks_count() <= 0 || !netplay_lobby_unlimited()) return false;
+    if (!r.in_room) return !S.ranked_pick;
+    NetRankInfo ri;
+    NetTSet t;
+    NetCrew cb;
+    if (ranked_room(r, &ri) || tset_room(r, &t) || crew_room(r, &cb)) return false;
+    return (r.settings.fighter_rules & (NETPLAY_RULES_NO_CREATED | NETPLAY_RULES_STANDARD)) == 0;
+}
 const std::vector<OnlineFighter> &grid_fighters()
 {
     static std::vector<OnlineFighter> list;
@@ -2999,6 +3027,29 @@ const std::vector<OnlineFighter> &grid_fighters()
             cp.style = styles[i].c_str();
             list.insert(list.begin(), cp);
             g_grid_cp.insert(g_grid_cp.begin(), (int)i);
+        }
+    }
+    if (community_numbers_here(r)) {
+        // build 86: community fighters beyond the places: a shelf (played this session first, then by number) and
+        // MORE, the paged list of every one (the community window)
+        int shelf[32], m = new_fighters_shelf(shelf, 30);
+        for (int k = 0; k < m; k++) {
+            const FighterBanksEntry *e = fighter_banks_find(shelf[k]);
+            if (!e) continue;
+            OnlineFighter o{};
+            o.id = e->id;
+            snprintf(o.name, sizeof(o.name), "%s", e->name);
+            o.style = "COMMUNITY FIGHTER";
+            list.push_back(o);
+            g_grid_cp.push_back(-1);
+        }
+        if (fighter_banks_count() > m) {
+            OnlineFighter more{};
+            more.id = FB_MORE_ID;
+            snprintf(more.name, sizeof(more.name), "More");
+            more.style = "EVERY COMMUNITY FIGHTER";
+            list.push_back(more);
+            g_grid_cp.push_back(-1);
         }
     }
     if (list.size() > 1) {
@@ -3039,7 +3090,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
 {
     // build 85: while the skin window is open the grid takes no input (the window does, below)
     Pad idle = {};
-    const Pad &pad = S.skin_open ? idle : pad_in;
+    const Pad &pad = S.skin_open || S.unl_open ? idle : pad_in;
     const auto &list = grid_fighters();
     int n = (int)list.size();
     const int cols = 7, rows = 4;
@@ -3104,7 +3155,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     auto blocked = [&](int i) { return list[i].id != FIGHTER_RANDOM && fighter_blocked(rules_room, list[i].id); };
     // the chosen fighter, large, with name and style
     glass(dl, f, 36, 74, 180, 308);
-    if (cur.id == FIGHTER_RANDOM) random_card(dl, f, 46, 84, 160, 240, true, 110);
+    if (cur.id == FIGHTER_RANDOM || cur.id == FB_MORE_ID) random_card(dl, f, 46, 84, 160, 240, true, 110);
     else if (!portrait(dl, f, cur.id, 46, 84, 160, 240))
         text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), cur.name, CENTER, 1.4f, 150);
     S.fighters_cp = cur_cp;
@@ -3146,6 +3197,10 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             if (list[i].id == FIGHTER_RANDOM) {
                 random_card(dl, f, x, y, cw, ch, sel, 34);
                 text(dl, f, g_title, 9, x + cw / 2, y + ch - 14, sel ? WHITE : GREY, "RANDOM", CENTER, 0.6f);
+            } else if (list[i].id == FB_MORE_ID) {     // build 86: the community window
+                rect(dl, f, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32(56, 14, 20, 255) : IM_COL32(24, 10, 12, 255), 3);
+                text(dl, f, g_title, 20, x + cw / 2, y + ch / 2 - 16, sel ? ORANGE : with_alpha(ORANGE, 0.6f), "+", CENTER, 1.2f);
+                text(dl, f, g_title, 9, x + cw / 2, y + ch - 14, sel ? WHITE : GREY, "MORE", CENTER, 0.6f);
             } else if (!portrait(dl, f, list[i].id, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32_WHITE : IM_COL32(150, 150, 150, 255)))
                 text(dl, f, g_body, 9, x + 3, y + 30, GREY, list[i].name, LEFT, 0, cw - 4);
             if (list[i].id == NETPLAY_CREATED_FIGHTER) {     // the fighter's name on an orange band
@@ -3209,13 +3264,22 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         S.random_pick = cur.id == FIGHTER_RANDOM;
         if (S.random_pick) {    // RANDOM is the last card: one of the others the room's rules allow
             std::vector<int> allowed;
-            for (int i = 0; i + 1 < n; i++) if (!blocked(i)) allowed.push_back(i);
+            for (int i = 0; i + 1 < n; i++) if (!blocked(i) && list[i].id < FB_FIRST_LOGICAL) allowed.push_back(i);
             pick = allowed.empty() ? online_random_below(n - 1) : allowed[online_random_below((int)allowed.size())];
         }
         int pick_cp = pick < (int)g_grid_cp.size() ? g_grid_cp[pick] : -1;
         if (pick_cp >= 0) cp_choose(pick_cp);   // which created fighter: remembered, and sent to the relay
         S.pick_skin = 0;
-        if (!S.random_pick && pick_cp < 0 && list[pick].id < 98 && fighter_skins_count(list[pick].id) > 0) {
+        if (!S.random_pick && list[pick].id == FB_MORE_ID) {
+            // build 86: MORE: the community window, on the fighter last picked from it (else the first)
+            S.unl_open = true;
+            S.unl_sel = 0;
+            int saved = recomp_settings_get("online", "fighter", -1);
+            for (int i = 0; i < fighter_banks_count(); i++) if (fighter_banks_at(i)->id == saved) S.unl_sel = i;
+            S.unl_opened = GetTickCount64();
+            { Pad none = {}; community_test_keys(none, true); }
+            fprintf(stderr, "[BANKS] hub: MORE: the community window, %d fighters, on %d\n", fighter_banks_count(), S.unl_sel);
+        } else if (!S.random_pick && pick_cp < 0 && list[pick].id < 98 && fighter_skins_count(list[pick].id) > 0) {
             // build 85: a fighter with skins: the skin window first, on the look played last with it
             S.skin_open = true;
             S.skin_fe = list[pick].id;
@@ -3243,6 +3307,18 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             fprintf(stderr, "[SKINS] hub: feID %d with skin %d\n", S.skin_fe, S.skin_sel);
         }
         if (r) S.skin_open = false;
+    }
+    if (S.unl_open) {
+        int r = community_window(dl, f, GetTickCount64() - S.unl_opened > 250 ? pad_in : idle, &S.unl_sel);
+        const FighterBanksEntry *e = r == 1 ? fighter_banks_at(S.unl_sel) : nullptr;
+        if (e) {
+            *chosen = true;
+            *fighter = e->id;
+            new_fighters_shelf_played(e->id);   // on the shelf from now on
+            fprintf(stderr, "[BANKS] hub: community fighter %d \"%s\" picked\n", e->id, e->name);
+        }
+        if (r) S.unl_open = false;
+        if (r) const_cast<Pad &>(pad_in).b = false;     // B closed the window, not the page
     }
     // BACK from a ranked search's pick goes back to the mode chooser, not to the online menu (a player
     // who wanted another fighter for ranked landed on the hub, 2026-11-03)

@@ -894,7 +894,9 @@ def hub_portraits(data, packs, template, known=()):
             if not ops:
                 continue
             place = fighter_place(ops[0], p.get('fighter_fe_id'))
-            if not newfighter.is_place(place) or place in dict(there):
+            # build 86: a community fighter beyond the places has one too, under its number (the hub's picker,
+            # the room card and the versus screen show it online)
+            if not (newfighter.is_place(place) or newfighter.is_logical(place)) or place in dict(there):
                 continue
             path = folder / ('%d.png' % place)
             if (place, p['id']) not in known or not path.is_file():
@@ -912,9 +914,13 @@ def hub_portraits(data, packs, template, known=()):
         except PACK_ERRORS:
             continue                        # no body art, or art the composer refused: no portrait
     keep = {place for place, _ in there}
-    for place in newfighter.PLACES:
-        path = folder / ('%d.png' % place)
-        if place not in keep and path.is_file():
+    stale = [folder / ('%d.png' % place) for place in newfighter.PLACES if place not in keep]
+    if folder.is_dir():     # a number's portrait whose pack is gone (stock portraits are below 1000)
+        for path in folder.glob('*.png'):
+            if path.stem.isdigit() and newfighter.is_logical(int(path.stem)) and int(path.stem) not in keep:
+                stale.append(path)
+    for path in stale:
+        if path.is_file():
             try:
                 path.unlink()
             except OSError:

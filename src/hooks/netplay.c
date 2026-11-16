@@ -58,6 +58,7 @@
 #include "pc_mods.h"
 #include "fight_hud.h"
 #include "fighter_skins.h"
+#include "fighter_banks.h"
 #include "start_countdown.h"
 #include "detmath/detmath.h"
 
@@ -112,6 +113,7 @@ void netplay_lobby_settings(const NetRoomSettings *s) { (void)s; }
 void netplay_lobby_ready(int r, int f) { (void)r; (void)f; }
 void netplay_lobby_ready_skin(int r, int f, int k) { (void)r; (void)f; (void)k; }
 int netplay_lobby_skins(void) { return 0; }
+int netplay_lobby_unlimited(void) { return 0; }
 void netplay_lobby_vote(int c) { (void)c; }
 void netplay_lobby_leave(void) {}
 void netplay_lobby_yield(void) {}
@@ -314,6 +316,13 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_XPLAY_OPT (recomp_settings_get("online", "crossplay_android", 0) ? CAPS_XPLAY_ANDROID : 0u) /* sent only while on */
 #define CAPS_SKINS    4194304u  /* 1 << 22 (build 85), both ways: READY's third byte is the player's skin of a stock fighter,
                                  * and START (WATCH, WATCHLATE) ends with the players' skins (src/hooks/fighter_skins.c) */
+#define CAPS_UNLIMITED 33554432u /* 1 << 25 (build 86), both ways: community fighters beyond the places (fighter_banks.h).
+                                 * READY ends with the fighter number (u32: 1000 and up, the byte its template), ROOM
+                                 * with the players' numbers, START (WATCH, WATCHLATE) after the skins with the match's
+                                 * numbers; the relay keeps one only where every member announced this bit and has the
+                                 * room's content print (server docs/unlimited-fighters-online.md) */
+/* build 86: a community fighter number (1000 and up; not the select grid's MORE cell) */
+static int is_number(int fighter) { return fighter >= FB_FIRST_LOGICAL && fighter != FB_MORE_ID; }
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -2395,6 +2404,17 @@ static void make_data_print(void)
         if (n < (int)sizeof(text)) n += snprintf(text + n, sizeof(text) - (size_t)n, "%s%s %08X", i ? ", " : "", k_fight_files[i], f);
         if (overridden && o < (int)sizeof(over)) o += snprintf(over + o, sizeof(over) - (size_t)o, " %s", k_fight_files[i]);
     }
+    {   /* build 86: the community fighters' side file (fighter_banks.h) where there is one: which record each number
+         * binds to. It follows from the database for the same composer, so this only catches a mixed install; the
+         * print of a PC without one is as before. */
+        int overridden = 0;
+        uint32_t f = file_print(FB_SIDE_FILE, &overridden);
+        if (f) {
+            h = mix32(h ^ f ^ 0x46464C46u);
+            if (n < (int)sizeof(text)) n += snprintf(text + n, sizeof(text) - (size_t)n, ", %s %08X", FB_SIDE_FILE, f);
+            if (overridden && o < (int)sizeof(over)) o += snprintf(over + o, sizeof(over) - (size_t)o, " %s", FB_SIDE_FILE);
+        }
+    }
     snprintf(g_data_over, sizeof(g_data_over), "%s", o ? over + 1 : "");
     g_data_print = h ? h : 1;
     fprintf(stderr, "[NETPLAY] game files %08X (%u ms): %s%s%s\n", g_data_print,
@@ -3210,6 +3230,17 @@ static void on_room(const uint8_t *b, int len)
         rdbytes(&r, v.blocked, v.blocked_count);
         if (r.bad) return;
     }
+    if (r.i < r.n) {    /* build 86: the players' community fighter numbers (relays answering CAPS_UNLIMITED) */
+        int nn = rd8(&r), k;
+        for (k = 0; k < nn && !r.bad; k++) {
+            int s = rd8(&r), j;
+            uint32_t num = 0;
+            for (j = 0; j < 4; j++) num |= (uint32_t)rd8(&r) << (8 * j);     /* in order: no reads in one expression */
+            if (r.bad || !is_number((int)num) || num > 0x7FFFFFFFu) return;
+            for (j = 0; j < count; j++) if (v.players[j].slot == s) v.players[j].fighter = (int)num;
+        }
+        if (r.bad) return;
+    }
     v.in_room = 1;
     v.received = GetTickCount64();
     EnterCriticalSection(&g_cs);
@@ -3795,6 +3826,26 @@ static void on_start_as(const uint8_t *b, int len, int watching)
             }
             if (r.bad) return;
         }
+        if (r.i < r.n) {    /* build 86: the community fighters' numbers, after the skins (relays answering
+                             * CAPS_UNLIMITED); each replaces its player's template byte */
+            int nn = rd8(&r), k;
+            for (k = 0; k < nn && !r.bad; k++) {
+                int s = rd8(&r), j;
+                uint32_t num = 0;
+                for (j = 0; j < 4; j++) num |= (uint32_t)rd8(&r) << (8 * j);
+                if (r.bad || num > 0x7FFFFFFFu || !is_number((int)num)) return;
+                for (j = 0; j < count; j++) if (slots[j] == s) fighters[j] = (int)num;
+            }
+            if (r.bad) return;
+        }
+        /* the four bank rows (124..127) are each PC's per-slot rows for the numbers: never a fighter of their own
+         * online (an older client's place there); Doc on every PC that has them, as the relay's own fallback */
+        if (fighter_banks_ready())
+            for (i = 0; i < count; i++)
+                if (fighter_banks_index(fighters[i]) >= 0) {
+                    fprintf(stderr, "[BANKS] START: fighter %d is a bank row here; the player plays Doc\n", fighters[i]);
+                    fighters[i] = 55;
+                }
         if (!(N.start_seed && seed == N.start_seed)) {
             EnterCriticalSection(&g_cs);
             memcpy(N.cp_start_crc, named, sizeof(named));
@@ -4581,7 +4632,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
-                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED |
+                              CAPS_UNLIMITED); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -5767,6 +5819,16 @@ void netplay_lobby_ready(int ready, int fighter)
     netplay_lobby_ready_skin(ready, fighter, skin);
 }
 
+int netplay_lobby_unlimited(void)
+{
+    int on;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    EnterCriticalSection(&g_cs);
+    on = relay_has(CAPS_UNLIMITED);
+    LeaveCriticalSection(&g_cs);
+    return on;
+}
+
 int netplay_lobby_skins(void)
 {
     int on;
@@ -5777,15 +5839,36 @@ int netplay_lobby_skins(void)
     return on;
 }
 
+/* Build 86: a community fighter beyond the places (fighter_banks.h, 1000 and up) on the wire: READY's byte is its
+ * template (the stock fighter it was made from: what a relay plays that cannot keep the number), the number follows
+ * the skin byte. Without the community fighter on this PC: Doc. */
+static int unl_template(int number)
+{
+    const FighterBanksEntry *e = fighter_banks_find(number);
+    return e && e->template_fe_id >= 0 && e->template_fe_id < 0xFF ? e->template_fe_id : 55;
+}
+
 void netplay_lobby_ready_skin(int ready, int fighter, int skin)
 {
-    /* build 85: the skin as a third byte, only to a relay that answered CAPS_SKINS (an older one reads two) */
-    uint8_t b[3] = { (uint8_t)(ready ? 1 : 0), (uint8_t)fighter, (uint8_t)(skin > 0 && skin <= FIGHTER_SKINS_PER ? skin : 0) };
-    int len = 2;
+    /* build 85: the skin as a third byte, only to a relay that answered CAPS_SKINS (an older one reads two);
+     * build 86: a community fighter's number after it (relays answering CAPS_UNLIMITED), its template in the byte */
+    uint8_t b[7] = { (uint8_t)(ready ? 1 : 0), (uint8_t)fighter, (uint8_t)(skin > 0 && skin <= FIGHTER_SKINS_PER ? skin : 0) };
+    int len = 2, number = is_number(fighter) ? fighter : 0;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    if (number) {
+        b[1] = (uint8_t)unl_template(number);
+        b[2] = 0;
+    }
     EnterCriticalSection(&g_cs);
     if (relay_has(CAPS_SKINS) && fighter >= 0 && fighter < 0xFF) len = 3;
-    if (N.roomv.in_room && NETPLAY_IS_HILL(N.roomv.settings.mode) && fighter >= 0 && fighter < 0xFF) {
+    if (number && relay_has(CAPS_UNLIMITED)) {
+        len = 7;
+        put32(b + 3, (uint32_t)number);
+    } else if (number) {
+        if (relay_has(CAPS_SKINS)) len = 3;
+        fighter = b[1];     /* a relay without the bit: the template, as the room will show it */
+    }
+    if (N.roomv.in_room && NETPLAY_IS_HILL(N.roomv.settings.mode) && ((fighter >= 0 && fighter < 0xFF) || is_number(fighter))) {
         /* build 73: kept until the room has it (hill_pick_tick), and the fighter of this PC's next ready */
         if (N.koth_pick != fighter) N.koth_pick_tries = 0;
         N.koth_pick = fighter;
@@ -5793,6 +5876,9 @@ void netplay_lobby_ready_skin(int ready, int fighter, int skin)
     }
     LeaveCriticalSection(&g_cs);
     if (len == 3 && b[2]) fprintf(stderr, "[SKINS] READY: fighter %d, skin %d\n", fighter, b[2]);
+    if (len == 7) fprintf(stderr, "[BANKS] READY: community fighter %d (template %d)\n", number, b[1]);
+    else if (number) fprintf(stderr, "[BANKS] READY: community fighter %d plays its template %d (the relay takes no "
+                             "fighter numbers)\n", number, b[1]);
     request(T_READY, b, len);
 }
 
