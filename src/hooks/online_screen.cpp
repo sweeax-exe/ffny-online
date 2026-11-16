@@ -2991,7 +2991,7 @@ bool tset_room(const NetRoom &r, NetTSet *out);       // tset_ui.inc
 // member of the room must have a game that knows them); a pick it cannot keep plays its template.
 bool community_numbers_here(const NetRoom &r)
 {
-    if (fighter_banks_count() <= 0 || !netplay_lobby_unlimited()) return false;
+    if (fighter_banks_count() <= 0 || (!gallery_on() && !netplay_lobby_unlimited())) return false;
     if (!r.in_room) return !S.ranked_pick;
     NetRankInfo ri;
     NetTSet t;
@@ -4882,6 +4882,10 @@ void gallery_step()
                                          "fighters-random", "vote-random",
                                          // build 85: the skin window over CHOOSE FIGHTER (a fighter with skins, else none)
                                          "fighters-skins",
+                                         // build 86: community fighters beyond the places (run with an override that has
+                                         // some, e.g. scripts/unlimited-synth.py): the grid's shelf and MORE, the community
+                                         // window over CHOOSE FIGHTER, a room whose players play two of them
+                                         "fighters-community", "fighters-more", "room-community",
                                          "ranked", "voice", "music", "music-own", "music-empty", "stats", "stats-1v1", "players", "fighters",
                                          // build 47: every server's players (All servers)
                                          "players-all",
@@ -5251,6 +5255,28 @@ void gallery_step()
                 S.skin_opened = GetTickCount64();
                 break;
             }
+    }
+    else if (p == "fighters-community" || p == "fighters-more") {   // build 86: the shelf, or MORE's window open
+        S.page = FIGHTERS;
+        S.fighter_top = 0;
+        const auto &list = grid_fighters();
+        for (int i = 0; i < (int)list.size(); i++)
+            if (list[i].id >= FB_FIRST_LOGICAL && (p == "fighters-community" || list[i].id == FB_MORE_ID)) {
+                S.fighter_sel = i;
+                S.fighter_top = i / 7 > 3 ? i / 7 - 3 : 0;
+                if (list[i].id == FB_MORE_ID) {
+                    S.unl_open = true;
+                    S.unl_sel = 13;
+                    S.unl_opened = GetTickCount64();
+                }
+                break;
+            }
+    }
+    else if (p == "room-community") {   // build 86: two players with community fighters, their portraits by number
+        S.page = HUB;
+        G.room = sample_room(2, 4, 3);
+        for (int i = 0; i < G.room.player_count && i < 2; i++)
+            if (const FighterBanksEntry *e = fighter_banks_at(i * 7)) G.room.players[i].fighter = e->id;
     }
     else if (p == "fighters-rules") {   // a room of stock fighters and no banned tier: two fighters blocked, one chosen
         S.page = FIGHTERS;
