@@ -143,6 +143,7 @@ white outline: engaged; `rts_social_ui.inc`). `[openworld] free_roam` (on), `roa
 | `RECOMP_RTS_TIME_LIMIT=<min>`, `RECOMP_RTS_KO_TARGET=<n>` | VS CPU's round rules (the `[openworld]` settings) |
 | `RECOMP_RTS_TEST_SECONDS=<s>` | offline tests: the clock ends a Run the Streets fight after s seconds (never online) |
 | `RECOMP_TEST_RTS_RULES=<min>,<kos>` | online tests: the host sets its Run the Streets room's round rules |
+| `RECOMP_RTS_GAME_CLOCK=1` | keeps the game's own fight clock (top centre) in Run the Streets fights |
 | `RECOMP_ROLLBACK_RTS=1` | rollback in RTS fights (every copy) |
 | `RECOMP_RTS_VOICE_LOG=1`, `RECOMP_RTS_SOCIAL_TEST=1`, `RECOMP_RTS_TEST_*` | the social layer's logs and samples |
 | `RECOMP_OW_*` | the Big Arena rules and probes (openworld.c) |
