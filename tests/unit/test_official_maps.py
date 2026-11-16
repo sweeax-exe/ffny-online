@@ -196,3 +196,16 @@ def test_compose_an_official_map_into_its_venue_slot(game, data):
                         order=mods.LOCAL_ORDER)
     result = tcc.compose(data, game, [pack, own])
     assert result['applied'] == [MAP_ID] and result['skipped'][0][0] == 'my-block'
+
+
+def test_a_run_the_streets_map_is_left_out_of_battles_venue_select(game, data):
+    """Build 86: the composer gives an official RTS map's Venue row no match types (Battle's GetNextVenue skips it);
+    the row stays (Game.StartGame loads it by feID). A non-RTS official map keeps its template's types."""
+    pack = official_folder(data)
+    tcc.compose(data, game, [pack])
+    plain = {v['fe_id']: v for _, v in tcc.sod.venues(tcc.out(data, 'assets/djv2.sod').read_bytes())}
+    assert plain[28]['modes'] == plain[3]['modes'] != 0
+    result = tcc.compose(data, game, [dict(pack, rts_map=True)])
+    assert result['applied'] == [MAP_ID] and not result.get('unchanged'), result
+    rows = {v['fe_id']: v for _, v in tcc.sod.venues(tcc.out(data, 'assets/djv2.sod').read_bytes())}
+    assert rows[28]['modes'] == 0 and rows[28]['filename'] == 'V2BG_28A' and rows[3]['modes'] == plain[3]['modes']

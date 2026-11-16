@@ -1089,6 +1089,8 @@ class Manager:
                             fighter_fe_id=r.get('fighter_fe_id', 0),
                             fighter_mode=r.get('fighter_mode', ''), skin_of=r.get('skin_of'),
                             reviewed=reviewed.get((mod_id, r.get('version')), ''))
+                if r.get('official') and r.get('rts_map'):
+                    pack.update(rts_map=True)   # build 86: the composer leaves its venue out of Battle's venue select
                 if r.get('bundle'):
                     # content_compose applies a pack of several mods whole or not at all
                     pack.update(bundle=r['bundle'], bundle_name=r.get('bundle_name', r['bundle']))

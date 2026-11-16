@@ -46,9 +46,10 @@ import shutil
 import struct
 
 from ffnycontent import clothing, cpparts, delta, fighterart, loc, newfighter, newvenue, unlimited, viv
+from ffnycontent import sod as sodmod
 
 SCHEMA = 1
-COMPOSER = 9                    # bump when the output for the same inputs changes (9: fighter banks, records beyond the places)
+COMPOSER = 10                   # bump when the output for the same inputs changes (10: build 86 = banks, official maps, fighter_light)
 NEW_DAYS = 14                   # a new fighter's select thumbs carry NEW for this long after its review
 HUB_ART = ('online-art', 'fighters')    # <data>/online-art/fighters/<feID>.png: the online hub's portraits
 SKIN_ART = ('online-art', 'skins')      # <data>/online-art/skins/<pack id>.png: a skin's picture in the skin window
@@ -486,10 +487,11 @@ def apply_skin(work, op, skin_of=None):
     return template_fe_id, model, op['name']
 
 
-def apply_pack(work, folder, info, fe_id=None, new=False, skin=False, skin_of=None):
+def apply_pack(work, folder, info, fe_id=None, new=False, skin=False, skin_of=None, rts=False):
     """One pack's ops (first, on the files as the earlier packs left them) and entries; raises on any failure.
     ``fe_id``: a new-fighter pack's place from the signed catalogue; ``new``: its select thumbs carry NEW;
-    ``skin``: the team accepted the new fighter as a skin of its template (``skin_of``, ``apply_skin``)."""
+    ``skin``: the team accepted the new fighter as a skin of its template (``skin_of``, ``apply_skin``);
+    ``rts``: an official Run the Streets map (build 86): its venue is left out of Battle mode's venue select."""
     clothing_ops = [op for op in info.get('ops', []) if op['op'] in CLOTHING_OPS]
     if clothing_ops:
         tables = {}
@@ -519,6 +521,8 @@ def apply_pack(work, folder, info, fe_id=None, new=False, skin=False, skin_of=No
         venue_xml, entity_xml, sod_blob = newvenue.apply(work.current(newvenue.VENUE_XML),
                                                          work.current(newvenue.ENTITY_XML),
                                                          work.current(clothing.SOD_PATH), op, taken)
+        if rts:
+            sod_blob = sodmod.set_venue_modes(sod_blob, int(op['fe_id']), 0)
         work.set_loose(newvenue.VENUE_XML, venue_xml)
         work.set_loose(newvenue.ENTITY_XML, entity_xml)
         work.set_loose(clothing.SOD_PATH, sod_blob)
@@ -719,7 +723,8 @@ def run_packs(bases, chosen, log, new=()):
             if p.get('place_problem'):
                 raise ComposeError(p['place_problem'])
             info = read_install(p['folder'])
-            apply_pack(work, p['folder'], info, p.get('fighter_fe_id'), p['id'] in new, is_skin(p), p.get('skin_of'))
+            apply_pack(work, p['folder'], info, p.get('fighter_fe_id'), p['id'] in new, is_skin(p), p.get('skin_of'),
+                       bool(p.get('rts_map')))
             applied.append(p)
         except PACK_ERRORS + (cpparts.PartsError, loc.LocError, newfighter.FighterError) as error:
             work.restore(snap)
@@ -853,7 +858,8 @@ def inputs_key(game, packs, off, languages=(), new=()):
     raw = json.dumps([COMPOSER, str(Path(game).resolve()),
                       [[p['id'], p['version'], p['content_sha256'], p.get('fighter_fe_id', 0)]
                        + ([p['bundle']] if p.get('bundle') else []) + (['left out'] if p.get('place_problem') else [])
-                       + (['skin', p.get('skin_of')] if is_skin(p) else []) for p in packs],
+                       + (['skin', p.get('skin_of')] if is_skin(p) else []) + (['rts'] if p.get('rts_map') else [])
+                       for p in packs],
                       sorted(off),
                       [[lang['id'], lang['stamp']] for lang in languages],
                       sorted(new)])
