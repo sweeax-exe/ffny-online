@@ -168,6 +168,7 @@ typedef struct NetRoom {
 #define NETPLAY_CAP_SPECTATE 16    /* spectator mode: rooms can be watched (netplay_lobby_spectate) */
 #define NETPLAY_CAP_FFAROT 8192    /* FFA rotation rooms (NETPLAY_MODE_FFAROT, build 66) */
 #define NETPLAY_CAP_HILL_CREATED 524288 /* build 76: created fighters in King of the Hill and FFA rotation rooms */
+#define NETPLAY_CAP_ORIGINAL 8388608   /* build 86: QUICK and RANKED carry the original-fighters choice */
 #define NETPLAY_CAP_RANDOM_VENUE 16384  /* RANDOM in the venue vote (build 67): netplay_lobby_vote(NETPLAY_VOTE_RANDOM) */
 /* NetRoomPlayer.voted and netplay_lobby_vote(): RANDOM, the relay draws the venue from the room's pool when
  * it wins. Only with relays answering NETPLAY_CAP_RANDOM_VENUE. */
@@ -317,6 +318,15 @@ int netplay_lobby_players(NetPlayer *out, int max, int *online, int *rooms);
 void netplay_lobby_create(const NetRoomSettings *settings);
 void netplay_lobby_join(const char *code);
 void netplay_lobby_quick(int mode, int max);
+/* Build 86, "Original fighters only" or "All fighters (community too)": the player's choice where a search
+ * starts, remembered per match type (a bit per type of the setting [online] original_fighters; ranked too),
+ * default all fighters (what every search was before). QUICK sends the type's choice and RANKED its flag to relays
+ * answering NETPLAY_CAP_ORIGINAL: original-only searches meet original-only (STANDARD ONLY) rooms, and an
+ * all-fighters one joins such a room when no other is open (server relay/original.go). RECOMP_TEST_QUICK_ORIGINAL
+ * (tests: 1 or 0) beats the setting. */
+int netplay_original(int mode);         /* 1 original fighters only; mode NETPLAY_ORIGINAL_RANKED: ranked */
+void netplay_set_original(int mode, int on);
+#define NETPLAY_ORIGINAL_RANKED (-1)
 /* Spectator mode (docs/research/spectator-mode.md): watch the room with this code; the room's
  * NetRoom.you is then NETPLAY_SLOT_SPECTATOR and every match that starts in it is run here from the
  * players' inputs, with no local player. Only when netplay_lobby_caps() has NETPLAY_CAP_SPECTATE. */

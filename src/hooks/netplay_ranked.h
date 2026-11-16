@@ -23,6 +23,8 @@ enum { NETRANK_OPEN = 0, NETRANK_CLASSIC = 1, NETRANK_DRAFT = 2, NETRANK_MODES =
 #define NETRANK_EXT_LEN     14      /* what the long RANKED adds to the 25-byte one */
 #define NETRANK_CODE_LEN    6
 #define NETRANK_FLAG_WHY    2       /* RANKED flags bit 1 (build 54): this game reads QUEUE 2's reason */
+#define NETRANK_FLAG_ORIGINAL 4     /* RANKED flags bit 2 (build 86, CAPS bit 23): original fighters only, the match
+                                     * plays without community skins (netplay_original) */
 #define NETRANK_PLACEMENT   0xFF    /* RANKINFO division: still placing */
 #define NETRANK_DIVISIONS   22      /* Street Rookie III .. Def Jam Legend */
 #define NETRANK_SET_RUNNING 0xFF    /* RANKINFO winner */

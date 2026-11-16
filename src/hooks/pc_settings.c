@@ -134,6 +134,11 @@ static RecompSetting g_display_settings[] = {
       "Let quick match, rooms and King of the Hill pair you with players of the community Android port "
       "(by contatg) in builds that FFNY Online has tested for cross-play. Off: you only meet PC players. "
       "Ranked never mixes platforms. Takes effect the next time you go online." },
+    { "online", "original_fighters", RECOMP_SETTING_INT, 0, 0, 536870911, NULL, NULL, 0,
+      "Kept by the game: where you chose \"Original fighters only\" instead of \"All fighters (community too)\" "
+      "when you start a search (Quick Match per match type, King of the Hill, FFA rotation, Ranked), so the same "
+      "choice is ready next time. One bit per match type (0..23; King of the Hill 24 and 25, FFA rotation 26; "
+      "Ranked 28). 0: all fighters everywhere." },
     { "online", "rollback", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Beta: rollback netcode in online fights, used only when every player in the match has it on. Your presses "
       "count at once and the game corrects itself when the other player's arrive late. It can still crash." },

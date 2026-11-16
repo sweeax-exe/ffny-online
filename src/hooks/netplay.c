@@ -42,6 +42,7 @@
 #include "netplay.h"
 #include "netplay_delay_rules.h"
 #include "recomp_settings.h"
+#include "pc_settings.h"
 #include "updater.h"
 #include "automatch.h"
 #include "online_data.h"
@@ -70,6 +71,33 @@
 #define G_RESULT_COUNT 0x003BE624u
 #define RESULTS_MAX    ((G_RESULT_COUNT - G_RESULTS) / 0x10u)
 #define G_CROWD_RECORDS 0x003494E0u     /* count of the crowd's "audience public" records */
+
+/* Build 86: "Original fighters only" or "All fighters (community too)", remembered per match type (netplay.h):
+ * one bit of [online] original_fighters per type (0..23 as they are, King of the Hill 24 and 25, FFA rotation 26,
+ * Ranked 28). */
+static int original_bit(int mode)
+{
+    if (mode == NETPLAY_ORIGINAL_RANKED) return 28;
+    if (mode >= 0x40 && mode <= 0x42) return 24 + (mode - 0x40);
+    return mode >= 0 && mode < 24 ? mode : -1;
+}
+
+int netplay_original(int mode)
+{
+    const char *t = getenv("RECOMP_TEST_QUICK_ORIGINAL");
+    int bit = original_bit(mode);
+    if (t && (t[0] == '0' || t[0] == '1') && !t[1]) return t[0] == '1';
+    return bit >= 0 && ((unsigned)recomp_settings_get("online", "original_fighters", 0) >> bit & 1u) ? 1 : 0;
+}
+
+void netplay_set_original(int mode, int on)
+{
+    int bit = original_bit(mode);
+    unsigned v = (unsigned)recomp_settings_get("online", "original_fighters", 0);
+    if (bit < 0) return;
+    v = on ? v | 1u << bit : v & ~(1u << bit);
+    if (recomp_settings_set("online", "original_fighters", (int)v) > 0) pc_settings_save();
+}
 
 #if !defined(_WIN32)
 
@@ -315,6 +343,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_XPLAY_OPT (recomp_settings_get("online", "crossplay_android", 0) ? CAPS_XPLAY_ANDROID : 0u) /* sent only while on */
 #define CAPS_SKINS    4194304u  /* 1 << 22 (build 85), both ways: READY's third byte is the player's skin of a stock fighter,
                                  * and START (WATCH, WATCHLATE) ends with the players' skins (src/hooks/fighter_skins.c) */
+#define CAPS_ORIGINAL 8388608u  /* 1 << 23 (build 86), both ways: QUICK ends with the search's choice (1 original fighters
+                                 * only, 0 all fighters) after the ping; RANKED's flags carry NETRANK_FLAG_ORIGINAL */
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
@@ -4581,7 +4611,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 uint8_t cb[6 + 8 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
-                put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
+                put32(cb + n, CAPS_KOTH | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
                               CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
@@ -5532,9 +5562,16 @@ int netplay_spectating(void)
 
 void netplay_lobby_quick(int mode, int max)
 {
-    int most = room_max(mode);
-    uint8_t b[4] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > most ? most : max) };
-    request(T_QUICK, b, 2 + put_ping(b + 2));
+    int most = room_max(mode), n, original = netplay_original(mode);
+    uint8_t b[5] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > most ? most : max) };
+    n = 2 + put_ping(b + 2);
+    if (relay_has(CAPS_ORIGINAL)) {     /* build 86: the search's choice after the ping (unknown: 0xFFFF) */
+        if (n == 2) { b[2] = b[3] = 0xFF; n = 4; }
+        b[n++] = (uint8_t)(original ? 1 : 0);
+    }
+    fprintf(stderr, "[NETPLAY] quick match: mode %d, %s%s\n", mode, original ? "original fighters only" : "all fighters",
+            relay_has(CAPS_ORIGINAL) ? "" : " (the relay takes no choice)");
+    request(T_QUICK, b, n);
 }
 
 /* Asks the account service for a ticket (it blocks), then joins the queue with it. */
@@ -5580,6 +5617,10 @@ static DWORD WINAPI ranked_thread(LPVOID param)
         LeaveCriticalSection(&g_cs);
         netranked_encode_ext(b + TICKET_LEN + 1, modes, primary, rb, pings, code);
         b[TICKET_LEN + 1 + 1] |= NETRANK_FLAG_WHY;     /* build 54: a refusal says why (QUEUE 2's reason) */
+        EnterCriticalSection(&g_cs);
+        if (relay_has(CAPS_ORIGINAL) && netplay_original(NETPLAY_ORIGINAL_RANKED))
+            b[TICKET_LEN + 1 + 1] |= NETRANK_FLAG_ORIGINAL;    /* build 86: original fighters only: no skins */
+        LeaveCriticalSection(&g_cs);
     }
     fprintf(stderr, "[NETPLAY] ranked: queueing for %s (modes %u)%s%s, pings %d/%d/%d ms\n", netranked_mode_title(primary),
             modes, code[0] ? ", set " : "", code, pings[0], pings[1], pings[2]);

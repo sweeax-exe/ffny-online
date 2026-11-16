@@ -992,6 +992,7 @@ struct Gallery {
     int room_rb[NETPLAY_ROOM_SLOTS] = {};   // each sample member's rollback byte (netplay_room_rollback)
     NetCrew crew = {};              // crew battles (stage 3): the crew-battle pages' sample (battle 0: none)
     bool my_crew = false;           // build 77: the hub shows MY CREW
+    unsigned original = 0;          // build 86: the sample's "Original fighters only" choices (bit per type, as the setting)
 } G;
 NetHillWatch G_hill_hud;            // build 70: the spectator HUD pages' sample (count 0: none)
 NetHillMenu G_hill_menu;            // build 73: the room menu pages' sample (results 0: not the results strip)
@@ -1200,6 +1201,22 @@ std::string max_ping_text(int ms)
 bool standard_only(int rules) { return (rules & NETPLAY_RULES_STANDARD) != 0; }
 bool content_switch_offered() { return rules_offered() && pc_content_print() != 0; }
 const char *content_text(int rules) { return standard_only(rules) ? "Off: standard only" : "On: new fighters, venues"; }
+// build 86: "Original fighters only" or "All fighters (community too)" where a search starts (Quick Match per type,
+// King of the Hill, FFA rotation, Ranked: NETPLAY_ORIGINAL_RANKED), remembered by netplay_original. The gallery
+// keeps its own.
+static int original_gallery_bit(int type) { return type == NETPLAY_ORIGINAL_RANKED ? 28 : type >= 0x40 ? 24 + (type - 0x40) : type; }
+bool search_original(int type)
+{
+    if (gallery_on()) return (G.original >> original_gallery_bit(type) & 1u) != 0;
+    return netplay_original(type) != 0;
+}
+void search_original_toggle(int type)
+{
+    bool on = !search_original(type);
+    if (gallery_on()) G.original ^= 1u << original_gallery_bit(type);
+    else netplay_set_original(type, on);
+}
+const char *original_words(bool original) { return original ? "ORIGINAL FIGHTERS ONLY" : "ALL FIGHTERS (COMMUNITY TOO)"; }
 // A pool may hold new venues when community content is on (and this PC has it: the venue list has them then).
 bool community_pool(const NetRoomSettings &s) { return !standard_only(s.fighter_rules); }
 // The small NEW badge (build 82) on a new fighter's card or a new venue's: a red tab with its top left at x, y.
@@ -2043,6 +2060,13 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     // entry, and stayed there for every later Quick Match)
     if (S.hub_sel == 0 && (pad.left || pad.right) && mode_count)
         S.quick_mode = std::max(0, std::min(mode_count - 1, S.quick_mode + (pad.right ? 1 : -1)));
+    // build 86: LB switches who this quick match meets (remembered per type, so it is one press next time)
+    if (S.hub_sel == 0 && pad.lb && mode_count) {
+        int type = quick_modes[S.quick_mode];
+        search_original_toggle(type);
+        say(search_original(type) ? "Original fighters only: you meet players who chose the same, in rooms without community fighters or skins."
+                                  : "All fighters: community fighters and skins too. You can still meet players who chose original only.", 5000);
+    }
 
     page_title(dl, f, "ONLINE");
     if (online_count(dl, f, true) || pad.x) open_servers();
@@ -2169,6 +2193,15 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, "UP TO 8 PLAYERS, 4 FIGHT, WINNER STAYS", CENTER, 0.8f, 200);
         else if (S.quick_mode > 0 && mode_name(type))
             text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, upper(mode_name(type)).c_str(), CENTER, 0.8f, 200);
+        // build 86: the fighters this search meets, between the text and the mode; LB (or a click) switches
+        {
+            bool orig = search_original(type);
+            const char *w = original_words(orig);
+            float tw = text_width(f, g_title, 11, w), bx = 463 + dx - tw / 2 - 10, by = 352;
+            if (mouse_click(f, bx, by, tw + 20, 18)) search_original_toggle(type);
+            rect(dl, f, bx, by, tw + 20, 18, orig ? IM_COL32(40, 70, 120, 220) : IM_COL32(120, 12, 26, 200), 5);
+            text(dl, f, g_title, 11, 463 + dx, by + 2, WHITE, w, CENTER, 0.8f);
+        }
     }
 
     if (pad.a) {
@@ -2203,7 +2236,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
                 } else {
                     netplay_lobby_quick(type, qmax);
                     S.quick_wanted = !NETPLAY_IS_HILL(type);
-                    say("Looking for a room...");
+                    say(search_original(type) ? "Looking for a room (original fighters only)..." : "Looking for a room...");
                 }
             }
             break;
@@ -2967,9 +3000,13 @@ const std::vector<OnlineFighter> &grid_fighters()
     static std::vector<OnlineFighter> list;
     static std::vector<std::string> styles;
     list = roster();
-    g_grid_cp.assign(list.size(), -1);
     NetRoom r;
     lobby_room(&r);
+    // build 86: a room for original fighters only (STANDARD ONLY) shows no community fighters at all
+    if (r.in_room && standard_only(r.settings.fighter_rules))
+        list.erase(std::remove_if(list.begin(), list.end(), [](const OnlineFighter &o) { return ONLINE_NEW_FIGHTER(o.id) != 0; }),
+                   list.end());
+    g_grid_cp.assign(list.size(), -1);
     // build 76: in King of the Hill and FFA rotation rooms too where the relay plays them (not crew battles)
     bool hill_cp = false;
     if (r.in_room && NETPLAY_IS_HILL(r.settings.mode)) {
@@ -3205,7 +3242,10 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         int pick_cp = pick < (int)g_grid_cp.size() ? g_grid_cp[pick] : -1;
         if (pick_cp >= 0) cp_choose(pick_cp);   // which created fighter: remembered, and sent to the relay
         S.pick_skin = 0;
-        if (!S.random_pick && pick_cp < 0 && list[pick].id < 98 && fighter_skins_count(list[pick].id) > 0) {
+        // build 86: no skins in a room for original fighters only, nor in a ranked search for them
+        bool no_skins = (rules_room.in_room && standard_only(rules_room.settings.fighter_rules)) ||
+                        (S.ranked_pick && search_original(NETPLAY_ORIGINAL_RANKED));
+        if (!S.random_pick && pick_cp < 0 && !no_skins && list[pick].id < 98 && fighter_skins_count(list[pick].id) > 0) {
             // build 85: a fighter with skins: the skin window first, on the look played last with it
             S.skin_open = true;
             S.skin_fe = list[pick].id;
@@ -4813,6 +4853,9 @@ void gallery_step()
                                          // RECOMP_TEST_CONTENT_NEW=all and RECOMP_TEST_CONTENT_NEWS=2)
                                          "create-standard", "room-standard", "rooms-standard", "fighters-standard",
                                          "fighters-new", "vote-new", "hub-news",
+                                         // build 86: QUICK MATCH set to original fighters only (One on One, King of the
+                                         // Hill), Ranked's skins choice
+                                         "hub-original", "hub-koth-original", "ranked-modes-original",
                                          // build 83: the hub fighter search (a query; one nothing matches)
                                          "fighters-search", "fighters-search-none",
                                          // build 83: the last content sync failed (RECOMP_TEST_CONTENT_SYNC=<reason>), and the
@@ -5010,6 +5053,7 @@ void gallery_step()
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
     G.crew = NetCrew();
     G.my_crew = false;
+    G.original = 0;                     // build 86: all fighters unless the page says
     std::string p = page;
     // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
     G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
@@ -5045,6 +5089,13 @@ void gallery_step()
         if (p == "hub-crew-signin") G.account = ACCOUNT_OUT;
     }
     else if (p == "hub-rollback-restart") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }   // build 46: the restart notice
+    else if (p == "hub-original" || p == "hub-koth-original") {     // build 86: QUICK MATCH, original fighters only
+        S.page = HUB;
+        S.hub_sel = 0;
+        std::vector<int> cycle = mode_cycle();
+        S.quick_mode = p == "hub-original" ? 0 : cycle_index(cycle, NETPLAY_MODE_KOTH_RANDOM);
+        G.original = 1u << 0 | 1u << 24 | 1u << 25;
+    }
     else if (p == "hub-team" || p == "hub-special" || p == "hub-koth" || p == "hub-rot") {     // QUICK MATCH with Team, Inferno, King of the Hill or FFA rotation
         S.page = HUB;
         S.hub_sel = 0;
@@ -6492,6 +6543,7 @@ bool draw_pages(ImVec2 display)
                 hx += hint(dl, f, hx, 424, "a", "SELECT");
                 hx += hint(dl, f, hx, 424, "b", "BACK");
             }
+            if (S.hub_sel == 0) hx += hint(dl, f, hx, 424, "lb", "FIGHTERS");     // build 86: original only or all
             hint(dl, f, hx, 424, "rb", "MY MUSIC");     // build 82: the player's songs, their order
             if (pad.rb && S.page == HUB) open_music();
         }
