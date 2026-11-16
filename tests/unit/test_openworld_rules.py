@@ -158,6 +158,18 @@ def test_state_holds_the_round_rules_and_free_roam_without_holes():
     assert 'for (i = 0; i < sizeof BA; i++) h = (h ^ p[i]) * 16777619u;' in ow
 
 
+def test_a_revived_fighter_comes_back_at_its_spawn_point():
+    """Build 87: the revive also moves the animation's own place (+0xC4, +0xCC, +0xD4). The first animation after it
+    starts from there (sub_001A85A0, flags 4 and 8), which had put every revived fighter back where its body lay."""
+    ow = read('src/hooks/openworld.c')
+    revive = re.search(r'static void ba_revive\(int s, int pick_spawn\)\n\{.*?\n\}\n', ow, re.S).group(0)
+    for line in ('MEMF(r + 0x44u) = c.spawn_x[i];', 'MEMF(r + 0x4Cu) = c.spawn_z[i];', 'MEMF(r + 0x54u) = yaw;',
+                 'MEMF(r + 0xC4u) = c.spawn_x[i];', 'MEMF(r + 0xCCu) = c.spawn_z[i];', 'MEMF(r + 0xD4u) = yaw;'):
+        assert line in revive, line
+    # after the state change (the revive's own calls), so nothing of the knockout is left to copy back
+    assert revive.index('call2(sub_001B5420, 2, r, 1u);') < revive.index('MEMF(r + 0xC4u)')
+
+
 def test_offline_only_and_hooks():
     ow = read('src/hooks/openworld.c')
     assert 'RECOMP_OW_ONLINE_TEST' in ow and 'netplay_active()' in ow and 'cheats_in_story()' in ow

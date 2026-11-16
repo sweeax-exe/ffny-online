@@ -569,10 +569,26 @@ static void ba_revive(int s, int pick_spawn)
         }
         i = ow_rules_pick_spawn(&c);
         if (i >= 0) {
+            float yaw = ow_rules_yaw_to_centre(c.spawn_x[i], c.spawn_z[i]);
+            /* at the height its body lay at (0 on the Big Arena template, 1.76 on Knox and Jam's streets): the game
+             * moves the height only with some animations, and a fighter that really comes back far from the others
+             * walked a long way sunk to 0. (The cached floor height +0x3A4 is no help: it reads 0 on parts of a map.) */
+            float floor_y = MEMF(r + 0x48u);
+            if (!(floor_y > -10000.0f && floor_y < 10000.0f)) floor_y = 0.0f;
             MEMF(r + 0x44u) = c.spawn_x[i];
-            MEMF(r + 0x48u) = 0.0f;
+            MEMF(r + 0x48u) = floor_y;
             MEMF(r + 0x4Cu) = c.spawn_z[i];
-            MEMF(r + 0x54u) = ow_rules_yaw_to_centre(c.spawn_x[i], c.spawn_z[i]);
+            MEMF(r + 0x54u) = yaw;
+            /* build 87: and the animation's own place. The record keeps where the running animation has carried
+             * the body (+0xC4 x, +0xCC z, +0xD4 yaw: the record's position plus the animation's travel, sub_001A76A0
+             * every step), and the next animation starts from there (sub_001A85A0 with flags 4 and 8 copies them to
+             * +0x44, +0x4C and +0x54). The first animation after the revive (flags 0xE, in the same step) put the
+             * fighter back where its knocked-out body lay, so nobody ever came back at a spawn point (builds 86 and
+             * before; seen in the free-roam tests: "back at 260,0", then tracked where it fell). */
+            MEMF(r + 0xC4u) = c.spawn_x[i];
+            MEMF(r + 0xC8u) = floor_y;
+            MEMF(r + 0xCCu) = c.spawn_z[i];
+            MEMF(r + 0xD4u) = yaw;
         }
     }
     h = MEM32(HUD_PLAYERS + 4u * (uint32_t)s);

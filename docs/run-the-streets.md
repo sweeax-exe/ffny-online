@@ -58,6 +58,14 @@ but it read as a bug. So:
   slot) and every fighter is held at rest and unhurt for 3 s (`ow_pad_hold`, `ow_health_change`) while TIME! shows
   (1.5 s) and then the winner; only then do the losers go down, last placed first, and the game's results follow.
   The KO target's end keeps its half second before the losers go down.
+- **One clock.** The game's own fight clock (top centre, counting up; `sub_000B54E0`, the HUD's `text_time`) is left
+  out in a Run the Streets fight, since the plate's clock counts down to the room's limit and two clocks running
+  opposite ways confused the testers (`recomp_manual.c`; `RECOMP_RTS_GAME_CLOCK=1` keeps it). Every other fight draws
+  it as before.
+- **Coming back** (fixed in build 87). A knocked-out fighter is put at a spawn point after 3 s. Up to build 86 it
+  stood up where its body lay instead: the record also keeps the place the running animation has carried the body
+  to (`+0xC4` x, `+0xCC` z, `+0xD4` yaw, `sub_001A76A0`), and the first animation after the revive starts from there
+  (`sub_001A85A0` flags 4 and 8). `ba_revive` now sets both, at the height the body lay at.
 
 ## The map (interface with feat/official-maps)
 
