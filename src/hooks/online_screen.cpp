@@ -924,6 +924,8 @@ struct State {
     bool ranked_pick = false;       // FIGHTERS picks the fighter for a ranked search
     bool rts_pick = false;          // FIGHTERS picks the fighter for an offline Run the Streets fight
     int rts_sel = 0, rts_cpus = 3;  // RUN THE STREETS: the chosen entry, the CPU fighters of VS CPU (2..3)
+    bool rts_setup = false;         // build 87: VS CPU's set-up (CPU fighters, TIME LIMIT, KO TARGET) is open
+    int rts_setup_sel = 0;
     int hub_sel = 0, rooms_sel = 0, settings_sel = 0, fighter_sel = 0, fighter_top = 0, vote_sel = 0, voice_sel = 0;
     int quick_mode = 0;             // index into online_modes
     int stats_page = 0;             // MY STATS: the leaderboard page
@@ -1013,6 +1015,7 @@ struct Gallery {
     bool my_crew = false;           // build 77: the hub shows MY CREW
     unsigned original = 0;          // build 86: the sample's "Original fighters only" choices (bit per type, as the setting)
     bool rts = false;               // build 86: the hub shows RUN THE STREETS (an account with access)
+    int rts_rules = 0;              // build 87: VS CPU's round rules on the gallery's pages (never the settings)
 } G;
 NetHillWatch G_hill_hud;            // build 70: the spectator HUD pages' sample (count 0: none)
 NetHillMenu G_hill_menu;            // build 73: the room menu pages' sample (results 0: not the results strip)
@@ -2088,7 +2091,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         "Your crew's page: its members and who is online, its level, record and turf, the crew chat and the "
         "ladder. Not in a crew yet: your crew invites, or found one of your own. Sign in with Discord to have one.",
         "A whole New York block at night, up to four fighters loose on the streets. Get knocked out, you are back "
-        "on a corner in seconds; first to five knockouts takes it. Against the CPU or online.",
+        "on a corner in seconds; the KO target takes it, or the lead when the clock runs out. Against the CPU or online.",
     };
     std::vector<int> quick_modes = mode_cycle();     // King of the Hill last, when the relay has it
     int mode_count = (int)quick_modes.size();
@@ -2336,7 +2339,109 @@ void open_rts()
 {
     S.page = RTS;
     S.rts_sel = 0;
+    S.rts_setup = false;
     if (S.rts_cpus < 2 || S.rts_cpus > 3) S.rts_cpus = 3;
+}
+
+// Build 87: a Run the Streets round's rules (openworld.h's rules byte: TIME LIMIT 5 / 10 / 15 minutes or none, KO
+// TARGET 5 / 10 / 20; 0 the defaults, 10 minutes and first to 10). VS CPU keeps its own in the settings ([openworld]
+// rts_time_limit / rts_ko_target); a room's are the host's (the room settings' rounds byte, which the relay checks
+// and sends in START to every PC of the fight).
+std::string rts_time_text(int rules)
+{
+    int t, k;
+    ow_rules_rts_decode(rules, &t, &k);
+    int secs = ow_rules_rts_seconds(t);
+    return secs > 0 ? std::to_string(secs / 60) + " minutes" : "None: the KO target ends it";
+}
+std::string rts_kos_text(int rules)
+{
+    int t, k;
+    ow_rules_rts_decode(rules, &t, &k);
+    return "First to " + std::to_string(ow_rules_rts_kos(k)) + " knockouts";
+}
+// step the time limit (row 0) or the KO target (row 1) of a rules byte; the time limit wraps (none after 15), the
+// KO target stops at its ends
+int rts_rules_step(int rules, int which, int step)
+{
+    int t, k;
+    ow_rules_rts_decode(rules, &t, &k);
+    if (which == 0) t = (t + step + OW_RTS_TIMES) % OW_RTS_TIMES;
+    else k = std::max(0, std::min(OW_RTS_KOS - 1, k + step));
+    return ow_rules_rts_encode(t, k);
+}
+std::string rts_rules_tag(int rules)
+{
+    char b[48];
+    ow_rules_rts_text(rules, b, (int)sizeof b);
+    return b;
+}
+
+// VS CPU's set-up: the CPU fighters, TIME LIMIT, KO TARGET, then CHOOSE FIGHTER (A) into the hub's fighter grid. Every
+// row with the stick or the D-pad left/right; B back to the page.
+void draw_rts_setup(ImDrawList *dl, const Frame &f, const Pad &pad, bool have_map)
+{
+    static const char *const labels[] = { "CPU FIGHTERS", "TIME LIMIT", "KO TARGET", "" };
+    const int rows = 4;
+    int rules = gallery_on() ? G.rts_rules : rts_offline_rules();
+    page_title(dl, f, "VS CPU");
+    text(dl, f, g_hand, 15, 54, 66, ORANGE, "RUN THE STREETS, OFFLINE", LEFT, 0.8f);
+    if (pad.up) S.rts_setup_sel = (S.rts_setup_sel + rows - 1) % rows;
+    if (pad.down) S.rts_setup_sel = (S.rts_setup_sel + 1) % rows;
+    int step = pad.right ? 1 : pad.left ? -1 : 0;
+    if (step) {
+        switch (S.rts_setup_sel) {
+        case 0: S.rts_cpus = std::max(2, std::min(3, S.rts_cpus + step)); break;
+        case 1: case 2: {
+            int nr = rts_rules_step(rules, S.rts_setup_sel - 1, step);
+            if (gallery_on()) G.rts_rules = nr;
+            else rts_offline_set_rules(nr);
+            rules = nr;
+            break;
+        }
+        }
+    }
+    for (int i = 0; i < rows; i++) {
+        float x = 50, y = 96 + i * 54.0f, w = 270, h = 44;
+        if (mouse_pick(f, x, y, w, h)) S.rts_setup_sel = i;
+        bool sel = S.rts_setup_sel == i;
+        glass(dl, f, x, y, w, h, 7, sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255), sel ? 0.78f : 0.6f);
+        if (sel) selector(dl, f, x, y, w, h);
+        if (i == 3) {
+            text(dl, f, g_title, 20, x + w / 2, y + h / 2 - 11, sel ? CREAM : GREY, "CHOOSE FIGHTER", CENTER);
+            if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
+            continue;
+        }
+        text(dl, f, g_title, 12, x + 12, y + 4, GREY, labels[i]);
+        std::string value = i == 0 ? std::to_string(S.rts_cpus) + " CPU fighters" : i == 1 ? rts_time_text(rules) : rts_kos_text(rules);
+        text(dl, f, g_title, 17, x + 12, y + 19, sel ? WHITE : GREY, value.c_str());
+        if (sel) {
+            text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER);
+            text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER);
+        }
+    }
+    door_panel(dl, f);
+    {
+        int t, k;
+        ow_rules_rts_decode(rules, &t, &k);
+        int secs = ow_rules_rts_seconds(t), kos = ow_rules_rts_kos(k);
+        std::string d = "You and " + std::to_string(S.rts_cpus) + " CPU fighters on the block. First to " +
+                        std::to_string(kos) + " knockouts wins" +
+                        (secs > 0 ? ", or the most when the " + std::to_string(secs / 60) +
+                                        " minutes are up. The clock is on the score plate."
+                                  : ". No time limit: the KO target ends it.");
+        door_text(dl, f, &tex("ui/online_icon.png"), "VS CPU", rts_rules_tag(rules).c_str(), d.c_str());
+    }
+    float hx = 54;
+    hx += hint(dl, f, hx, 392, "a", S.rts_setup_sel == 3 ? "CHOOSE FIGHTER" : "NEXT");
+    hint(dl, f, hx, 392, "b", "BACK");
+    if (pad.b) { S.rts_setup = false; return; }
+    if (!pad.a) return;
+    if (S.rts_setup_sel < 3) { S.rts_setup_sel++; return; }
+    if (!have_map) { say("Run the Streets has no map on this PC yet: start the game from the launcher to get it."); return; }
+    S.rts_pick = true;
+    S.ranked_pick = false;
+    S.page = FIGHTERS;
 }
 
 void rts_fighter_chosen(int fighter)
@@ -2351,6 +2456,19 @@ void rts_fighter_chosen(int fighter)
     }
 }
 
+// A new Run the Streets room: up to four (free places filled by CPU fighters), listed, the defaults' rules (10
+// minutes, first to 10), its venue the map (the relay plays its own Run the Streets map list anyway).
+void rts_room_settings(NetRoomSettings &s, int map_fe_id)
+{
+    default_settings(s);
+    s.mode = NETPLAY_MODE_RTS;
+    s.max = NETPLAY_RTS_SLOTS;
+    s.is_public = 1;
+    s.rounds = 0;
+    s.pool_count = 1;
+    s.pool[0] = (unsigned char)(map_fe_id > 0 ? map_fe_id : 28);
+}
+
 void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static const char *const items[] = { "VS CPU", "QUICK MATCH", "CREATE A ROOM", "FIND A ROOM" };
@@ -2358,7 +2476,7 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
                                         "UP TO FOUR, YOUR ROOM", "OPEN STREET FIGHTS" };
     static const char *const descs[] = {
         "You and 2 or 3 CPU fighters loose on the block. Knocked out? Back on a street corner in three seconds. "
-        "First to five knockouts, or the most when five minutes are up.",
+        "First to the KO target, or the most when the time is up.",
         "You are put into an open Run the Streets room on this server, or one is opened for the next players.",
         "A Run the Streets room of your own for up to four. Others join from the list or by its code; free places "
         "are filled with CPU fighters.",
@@ -2370,6 +2488,7 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
     RtsMap map;
     bool have_map = rts_map(&map) != 0;
+    if (S.rts_setup) { draw_rts_setup(dl, f, pad, have_map); return; }
     page_title(dl, f, "RUN THE STREETS");
     if (pad.up) S.rts_sel = (S.rts_sel + 3) % 4;
     if (pad.down) S.rts_sel = (S.rts_sel + 1) % 4;
@@ -2399,7 +2518,21 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
     door_panel(dl, f);
-    door_text(dl, f, &tex("ui/online_icon.png"), items[S.rts_sel], subs[S.rts_sel], descs[S.rts_sel]);
+    {
+        std::string d = descs[S.rts_sel];
+        if (S.rts_sel == 0) {       // build 87: the rules VS CPU plays by now (its set-up changes them)
+            int t, k, rules = gallery_on() ? G.rts_rules : rts_offline_rules();
+            ow_rules_rts_decode(rules, &t, &k);
+            int secs = ow_rules_rts_seconds(t);
+            d = "You and 2 or 3 CPU fighters loose on the block. Knocked out? Back on a street corner in three seconds. "
+                "First to " + std::to_string(ow_rules_rts_kos(k)) + " knockouts" +
+                (secs > 0 ? ", or the most when " + std::to_string(secs / 60) + " minutes are up." : ", no time limit.") +
+                " A sets the time limit and the KO target, then your fighter.";
+        } else if (S.rts_sel == 2) {
+            d += " You set the time limit and the KO target.";
+        }
+        door_text(dl, f, &tex("ui/online_icon.png"), items[S.rts_sel], subs[S.rts_sel], d.c_str());
+    }
     float hx = 54;
     hx += hint(dl, f, hx, 392, "a", "SELECT");
     hint(dl, f, hx, 392, "b", "BACK");
@@ -2408,10 +2541,9 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (!have_map) { say("Run the Streets has no map on this PC yet: start the game from the launcher to get it."); return; }
     bool relay_ok = gallery_on() || netplay_relay_rts();
     switch (S.rts_sel) {
-    case 0:
-        S.rts_pick = true;
-        S.ranked_pick = false;
-        S.page = FIGHTERS;
+    case 0:     // build 87: the set-up first (CPU fighters, TIME LIMIT, KO TARGET), then the fighter
+        S.rts_setup = true;
+        S.rts_setup_sel = 0;
         break;
     case 1:
         if (!relay_ok) { say("This server does not run Run the Streets yet: pick another one with X in the online menu."); break; }
@@ -2425,18 +2557,12 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
         say("Looking for a street fight...");
         S.page = HUB;
         break;
-    case 2: {
+    case 2: {   // build 87: through CREATE A ROOM's settings, with the time limit and the KO target
         if (!relay_ok) { say("This server does not run Run the Streets yet: pick another one with X in the online menu."); break; }
-        NetRoomSettings s;
-        default_settings(s);
-        s.mode = NETPLAY_MODE_RTS;
-        s.max = NETPLAY_RTS_SLOTS;
-        s.is_public = 1;
-        s.pool_count = 1;
-        s.pool[0] = (unsigned char)map.fe_id;     // the relay plays its own Run the Streets map list anyway
-        netplay_lobby_create(&s);
-        say("Opening the room...");
-        S.page = HUB;
+        rts_room_settings(S.settings, map.fe_id);
+        S.settings_edit = false;
+        S.settings_sel = 1;     // TIME LIMIT
+        S.page = SETTINGS;
         break;
     }
     case 3: S.page = ROOMS; netplay_lobby_list(0xFF); S.last_list = GetTickCount64(); break;
@@ -2995,21 +3121,26 @@ void venue_showcase(ImDrawList *dl, const Frame &f, const NetRoomSettings &s, fl
 void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &room)
 {
     // the rows; a King of the Hill room has one more, how each fight's venue is chosen
-    enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN, R_CPU, R_RULES, R_PING, R_CONTENT };
+    enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN, R_CPU, R_RULES, R_PING, R_CONTENT, R_RTS_TIME,
+               R_RTS_KOS };
     static const char *const labels[] = { "MODE", "VENUE OF EACH FIGHT", "PLAYERS", "VENUES", "LISTED", "", "CPU LEVEL",
-                                          "FIGHTER RULES", "MAX PING", "COMMUNITY CONTENT" };
+                                          "FIGHTER RULES", "MAX PING", "COMMUNITY CONTENT", "TIME LIMIT", "KO TARGET" };
     NetRoomSettings &s = S.settings;
-    bool was_koth = NETPLAY_IS_KOTH(s.mode), was_rot = NETPLAY_IS_FFAROT(s.mode);
-    // the host cannot turn a room into the other kind (the relay refuses it)
-    std::vector<int> cycle = S.settings_edit ? mode_cycle(was_koth, !was_koth, was_rot) : mode_cycle();
-    std::vector<int> rows_of = { R_MODE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN };
+    bool was_koth = NETPLAY_IS_KOTH(s.mode), was_rot = NETPLAY_IS_FFAROT(s.mode), rts = NETPLAY_IS_RTS(s.mode);
+    // the host cannot turn a room into the other kind (the relay refuses it); a Run the Streets room stays one
+    std::vector<int> cycle = rts ? std::vector<int>{ NETPLAY_MODE_RTS }
+                           : S.settings_edit ? mode_cycle(was_koth, !was_koth, was_rot) : mode_cycle();
+    // build 87: a Run the Streets room has the time limit and the KO target after its mode, and no venue row (the
+    // relay plays its map) and no community content switch (the map is official content)
+    std::vector<int> rows_of = rts ? std::vector<int>{ R_MODE, R_RTS_TIME, R_RTS_KOS, R_PLAYERS, R_LISTED, R_OPEN }
+                                   : std::vector<int>{ R_MODE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN };
     if (was_koth) rows_of.insert(rows_of.begin() + 1, R_VENUE_CHOICE);
     // build 67: how strong the CPU fighters are that fill a 3-Way's or Free for All's free places
-    if (cpu_level_offered(s.mode)) rows_of.insert(rows_of.begin() + 2, R_CPU);
+    if (cpu_level_offered(s.mode)) rows_of.insert(rows_of.begin() + (rts ? 4 : 2), R_CPU);
     // build 68: which fighters may be picked, and the highest ping a joining player may have (before LISTED)
     if (rules_offered()) rows_of.insert(rows_of.end() - 2, { R_RULES, R_PING });
     // build 82: community content (new fighters, new venues) on or off for this room, when this PC has some
-    if (content_switch_offered()) rows_of.insert(rows_of.end() - 2, R_CONTENT);
+    if (content_switch_offered() && !rts) rows_of.insert(rows_of.end() - 2, R_CONTENT);
     const int rows = (int)rows_of.size();
     if (S.settings_sel >= rows) S.settings_sel = rows - 1;
     if (pad.up) S.settings_sel = (S.settings_sel + rows - 1) % rows;
@@ -3021,6 +3152,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     // Team: four, no CPU partners (the relay starts a Team room with four only)
     auto least_of = [](int mode) { return NETPLAY_IS_HILL(mode) ? 3 : is_team(mode) ? 4 : 2; };
     auto most_of = [](int mode) {
+        if (NETPLAY_IS_RTS(mode)) return NETPLAY_RTS_SLOTS;
         if (NETPLAY_IS_KOTH(mode)) return NETPLAY_ROOM_SLOTS;
         if (NETPLAY_IS_FFAROT(mode)) return NETPLAY_FFAROT_SLOTS;
         const OnlineMode *om = online_mode(mode);
@@ -3067,8 +3199,11 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
             s.max_ping = order[(at + step + 4) % 4];
             break;
         }
+        case R_RTS_TIME: s.rounds = rts_rules_step(s.rounds, 0, step); break;   // 5, 10, 15 minutes, none
+        case R_RTS_KOS: s.rounds = rts_rules_step(s.rounds, 1, step); break;    // first to 5, 10, 20
         }
     }
+    if (rts && !ow_rules_rts_valid(s.rounds)) s.rounds = 0;
     if (!NETPLAY_CPU_FILL(s.mode)) s.cpu_level = NETPLAY_CPU_HARD;     // no CPU fighters: the default
     m = online_mode(s.mode);
     if (s.max > most_of(s.mode)) s.max = most_of(s.mode);
@@ -3104,7 +3239,9 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_PLAYERS:
             if (koth || rot) { snprintf(buf, sizeof(buf), "Up to %d in the line", s.max); value = buf; break; }
             snprintf(buf, sizeof(buf), is_team(s.mode) ? "%d players, 2 vs 2" : "%d players", s.max); value = buf;
-            if (m && s.max < m->fighters) { snprintf(buf, sizeof(buf), " + %d CPU", m->fighters - s.max); value += buf; } break;
+            if (m && s.max < m->fighters) { snprintf(buf, sizeof(buf), " + %d CPU", m->fighters - s.max); value += buf; }
+            if (rts && s.max < NETPLAY_RTS_SLOTS) { snprintf(buf, sizeof(buf), " + %d CPU", NETPLAY_RTS_SLOTS - s.max); value += buf; }
+            break;
         case R_POOL:
             if (int v = fixed_venue(s.mode)) { value = online_venue_name(v); break; }
             { int p = preset_of(s); value = p >= 0 ? presets()[p].name : "Custom"; snprintf(buf, sizeof(buf), " (%d)", s.pool_count); value += buf; } break;
@@ -3113,16 +3250,30 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_RULES: value = rules_text(s.fighter_rules); break;
         case R_PING: value = s.max_ping > 0 ? "Up to " + max_ping_text(s.max_ping) : "Off: anyone joins"; break;
         case R_CONTENT: value = content_text(s.fighter_rules); break;
+        case R_RTS_TIME: value = rts_time_text(s.rounds); break;
+        case R_RTS_KOS: value = rts_kos_text(s.rounds); break;
         }
         text(dl, f, g_title, row_h < 34 ? 15 : 17, x + 12, y + (row_h < 34 ? 14 : row_h < 40 ? 16 : 19), sel ? WHITE : GREY, value.c_str());
         // a fixed row (a special match's venue and players) has nothing to step through
-        bool fixed = (fixed_venue(s.mode) && (row == R_POOL || row == R_PLAYERS)) || (is_team(s.mode) && row == R_PLAYERS);
+        bool fixed = (fixed_venue(s.mode) && (row == R_POOL || row == R_PLAYERS)) || (is_team(s.mode) && row == R_PLAYERS) ||
+                     (rts && row == R_MODE);
         if (sel && !fixed) { text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER); }
     }
     // the door: the mode's logo (King of the Hill: its rules), then the venues filling the panel
     door_panel(dl, f);
     float venues_y, dx = door_dx();
-    if (koth) {
+    if (rts) {     // build 87: Run the Streets: its rules as chosen, no venue vote (the relay plays its map)
+        int t, k;
+        ow_rules_rts_decode(s.rounds, &t, &k);
+        int secs = ow_rules_rts_seconds(t);
+        std::string d = "UP TO FOUR LOOSE ON THE BLOCK, FREE PLACES GO TO CPU FIGHTERS. KNOCKED OUT? BACK ON A STREET CORNER "
+                        "IN THREE SECONDS. FIRST TO " + std::to_string(ow_rules_rts_kos(k)) + " KNOCKOUTS WINS" +
+                        (secs > 0 ? ", OR THE MOST WHEN THE " + std::to_string(secs / 60) + " MINUTES ARE UP." : ". NO TIME LIMIT.");
+        text(dl, f, g_title, 24, 463 + dx, 92, CREAM, "RUN THE STREETS", CENTER, 1.6f);
+        text(dl, f, g_hand, 13, 463 + dx, 120, ORANGE, rts_rules_tag(s.rounds).c_str(), CENTER, 1.0f);
+        text(dl, f, g_body, 12, 362 + dx, 138, WHITE, d.c_str(), LEFT, 1.0f, 202);
+        venues_y = 214;
+    } else if (koth) {
         text(dl, f, g_title, 24, 463 + dx, 92, CREAM, "KING OF THE HILL", CENTER, 1.6f);
         text(dl, f, g_hand, 13, 463 + dx, 120, ORANGE, "WINNER STAYS ON", CENTER, 1.0f);
         text(dl, f, g_body, 12, 362 + dx, 138, WHITE,
@@ -3144,12 +3295,13 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
             venues_y = 178;
         }
     }
-    venue_showcase(dl, f, s, 356 + dx, venues_y, 214, (g_game_door ? 438 : DOOR_Y + DOOR_H - 6) - venues_y);
+    if (!rts)       // a Run the Streets room plays the relay's map: no venues to show
+        venue_showcase(dl, f, s, 356 + dx, venues_y, 214, (g_game_door ? 438 : DOOR_Y + DOOR_H - 6) - venues_y);
     if (pad.a && rows_of[S.settings_sel] == R_OPEN) {
         if (S.settings_edit) { netplay_lobby_settings(&s); S.page = HUB; say("Settings saved; everyone readies again."); }
         else { netplay_lobby_create(&s); say("Opening the room..."); S.page = HUB; }
     }
-    if (pad.b) S.page = HUB;
+    if (pad.b) S.page = rts && !S.settings_edit ? RTS : HUB;      // a new Run the Streets room: back to its page
     (void)room;
 }
 
@@ -4244,6 +4396,12 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             text(dl, f, g_title, 10, sx, 73, ORANGE, cl.c_str(), RIGHT, 0.6f);
             sx -= text_width(f, g_title, 10, cl.c_str()) + 12;
         }
+        // build 87: a Run the Streets room's time limit and KO target, always (the round's end must never surprise)
+        if (NETPLAY_IS_RTS(r.settings.mode)) {
+            std::string rt = rts_rules_tag(r.settings.rounds);
+            text(dl, f, g_title, 10, sx, 73, ORANGE, rt.c_str(), RIGHT, 0.6f);
+            sx -= text_width(f, g_title, 10, rt.c_str()) + 12;
+        }
         // build 68: the room's rules, when not the defaults
         if (r.settings.fighter_rules != NETPLAY_RULES_ALL) {
             std::string rl = upper(rules_text(r.settings.fighter_rules));
@@ -5166,6 +5324,8 @@ void gallery_step()
                                          "milestones", "milestones-tough", "milestones-card", "milestones-chip",
                                          // build 86: RUN THE STREETS (closed test): the hub entry, the page, its CPU count
                                          "hub-rts", "rts", "rts-online",
+                                         // build 87: VS CPU's set-up, a new room's and a room's round rules
+                                         "rts-cpu", "rts-cpu-none", "create-rts", "room-rts",
                                          // build 86: Run the Streets' social layer (rts_social_ui.inc): the docked
                                          // chat closed and open on each tab, the chat bubbles and speaker icons
                                          "rts-dock", "rts-dock-room", "rts-dock-global", "rts-dock-private", "rts-bubbles" };
@@ -5341,6 +5501,24 @@ void gallery_step()
     else if (p == "hub-rts") { S.page = HUB; S.hub_sel = HUB_RTS; G.rts = true; G.ranked = true; }
     else if (p == "rts") { S.page = RTS; S.rts_sel = 0; S.rts_cpus = 3; G.rts = true; }
     else if (p == "rts-online") { S.page = RTS; S.rts_sel = 2; G.rts = true; }
+    else if (p == "rts-cpu" || p == "rts-cpu-none") {     // VS CPU's set-up: the defaults; none: 5 knockouts, no time limit
+        S.page = RTS; S.rts_setup = true; S.rts_setup_sel = 1; S.rts_cpus = 3; G.rts = true;
+        G.rts_rules = p == "rts-cpu" ? 0 : ow_rules_rts_encode(OW_RTS_TIME_NONE, 0);
+    }
+    else if (p == "create-rts") {   // a new Run the Streets room: 15 minutes, first to 20; the cursor on TIME LIMIT
+        G.rts = true;
+        rts_room_settings(S.settings, 28);
+        snprintf(S.settings.name, sizeof(S.settings.name), "Ann's room");
+        S.settings.rounds = ow_rules_rts_encode(2, 2);
+        S.settings_edit = false;
+        S.settings_sel = 1;
+        S.page = SETTINGS;
+    }
+    else if (p == "room-rts") {     // a Run the Streets room of 5 minutes, first to 5, on its card
+        S.page = HUB;
+        G.room = sample_room(NETPLAY_MODE_RTS, 4, 2);
+        G.room.settings.rounds = ow_rules_rts_encode(0, 0);
+    }
     else if (p == "rts-dock") g_rts_gallery_tab = 3;
     else if (p == "rts-dock-room") g_rts_gallery_tab = 0;
     else if (p == "rts-dock-global") g_rts_gallery_tab = 1;

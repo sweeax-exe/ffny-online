@@ -520,6 +520,9 @@ int netplay_delay_info(NetDelayInfo *o);    /* 1 while rollback runs steps again
 /* For diagnostics: one line on the online fight's step, rollback state and counters. */
 int netplay_rollback_brief(char *out, int size);
 int netplay_rts_match(void);    /* the running (or last) online fight came from a Run the Streets room */
+/* build 87: that fight's round rules, START's rounds byte (openworld.h ow_rules_rts_*: the time limit and the KO
+ * target the room's host chose, which the relay checked); 0 the defaults */
+int netplay_rts_rules(void);
 int netplay_rts_room(void);     /* this PC is in a Run the Streets room (between fights too) */
 int netplay_relay_rts(void);    /* the relay answered CAPS with NETPLAY_CAP_RTS */
 int netplay_local_slot(void);   /* tests: this PC's fighter slot in a lockstep fight, -1 otherwise */

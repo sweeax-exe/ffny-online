@@ -246,6 +246,12 @@ static RecompSetting g_display_settings[] = {
       "Big Arena: seconds before a knocked-out fighter comes back (then 2 seconds without damage)." },
     { "openworld", "time_limit", RECOMP_SETTING_INT, 300, 0, 3600, NULL, "RECOMP_OW_TIME_LIMIT", 0,
       "Big Arena: seconds of fighting before the leader wins (0: no time limit)." },
+    /* build 87: Run the Streets' VS CPU round rules (the page's TIME LIMIT and KO TARGET; online rooms have their own) */
+    { "openworld", "rts_time_limit", RECOMP_SETTING_INT, 10, 0, 15, NULL, "RECOMP_RTS_TIME_LIMIT", 0,
+      "Run the Streets VS CPU: minutes before the leader wins: 5, 10 or 15 (0: no time limit, the KO target ends it). "
+      "Set on the Run the Streets page." },
+    { "openworld", "rts_ko_target", RECOMP_SETTING_INT, 10, 5, 20, NULL, "RECOMP_RTS_KO_TARGET", 0,
+      "Run the Streets VS CPU: knockouts to win: 5, 10 or 20. Set on the Run the Streets page." },
     { "openworld", "blazin", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_OW_BLAZIN", 0,
       "Big Arena: BLAZIN' moves. Off for now: a BLAZIN' on a map built with FFNY Studio crashes the game after the "
       "fight (being fixed)." },

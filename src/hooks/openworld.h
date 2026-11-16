@@ -29,7 +29,11 @@ typedef struct OwHudView {
     uint32_t protected_;    /* slots in their respawn protection */
     int leader;             /* the slot ahead, -1 a tie */
     int ending, winner;     /* the limit is reached: the winner's slot */
-    int seconds_left;       /* the time limit's rest, -1 none */
+    int seconds_left;       /* the time limit's rest, -1 none (no time limit: the rest to the safety end) */
+    int steps_left;         /* the same in steps, -1 none */
+    int unlimited;          /* Run the Streets without a time limit (the KO target ends it) */
+    int time_up;            /* the end came from the clock: TIME!, then the winner, then the losers go down */
+    uint32_t end_step;      /* the step the end came at (ending) */
     int local;              /* this PC's slot (offline 0) */
     uint32_t step;          /* the fight's step */
 } OwHudView;
@@ -59,8 +63,33 @@ void ow_rules_stick_turn(float heading_deg, float *x, float *y);
 /* The heading of a camera looking from eye to at (x, z), in the same sense: 0 looking along -Z. */
 float ow_rules_view_heading(float eye_x, float eye_z, float at_x, float at_z);
 
+/* Run the Streets' round rules (build 87): the time limit (5, 10, 15 minutes or none) and the KO target (5, 10, 20)
+ * a room's host or the VS CPU page chose, as one byte: in a mode 0x43 room it is the room settings' rounds byte, which
+ * the relay checks and puts in START, so every PC of the fight has the same. 0 is the defaults (10 minutes, first to
+ * 10); else OW_RTS_RULES_SET | time index | KO index << 2. Anything else reads as the defaults. Without a time limit
+ * the KO target ends the fight; so a fight nobody scores in never runs forever, it still ends after
+ * OW_RTS_SAFETY_SECONDS like a time limit (TIME!, the leader wins). */
+#define OW_RTS_RULES_SET      0x80
+#define OW_RTS_TIMES          4         /* 5, 10, 15 minutes, none */
+#define OW_RTS_KOS            3         /* first to 5, 10, 20 */
+#define OW_RTS_DEFAULT_TIME   1         /* 10 minutes */
+#define OW_RTS_DEFAULT_KOS    1         /* first to 10 */
+#define OW_RTS_TIME_NONE      3
+#define OW_RTS_SAFETY_SECONDS 1800      /* no time limit: still over after 30 minutes */
+int ow_rules_rts_valid(int byte);
+int ow_rules_rts_encode(int time_idx, int ko_idx);              /* the defaults are 0 */
+void ow_rules_rts_decode(int byte, int *time_idx, int *ko_idx); /* invalid: the defaults */
+int ow_rules_rts_seconds(int time_idx);                         /* 300, 600, 900; 0 none */
+int ow_rules_rts_kos(int ko_idx);
+int ow_rules_rts_time_index(int seconds);                       /* 300/600/900/0 -> index (else the default) */
+int ow_rules_rts_ko_index(int kos);
+int ow_rules_rts_limit_steps(int byte);                         /* the fight's end in steps (the safety one without a limit) */
+int ow_rules_rts_text(int byte, char *out, int size);           /* "10 MIN  -  FIRST TO 10" */
+
 /* Run the Streets (rts.c, openworld.c): the overlays and the voice read these. */
 int ow_rts_active(void);    /* a Run the Streets fight runs on this PC (offline or online) */
+/* sub_001BAA00's entry after netplay_on_pad_read: every fighter at rest once the clock ended the fight (TIME!) */
+void ow_pad_hold(uint32_t actor);
 
 #ifdef __cplusplus
 }

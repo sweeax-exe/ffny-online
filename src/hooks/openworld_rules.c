@@ -3,6 +3,7 @@
 /* Big Arena's pure rules (openworld.c calls them inside the fight step, so they must give the same answer on every
  * PC: no clock, no host state, ties broken by slot). Unit-tested natively (tests/unit/test_openworld_rules.py). */
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "openworld.h"
@@ -127,4 +128,73 @@ float ow_rules_view_heading(float eye_x, float eye_z, float at_x, float at_z)
     if (dx == 0.0f && dz == 0.0f) return 0.0f;
     /* -Z is 0; +X (to the stock right) is 90: clockwise seen from above with +X right and -Z up */
     return atan2f(dx, -dz) * 57.2957795f;
+}
+
+/* Run the Streets' round rules (build 87): the time limit and the KO target as one byte. */
+static const int k_rts_seconds[OW_RTS_TIMES] = { 300, 600, 900, 0 };
+static const int k_rts_kos[OW_RTS_KOS] = { 5, 10, 20 };
+
+int ow_rules_rts_valid(int byte)
+{
+    if (byte == 0) return 1;
+    if (byte < 0 || byte > 0xFF || (byte & 0xF0) != OW_RTS_RULES_SET) return 0;
+    return ((byte >> 2) & 3) < OW_RTS_KOS;
+}
+
+int ow_rules_rts_encode(int time_idx, int ko_idx)
+{
+    if (time_idx < 0 || time_idx >= OW_RTS_TIMES) time_idx = OW_RTS_DEFAULT_TIME;
+    if (ko_idx < 0 || ko_idx >= OW_RTS_KOS) ko_idx = OW_RTS_DEFAULT_KOS;
+    if (time_idx == OW_RTS_DEFAULT_TIME && ko_idx == OW_RTS_DEFAULT_KOS) return 0;
+    return OW_RTS_RULES_SET | time_idx | (ko_idx << 2);
+}
+
+void ow_rules_rts_decode(int byte, int *time_idx, int *ko_idx)
+{
+    int t = OW_RTS_DEFAULT_TIME, k = OW_RTS_DEFAULT_KOS;
+    if (byte != 0 && ow_rules_rts_valid(byte)) { t = byte & 3; k = (byte >> 2) & 3; }
+    if (time_idx) *time_idx = t;
+    if (ko_idx) *ko_idx = k;
+}
+
+int ow_rules_rts_seconds(int time_idx)
+{
+    return time_idx >= 0 && time_idx < OW_RTS_TIMES ? k_rts_seconds[time_idx] : k_rts_seconds[OW_RTS_DEFAULT_TIME];
+}
+
+int ow_rules_rts_kos(int ko_idx)
+{
+    return ko_idx >= 0 && ko_idx < OW_RTS_KOS ? k_rts_kos[ko_idx] : k_rts_kos[OW_RTS_DEFAULT_KOS];
+}
+
+int ow_rules_rts_time_index(int seconds)
+{
+    int i;
+    for (i = 0; i < OW_RTS_TIMES; i++) if (k_rts_seconds[i] == seconds) return i;
+    return OW_RTS_DEFAULT_TIME;
+}
+
+int ow_rules_rts_ko_index(int kos)
+{
+    int i;
+    for (i = 0; i < OW_RTS_KOS; i++) if (k_rts_kos[i] == kos) return i;
+    return OW_RTS_DEFAULT_KOS;
+}
+
+int ow_rules_rts_limit_steps(int byte)
+{
+    int t, s;
+    ow_rules_rts_decode(byte, &t, NULL);
+    s = ow_rules_rts_seconds(t);
+    return 60 * (s > 0 ? s : OW_RTS_SAFETY_SECONDS);
+}
+
+int ow_rules_rts_text(int byte, char *out, int size)
+{
+    int t, k, s;
+    if (!out || size <= 0) return 0;
+    ow_rules_rts_decode(byte, &t, &k);
+    s = ow_rules_rts_seconds(t);
+    if (s > 0) return snprintf(out, (size_t)size, "%d MIN  -  FIRST TO %d", s / 60, ow_rules_rts_kos(k));
+    return snprintf(out, (size_t)size, "NO TIME LIMIT  -  FIRST TO %d", ow_rules_rts_kos(k));
 }

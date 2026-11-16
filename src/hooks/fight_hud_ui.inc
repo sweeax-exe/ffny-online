@@ -27,6 +27,12 @@
 //   Big Arena (open-world phase 1): the score plate at the top (first to N, each fighter's knockouts, the leader
 //             crowned, this PC's own in orange, the time left), "BACK IN 3" while this PC's fighter is down, and
 //             the winner at the end. Read from openworld.c's state of the last step (ow_hud_view).
+//             Build 87 (the owner's first Run the Streets test: the 5-minute end felt like a bug): the round clock
+//             is its own block on the plate (TIME over the minutes and seconds; orange in the last minute, red
+//             and beating in the last 30 s; NO LIMIT without a time limit), "30 SECONDS LEFT" slams in on the
+//             band for 3 s when the clock reaches 0:30, and an end by the clock shows TIME! and then the winner
+//             before anyone goes down (openworld.c holds everyone for those 3 s). All from the fight's steps, so
+//             every PC shows them at the same point of the fight.
 //
 // Tests: RECOMP_TEST_NAME_TAGS=A,B,C,D names the fighters of an offline fight (the tags' pictures
 // without four copies of the game); RECOMP_TEST_PERFECT=1 is fight_hud.c's.
@@ -54,7 +60,7 @@ struct FightHudUi {
     // Big Arena (openworld.c): the scores, a respawn count, the winner
     OwHudView arena{};
     bool arena_on = false, arena_won = false;
-    uint32_t arena_end_round = 0;
+    uint32_t arena_end_round = 0, arena_notice_round = 0;
     unsigned long long arena_end_at = 0;
 } FH;
 
@@ -292,6 +298,15 @@ void fh_tags(ImDrawList *dl, ImVec2 display)
     }
 }
 
+// "30 SECONDS LEFT": how far into its 3 seconds (0..1) by the fight's steps, -1 while it is not up
+const int FH_NOTICE_STEPS = 30 * 60, FH_NOTICE_SHOW = 3 * 60;
+float fh_arena_notice_t(const OwHudView &a)
+{
+    if (a.ending || a.steps_left < 0 || a.steps_left > FH_NOTICE_STEPS || a.steps_left <= FH_NOTICE_STEPS - FH_NOTICE_SHOW)
+        return -1.0f;
+    return (float)(FH_NOTICE_STEPS - a.steps_left) / (float)FH_NOTICE_SHOW;
+}
+
 }   // namespace
 
 // Once a frame, with the overlay closed and no versus screen up: true when a banner or tags are to be drawn.
@@ -352,7 +367,12 @@ bool fight_hud_wanted()
     FH.arena_won = false;
     if (arena && FH.arena.ending && FH.arena.winner >= 0) {
         if (FH.arena_end_round != FH.view.round) { FH.arena_end_round = FH.view.round; FH.arena_end_at = now; }
-        FH.arena_won = now - FH.arena_end_at < 4500;
+        FH.arena_won = now - FH.arena_end_at < (FH.arena.time_up ? 6000u : 4500u);
+    }
+    if (FH.arena_on && FH.arena.steps_left > 0 && fh_arena_notice_t(FH.arena) >= 0 &&
+        FH.arena_notice_round != FH.view.round) {
+        FH.arena_notice_round = FH.view.round;
+        fprintf(stderr, "[FIGHTHUD] Big Arena: 30 SECONDS LEFT (step %u)\n", (unsigned)FH.arena.step);
     }
     if (FH.arena_on) {
         static uint32_t logged_round;
@@ -363,6 +383,25 @@ bool fight_hud_wanted()
         }
     }
     return FH.banner || FH.tags || FH.count >= 0 || FH.arena_on || FH.arena_won;
+}
+
+// A call-out on the band at cy: slammed in (large to its size over the first 0.16 of t), held, faded over the last
+// 0.18; the game's worn look when its art is there, else gold stencil on red.
+void fh_callout(ImDrawList *dl, const Frame &f, float cy, float t, float size0, const char *what, bool fade = true)
+{
+    float in = t < 0.16f ? t / 0.16f : 1.0f, pop = (1.0f - in) * (1.0f - in);
+    float out = fade && t > 0.82f ? (1.0f - t) / 0.18f : 1.0f;
+    float alpha = std::max(0.0f, std::min(1.0f, in * 1.6f)) * std::max(0.0f, out);
+    float size = size0 * (1.0f + pop * 1.3f);
+    HudArt art;
+    if (fh_game_look(art)) {
+        fh_band(dl, f, cy, std::max(0.0f, std::min(1.0f, in * 3.0f)) * std::max(0.0f, out), 0.9f, &art);
+        fh_worn_text(dl, f, art, size, 320, cy - size * 0.5f, alpha, what);
+        return;
+    }
+    fh_band(dl, f, cy, std::max(0.0f, std::min(1.0f, in * 3.0f)) * std::max(0.0f, out), 0.85f);
+    text(dl, f, g_stencil, size, 320 + 3, cy - size * 0.5f + 3, with_alpha(RED, alpha * 0.9f), what, CENTER, 0);
+    text(dl, f, g_stencil, size, 320, cy - size * 0.5f, with_alpha(GOLD, alpha), what, CENTER, 2.4f);
 }
 
 std::string fh_arena_name(int slot)
@@ -383,9 +422,10 @@ void fh_arena(ImDrawList *dl, ImVec2 display)
     for (int s = 0; s < 4; s++) n += (a.present >> s) & 1;
     if (n < 1) return;
     // the plate, bottom centre between the lower health bars (the game's clock is top centre): "FIRST TO 5" over a
-    // chip per fighter, the time left at the right
-    const float chip = 58, top = 434;
-    float w = n * chip + 16 + (a.seconds_left >= 0 ? 44 : 0), x0 = 320 - w / 2;
+    // chip per fighter, the round clock in its own block at the right (build 87)
+    const float chip = 58, top = 434, clock_w = 62;
+    bool clock = a.seconds_left >= 0;
+    float w = n * chip + 16 + (clock ? clock_w : 0), x0 = 320 - w / 2;
     ImU32 dark = IM_COL32(12, 10, 8, 200);
     dl->AddRectFilled(f.p(x0, top), f.p(x0 + w, top + 38), dark, 4 * f.s());
     dl->AddRectFilled(f.p(x0, top + 36), f.p(x0 + w, top + 38), with_alpha(GOLD, 0.85f));
@@ -406,9 +446,27 @@ void fh_arena(ImDrawList *dl, ImVec2 display)
         if (lead) crown(dl, f, x + chip / 2 + 13, top + 26, 9);
         x += chip;
     }
-    if (a.seconds_left >= 0) {
-        snprintf(line, sizeof line, "%d:%02d", a.seconds_left / 60, a.seconds_left % 60);
-        text(dl, f, g_title, 12, x + 20, top + 17, a.seconds_left <= 30 ? RED : CREAM, line, CENTER, 1.0f);
+    if (clock) {
+        // the round clock: its own darker block, TIME over m:ss; no time limit: NO LIMIT (the safety end's last
+        // minute still counts down)
+        float bx = x + 2, cx = bx + clock_w / 2 - 2;
+        bool shown = !a.unlimited || a.seconds_left <= 60 || a.ending;
+        int secs = a.seconds_left;
+        ImU32 col = secs <= 30 ? RED : secs <= 60 ? ORANGE : CREAM;
+        if (secs <= 30 && !a.ending) {      // the last 30 s beat once a second (by the steps)
+            float beat = (float)(a.steps_left % 60) / 60.0f;
+            col = with_alpha(col, 0.65f + 0.35f * beat);
+        }
+        dl->AddRectFilled(f.p(bx, top + 3), f.p(bx + clock_w - 6, top + 34), IM_COL32(0, 0, 0, 150), 3 * f.s());
+        if (secs <= 30 && !a.ending)
+            dl->AddRect(f.p(bx, top + 3), f.p(bx + clock_w - 6, top + 34), with_alpha(RED, 0.8f), 3 * f.s(), 0, 1.5f * f.s());
+        text(dl, f, g_title, 8.5f, cx, top + 4, with_alpha(CREAM, 0.7f), "TIME", CENTER, 0);
+        if (shown) {
+            snprintf(line, sizeof line, "%d:%02d", secs / 60, secs % 60);
+            text(dl, f, g_stencil, 16, cx, top + 13, col, line, CENTER, 1.2f);
+        } else {
+            text(dl, f, g_title, 10, cx, top + 17, with_alpha(CREAM, 0.85f), "NO LIMIT", CENTER, 1.0f);
+        }
     }
     // this PC's fighter is down: the count back
     int me = a.local;
@@ -418,6 +476,15 @@ void fh_arena(ImDrawList *dl, ImVec2 display)
         text(dl, f, g_body, 13, 320, 196, CREAM, "KNOCKED OUT", CENTER, 1.2f);
         snprintf(line, sizeof line, secs > 0 ? "BACK IN %d" : "GET UP", secs);
         text(dl, f, g_stencil, 40, 320, 210, GOLD, line, CENTER, 2.0f);
+    }
+    // the clock reaches 0:30: "30 SECONDS LEFT" for 3 s, above the middle (the KNOCKED OUT band is lower)
+    float notice = fh_arena_notice_t(a);
+    if (notice >= 0) fh_callout(dl, f, 150, notice, 44, "30 SECONDS LEFT");
+    // an end by the clock: TIME! first (1.5 s), then the winner, before anyone goes down
+    unsigned long long since = GetTickCount64() - FH.arena_end_at;
+    if (FH.arena_won && a.time_up && since < 1500) {
+        fh_callout(dl, f, 228, (float)since / 1500.0f, 92, "TIME!");
+        return;
     }
     // the end: the winner
     if (FH.arena_won) {

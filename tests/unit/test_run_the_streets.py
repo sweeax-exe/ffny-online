@@ -133,9 +133,11 @@ def test_hidden_without_access():
 
 def test_online_rules_are_fixed_and_lockstep():
     ow = read('src/hooks/openworld.c')
-    # online: the room's mode decides, with the same rules on every PC (no PC's own settings)
-    m = re.search(r'if \(online && rts\) \{(.*?)\} else \{', ow, re.S)
-    assert m and 'recomp_settings_get' not in m.group(1)
+    # online: the room's mode decides, with the same rules on every PC (no PC's own settings): build 87, the room's
+    # round rules from START (test_rts_round_rules.py)
+    m = re.search(r'if \(online && rts\) \{(.*?)\} else if \(rts\) \{', ow, re.S)
+    assert m and 'recomp_settings_get' not in m.group(1) and 'getenv' not in m.group(1)
+    assert 'BA.rules = (uint8_t)netplay_rts_rules();' in m.group(1)
     assert 'rts = netplay_rts_match();' in ow
     assert 'uint32_t spawn_hash;' in ow     # the map's spawn points are in the checksummed state
     net = read('src/hooks/netplay.c')

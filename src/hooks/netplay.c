@@ -197,6 +197,7 @@ void netplay_on_pad_read(uint32_t a) { start_countdown_hold(a, start_countdown_o
 int netplay_countdown_active(void) { return start_countdown_active(0); }
 int netplay_local_slot(void) { return -1; }
 int netplay_rts_match(void) { return 0; }
+int netplay_rts_rules(void) { return 0; }
 int netplay_rts_room(void) { return 0; }
 int netplay_fighter_of_room_slot(int s) { (void)s; return -1; }
 int netplay_relay_rts(void) { return 0; }
@@ -555,6 +556,7 @@ static struct {
     int koth_match;                 /* this START is a King of the Hill fight (or an FFA rotation one) */
     int rot_match;                  /* this START is an FFA rotation fight: up to four, the winner stays */
     int rts_match;                  /* this START is a Run the Streets fight (NETPLAY_MODE_RTS room) */
+    int rts_rules;                  /* build 87: its round rules, START's rounds byte (never the game's own rules) */
     int rot_out[MAXP];              /* FFA rotation: when each position was put out (1, 2, ...), 0 still in */
     int rot_outs;
     uint8_t koth_order[MAXP];       /* FFA rotation: the RESULT's finishing order (room slots, best first) */
@@ -940,6 +942,7 @@ int netplay_delay_info(NetDelayInfo *o)
 }
 int netplay_local_slot(void) { return N.lockstep && !N.watching ? N.pos : -1; }
 int netplay_rts_match(void) { return N.rts_match; }
+int netplay_rts_rules(void) { return N.rts_rules; }
 int netplay_rts_room(void) { return N.roomv.in_room && NETPLAY_IS_RTS(N.roomv.settings.mode); }
 /* Run the Streets' social layer (rts_social.c): the fighter (START position) of a room slot in the running match, for
  * the chat bubbles and proximity voice; -1 none (a spectator, not in this match, no match). Read only, any thread. */
@@ -4049,6 +4052,10 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     /* FFA rotation: the same, with up to four; a player who leaves is out and the others fight on */
     N.rot_match = NETPLAY_IS_FFAROT(N.roomv.settings.mode);
     N.rts_match = NETPLAY_IS_RTS(N.roomv.settings.mode);
+    /* build 87: a Run the Streets room's rounds byte is its round rules (time limit, KO target; openworld.c reads it at
+     * the set-up), never the game's own match rules, which stay 0 as before */
+    N.rts_rules = N.rts_match && ow_rules_rts_valid(m.rules) ? m.rules : 0;
+    if (N.rts_match) m.rules = N.report_m.rules = 0;
     memset(N.rot_out, 0, sizeof(N.rot_out));
     N.rot_outs = N.koth_order_n = 0;
     /* a ranked set's game: its RESULT goes to the relay too (the set's score, the loser's venue pick) */
@@ -7034,6 +7041,28 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     }
                     Sleep(100);
                     continue;
+                }
+            }
+            {   /* RECOMP_TEST_RTS_RULES=<minutes>,<KOs> (tests, build 87; minutes 5, 10, 15 or 0 for none, KOs 5, 10,
+                 * 20): the host sets its Run the Streets room's round rules (the rounds byte) */
+                const char *tt = getenv("RECOMP_TEST_RTS_RULES");
+                if (tt && *tt && strchr(tt, ',') && r.in_room && r.phase == 0 && r.you == r.host && !N.match_live &&
+                    NETPLAY_IS_RTS(r.settings.mode)) {
+                    int want_rules = ow_rules_rts_encode(ow_rules_rts_time_index(atoi(tt) * 60),
+                                                         ow_rules_rts_ko_index(atoi(strchr(tt, ',') + 1)));
+                    if (r.settings.rounds != want_rules) {
+                        static ULONGLONG asked;
+                        if (GetTickCount64() - asked > 1000) {
+                            NetRoomSettings want = r.settings;
+                            asked = GetTickCount64();
+                            want.rounds = want_rules;
+                            fprintf(stderr, "[NETPLAY] tests: the Run the Streets room's round rules are %02X (%s)\n",
+                                    want_rules, tt);
+                            netplay_lobby_settings(&want);
+                        }
+                        Sleep(100);
+                        continue;
+                    }
                 }
             }
             {   /* RECOMP_TEST_FIGHTER_RULES=all|nobanned|nocreated|stock[+standard]|standard and RECOMP_TEST_MAX_PING=MS

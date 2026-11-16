@@ -1,8 +1,9 @@
 # Run the Streets (open-world mode, closed test from build 86)
 
 A free-for-all on a whole night-time New York block: up to four fighters, a knocked-out fighter comes back on a street
-corner after three seconds, the last fighter who hit them scores the knockout, and the first to five knockouts (or the
-leader when five minutes are up) wins. The rules are the Big Arena of `src/hooks/openworld.c`; the door, the map and
+corner after three seconds, the last fighter who hit them scores the knockout, and the first to the KO target (or the
+leader when the time limit is up) wins. Build 87: the time limit (5, 10, 15 minutes or none) and the KO target (5, 10,
+20) are the room host's choice, VS CPU's on its set-up; the defaults are 10 minutes and first to 10. The rules are the Big Arena of `src/hooks/openworld.c`; the door, the map and
 the access are `src/hooks/rts.c`; the social layer (chat bubbles, proximity voice, the docked chat) is
 `src/hooks/rts_social*.c`. Server side: the private server repo, `docs/run-the-streets.md` there.
 
@@ -13,15 +14,18 @@ the access are `src/hooks/rts.c`; the social layer (chat bubbles, proximity voic
   admins always). Signed out or without access the mode is completely hidden. The game asks in the background, keeps
   a yes 5 minutes and a no 1 minute, and asks again when the account signs in or out.
 - **The door.** ONLINE (main menu) > **RUN THE STREETS** (after RANKED MATCH; only with access):
-  - **VS CPU**: you and 2 or 3 CPU fighters, offline; left/right sets the count, A picks the fighter from the hub's
-    fighter grid, then the fight starts. Four fighters play Free for All, three play 3-Way (a Free for All of two or
+  - **VS CPU**: you and 2 or 3 CPU fighters, offline; A opens its set-up (CPU FIGHTERS, TIME LIMIT, KO TARGET,
+    left/right on each, kept in `[openworld] rts_time_limit` / `rts_ko_target`), then CHOOSE FIGHTER picks the
+    fighter from the hub's fighter grid and the fight starts. Four fighters play Free for All, three play 3-Way (a Free for All of two or
     three crashed at set-up on a new venue, `sub_001BBC10+0x80`; a One on One against one CPU ran 5 minutes without
-    a knockout, so it is not offered). The rules are `[openworld]` (score_limit 5, respawn_seconds 3, time_limit
-    300). Fights stay Run the Streets through rematches until the main menu shows again.
+    a knockout, so it is not offered). Before build 87 the rules were `[openworld]` (score_limit 5, respawn_seconds 3, time_limit 300);
+    those settings now apply only to the other Big Arena fights. Fights stay Run the Streets through rematches until the main menu shows again.
   - **QUICK MATCH** / **CREATE A ROOM** (up to four, free places filled by CPU fighters) / **FIND A ROOM**: online,
     a room of mode `0x43` on this relay. The relay checks the access itself and refuses with ERROR 8 and its own
     sentence, which the game shows.
-- **Online rules are fixed** (first to 5, 3 s respawn, 300 s; no PC's own settings), the fights stay in lockstep
+- **Online rules are the room's** (build 87): CREATE A ROOM opens the room settings with TIME LIMIT and KO TARGET
+  (the host may change them later with Y, ROOM SETTINGS); the room card shows them (`10 MIN - FIRST TO 10`). QUICK
+  MATCH plays the defaults. 3 s respawn always; no PC's own settings. The fights stay in lockstep
   (`every_player_rolls_back` returns 0 for them; `RECOMP_ROLLBACK_RTS=1` on every copy lifts it for tests), and the
   Big Arena state plus a hash of the map's spawn points are in every rollback save and the checksum.
 
@@ -32,6 +36,28 @@ the access are `src/hooks/rts.c`; the social layer (chat bubbles, proximity voic
 | Room mode | `NETPLAY_MODE_RTS` 0x43 (ROOM/CREATE/SETTINGS); START carries match type 3 (Free for All) |
 | CAPS bit | `NETPLAY_CAP_RTS` = 1 << 24, both ways (bit 23 is the standard preference's `CAPS_ORIGINAL`) |
 | Rollback class | `NETPLAY_RB_FFA`; the client keeps RTS fights in lockstep regardless |
+
+## Round rules, the clock and the end (build 87)
+
+The owner's first real test (build 86) ended after 5 minutes with everyone else going down at once: the time limit,
+but it read as a bug. So:
+
+- **One byte.** `openworld.h` `ow_rules_rts_*`: 0 = the defaults (10 minutes, first to 10), else
+  `0x80 | time | ko << 2` (time 0..3 = 5, 10, 15 minutes, none; ko 0..2 = 5, 10, 20); anything else reads as the
+  defaults. Online it is the room settings' rounds byte (CREATE / SETTINGS / ROOM), which the relay checks and sends
+  unchanged in START; `netplay.c` takes START's byte as the fight's rules (`netplay_rts_rules`) and gives the game's own
+  match rules 0 as before. Rooms are per build, so a build-86 game never shares a fight with one that reads it.
+- **Lockstep safety.** The rules byte, the KO target, the time limit, how the fight ended and when are in the Big Arena
+  state (`BA`), which every rollback save carries and the online checksum folds in, next to the spawn hash.
+- **No time limit.** The KO target ends the fight; a fight nobody scores in still ends after 30 minutes
+  (`OW_RTS_SAFETY_SECONDS`) like a time limit, so a room is never stuck.
+- **The plate** (fight_hud_ui.inc): the round clock is its own block (TIME over m:ss, orange in the last minute, red
+  and beating in the last 30 s; NO LIMIT without a time limit until the safety end's last minute). At 0:30 "30 SECONDS
+  LEFT" slams in for 3 s.
+- **TIME!** When the clock ends the fight, the leader is the winner (ties: fewer times knocked out, then the lower
+  slot) and every fighter is held at rest and unhurt for 3 s (`ow_pad_hold`, `ow_health_change`) while TIME! shows
+  (1.5 s) and then the winner; only then do the losers go down, last placed first, and the game's results follow.
+  The KO target's end keeps its half second before the losers go down.
 
 ## The map (interface with feat/official-maps)
 
@@ -73,6 +99,9 @@ venue_code=28A
 | `RECOMP_RTS_ACCESS=1` / `0` | grant / refuse the access without asking the service (harness runs) |
 | `RECOMP_RTS_VENUE=<feID>[,<code>]` | the map is this venue (no content.ini needed) |
 | `RECOMP_RTS_TEST_FIGHT=1` | every offline fight on the map plays by Run the Streets rules (with an automatch) |
+| `RECOMP_RTS_TIME_LIMIT=<min>`, `RECOMP_RTS_KO_TARGET=<n>` | VS CPU's round rules (the `[openworld]` settings) |
+| `RECOMP_RTS_TEST_SECONDS=<s>` | offline tests: the clock ends a Run the Streets fight after s seconds (never online) |
+| `RECOMP_TEST_RTS_RULES=<min>,<kos>` | online tests: the host sets its Run the Streets room's round rules |
 | `RECOMP_ROLLBACK_RTS=1` | rollback in RTS fights (every copy) |
 | `RECOMP_RTS_VOICE_LOG=1`, `RECOMP_RTS_SOCIAL_TEST=1`, `RECOMP_RTS_TEST_*` | the social layer's logs and samples |
 | `RECOMP_OW_*` | the Big Arena rules and probes (openworld.c) |
