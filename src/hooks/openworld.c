@@ -375,6 +375,7 @@ typedef struct {
     uint8_t roam_mode[4];           /* OW_ROAM_FREE, _ENGAGED, _LOCKED */
     int8_t roam_pending[4];         /* a hit while free: engage this attacker at the slot's next input (-1 none) */
     uint32_t roam_last[4];          /* the step of the slot's last fight button or hit */
+    uint8_t roam_turn[4];           /* steps left of the turn toward a target just locked on to */
 } BigArena;
 static BigArena BA;
 typedef char ow_state_fits[sizeof(BigArena) <= OW_STATE_BYTES ? 1 : -1];
@@ -706,8 +707,8 @@ void ow_hit(uint32_t attacker, uint32_t defender)
  *   free -> engaged: a fight button (0x30F0) with a fighter within ROAM_ENGAGE_RANGE (that one becomes the target),
  *                    or a hit given or taken (the other one becomes the target);
  *   free/engaged -> locked: White or Black (the game's target switch, sub_001C99B0) or a right-stick flick (its
- *                    turn, sub_001C9DF0 -> state 0x55): the fighter best in front within ROAM_PICK_RANGE, else the
- *                    nearest within ROAM_PICK_NEAR; the press goes on as a flick so the game turns to it. Nobody
+ *                    gesture, sub_001C9DF0 -> state 0x55): the fighter best in front within ROAM_PICK_RANGE, else the
+ *                    nearest within ROAM_PICK_NEAR; the press goes on as a flick so the fighter gestures at it, and it turns to face it. Nobody
  *                    there: the press is dropped. While locked White/Black switch as in the game;
  *   engaged -> free: roam_steps without a fight button or a hit;
  *   locked -> free:  White and Black together, or the target farther than ROAM_LOCK_DROP;
@@ -723,6 +724,8 @@ void ow_hit(uint32_t attacker, uint32_t defender)
 #define ROAM_ENGAGE_RANGE   70.0f       /* ~6 m: a fight button engages a fighter this close, in front */
 #define ROAM_ENGAGE_NEAR    45.0f       /* ~4 m all around */
 #define ROAM_LOCK_DROP      470.0f      /* ~40 m */
+#define ROAM_TURN_STEPS     30          /* the turn to a target just locked on to: at most this many steps */
+#define ROAM_TURN_RATE      12.0f       /* degrees a step */
 #define PAIR_DIST           0x003C04E8u
 #define PAIR_ANGLE          0x003C04A8u
 
@@ -803,7 +806,8 @@ void ow_roam_input(uint32_t r)
             m = OW_ROAM_LOCKED;
             why = (pressed & ROAM_SELECT) ? "target button" : "right stick";
             BA.roam_last[s] = BA.step;
-            pressed = (pressed & ~ROAM_SELECT) | ROAM_FLICK;   /* the game's own turn to it (state 0x55) */
+            BA.roam_turn[s] = ROAM_TURN_STEPS;
+            pressed = (pressed & ~ROAM_SELECT) | ROAM_FLICK;   /* the game's own gesture at it (state 0x55) */
         } else {
             pressed &= ~(ROAM_SELECT | ROAM_FLICK);           /* nobody near: no turn toward a far fighter */
         }
@@ -830,7 +834,33 @@ void ow_roam_input(uint32_t r)
     MEM32(r + 0x9F0u) = pressed;
     BA.roam_mode[s] = m;
     roam_log(s, m0, m, why, target_slot(r));
-    if (m != OW_ROAM_FREE) return;
+    if (m != OW_ROAM_FREE) {
+        /* just locked on: face the target (the game turns an idle fighter only when it is more than 80 degrees
+         * off, and its gesture state 0x55 does not turn), up to ROAM_TURN_RATE degrees a step, while it stands or
+         * gestures and the stick rests */
+        uint32_t st = MEM32(r + 0x30u);
+        t = target_slot(r);
+        if (BA.roam_turn[s] && t >= 0 && (st == 1u || st == 0x55u) && !(held & 0xFu)) {
+            float want = MEMF(PAIR_ANGLE + 4u * ((uint32_t)s * 4u + (uint32_t)t));
+            float d = ow_rules_angle_diff(MEMF(r + 0x54u), want);
+            if (d > ROAM_TURN_RATE) d = ROAM_TURN_RATE;
+            if (d < -ROAM_TURN_RATE) d = -ROAM_TURN_RATE;
+            MEMF(r + 0x54u) = MEMF(r + 0x54u) + d;
+            BA.roam_turn[s]--;
+            if (d > -0.5f && d < 0.5f) BA.roam_turn[s] = 0;
+        } else {
+            BA.roam_turn[s] = 0;
+        }
+        return;
+    }
+    BA.roam_turn[s] = 0;
+    /* free and standing: the game's idle turn toward the target (state 1, sub_001CAC40 without a direction: more
+     * than 80 degrees off -> +0x910 bits 0/1, +0x81C the target's angle) is held off by its own cool-down, bit 1
+     * with the timer +0x90C (cleared when the timer passes 10 steps, 0x29F7B0), so once the fighter fights again the
+     * game turns it after that short wait. A turn already started ends where the fighter faces. */
+    if (MEM8(r + 0x910u) & 1u) MEMF(r + 0x81Cu) = MEMF(r + 0x54u);
+    MEM8(r + 0x910u) = (uint8_t)(MEM8(r + 0x910u) | 2u);
+    MEMF(r + 0x90Cu) = 0.0f;
     /* free: the target on the nearest standing fighter (quiet for the game's retarget), the cache on the stick */
     t = target_slot(r);
     c = roam_pick(s, 0.0f, 0.0f, 1e9f, 1);

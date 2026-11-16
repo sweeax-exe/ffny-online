@@ -332,7 +332,7 @@ void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, con
             float sx = px + (nx * 0.5f + 0.5f) * pw, sy = py + (0.5f - ny * 0.5f) * ph;
             float ax = (sx - f.o.x) / f.sx, ay = (sy - f.o.y) / f.sy;
             float bob = 1.5f * sinf((float)(now % 1000ull) * 0.00628f);
-            ImVec2 a = f.p(ax - 6, ay - 12 + bob), b = f.p(ax + 6, ay - 12 + bob), c = f.p(ax, ay - 3 + bob);
+            ImVec2 a = f.p(ax - 8, ay - 16 + bob), b = f.p(ax + 8, ay - 16 + bob), c = f.p(ax, ay - 4 + bob);
             bool locked = v.roam_mode == OW_ROAM_LOCKED;
             if (locked) {
                 dl->AddTriangleFilled(a, b, c, IM_COL32(235, 40, 40, 235));
