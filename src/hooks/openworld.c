@@ -417,6 +417,10 @@ void ow_match_start(void)
     BAcfg.camera_set = 1;
     C.have = 0;
     if (!want) return;
+    /* Run the Streets keeps the follow camera looking north (-Z): the map's north faces are left undrawn for it (the
+     * game draws faces from both sides), and with that heading the stick is already camera-relative (up = away from
+     * the camera). The behind camera and its turned stick stay for the other Big Arena fights. */
+    if (rts) BAcfg.camera = 1;
     BA.on = 1;
     BA.rts = (uint32_t)rts;
     if (online && rts) {            /* the same rules on every PC: none of a PC's own settings */

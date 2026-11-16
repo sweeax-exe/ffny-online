@@ -71,6 +71,9 @@ int pc_content_skins(PcContentSkin *out, int max);
 /* The installed catalogue packs in catalogue order (re-read on every call; content.ini is small).
  * Returns the count (at most max). */
 int pc_content_list(PcContentPack *out, int max);
+/* Build 86: a small file of an installed pack's folder (<data>/mods/<id>/<name>, e.g. an official map's
+ * bigarena.json) read into out (NUL-terminated); the bytes read, 0 when missing, -1 when larger than size - 1. */
+int pc_content_pack_file(const char *id, const char *name, char *out, int size);
 
 /* The settings.ini switch for a replacement pack or one of the player's own packs ([content] off). Community
  * content packs cannot be off. */

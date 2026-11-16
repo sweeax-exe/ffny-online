@@ -26,12 +26,13 @@ typedef struct RtsMap {
     char code[8];
     char id[96];
     char name[64];
+    char version[40];
 } RtsMap;
 int rts_map(RtsMap *out);
 
-/* The spawn points of the map (x, z), up to max: the pack's bigarena json when the launcher serves one
- * (assets/bigarena_<code>.json or assets/bigarena.json naming V2BG_<code>), else the defaults of the official map
- * Knox and Jam for a knox-and-jam pack. 0: none (openworld.c then uses its ring). Same content, same points on every
+/* The spawn points of the map (x, z), up to max: the official map's <data>/mods/<id>/bigarena.json (its "spawns",
+ * when its "venue" is V2BG_<code>), else a bigarena json the launcher serves (assets/bigarena_<code>.json or
+ * assets/bigarena.json naming V2BG_<code>), else Knox and Jam 0.1's sixteen street spawns for a knox-and-jam pack. 0: none (openworld.c then uses its ring). Same content, same points on every
  * PC (the content print). */
 int rts_spawns(const RtsMap *m, float *x, float *z, int max);
 

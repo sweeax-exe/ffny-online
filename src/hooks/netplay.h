@@ -55,7 +55,7 @@ enum NetplayState {
 #define NETPLAY_MODE_RTS         0x43
 #define NETPLAY_RTS_SLOTS        4
 #define NETPLAY_IS_RTS(mode)     ((mode) == NETPLAY_MODE_RTS)
-#define NETPLAY_CAP_RTS          8388608u   /* 1 << 23, both ways */
+#define NETPLAY_CAP_RTS          16777216u  /* 1 << 24, both ways (bit 23 is the standard preference, CAPS_ORIGINAL) */
 /* A room with a line (HILL): King of the Hill or FFA rotation. */
 #define NETPLAY_IS_HILL(mode)    (NETPLAY_IS_KOTH(mode) || NETPLAY_IS_FFAROT(mode))
 

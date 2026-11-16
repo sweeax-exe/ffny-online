@@ -142,5 +142,5 @@ def test_online_rules_are_fixed_and_lockstep():
     assert 'N.rts_match = NETPLAY_IS_RTS(N.roomv.settings.mode);' in net
     assert re.search(r'if \(N\.rts_match && !\(getenv\("RECOMP_ROLLBACK_RTS"\)', net)
     hdr = read('src/hooks/netplay.h')
-    assert '#define NETPLAY_MODE_RTS         0x43' in hdr and '#define NETPLAY_CAP_RTS          8388608u' in hdr
-    assert 'NETPLAY_CAP_RTS); n += 4;' in net       # every build-86 client announces it
+    assert '#define NETPLAY_MODE_RTS         0x43' in hdr and '#define NETPLAY_CAP_RTS          16777216u' in hdr
+    assert 'put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS |' in net       # every build-86 client announces it

@@ -110,7 +110,7 @@ int rts_map(RtsMap *out)
         if (c) snprintf(out->code, sizeof out->code, "%s", c + 1);
         else snprintf(out->code, sizeof out->code, "%02dA", out->fe_id);
         snprintf(out->id, sizeof out->id, "test-venue-%d", out->fe_id);
-        snprintf(out->name, sizeof out->name, "%s", online_venue_name(out->fe_id));
+        snprintf(out->name, sizeof out->name, "Venue %s", out->code);     /* (online_data.c's load asks rts_map) */
         return out->fe_id >= 1 && out->fe_id <= 63;
     }
     n = pc_content_list(packs, PC_CONTENT_MAX);
@@ -126,6 +126,7 @@ int rts_map(RtsMap *out)
     else snprintf(out->code, sizeof out->code, "%02dA", out->fe_id);
     snprintf(out->id, sizeof out->id, "%s", packs[best].id);
     snprintf(out->name, sizeof out->name, "%s", packs[best].name);
+    snprintf(out->version, sizeof out->version, "%s", packs[best].version);
     return 1;
 }
 
@@ -169,10 +170,19 @@ int rts_spawns(const RtsMap *m, float *x, float *z, int max)
     char path[64];
     int n, i;
     if (!m || !m->fe_id) return 0;
+    {   /* the official map's own layout: <data>/mods/<id>/bigarena.json (feat/official-maps; covered by the content
+         * hash, so the same on every PC of a room), read defensively: it must name this venue */
+        static char buf[16384];
+        char want[24];
+        snprintf(want, sizeof want, "V2BG_%s", m->code);
+        if (pc_content_pack_file(m->id, "bigarena.json", buf, (int)sizeof buf) > 0 && strstr(buf, want) &&
+            (n = ow_rules_parse_spawns(buf, x, z, max)) > 0)
+            return n;
+    }
     snprintf(path, sizeof path, "assets/bigarena_%s.json", m->code);
     if ((n = spawns_from_file(path, m, x, z, max)) > 0) return n;
     if ((n = spawns_from_file("assets/bigarena.json", m, x, z, max)) > 0) return n;
-    if (strstr(m->id, "knox-and-jam") || getenv("RECOMP_RTS_KNOX_SPAWNS")) {
+    if ((strstr(m->id, "knox-and-jam") && !strncmp(m->version, "0.1", 3)) || getenv("RECOMP_RTS_KNOX_SPAWNS")) {
         for (i = 0; i < 16 && i < max; i++) { x[i] = k_knox_spawns[i][0]; z[i] = k_knox_spawns[i][1]; }
         return i;
     }
@@ -192,7 +202,10 @@ int rts_offline_start(int fighter, int skin, int cpus, const int *cpu_fighters)
     if (cpus < 1) cpus = 1;
     if (cpus > 3) cpus = 3;
     memset(&am, 0, sizeof am);
-    am.type = 3;                /* Free for All (also with two: Big Arena's rules decide the end) */
+    /* Free for All with four; with fewer the game's own type for that many (an FFA of two or three crashed at the
+     * set-up on a new venue, sub_001BBC10+0x80): 3-Way with three, One on One with two. Big Arena's rules decide
+     * the end either way. Online rooms are always four (the relay's CPU fill). */
+    am.type = cpus == 3 ? 3 : cpus == 2 ? 2 : 0;
     am.venue = m.fe_id;
     am.count = 1 + cpus;
     am.fighter[0] = fighter;
