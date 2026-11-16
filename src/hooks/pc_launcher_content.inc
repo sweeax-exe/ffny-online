@@ -74,8 +74,10 @@ static bool content_play_gate(bool pressed)
 static const char *content_play_note()
 {
     if (!g_content_play_waiting) return nullptr;
-    return g_content_play_skip ? "Stopping the download: the game starts in a moment."
-                               : "Getting the newest community content first. PLAY NOW starts without it.";
+    if (g_content_play_skip) return "Stopping the download: the game starts in a moment.";
+    // build 86: the game's UPDATE NOW opened the launcher, which pressed PLAY itself
+    return content_update_restarted() ? "Getting the new community content. The game starts again by itself."
+                                      : "Getting the newest community content first. PLAY NOW starts without it.";
 }
 
 static const char *content_type_label(const char *type)

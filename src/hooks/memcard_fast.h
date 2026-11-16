@@ -8,5 +8,7 @@
 int memcard_fast_on(void);
 void memcard_fast_tick(void (*tick)(void));
 void memcard_fast_sleep(void (*sleep_fn)(void));
+/* Build 86: 1 while a save is being written (UPDATE NOW waits for it). */
+int memcard_writing(void);
 
 #endif

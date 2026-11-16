@@ -41,6 +41,7 @@
 #include "pc_ui_actions.h"
 #include "pc_launcher_home.h"
 #include "pc_content.h"
+#include "content_update.h"
 
 #include "imgui.h"
 #include "imgui_internal.h"     // SetKeyOwner: F9's box keeps the keys from the screens under it
@@ -3366,6 +3367,8 @@ static UiResult draw_launcher(float x, float y, float width, float height)
         bool pressed = glass_button("##play", g_content_play_waiting ? (g_content_play_skip ? "WAIT" : "PLAY NOW") : "PLAY",
                                     at(48, 498), ImVec2(270 * s, 64 * s), s, GLASS_RED, display_font(), 36 * s,
                                     !busy && !g_content_play_skip);
+        // build 86: started by the game's UPDATE NOW: PLAY by itself, which waits for the sync (and its compose)
+        if (!busy && content_update_auto_play()) pressed = true;
         if (content_play_gate(pressed)) result.play = true;
     }
     // Four small buttons under PLAY (61.5 wide, 8 apart).
@@ -3704,6 +3707,7 @@ std::atomic<bool> g_toggle(false);
 std::atomic<bool> g_note_shown(false);  // F9's "What's wrong?" box is up (pc_ui_report_ask)
 bool g_online = false;              // the overlay shows the online screens (the main menu's ONLINE)
 bool g_exit = false;                // the overlay shows the main menu's QUIT FFNY ONLINE? prompt
+bool g_cupd = false;                // build 86: the main menu's "New community content is out" popup
 std::atomic<bool> g_exit_req{false};    // ESC or a click on the EXIT chip (window thread)
 bool g_ms = false;                  // the overlay shows MILESTONES (the user-ID screen, the Story crib)
 bool g_skin = false;                // build 85: the overlay shows the skin window over a select screen
@@ -3825,7 +3829,7 @@ void set_open(bool open)
     if (g_open.load() == open) return;
     g_open = open;
     g_just_opened = open;
-    if (!open) g_online = g_exit = g_ms = g_skin = false;
+    if (!open) g_online = g_exit = g_ms = g_skin = g_cupd = false;
     if (open) { g_hold_input = false; xbox_HostInputSetUiActive(1); }
     else g_hold_input = true;           // released in release_input_when_idle
 #if !defined(_WIN32)
@@ -4529,6 +4533,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
     if (toggled && !g_note.open) set_open(!g_open.load());
     release_input_when_idle();
+    content_update_frame(g_online ? 1 : 0);      // build 86: the content check in any menu; UPDATE NOW taken
     if (online_screen::take_open_request()) {      // ONLINE chosen in the game's main menu
         set_open(true);
         g_online = true;
@@ -4555,6 +4560,11 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         if (!g_open.load() && !g_note.open && !toggled && online_screen::take_skin_window_request()) {
             set_open(true);
             g_skin = true;
+        } else if (!g_open.load() && !g_note.open && !toggled && content_update_offer_due(online_screen::exit_wanted())) {
+            // build 86: new community content: once per news on the main menu, and after each fight
+            set_open(true);
+            g_cupd = true;
+            online_screen::update_prompt_begin("main menu");
         } else if (!g_open.load() && !g_note.open && !toggled && online_screen::exit_wanted() &&
             (req || view_press || online_screen::take_exit_test_request())) {
             set_open(true);
@@ -4605,7 +4615,9 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     bool toast = bug_report_toast(notice, sizeof(notice)) ||
                  (!g_open.load() && netplay_toast(notice, sizeof(notice))) ||  // online: a wait, a desync
                  (!g_open.load() && online_screen::milestone_toast(notice, sizeof(notice))) ||  // a milestone reached
-                 update_notice(notice, sizeof(notice));                         // a newer build is out
+                 update_notice(notice, sizeof(notice)) ||                       // a newer build is out
+                 // build 86: new community content, in any menu (the online screens say it themselves)
+                 content_update_toast(notice, sizeof(notice), !g_open.load() && !netplay_in_fight() && !netplay_active());
     // F9's picture is taken this frame: without the notice F9 itself put up ("taking a picture"), which
     // would cover the screen being reported. With nothing else drawn, the game's frame stays the picture.
     bool report = g_report_pending.exchange(false);
@@ -4667,6 +4679,13 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         if (g_note.open ? false : !online_screen::draw_milestones(io.DisplaySize)) close_request = true;
     } else if (g_skin) {
         if (!g_note.open && online_screen::draw_skin_window(io.DisplaySize)) close_request = true;
+    } else if (g_cupd) {
+        // 0 open, 1 LATER, 2 UPDATE NOW (taken: the game closes), 3 the main menu went away
+        int answer = g_note.open ? 0 : online_screen::draw_update_prompt(io.DisplaySize, true);
+        if (answer) {
+            content_update_offer_answer(answer == 1);
+            close_request = true;
+        }
     } else if (g_exit) {
         int answer = g_note.open ? 0 : online_screen::draw_exit_prompt(io.DisplaySize);
         if (answer == 2 && g_window) {

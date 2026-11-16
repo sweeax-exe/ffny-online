@@ -110,6 +110,15 @@ static int request_type(void)
     return r ? (int)rd32(r + 8) : 0;
 }
 
+/* Build 86 (UPDATE NOW, content_update.c): a save is being written (the driver's write state 3, or a request of
+ * the types a save uses waits for the worker): the game must not close now. Any thread; reads only. */
+int memcard_writing(void)
+{
+    uint32_t impl = impl_now();
+    int type = request_type();
+    return (impl && rd32(impl + 0x6C) == 3u) || type == 6 || type == 23 || type == 31;
+}
+
 /* Which work is sped up, from traces of the boot load, the user-ID lists, a profile load and a save:
  *   front-end op 6 (boot load) and 1 (user-ID list) only;
  *   driver state 1 mount/enumerate, 6 list, 4 file read, 7 close (3 is the save's write state);
