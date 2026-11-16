@@ -57,6 +57,8 @@
 #include "social.h"
 #include "fight_hud.h"
 #include "openworld.h"
+#include "rts_social.h"
+#include "rts_social_rules.h"
 #include "fight_hud_rules.h"
 #include "start_countdown.h"
 #include "milestones.h"
@@ -4917,6 +4919,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "ranked_ui.inc"
 #include "ranked_board.inc"
 #include "social_ui.inc"
+#include "rts_social_ui.inc"
 #include "crew_ui.inc"
 #include "locker_ui.inc"
 #include "turf_ui.inc"
@@ -5024,7 +5027,10 @@ void gallery_step()
                                          // build 79: MILESTONES (milestones_ui.inc; the sample profile RICO)
                                          "milestones", "milestones-tough", "milestones-card", "milestones-chip",
                                          // build 86: RUN THE STREETS (closed test): the hub entry, the page, its CPU count
-                                         "hub-rts", "rts", "rts-online" };
+                                         "hub-rts", "rts", "rts-online",
+                                         // build 86: Run the Streets' social layer (rts_social_ui.inc): the docked
+                                         // chat closed and open on each tab, the chat bubbles and speaker icons
+                                         "rts-dock", "rts-dock-room", "rts-dock-global", "rts-dock-private", "rts-bubbles" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -5121,6 +5127,8 @@ void gallery_step()
     G_hill_hud = NetHillWatch();
     G_hill_menu = NetHillMenu();
     G_hill_menu.auto_ms = G_hill_menu.pick = G_hill_menu.room_ms = -1;
+    g_rts_gallery_tab = -1;
+    g_rts_gallery_world = false;
     S.note_until = 0;
     S.settings_edit = false;
     {   // the relays as a player in Europe sees them, the hub on Europe
@@ -5193,6 +5201,11 @@ void gallery_step()
     else if (p == "hub-rts") { S.page = HUB; S.hub_sel = HUB_RTS; G.rts = true; G.ranked = true; }
     else if (p == "rts") { S.page = RTS; S.rts_sel = 0; S.rts_cpus = 3; G.rts = true; }
     else if (p == "rts-online") { S.page = RTS; S.rts_sel = 2; G.rts = true; }
+    else if (p == "rts-dock") g_rts_gallery_tab = 3;
+    else if (p == "rts-dock-room") g_rts_gallery_tab = 0;
+    else if (p == "rts-dock-global") g_rts_gallery_tab = 1;
+    else if (p == "rts-dock-private") g_rts_gallery_tab = 2;
+    else if (p == "rts-bubbles") g_rts_gallery_world = true;
     else if (p == "hub-rollback-restart") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }   // build 46: the restart notice
     else if (p == "hub-team" || p == "hub-special" || p == "hub-koth" || p == "hub-rot") {     // QUICK MATCH with Team, Inferno, King of the Hill or FFA rotation
         S.page = HUB;
@@ -6163,6 +6176,27 @@ bool draw_fight_chat(ImDrawList *dl, ImVec2 display)
 
 bool fight_chat_typing() { return FC.typing || (QW.open && QW.where == QW_FIGHT); }
 
+// Run the Streets: the chat bubbles and speaker icons over the fighters (rts_social_ui.inc), drawing only.
+bool rts_world_wanted()
+{
+    try {
+        return rts_world_draw_impl(nullptr, ImVec2(0, 0), false);
+    } catch (...) {
+        return false;
+    }
+}
+
+void draw_rts_world(ImDrawList *dl, ImVec2 display)
+{
+    try {
+        rts_world_draw_impl(dl, display, true);
+    } catch (const std::exception &e) {
+        ui_caught("chat bubbles", e.what());
+    } catch (...) {
+        ui_caught("chat bubbles", nullptr);
+    }
+}
+
 bool test_pad(int *buttons, float *lx, float *ly)
 {
     *buttons = QT.buttons;
@@ -6176,6 +6210,7 @@ bool test_pad_r3() { return quick_button() == ImGuiKey_GamepadR3; }
 const char *shot_label()
 {
     if (const char *chat = chat_shot_label()) return chat;
+    if (const char *rts = rts_shot_label()) return rts;
     if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
     if (!gallery_on() && !g_versus_up && net_state() != NETPLAY_CONNECTED) {    // the crew battle screen (stage 3)
         NetRoom r;
@@ -6281,6 +6316,11 @@ bool draw_pages(ImVec2 display)
     if (gallery_on() && G_hill_hud.count) {     // the spectator HUD's pages: over a stand-in for the fight
         backdrop(dl, f, display, true, LOOK_MATCH);
         hill_hud(dl, f, G_hill_hud, room);
+        return true;
+    }
+    if (gallery_on() && (g_rts_gallery_tab >= 0 || g_rts_gallery_world)) {     // build 86: Run the Streets' social layer
+        backdrop(dl, f, display, true, LOOK_MATCH);
+        rts_gallery_page(dl, display);
         return true;
     }
     if (gallery_on() && G_hill_menu.results) {  // build 73: the results' strip, over a stand-in for them

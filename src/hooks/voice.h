@@ -26,6 +26,10 @@ float voice_mic_meter(void);
 int voice_player_volume(int slot);
 void voice_set_player_volume(int slot, int percent);
 
+/* Run the Streets' speaker icons (rts_social_ui.inc): room slot `slot` was heard in the last 300 ms; this PC sends. */
+int voice_talking(int slot);
+int voice_sending(void);
+
 #ifdef __cplusplus
 }
 #endif

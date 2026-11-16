@@ -167,6 +167,7 @@ int netplay_countdown_active(void) { return start_countdown_active(0); }
 int netplay_local_slot(void) { return -1; }
 int netplay_rts_match(void) { return 0; }
 int netplay_rts_room(void) { return 0; }
+int netplay_fighter_of_room_slot(int s) { (void)s; return -1; }
 int netplay_relay_rts(void) { return 0; }
 int netplay_delay_info(NetDelayInfo *o) { if (o) memset(o, 0, sizeof(*o)); return 0; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
@@ -889,6 +890,15 @@ int netplay_delay_info(NetDelayInfo *o)
 int netplay_local_slot(void) { return N.lockstep && !N.watching ? N.pos : -1; }
 int netplay_rts_match(void) { return N.rts_match; }
 int netplay_rts_room(void) { return N.roomv.in_room && NETPLAY_IS_RTS(N.roomv.settings.mode); }
+/* Run the Streets' social layer (rts_social.c): the fighter (START position) of a room slot in the running match, for
+ * the chat bubbles and proximity voice; -1 none (a spectator, not in this match, no match). Read only, any thread. */
+int netplay_fighter_of_room_slot(int slot)
+{
+    int pos;
+    if (slot < 0 || slot >= ROOMSLOTS || !N.lobby || !N.match_live) return -1;
+    pos = N.pos_of_slot[slot];
+    return pos >= 0 && pos < MAXP && pos < N.players ? pos : -1;
+}
 int netplay_relay_rts(void) { return N.relay_caps > 0 && (N.relay_caps & NETPLAY_CAP_RTS) != 0; }
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
