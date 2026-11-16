@@ -50,6 +50,7 @@
 #include "openworld.h"
 #include "netplay.h"
 #include "rts.h"
+#include "rts_social.h"
 
 #define ACTORS      0x003B92E0u
 #define STRIDE      0x12E8u
@@ -838,10 +839,10 @@ void ow_camera(void (*gen)(void))
     uint32_t r;
     float at[3], eye[3];
     gen();
-    if (!followcam_wanted()) return;
+    if (!followcam_wanted()) { rts_social_camera(); return; }
     slot = netplay_local_slot();
     if (slot < 0 || slot > 3) slot = C.slot;
-    if (!present(slot)) return;
+    if (!present(slot)) { rts_social_camera(); return; }
     r = rec(slot);
     at[0] = MEMF(r + 0x44u); at[1] = MEMF(r + 0x48u) + 16.0f; at[2] = MEMF(r + 0x4Cu);
     if (!netplay_rerunning()) {         /* host smoothing: only once per real step */
@@ -872,6 +873,7 @@ void ow_camera(void (*gen)(void))
     MEMF(RCAM + 0x1Cu) = 1.0f;
     MEMF(RCAM + 0x2Cu) = 1.0f;
     guest_call(sub_000443D0, 0, 0, NULL);
+    rts_social_camera();    /* the social layer's copy of the final camera (bubbles, proximity voice) */
 }
 
 /* ---------------------------------------------------------------- match state (diagnostics) */

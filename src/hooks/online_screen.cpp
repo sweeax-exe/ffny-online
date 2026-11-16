@@ -57,6 +57,8 @@
 #include "social.h"
 #include "fight_hud.h"
 #include "openworld.h"
+#include "rts_social.h"
+#include "rts_social_rules.h"
 #include "fight_hud_rules.h"
 #include "start_countdown.h"
 #include "milestones.h"
@@ -4917,6 +4919,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "ranked_ui.inc"
 #include "ranked_board.inc"
 #include "social_ui.inc"
+#include "rts_social_ui.inc"
 #include "crew_ui.inc"
 #include "locker_ui.inc"
 #include "turf_ui.inc"
@@ -6163,6 +6166,27 @@ bool draw_fight_chat(ImDrawList *dl, ImVec2 display)
 
 bool fight_chat_typing() { return FC.typing || (QW.open && QW.where == QW_FIGHT); }
 
+// Run the Streets: the chat bubbles and speaker icons over the fighters (rts_social_ui.inc), drawing only.
+bool rts_world_wanted()
+{
+    try {
+        return rts_world_draw_impl(nullptr, ImVec2(0, 0), false);
+    } catch (...) {
+        return false;
+    }
+}
+
+void draw_rts_world(ImDrawList *dl, ImVec2 display)
+{
+    try {
+        rts_world_draw_impl(dl, display, true);
+    } catch (const std::exception &e) {
+        ui_caught("chat bubbles", e.what());
+    } catch (...) {
+        ui_caught("chat bubbles", nullptr);
+    }
+}
+
 bool test_pad(int *buttons, float *lx, float *ly)
 {
     *buttons = QT.buttons;
@@ -6176,6 +6200,7 @@ bool test_pad_r3() { return quick_button() == ImGuiKey_GamepadR3; }
 const char *shot_label()
 {
     if (const char *chat = chat_shot_label()) return chat;
+    if (const char *rts = rts_shot_label()) return rts;
     if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
     if (!gallery_on() && !g_versus_up && net_state() != NETPLAY_CONNECTED) {    // the crew battle screen (stage 3)
         NetRoom r;

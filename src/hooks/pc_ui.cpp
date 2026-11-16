@@ -4585,6 +4585,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     bool mschip = !g_open.load() && !versus && !decor && online_screen::milestones_wanted();
     // Build 76: the input delay line over an online fight (delay_hud_ui.inc), drawing only
     bool delayhud = !g_open.load() && !versus && !decor && !hillhud && online_screen::delay_hud_wanted();
+    // Run the Streets: chat bubbles and speaker icons over the fighters (rts_social_ui.inc), drawing only
+    bool rtsworld = !g_open.load() && !versus && !decor && online_screen::rts_world_wanted();
     static bool fc_held;
     auto fight_chat_hold = [&](bool typing) {
         if (typing && !fc_held) {
@@ -4618,7 +4620,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (g_note.open) toast = false;     // F9's "taking a picture" would sit over the box
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
-    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !fighthud && !delayhud && !mschip && !offer) { ui_unlock(); return; }
+    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !fighthud && !delayhud && !mschip && !offer && !rtsworld) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -4729,6 +4731,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
             if (logged++ < 20) fprintf(stderr, "[SOCIAL] caught: an exception (hill results strip)\n");
         }
     }
+    if (rtsworld) online_screen::draw_rts_world(ImGui::GetForegroundDrawList(), io.DisplaySize);
     if (fightchat) fight_chat_hold(online_screen::draw_fight_chat(ImGui::GetForegroundDrawList(), io.DisplaySize));
     if (talking) {  // small, bottom left, over everything
         ImDrawList *fg = ImGui::GetForegroundDrawList();

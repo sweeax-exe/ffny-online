@@ -17,6 +17,7 @@
 #include "recomp_settings.h"
 #include "d3d8_present.h"
 #include "hooks/recorder.h"
+#include "hooks/rts_social.h"
 
 static float g_aspect;          /* 0 = off */
 static float g_k = 1.0f;
@@ -289,6 +290,8 @@ void ws_view_params(uint32_t vp, uint32_t mode, uint32_t pfov, uint32_t pasp, ui
         MEMF(py) = y;
         MEMF(ph) = h;
     }
+    if (full && mode == 0)                             /* the fight's lens, for the overlays over the world */
+        rts_social_lens(MEMF(pfov), MEMF(pasp));
     if (a > 0.0f && logged[mode]++ < 4)
         fprintf(stderr, "[WS] view mode %u %s: fov %.2f -> %.2f, aspect %.4f, y %.1f h %.1f\n",
                 mode, full ? "full" : "sub", fov, MEMF(pfov), MEMF(pasp), MEMF(py), MEMF(ph));
