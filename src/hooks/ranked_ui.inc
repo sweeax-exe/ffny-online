@@ -231,6 +231,7 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.right) R.primary = order[(at + 1) % 3];
     for (int i = 0; i < 3; i++) if (order[i] == R.primary) at = i;
     if (pad.y) R.also = !R.also;
+    if (pad.lb) search_original_toggle(NETPLAY_ORIGINAL_RANKED);     // build 86: original only: no community skins
     if (pad.x) { open_ranked_board(R.primary, RANKED_MODES); return; }     // build 62: the mode's ladder
     searching_poll();
 
@@ -298,11 +299,20 @@ void draw_ranked_modes(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_hand, 11, 320, by + 22, with_alpha(ORANGE, 0.8f),
              "Found sooner: after 45 s either mode you both search may match.", CENTER, 0.7f);
     }
+    {   // build 86: ranked plays the original fighters; original only turns the community skins off in the set too
+        bool orig = search_original(NETPLAY_ORIGINAL_RANKED);
+        const char *w = orig ? "ORIGINAL FIGHTERS ONLY: NO COMMUNITY SKINS" : "ALL FIGHTERS: COMMUNITY SKINS TOO";
+        float tw = text_width(f, g_title, 10, w), bx = 320 - tw / 2 - 10, by = 389;
+        if (mouse_click(f, bx, by, tw + 20, 16)) search_original_toggle(NETPLAY_ORIGINAL_RANKED);
+        rect(dl, f, bx, by, tw + 20, 16, orig ? IM_COL32(40, 70, 120, 220) : IM_COL32(120, 12, 26, 200), 5);
+        text(dl, f, g_title, 10, 320, by + 2, WHITE, w, CENTER, 0.7f);
+    }
     preseason_strip(dl, f, 320, 58, 420, "A test week: bugs may happen, and every rank resets when Season 1 starts.");
     float hx = 54;
     hx += hint(dl, f, hx, 410, "a", R.primary == NETRANK_DRAFT ? "SEARCH" : "CHOOSE FIGHTER");
     hx += hint(dl, f, hx, 410, "y", R.also ? "ONLY THIS MODE" : "ALSO SEARCH");
     hx += hint(dl, f, hx, 410, "x", "RANKED BOARD");
+    hx += hint(dl, f, hx, 410, "lb", "SKINS");
     hint(dl, f, hx, 410, "b", "BACK");
     if (pad.b) { S.page = HUB; return; }
     if (pad.a && R.primary == NETRANK_DRAFT) {   // the fighters are drafted: straight to the search
@@ -1517,6 +1527,7 @@ bool ranked_gallery(const std::string &p)
     if (ranked_board_gallery(p)) return true;      // build 62 (it also sets the searching counts' sample)
     if (ranked_draft_gallery(p)) return true;
     if (p == "ranked-modes") { S.page = RANKED_MODES; }
+    else if (p == "ranked-modes-original") { S.page = RANKED_MODES; G.original = 1u << 28; }   // build 86: no skins
     else if (p == "ranked" || p == "ranked-search") { S.page = RANKED; G.queue = NETQUEUE_SEARCHING; }
     else if (p == "ranked-accept") { S.page = RANKED; G.queue = NETQUEUE_ACCEPT; }
     else if (p.compare(0, 11, "ranked-room") == 0 || p == "ranked-vote") {
