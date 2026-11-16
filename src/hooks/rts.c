@@ -199,13 +199,12 @@ int rts_offline_start(int fighter, int skin, int cpus, const int *cpu_fighters)
     AutoMatch am;
     int i;
     if (!rts_access() || !rts_map(&m)) return 0;
-    if (cpus < 1) cpus = 1;
+    if (cpus < 2) cpus = 2;     /* One on One (one CPU) did not play by Big Arena's rules: no knockout in 5 minutes */
     if (cpus > 3) cpus = 3;
     memset(&am, 0, sizeof am);
     /* Free for All with four; with fewer the game's own type for that many (an FFA of two or three crashed at the
-     * set-up on a new venue, sub_001BBC10+0x80): 3-Way with three, One on One with two. Big Arena's rules decide
-     * the end either way. Online rooms are always four (the relay's CPU fill). */
-    am.type = cpus == 3 ? 3 : cpus == 2 ? 2 : 0;
+     * set-up on a new venue, sub_001BBC10+0x80): 3-Way with three. Big Arena's rules decide the end either way. Online rooms are always four (the relay's CPU fill). */
+    am.type = cpus == 3 ? 3 : 2;
     am.venue = m.fe_id;
     am.count = 1 + cpus;
     am.fighter[0] = fighter;

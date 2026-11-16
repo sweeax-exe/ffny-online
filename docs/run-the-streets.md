@@ -13,11 +13,11 @@ the access are `src/hooks/rts.c`; the social layer (chat bubbles, proximity voic
   admins always). Signed out or without access the mode is completely hidden. The game asks in the background, keeps
   a yes 5 minutes and a no 1 minute, and asks again when the account signs in or out.
 - **The door.** ONLINE (main menu) > **RUN THE STREETS** (after RANKED MATCH; only with access):
-  - **VS CPU**: you and 1 to 3 CPU fighters, offline; left/right sets the count, A picks the fighter from the hub's
-    fighter grid, then the fight starts. Four fighters play Free for All; three play 3-Way and two One on One (a Free
-    for All of two or three crashed at set-up on a new venue, `sub_001BBC10+0x80`). The rules are `[openworld]`
-    (score_limit 5, respawn_seconds 3, time_limit 300). Fights stay Run the Streets through rematches until the main
-    menu shows again.
+  - **VS CPU**: you and 2 or 3 CPU fighters, offline; left/right sets the count, A picks the fighter from the hub's
+    fighter grid, then the fight starts. Four fighters play Free for All, three play 3-Way (a Free for All of two or
+    three crashed at set-up on a new venue, `sub_001BBC10+0x80`; a One on One against one CPU ran 5 minutes without
+    a knockout, so it is not offered). The rules are `[openworld]` (score_limit 5, respawn_seconds 3, time_limit
+    300). Fights stay Run the Streets through rematches until the main menu shows again.
   - **QUICK MATCH** / **CREATE A ROOM** (up to four, free places filled by CPU fighters) / **FIND A ROOM**: online,
     a room of mode `0x43` on this relay. The relay checks the access itself and refuses with ERROR 8 and its own
     sentence, which the game shows.

@@ -390,7 +390,7 @@ void fh_arena(ImDrawList *dl, ImVec2 display)
     dl->AddRectFilled(f.p(x0, top), f.p(x0 + w, top + 38), dark, 4 * f.s());
     dl->AddRectFilled(f.p(x0, top + 36), f.p(x0 + w, top + 38), with_alpha(GOLD, 0.85f));
     char line[48];
-    snprintf(line, sizeof line, "BIG ARENA  -  FIRST TO %d", a.score_limit);
+    snprintf(line, sizeof line, "%s  -  FIRST TO %d", ow_rts_active() ? "RUN THE STREETS" : "BIG ARENA", a.score_limit);
     text(dl, f, g_body, 8.5f, 320, top + 2, with_alpha(CREAM, 0.8f), line, CENTER, 0);
     float x = x0 + 8;
     for (int s = 0; s < 4; s++) {

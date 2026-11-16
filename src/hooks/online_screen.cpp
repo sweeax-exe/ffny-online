@@ -914,7 +914,7 @@ struct State {
     bool settings_edit = false;     // SETTINGS changes the room's (host) instead of a new one
     bool ranked_pick = false;       // FIGHTERS picks the fighter for a ranked search
     bool rts_pick = false;          // FIGHTERS picks the fighter for an offline Run the Streets fight
-    int rts_sel = 0, rts_cpus = 3;  // RUN THE STREETS: the chosen entry, the CPU fighters of VS CPU (1..3)
+    int rts_sel = 0, rts_cpus = 3;  // RUN THE STREETS: the chosen entry, the CPU fighters of VS CPU (2..3)
     int hub_sel = 0, rooms_sel = 0, settings_sel = 0, fighter_sel = 0, fighter_top = 0, vote_sel = 0, voice_sel = 0;
     int quick_mode = 0;             // index into online_modes
     int stats_page = 0;             // MY STATS: the leaderboard page
@@ -2298,7 +2298,7 @@ void open_rts()
 {
     S.page = RTS;
     S.rts_sel = 0;
-    if (S.rts_cpus < 1 || S.rts_cpus > 3) S.rts_cpus = 3;
+    if (S.rts_cpus < 2 || S.rts_cpus > 3) S.rts_cpus = 3;
 }
 
 void rts_fighter_chosen(int fighter)
@@ -2319,7 +2319,7 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
     static const char *const subs[] = { "YOU AGAINST THE CPU, OFFLINE", "INTO A STREET FIGHT ONLINE",
                                         "UP TO FOUR, YOUR ROOM", "OPEN STREET FIGHTS" };
     static const char *const descs[] = {
-        "You and 1 to 3 CPU fighters loose on the block. Knocked out? Back on a street corner in three seconds. "
+        "You and 2 or 3 CPU fighters loose on the block. Knocked out? Back on a street corner in three seconds. "
         "First to five knockouts, or the most when five minutes are up.",
         "You are put into an open Run the Streets room on this server, or one is opened for the next players.",
         "A Run the Streets room of your own for up to four. Others join from the list or by its code; free places "
@@ -2336,7 +2336,7 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.up) S.rts_sel = (S.rts_sel + 3) % 4;
     if (pad.down) S.rts_sel = (S.rts_sel + 1) % 4;
     if (S.rts_sel == 0 && (pad.left || pad.right))
-        S.rts_cpus = std::max(1, std::min(3, S.rts_cpus + (pad.right ? 1 : -1)));
+        S.rts_cpus = std::max(2, std::min(3, S.rts_cpus + (pad.right ? 1 : -1)));
     {
         std::string where = have_map ? "THE MAP: " + upper(map.name[0] ? map.name : map.code) : "NO MAP YET: START FROM THE LAUNCHER";
         text(dl, f, g_title, 14, 50, 56, have_map ? CREAM : ORANGE, where.c_str(), LEFT, 1.2f, 556);
@@ -2354,7 +2354,7 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
         if (i == 0) {       // the CPU count: < 1..3 >
             char n[8];
             snprintf(n, sizeof(n), "%d", S.rts_cpus);
-            text(dl, f, g_title, 18, x + w - 52, y + 6, S.rts_cpus > 1 ? ORANGE : with_alpha(GREY, 0.35f), "<", CENTER, 1.2f);
+            text(dl, f, g_title, 18, x + w - 52, y + 6, S.rts_cpus > 2 ? ORANGE : with_alpha(GREY, 0.35f), "<", CENTER, 1.2f);
             text(dl, f, g_title, 22, x + w - 34, y + 4, CREAM, n, CENTER, 1.2f);
             text(dl, f, g_title, 18, x + w - 16, y + 6, S.rts_cpus < 3 ? ORANGE : with_alpha(GREY, 0.35f), ">", CENTER, 1.2f);
         }

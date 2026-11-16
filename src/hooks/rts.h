@@ -37,7 +37,7 @@ int rts_map(RtsMap *out);
 int rts_spawns(const RtsMap *m, float *x, float *z, int max);
 
 /* An offline Run the Streets fight: the player on pad 0 with `fighter` (Battle-mode ID) and skin, against `cpus`
- * (1..3) CPU fighters `cpu_fighters[]` (-1: drawn by the game's own random pick), on the map. Returns 0 when the map
+ * (2..3) CPU fighters `cpu_fighters[]` (-1: drawn by the game's own random pick), on the map. Returns 0 when the map
  * or access is missing. The fights after it (the rematch) stay Run the Streets until the main menu shows again. */
 int rts_offline_start(int fighter, int skin, int cpus, const int *cpu_fighters);
 /* 1 from rts_offline_start until the main menu is back after its fights (the menu hook calls rts_main_menu()). */
