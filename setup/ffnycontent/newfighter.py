@@ -594,6 +594,7 @@ def apply_op(files, op, fe_id, pictures=True, pack=None, new=False, logical=Fals
     voice = (op.get("gameplay") or {}).get("voice") or {}
     if voice.get("mode") == "own" and logical:
         voice = {}          # phase 1: a bank plays the template's voice
+    if voice.get("mode") == "own":
         # the own voice: its five files at N = 40 + its place index in the speech archive, and N in word 21
         if pack is None:
             raise FighterError("this new fighter's own voice needs the pack's voice files")

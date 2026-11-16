@@ -383,3 +383,28 @@ def test_real_packs_as_skins_keep_their_files(tmp_path):
             if e["archive"] == nf.MODEL_ARCHIVE and e["mode"] == "add":
                 assert hashlib.sha256(v2ip.read(e["entry"])).hexdigest() == e["result_sha256"], (folder.name, e["entry"])
         assert "skin=%s|%d|%s|" % (folder.name, op["template_fe_id"], op["model"]) in             composed(data, "files.ini").read_text(encoding="utf-8")
+
+
+def test_a_place_fighters_own_voice_is_composed(tmp_path):
+    """Build 86 (merge of the unlimited fighters): a new fighter at a place keeps its own voice (the speech archive's
+    entries at 40 + its place index and the row's speech word); only a fighter beyond the places plays its
+    template's. The phase-1 change had turned the own-voice step off for place fighters."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import test_fighter_voice as tfv
+    from ffnycontent import fightervoice as fv
+    sys.path.pop(0)
+    files, lines = tfv.own_lines()
+    g = {"version": 1, "stats": dict(zip(nf.STAT_KEYS, (12, 9, 4, 6, 15, 0, 4))), "styles": ["W", "B"],
+         "blazins": [74, 44, 16, 65], "voice": {"mode": "own", "lines": lines}}
+    pack = make_pack(tmp_path / "packs" / "doc-voice", "V2IP_7G3A", "Doc Voice", gameplay=g)
+    for rel, raw in files.items():
+        (pack / rel).parent.mkdir(parents=True, exist_ok=True)
+        (pack / rel).write_bytes(raw)
+    data = tmp_path / "data"
+    got = content_compose.compose(data, GAME, [record(pack, "doc-voice", 1, 100)], off=(), log=lambda t: None,
+                                  languages=[])
+    assert got["applied"] == ["doc-voice"], got
+    new = nf.characters(composed(data, nf.SOD_PATH).read_bytes())[-1]
+    assert new["fe_id"] == 100 and new["words"][nf.W_SPEECH] == fv.voice_number(100)
+    speech = viv.Archive(str(composed(data, fv.SPEECH_ARCHIVE)))
+    assert all(speech.has(name) for name in fv.voice_entries(fv.voice_number(100)))
