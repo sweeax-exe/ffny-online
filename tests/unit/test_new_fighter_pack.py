@@ -33,15 +33,16 @@ pytestmark = pytest.mark.skipif(GAME is None, reason="needs the user's own dump"
 TEMPLATE, TEMPLATE_MODEL = 55, "V2IP_109A"
 
 
-def make_pack(folder, model, name, fe_id=None, gameplay=None):
+def make_pack(folder, model, name, fe_id=None, gameplay=None, results=None):
     """A new-fighter pack as FFNY Studio writes it: the template's model files under the new name (symbols
-    renamed) as add entries, and the op."""
+    renamed) as add entries, and the op. ``results`` {suffix: bytes}: the maker's own files (painted textures in the
+    .xsh, an imported body), as ``Project.build_new_fighter`` passes them."""
     folder = Path(folder)
     (folder / "deltas").mkdir(parents=True)
     arc = viv.Archive(str(GAME / "assets" / "v2ip.viv"))
     originals = {s: arc.read(TEMPLATE_MODEL + s) for s in nf.MODEL_SUFFIXES if arc.has(TEMPLATE_MODEL + s)}
     entries = []
-    for entry, base_entry, base, result in nf.model_entries(TEMPLATE_MODEL, model, originals):
+    for entry, base_entry, base, result in nf.model_entries(TEMPLATE_MODEL, model, originals, results):
         rel = "deltas/%s.ffdelta" % entry
         (folder / rel).write_bytes(delta.encode(base, result))
         entries.append({"archive": nf.MODEL_ARCHIVE, "entry": entry, "mode": "add", "base_archive": nf.MODEL_ARCHIVE,
@@ -296,3 +297,89 @@ def test_catalogue_skin_fields():
     fighter = {k: v for k, v in dict(base, id="doc-two", fighter_fe_id=100).items() if k not in ("fighter_mode", "skin_of")}
     mod_catalogue.build([dict(base), dict(base, id="doc-blue"), fighter], 1, "2026-11-15T00:00:00Z",
                         "2026-12-15T00:00:00Z")
+
+
+# -- skins with the template's look or their own (2026-11-16: "skins show the original, not the edited one") ----------
+# The live skins of 2026-11-16 are three kinds of Studio packs: painted textures in the model's own .xsh (Bo 2, Z. Trejo,
+# OG Crack, Sticky LS at twice the texture size), an imported model (.o and .xsh of its own, as Kratos or cj v2 would
+# be as skins), and the template's files with only the model code renamed (Scorcha, Cyborg Crow: Studio 0.2.0 built
+# them while its viewport still showed an earlier texture project's paint). A skin's composed model files are exactly
+# the pack's: the first two look like their maker made them, the third like the template (the pack has no look).
+
+def template_files():
+    arc = viv.Archive(str(GAME / "assets" / "v2ip.viv"))
+    return {s: arc.read(TEMPLATE_MODEL + s) for s in nf.MODEL_SUFFIXES if arc.has(TEMPLATE_MODEL + s)}
+
+
+def painted(xsh, scale=1):
+    """The template's .xsh with its texel bytes changed past the header (``scale`` 2: grown, as a texture painted
+    at twice the size makes it), standing in for Studio's shpxwrite.swap_images."""
+    head, body = xsh[:4096], bytes(b ^ 0x5A for b in xsh[4096:])
+    return head + body * scale
+
+
+def skin_model(data, model):
+    v2ip = viv.Archive(str(composed(data, nf.MODEL_ARCHIVE)))
+    return {s: v2ip.read(model + s) for s in nf.MODEL_SUFFIXES if v2ip.has(model + s)}
+
+
+def expected(model, results=None):
+    return {entry[len(model):]: result
+            for entry, _, _, result in nf.model_entries(TEMPLATE_MODEL, model, template_files(), results)}
+
+
+@pytest.mark.parametrize("kind", ["painted", "painted-2x", "imported"])
+def test_a_skin_gets_the_packs_own_look(tmp_path, kind):
+    tpl = template_files()
+    results = {"painted": {".xsh": painted(tpl[".xsh"])},
+               "painted-2x": {".xsh": painted(tpl[".xsh"], 2)},
+               "imported": {".o": tpl[".o"] + bytes(range(256)) * 64, ".xsh": painted(tpl[".xsh"], 3)}}[kind]
+    pack = make_pack(tmp_path / "packs" / "doc-look", "V2IP_7L1A", "Doc Look", results=results)
+    data = tmp_path / "data"
+    got = content_compose.compose(data, GAME, [skin_record(pack, "doc-look", 1)], off=(), log=lambda t: None,
+                                  languages=[])
+    assert got["applied"] == ["doc-look"] and not got["skipped"]
+    model = skin_model(data, "V2IP_7L1A")
+    want = expected("V2IP_7L1A", results)
+    assert model == want
+    plain = expected("V2IP_7L1A")
+    changed = [s for s in results if model[s] != plain[s]]
+    assert changed == list(results), "the skin's composed model lost the maker's %s" % kind
+    # the model's own texture name, so the template's and the skin's never share one in a fight
+    assert b"A7L1" in model[".xsh"] and b"A109" not in model[".xsh"]
+    assert "skin=doc-look|55|V2IP_7L1A|Doc Look" in composed(data, "files.ini").read_text(encoding="utf-8")
+
+
+def test_a_skin_without_a_look_of_its_own_is_the_template_renamed(tmp_path):
+    """What studio-scorcha and studio-cyborg-crow are: in the game such a skin shows the template's look."""
+    pack = make_pack(tmp_path / "packs" / "doc-plain", "V2IP_7P1A", "Plain Doc")
+    data = tmp_path / "data"
+    content_compose.compose(data, GAME, [skin_record(pack, "doc-plain", 1)], off=(), log=lambda t: None, languages=[])
+    model, tpl = skin_model(data, "V2IP_7P1A"), template_files()
+    assert model == expected("V2IP_7P1A")
+    for s in (".o", ".xsh"):
+        differing = sum(a != b for a, b in zip(model[s], tpl[s]))
+        # the renamed model and texture names only: under 1 % (painting one texture changes 90 % of the .xsh)
+        assert len(model[s]) == len(tpl[s]) and differing < len(tpl[s]) // 100, (s, differing)
+
+
+LIVE = os.environ.get("FFNY_SKIN_PACKS")       # a folder of real packs' installed folders (mods/<id>), never committed
+
+
+@pytest.mark.skipif(not LIVE, reason="FFNY_SKIN_PACKS names no folder of real packs")
+def test_real_packs_as_skins_keep_their_files(tmp_path):
+    """Real community packs (their installed folders, e.g. a scratch data root's mods/) composed as skins of their
+    templates: every added model file is the pack's delta result, byte for byte."""
+    folders = sorted(p for p in Path(LIVE).iterdir() if (p / "install.json").is_file())
+    for n, folder in enumerate(folders):
+        info = json.loads((folder / "install.json").read_text(encoding="utf-8"))
+        op = next(o for o in info["ops"] if o["op"] == "new-fighter")
+        data = tmp_path / folder.name
+        got = content_compose.compose(data, GAME, [skin_record(folder, folder.name, 1, op["template_fe_id"])], off=(),
+                                      log=lambda t: None, languages=[])
+        assert got["applied"] == [folder.name], got["skipped"]
+        v2ip = viv.Archive(str(composed(data, nf.MODEL_ARCHIVE)))
+        for e in info["entries"]:
+            if e["archive"] == nf.MODEL_ARCHIVE and e["mode"] == "add":
+                assert hashlib.sha256(v2ip.read(e["entry"])).hexdigest() == e["result_sha256"], (folder.name, e["entry"])
+        assert "skin=%s|%d|%s|" % (folder.name, op["template_fe_id"], op["model"]) in             composed(data, "files.ini").read_text(encoding="utf-8")
