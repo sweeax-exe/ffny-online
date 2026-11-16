@@ -47,4 +47,19 @@ from a room where a player holds a number; QUICK never puts it there.
 `relay/accounts/fighter_numbers_test.go`. Game runs: `dj scenario online` with `--override` a synthetic set
 (`scripts/unlimited-synth.py --count 120`), `--env RECOMP_TEST_CONTENT_PRINT=<hex>` (rooms need a content print),
 `FFNY_SERVER_DIR=<server worktree>` and `DJ_RELAY_EXTRA="-unlimited -unlimited-numbers @numbers.txt -client-check
-off"`. `RECOMP_TEST_NO_UNLIMITED=1` makes a copy an older game (no bit 25). Results: the branch's report.
+off"`. `RECOMP_TEST_NO_UNLIMITED=1` makes a copy an older game (no bit 25).
+
+Runs on 2026-11-16 (synthetic set of 120, IDs 1000..1119, all logs under `logs/dj/`):
+
+| Run | What | Result |
+|---|---|---|
+| 20261116-140024-online | 2 copies, lockstep, 1000 vs 1007, 2 matches | ok: START `1000 1007` on both, banks 124/125 bound, record and picture redirects, HUD `SYN 1000` / `SYN 1007`, checks equal **[V]** |
+| 20261116-140525-online | rollback, mirror 1014 vs 1014, 2 rematches, 1 spectator | ok: banks 124 and 125 both hold 1014, the spectator binds the same, rematches keep the binding, checks equal on all three **[V]** |
+| 20261116-142657-online | King of the Hill, 3 copies (1021, 1028, 1035), live hill watching | ok: bank 125 rebound 1028 -> 1035 -> 1028 across fights on every copy, 3 live watches with 20 checks each, no desync **[V]** |
+| 20261116-161046-online | 1042 vs 1049, a late spectator as an older game | the relay answers it without bit 25 and refuses its SPECTATE with ERROR 10 ("A new build is out ..."); the players play on (the scenario counts the unwatched fight as its failure) **[V]** |
+| 20261116-162155-online | `--password`, local account service with `-test-fighter-numbers` | ok: stats `{"1000": 1}` "Syn 1000" and `{"1007": 1}` "Syn 1007" in accounts.json **[V]** |
+| 20261116-151738-gallery | gallery pages fighters-community, fighters-more, room-community | shelf cards, the window (page 2/10, 120 fighters), room cards by number with template portraits **[V]**; the hints overlap it showed is fixed in ea84f537 |
+
+Open **[U]**: a real catalogue pack with its own hub portrait and pictures (the synthetic set uses the templates'); the
+replay recording keeps template bytes (server); own voices (phase 3B); the select screen's rule "one player per
+character" does not apply online (the relay sets the lineup), so mirrors work there.
