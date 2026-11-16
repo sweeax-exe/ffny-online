@@ -125,6 +125,13 @@ hub's CHOOSE FIGHTER and over the game's own select screens; the slot's model is
 else is the template's. A template's skins are numbered from 1 in catalogue order; online the number travels as
 READY's third byte and in START's skins trailer (CAPS bit 22), so the opponent and spectators load the same model.
 CPU fighters and random picks play Default. The last skin per fighter is kept in `<data>/skin-choices.ini`.
+A skin shows exactly the pack's model files: its look is the maker's painted textures (the model's own `.xsh`) or
+an imported model. A pack that is its template's files with only the model code renamed looks like the template, as a
+skin and as its own character (FFNY Studio 0.2.0 built such packs while its view still showed another project's
+paint: studio-scorcha and studio-cyborg-crow, 2026-11-16). The account service measures the look from the deltas
+(`checks.own_look`: the model's `.o` or `.xsh` at least 2 % changed bytes) and refuses such a pack as a skin; Studio
+from fix/skin-looks no longer builds one. A pack without `art/body.png` has no skin picture: the window shows the
+template's portrait tinted, under the skin's name.
 
 A relay before this branch refuses the longer HELLO; it is sent only by a PC with `content` packs, so the relay
 goes out first. The relay answers a code join between different content sets with ERROR 15 (14 is the relay's "client not supported").
