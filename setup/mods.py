@@ -40,8 +40,10 @@ import content_compose
 # "bundle" and "bundle_name"); index-v2.json is without pack items, for launchers of build 79; index.json also
 # leaves new fighters out, for launchers up to build 78. All share their revisions. Build 85: index-v4.json also
 # lists the skins (new fighters the team accepted as an extra outfit of a stock fighter: "fighter_mode": "skin",
-# "skin_of", no place).
-CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v4.json'
+# "skin_of", no place). Build 86: index-v5.json is everything plus the FFNY team's official maps (kind official-map,
+# rts_map, venue_fe_id; their versions need official-map-v1); index-v4.json is the same without them.
+CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v5.json'
+CATALOGUE_URL_V4 = 'https://play.defjam.online/updates/content/index-v4.json'
 CATALOGUE_URL_V3 = 'https://play.defjam.online/updates/content/index-v3.json'
 CATALOGUE_URL_V2 = 'https://play.defjam.online/updates/content/index-v2.json'
 CATALOGUE_URL_V1 = 'https://play.defjam.online/updates/content/index.json'
@@ -484,15 +486,21 @@ def fetch_small(url, limit):
         return data
 
 
+FALLBACK = {CATALOGUE_URL: CATALOGUE_URL_V4, CATALOGUE_URL_V4: CATALOGUE_URL_V3}
+
+
 def fetch_index(url):
-    """(raw, signature, url) of a catalogue index. index-v4.json that the server does not have yet (404: an account
-    service from before build 85) falls back to index-v3.json, the same catalogue without fighters at low places."""
-    try:
-        return fetch_small(url, MAX_INDEX), fetch_small(url + '.sig', 64), url
-    except urllib.error.HTTPError as error:
-        if error.code != 404 or url != CATALOGUE_URL:
-            raise
-    return fetch_small(CATALOGUE_URL_V3, MAX_INDEX), fetch_small(CATALOGUE_URL_V3 + '.sig', 64), CATALOGUE_URL_V3
+    """(raw, signature, url) of a catalogue index. An index the server does not have yet (404) falls back one step:
+    index-v5.json (an account service from before build 86) to index-v4.json, the same catalogue without official
+    maps; index-v4.json (before build 85) to index-v3.json, without fighters at low places. Any other failure, and
+    any other index (a local test catalogue), stays a failure."""
+    while True:
+        try:
+            return fetch_small(url, MAX_INDEX), fetch_small(url + '.sig', 64), url
+        except urllib.error.HTTPError as error:
+            if error.code != 404 or url not in FALLBACK:
+                raise
+            url = FALLBACK[url]
 
 
 def semver(value):
@@ -814,6 +822,9 @@ class Manager:
                     receipt.update(fighter_fe_id=mod['fighter_fe_id'])
                 if mod.get('fighter_mode') == 'skin':
                     receipt.update(fighter_mode='skin', skin_of=mod['skin_of'])
+                if mod.get('kind') == OFFICIAL_KIND:
+                    # build 86: an official map (always on; content.ini official=1, rts_map, venue_fe_id)
+                    receipt.update(official=True, rts_map=bool(mod.get('rts_map')), venue_fe_id=mod['venue_fe_id'])
                 if 'bundle' in mod:
                     # one mod of a pack of several: the pack is installed and removed as one unit; its mods at
                     # this catalogue revision tell an interrupted sync's half pack (drop_broken_bundles)
@@ -1106,7 +1117,9 @@ class Manager:
                     files[path.relative_to(folder).as_posix()] = sha(path)
             text = lambda key, limit=80: str(info.get(key, '')).replace('\n', ' ').replace('\r', ' ')[:limit]
             place = info.get('fighter_fe_id', 0)
-            out.append(dict(id=folder.name, name=text('name') or folder.name, kind=text('kind') or 'replacement',
+            # an official map project tried in the player's own game is a content pack there (offline, local)
+            kind = 'content' if text('kind') == OFFICIAL_KIND else text('kind') or 'replacement'
+            out.append(dict(id=folder.name, name=text('name') or folder.name, kind=kind,
                             type=text('type'), version=text('version') or '0.0.0', authors=text('author'),
                             description=text('description', 500), content_sha256=content_hash(files),
                             order=LOCAL_ORDER + len(out), folder=folder, local=True,
@@ -1182,10 +1195,16 @@ class Manager:
             for key in ('name', 'authors', 'kind', 'type', 'version', 'language', 'content_sha256', 'order', 'bytes',
                         'description', 'fighter_fe_id', 'bundle', 'bundle_name'):
                 value = str(r.get(key, '')).replace('\n', ' ').replace('\r', ' ')[:500]
+                if key == 'kind' and value == OFFICIAL_KIND:
+                    value = 'content'
                 lines.append(key + '=' + value)
             if r.get('fighter_mode') == 'skin':
                 # build 85: a skin, an extra outfit of the stock fighter skin_of (pc_content.c)
                 lines += ['fighter_mode=skin', 'skin_of=%d' % r.get('skin_of', -1)]
+            if r.get('official'):
+                # build 86: an official map; kind= above says content (always on, in the content print), as the
+                # game of build 85 reads any other kind as a replacement the player could switch off
+                lines += ['official=1', 'rts_map=%d' % bool(r.get('rts_map'))]
             # build 82: the day the team accepted this version (the hub's NEW badge) and a new venue's feID
             lines.append('reviewed=' + reviewed.get((mod_id, r.get('version')), ''))
             if (self.mods / mod_id / 'install.json').is_file():
@@ -1193,6 +1212,13 @@ class Manager:
                 venue = new_venue_fe_id(self.mods / mod_id / 'install.json')
                 if venue:
                     lines.append('venue_fe_id=%d' % venue)
+                    code = new_venue_code(self.mods / mod_id / 'install.json')
+                    if code and r.get('official'):
+                        lines.append('venue_code=' + code)      # build 86: the official map's venue, e.g. 28A
+                    if r.get('official') and (self.mods / mod_id / 'bigarena.json').is_file():
+                        # its Big Arena layout (size, spawn points; Studio's mapbasics.bigarena_info) in the pack
+                        # folder <data>/mods/<id>/bigarena.json, the same bytes on every PC (in the content hash)
+                        lines.append('bigarena=1')
                 template = new_fighter_template_fe_id(self.mods / mod_id / 'install.json')
                 if template:
                     # build 83: the Content page says where the new fighter is ("in D-Mob's spot")
@@ -1385,6 +1411,21 @@ class Manager:
                     version=receipt['version'], rollback=int(bool(receipt.get('previous'))),
                     bundle=receipt.get('bundle', ''), bundle_name=receipt.get('bundle_name', '')))
         atomic_bytes(self.root / 'view.ini', ('\n'.join(lines) + '\n').encode())
+
+
+OFFICIAL_KIND = 'official-map'      # build 86: the FFNY team's official maps (mod_catalogue.py)
+
+
+def new_venue_code(install_json):
+    """A venue pack's new venue code (its new-venue op's code, e.g. 28A), else ''."""
+    try:
+        for op in json.loads(Path(install_json).read_text(encoding='utf-8')).get('ops') or []:
+            if isinstance(op, dict) and op.get('op') == 'new-venue' and isinstance(op.get('code'), str) \
+                    and re.fullmatch(r'[0-9]{2}[A-Z]', op['code']):
+                return op['code']
+    except (OSError, ValueError, AttributeError):
+        pass
+    return ''
 
 
 def new_venue_fe_id(install_json):
