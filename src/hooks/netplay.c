@@ -7044,7 +7044,9 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 }
             }
             {   /* RECOMP_TEST_RTS_RULES=<minutes>,<KOs> (tests, build 87; minutes 5, 10, 15 or 0 for none, KOs 5, 10,
-                 * 20): the host sets its Run the Streets room's round rules (the rounds byte) */
+                 * 20): the host sets its Run the Streets room's round rules (the rounds byte). Once the room holds a
+                 * second player, and not ready before: the relay's QUICK only joins rooms at the default rules, so a
+                 * host that changed them at once stayed alone (each test copy opened a room of its own). */
                 const char *tt = getenv("RECOMP_TEST_RTS_RULES");
                 if (tt && *tt && strchr(tt, ',') && r.in_room && r.phase == 0 && r.you == r.host && !N.match_live &&
                     NETPLAY_IS_RTS(r.settings.mode)) {
@@ -7052,7 +7054,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                                                          ow_rules_rts_ko_index(atoi(strchr(tt, ',') + 1)));
                     if (r.settings.rounds != want_rules) {
                         static ULONGLONG asked;
-                        if (GetTickCount64() - asked > 1000) {
+                        if (r.player_count >= 2 && GetTickCount64() - asked > 1000) {
                             NetRoomSettings want = r.settings;
                             asked = GetTickCount64();
                             want.rounds = want_rules;
