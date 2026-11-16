@@ -72,6 +72,7 @@ extern "C" {
 #include "bug_report.h"
 #include "voice.h"
 #include "online_screen.h"
+#include "rts_social_rules.h"
 #include "hd_build.h"
 #include "updater.h"
 
@@ -4227,6 +4228,9 @@ struct NoteOffer {
 };
 static NoteOffer g_offer;
 static std::atomic<bool> g_offer_visible(false), g_offer_key(false);
+// build 86.1: the fight chat's hold on the window's keys and clicks, set once a frame (pc_ui_window_message, rts_chat_route)
+static std::atomic<int> g_fc_keys(0);
+static std::atomic<bool> g_fc_typing(false);
 static const UiTick OFFER_MS = 20000;
 
 // Called each frame under the lock, before F9's box opens: whether the line shows this frame.
@@ -4420,6 +4424,24 @@ extern "C" void pc_ui_apply_settings(void)
 }
 
 #if defined(_WIN32)
+// The kind of a window message for the fight chat's routing (rts_chat_route).
+static int fight_chat_msg_kind(UINT msg)
+{
+    switch (msg) {
+    case WM_KEYDOWN: return RTS_MSG_KEYDOWN;
+    case WM_SYSKEYDOWN: return RTS_MSG_SYSKEYDOWN;
+    case WM_KEYUP: case WM_SYSKEYUP: return RTS_MSG_KEYUP;
+    case WM_CHAR: return RTS_MSG_CHAR;
+    case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN: case WM_XBUTTONDOWN:
+    case WM_LBUTTONDBLCLK: case WM_RBUTTONDBLCLK: case WM_MBUTTONDBLCLK: case WM_XBUTTONDBLCLK:
+        return RTS_MSG_MOUSEDOWN;
+    case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: case WM_XBUTTONUP: return RTS_MSG_MOUSEUP;
+    case WM_MOUSEMOVE: case WM_MOUSELEAVE: case WM_MOUSEWHEEL: case WM_MOUSEHWHEEL: case WM_SETFOCUS: case WM_KILLFOCUS:
+        return RTS_MSG_MOUSEMOVE;     // the overlay keeps track; the game sees them as before
+    default: return RTS_MSG_OTHER;
+    }
+}
+
 extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 {
     // F9's "What's wrong?" box takes the typing; another F9 and the overlay key wait until it is closed.
@@ -4478,6 +4500,31 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
             g_ms_req = true;
             return 1;
         }
+    }
+    // The fight chat with the online screens shut (build 86.1; before, only the pad's button, polled, opened it): the
+    // Run the Streets dock or a spectator's bar sees the keys and clicks; ENTER, a click on the chat and, while it
+    // is typed in, every press stay the chat's (rts_chat_route). Releases always reach the game.
+    if (!note && !g_open.load() && g_fc_keys.load() != RTS_CHAT_NONE) {
+        int kind = fight_chat_msg_kind(msg), route = 0;
+        if (kind == RTS_MSG_OTHER) return 0;
+        ui_lock();
+        if (g_ready) {
+            bool in_chat = kind == RTS_MSG_MOUSEDOWN &&
+                           online_screen::fight_chat_at((float)(short)LOWORD(lp), (float)(short)HIWORD(lp));
+            route = rts_chat_route(g_fc_keys.load(), g_fc_typing.load() ? 1 : 0, kind, (int)wp, in_chat ? 1 : 0);
+            if (kind == RTS_MSG_MOUSEDOWN)
+                fprintf(stderr, "[UI] fight chat: click at %d,%d%s\n", (int)(short)LOWORD(lp), (int)(short)HIWORD(lp),
+                        in_chat ? " on the chat (kept from the game)" : "");
+            if (route & RTS_ROUTE_UI) {
+                // a click carries its own position: the overlay may have had no WM_MOUSEMOVE over the fight (or a
+                // WM_MOUSELEAVE after it), and the dock's hit test reads io.MousePos
+                if (kind == RTS_MSG_MOUSEDOWN || kind == RTS_MSG_MOUSEUP)
+                    ImGui::GetIO().AddMousePosEvent((float)(short)LOWORD(lp), (float)(short)HIWORD(lp));
+                ImGui_ImplWin32_WndProcHandler(window, msg, wp, lp);
+            }
+        }
+        ui_unlock();
+        return (route & RTS_ROUTE_KEEP) ? 1 : 0;
     }
     if (!g_open.load() && !note) return 0;
     ui_lock();
@@ -4615,6 +4662,9 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         }
     };
     fight_chat_hold(fightchat && online_screen::fight_chat_typing());
+    // build 86.1: the window's keys and clicks reach the fight chat too (pc_ui_window_message)
+    g_fc_keys = fightchat ? online_screen::fight_chat_keys() : RTS_CHAT_NONE;
+    g_fc_typing = fightchat && online_screen::fight_chat_typing();
     char notice[160];
     // F9's notice shows over everything, the online screens and the settings included (pressed in
     // the online menu, it was hidden there); the netplay notices are for the fight only.

@@ -50,6 +50,38 @@ int rts_clamp_to_box(float *x, float *y, float x0, float y0, float x1, float y1,
 #define RTS_BUBBLE_MS 5000
 float rts_bubble_alpha(unsigned age_ms);
 
+/* The fight chat's keyboard and mouse while the online screens are shut (pc_ui_window_message). Before build 86.1 the
+ * window's messages reached the overlay only with the online screens open, so in a fight ENTER never opened the
+ * Run the Streets dock (the pad's button, polled, did). `chat`: RTS_CHAT_NONE, RTS_CHAT_BAR (a spectator's bar) or
+ * RTS_CHAT_DOCK (the Run the Streets dock); `typing`: the chat has the input now; `vk` the key (0x0D ENTER);
+ * `in_chat`: a click lands on the chat's chip or window. Returns RTS_ROUTE_UI (the overlay sees it) and/or
+ * RTS_ROUTE_KEEP (the game does not). Releases and moves always reach the game, so nothing it saw pressed stays
+ * pressed; ENTER is the dock's (it opens and sends; as the game's START it would pause); while typing every press is
+ * the chat's, so the fighter stands still; a click on the chat is the chat's (MOUSE1 punches). ALT+ENTER (a system
+ * key) stays the full-screen chord. */
+enum { RTS_CHAT_NONE = 0, RTS_CHAT_BAR = 1, RTS_CHAT_DOCK = 2 };
+enum { RTS_MSG_OTHER = 0, RTS_MSG_KEYDOWN, RTS_MSG_SYSKEYDOWN, RTS_MSG_KEYUP, RTS_MSG_CHAR, RTS_MSG_MOUSEDOWN,
+       RTS_MSG_MOUSEUP, RTS_MSG_MOUSEMOVE };
+enum { RTS_ROUTE_UI = 1, RTS_ROUTE_KEEP = 2 };
+/* (inline: pc_ui.cpp calls it from the window procedure, and the launcher app builds pc_ui.cpp without this file) */
+static inline int rts_chat_route(int chat, int typing, int kind, int vk, int in_chat)
+{
+    if (chat != RTS_CHAT_BAR && chat != RTS_CHAT_DOCK) return 0;
+    switch (kind) {
+    case RTS_MSG_KEYDOWN:
+        if (typing) return RTS_ROUTE_UI | RTS_ROUTE_KEEP;
+        return RTS_ROUTE_UI | (chat == RTS_CHAT_DOCK && vk == 0x0D ? RTS_ROUTE_KEEP : 0);
+    case RTS_MSG_CHAR:
+        return RTS_ROUTE_UI | (typing ? RTS_ROUTE_KEEP : 0);
+    case RTS_MSG_MOUSEDOWN:
+        return RTS_ROUTE_UI | (typing || in_chat ? RTS_ROUTE_KEEP : 0);
+    case RTS_MSG_SYSKEYDOWN: case RTS_MSG_KEYUP: case RTS_MSG_MOUSEUP: case RTS_MSG_MOUSEMOVE:
+        return RTS_ROUTE_UI;
+    default:
+        return 0;
+    }
+}
+
 #ifdef __cplusplus
 }
 #endif

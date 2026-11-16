@@ -107,6 +107,11 @@ void draw_fight_hud(ImDrawList *dl, ImVec2 display);
 bool fight_chat_wanted();
 bool draw_fight_chat(ImDrawList *dl, ImVec2 display);
 bool fight_chat_typing();
+/* Build 86.1: whose the keyboard and mouse are with the online screens shut (pc_ui_window_message, rts_chat_route):
+ * RTS_CHAT_DOCK in a Run the Streets fight (its dock), RTS_CHAT_BAR for a spectator's bar, else RTS_CHAT_NONE. Read
+ * once a frame. fight_chat_at: a click at (x, y) window pixels lands on the dock's chip or window (as last drawn). */
+int fight_chat_keys();
+bool fight_chat_at(float x, float y);
 /* Run the Streets (rts_social_ui.inc): the chat bubbles and speaker icons over the fighters. rts_world_wanted() once a
  * frame (with the overlay closed); draw_rts_world draws them, under the fight chat. Drawing only, no input. */
 bool rts_world_wanted();

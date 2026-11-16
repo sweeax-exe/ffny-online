@@ -49,6 +49,12 @@ struct RtsSocial {
     int kb_frame = -1;                      // the on-screen keyboard was up in this frame (its B is not the dock's)
     unsigned long long dock_since = 0, test_close_at = 0;
     int test_step = 0;
+    // build 86.1: where the dock was last drawn, in window pixels (clicks: rts_dock_at), and the local fighter's
+    // position while typing (the log proves it stands still)
+    ImVec4 hit_chip = ImVec4(0, 0, 0, 0), hit_win = ImVec4(0, 0, 0, 0), hit_tab[3] = {};
+    bool held_have = false;
+    float held_at[3] = { 0, 0, 0 }, held_max = 0;
+    unsigned long long held_log = 0;
 } RS;
 
 std::vector<RtsTestLine> rts_parse_test(const char *name, bool with_fighter)
@@ -374,6 +380,58 @@ const char *const k_dock_tabs[3] = { "ROOM", "GLOBAL", "PRIVATE" };
 
 bool rts_dock_live() { return !gallery_on() && fight_chat_live() && rts_social_on(); }
 
+// Build 86.1: whose the keyboard and mouse are with the online screens shut (pc_ui_window_message): the dock's in a
+// Run the Streets fight, a spectator's bar's while it can open, else the game's alone.
+int fight_chat_keys_impl()
+{
+    if (rts_dock_live()) return RTS_CHAT_DOCK;
+    if (!fight_chat_live() || room_chat_state() != 1) return RTS_CHAT_NONE;
+    NetRoom r;
+    lobby_room(&r);
+    return fight_spectator(r) ? RTS_CHAT_BAR : RTS_CHAT_NONE;
+}
+
+static bool in_box(const ImVec4 &b, float x, float y) { return b.z > b.x && x >= b.x && x < b.z && y >= b.y && y < b.w; }
+
+// A click at window pixels (x, y) lands on the dock: its chip when shut, its window when open.
+bool rts_dock_at(float x, float y)
+{
+    if (!rts_dock_live()) return false;
+    return FC.typing ? in_box(RS.hit_win, x, y) : in_box(RS.hit_chip, x, y);
+}
+
+// The local fighter's feet while the dock is open: logged at the open, every second and at the close with the
+// farthest it got from where it stood (the game's input is held: it must stay at about 0).
+static void rts_dock_held(bool typing)
+{
+    if (!typing) {
+        if (RS.held_have) fprintf(stderr, "[RTSDOCK] held: fighter moved at most %.2f units while the dock was open\n",
+                                  (double)RS.held_max);
+        RS.held_have = false;
+        return;
+    }
+    RtsSocialView v;
+    if (!rts_social_view(&v) || v.local < 0 || v.local > 3) return;
+    const float *p = v.pos[v.local];
+    unsigned long long now = GetTickCount64();
+    if (!RS.held_have) {
+        RS.held_have = true;
+        memcpy(RS.held_at, p, sizeof RS.held_at);
+        RS.held_max = 0;
+        RS.held_log = now;
+        fprintf(stderr, "[RTSDOCK] held: fighter %d at %.2f %.2f %.2f as the dock opened\n", v.local, (double)p[0],
+                (double)p[1], (double)p[2]);
+        return;
+    }
+    float dx = p[0] - RS.held_at[0], dz = p[2] - RS.held_at[2], d = sqrtf(dx * dx + dz * dz);
+    RS.held_max = std::max(RS.held_max, d);
+    if (now - RS.held_log >= 1000) {
+        RS.held_log = now;
+        fprintf(stderr, "[RTSDOCK] held: fighter at %.2f %.2f %.2f, %.2f units from the start\n", (double)p[0],
+                (double)p[1], (double)p[2], (double)d);
+    }
+}
+
 // The gallery's pages (RECOMP_TEST_ONLINE_GALLERY): the dock open on a tab (-1 none), its sample lines.
 int g_rts_gallery_tab = -1;
 bool g_rts_gallery_world = false;
@@ -599,6 +657,26 @@ bool rts_dock_draw(ImDrawList *dl, ImVec2 display)
         FC.cursor = 0;
         fprintf(stderr, "[RTSDOCK] opened (%s) on %s: game input held\n", FC.pad ? "pad" : "keyboard", k_dock_tabs[RS.tab]);
     }
+    // the mouse (build 86.1): a click on the chip opens the dock to type, a click on a tab picks it
+    if (!QW.open && !kb_up && ImGui::IsMouseClicked(0, false)) {
+        ImVec2 m = ImGui::GetIO().MousePos;
+        fprintf(stderr, "[RTSDOCK] click at %d,%d (%s)\n", (int)m.x, (int)m.y, FC.typing ? "open" : "shut");
+        if (!FC.typing && in_box(RS.hit_chip, m.x, m.y)) {
+            FC.typing = true;
+            FC.pad = false;
+            FC.opened = GetTickCount64();
+            FC.draft.clear();
+            FC.cursor = 0;
+            fprintf(stderr, "[RTSDOCK] opened (mouse) on %s: game input held\n", k_dock_tabs[RS.tab]);
+        } else if (FC.typing) {
+            for (int t = 0; t < tabs && t < 3; t++)
+                if (t != RS.tab && in_box(RS.hit_tab[t], m.x, m.y)) {
+                    RS.tab = t;
+                    FC.pad = false;
+                    fprintf(stderr, "[RTSDOCK] tab %s (mouse)\n", k_dock_tabs[RS.tab]);
+                }
+        }
+    }
     if (FC.typing && !kb_up && GetTickCount64() - FC.opened > 150) {
         bool sw_next = ImGui::IsKeyPressed(ImGuiKey_Tab, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false);
         bool sw_prev = ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false);
@@ -636,6 +714,7 @@ bool rts_dock_draw(ImDrawList *dl, ImVec2 display)
         if (w && w != RS.dm_opened) { RS.dm_opened = w; social::open_thread(w); }
     }
     social_set_typing(FC.typing);
+    rts_dock_held(FC.typing);
 
     return rts_dock_paint(dl, display, tabs, kb_up);
 }
@@ -683,6 +762,12 @@ bool rts_dock_paint(ImDrawList *dl, ImVec2 display, int tabs, bool kb_up)
                 if (u > 0) w += text_width(f, g_title, 7.5f, k_dock_tabs[t]) + 20;
             }
             rect(dl, f, x, yy, w, 13, IM_COL32(0, 0, 0, 120), 4);
+            {
+                ImVec2 a = f.p(x, yy), b = f.p(x + w, yy + 13);
+                if ((int)a.x != (int)RS.hit_chip.x || (int)a.y != (int)RS.hit_chip.y)     // tests: where to click
+                    fprintf(stderr, "[RTSDOCK] chip at %d,%d-%d,%d\n", (int)a.x, (int)a.y, (int)b.x, (int)b.y);
+                RS.hit_chip = ImVec4(a.x, a.y, b.x, b.y);
+            }
             rect(dl, f, x + 3, yy + 2, pw, 9, IM_COL32(70, 70, 70, 220), 2);
             text(dl, f, g_body, 8, x + 3 + pw / 2, yy + 2, WHITE, keys.c_str(), CENTER, 0);
             x += 7 + pw;
@@ -706,12 +791,14 @@ bool rts_dock_paint(ImDrawList *dl, ImVec2 display, int tabs, bool kb_up)
     // open: the compact window
     const float Y = 252, H = 214, TABH = 19, BAR = 26;
     glass(dl, f, X, Y, W, H, 8, IM_COL32(10, 10, 13, 255), 0.84f);
+    { ImVec2 a = f.p(X, Y), b = f.p(X + W, Y + H); RS.hit_win = ImVec4(a.x, a.y, b.x, b.y); }
     float tx = X + 6;
     for (int t = 0; t < tabs; t++) {
         bool on = t == RS.tab;
         int u = on ? 0 : rts_unread(t);
         float tw = text_width(f, g_title, 9, k_dock_tabs[t]) + 16 + (u > 0 ? 12 : 0);
         if (on) rect(dl, f, tx, Y + 5, tw, TABH - 3, with_alpha(RED, 0.9f), 4);
+        if (t < 3) { ImVec2 a = f.p(tx, Y + 5), b = f.p(tx + tw, Y + TABH + 2); RS.hit_tab[t] = ImVec4(a.x, a.y, b.x, b.y); }
         text(dl, f, g_title, 9, tx + 8, Y + 8, on ? IM_COL32(255, 245, 230, 255) : DIM, k_dock_tabs[t], LEFT, 0);
         if (u > 0) {
             float cx = tx + tw - 10;
@@ -772,7 +859,8 @@ bool rts_dock_paint(ImDrawList *dl, ImVec2 display, int tabs, bool kb_up)
             text(dl, f, g_body, 10, bx + 8, by + 5, DIM, can ? (std::string("Message ") + rts_dock_target()).c_str() : "You can only read here.", LEFT, 0);
         else
             text(dl, f, g_body, 10.5f, bx + 8 - shift, by + 4.5f, CREAM, FC.draft.c_str(), LEFT, 0);
-        if ((GetTickCount64() / 500) % 2 == 0) rect(dl, f, bx + 8 - shift + cw + 1, by + 4, 1.5f, 14, GOLD_TEXT);
+        if (g_rts_gallery_tab >= 0 || (GetTickCount64() / 500) % 2 == 0)     // the gallery's picture: always the caret
+            rect(dl, f, bx + 8 - shift + cw + 1, by + 4, 1.5f, 14, GOLD_TEXT);
         dl->PopClipRect();
         text(dl, f, g_body, 7, bx + bw - 6, by + 8, IM_COL32(242, 230, 200, 153), keys, RIGHT, 0);
     }
