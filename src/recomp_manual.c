@@ -245,11 +245,34 @@ static void id_set_full(uint32_t set, uint32_t id)
         fprintf(stderr, "[SETS] the set at %08X holds %u of %u ids: id %08X left out (%u so far)\n", set,
                 MEM32(set + 4), MEM32(set), id, refused);
 }
+/* A full fighter set with a new fighter's id in it (unlock_all, or a story reward, put every Character row in,
+ * new fighters' rows too): a stock fighter's id takes that place, since the new fighter does not need it. Else a
+ * stock fighter bought in Unlock Rewards would cost its points and stay locked. 1 when a place was made. */
+static int id_set_make_room(uint32_t set, uint32_t id)
+{
+    uint32_t count = MEM32(set + 4), ids = MEM32(set + 0xC), saved = MEM32(set + 8), i, j;
+    if (id >> 24 != 7u || new_fighter_row(id & 0x7FFFFFu) || !ids || count > MEM32(set))
+        return 0;
+    for (i = count; i-- > 0;) {
+        uint32_t v = MEM32(ids + 4 * i);
+        if (v >> 24 != 7u || !new_fighter_row(v & 0x7FFFFFu))
+            continue;
+        for (j = i; j + 1 < count; j++)
+            MEM32(ids + 4 * j) = MEM32(ids + 4 * (j + 1));
+        MEM32(ids + 4 * (count - 1)) = 0xFFFFFFFFu;
+        MEM32(set + 4) = count - 1;
+        if (saved)
+            MEM32(saved) = count - 1;
+        fprintf(stderr, "[SETS] the fighter set was full: new fighter id %08X made room for %08X\n", v, id);
+        return 1;
+    }
+    return 0;
+}
 extern void sub_00016810_gen(void);
 void sub_00016810(void)
 {
     uint32_t set = g_ecx;
-    if (MEM32(set + 4) >= MEM32(set)) {
+    if (MEM32(set + 4) >= MEM32(set) && !id_set_make_room(set, MEM32(MEM32(g_esp + 4)))) {
         id_set_full(set, MEM32(MEM32(g_esp + 4)));
         g_esp += 8;     /* ret 4: the return address and the id pointer */
         return;
@@ -2200,6 +2223,10 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         return first_time_help_hook;
     if (xbox_va == 0x000480E0u)         /* Game.GetNextFighter: new fighters in cells of their own (new_fighters.c) */
         return new_fighters_get_next;
+    if (xbox_va == 0x00054420u)         /* Unlock.GetCharacterList: stock fighters only (new_fighters.c) */
+        return new_fighters_unlock_list;
+    if (xbox_va == 0x000546B0u)         /* Unlock.GetGlobalCharUnlockInfo: the same count */
+        return new_fighters_unlock_info;
     if (xbox_va == 0x00081170u)         /* the crowd's update: its own generator copy online */
         return netplay_crowd_update;
     if (xbox_va == 0x0011EC80u)         /* the mixer's stream packet callback: released chunks */

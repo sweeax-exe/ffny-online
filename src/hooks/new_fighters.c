@@ -27,6 +27,7 @@
 #include "fighter_gameplay.h"
 #include "fighter_voice.h"
 #include "fighter_skins.h"
+#include "unlock_list.h"
 
 unsigned int defjam_fe_call(const char *command);                   /* recomp_manual.c */
 FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c: as the print reads it */
@@ -45,6 +46,7 @@ static uint32_t g_words[NEW_FIGHTER_MAX][ROW_WORDS];    /* its words (stats, sty
 static FighterGameplay g_gp[NEW_FIGHTER_MAX];           /* its own gameplay, when g_gp_ok */
 static int g_gp_ok[NEW_FIGHTER_MAX];
 static int g_new_count = -1;
+static unsigned char g_new_row[256];                   /* Character rows (the id's low bits) of new fighters */
 
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 
@@ -70,6 +72,7 @@ static void load(void)
     size_t size = 0;
     int overridden = 0;
     g_new_count = 0;
+    memset(g_new_row, 0, sizeof(g_new_row));
     f = netplay_open_fight_file("assets\\djv2.sod", &overridden);
     if (!f) return;
     fseek(f, 0, SEEK_END);
@@ -101,6 +104,7 @@ static void load(void)
                 core = rd32(d + row + 4 * W_CORE_ID);
                 if (new_fighter_is_place((int)fe)) {
                     NewFighter *nf;
+                    if (r < sizeof(g_new_row)) g_new_row[r] = 1;
                     if (g_new_count >= NEW_FIGHTER_MAX) continue;
                     nf = &g_new[g_new_count++];
                     nf->fe_id = (int)fe;
@@ -440,6 +444,12 @@ int new_fighters_list(const NewFighter **out)
     return g_new_count;
 }
 
+int new_fighter_row(uint32_t row)
+{
+    if (g_new_count < 0) load();
+    return row < sizeof(g_new_row) && g_new_row[row];
+}
+
 int new_fighter_template(int fe_id)
 {
     int i;
@@ -596,4 +606,84 @@ void new_fighters_after_funccall(const char *text)
     if (strcmp(text, "Game.ResetFighterList()")) return;
     if (new_fighters_list(NULL) <= 0) return;
     rebuild_list();
+}
+
+/* ---- the Unlock Rewards screen (battle/unlockchar) ----
+ *
+ * Its handlers write their answer into the front end's result text at 0x341768, 0x600 bytes, the 0x341D68 object
+ * and the call machinery's own state right after it (sub_0005F7B0 clears it, sub_0005F810 appends "%s&%s=%d" with
+ * no bound). Unlock.GetCharacterList (sub_00054420) lists every Character row but the Hero's,
+ * "Count=74&BE=<row id>&FE=<feID>&...", about 19 bytes a fighter: the 74 stock fighters take 1405, so about six
+ * new fighters more ran past the end. Then the screen got no list at all (its ActionScript stops after the call, no
+ * Unlock.GetCharCostInfo follows): every cell kept the grid's placeholder picture and the panel its authoring text
+ * (the bald fighter, COST 100, YOU HAVE 100), and nothing could be bought (trollizas, build 85, 2026-11-16;
+ * logs/dj/20261116-170145-unlockc). A new fighter is unlocked by its own select cell (LOCK=1, above) and has no
+ * picture in the screen's thumball.swf, so it has no place in this shop: its entries are taken out of the answer
+ * and whatever ran past the buffer is put back. Unlock.GetGlobalCharUnlockInfo (sub_000546B0) counts the same
+ * rows and the fighter set's ids; it gives "UNLOCKED n / total" for the stock fighters only. */
+#define FE_RESULT 0x00341768u
+#define CHARACTER_TABLE_INDEX 7u       /* an id is table << 24 | row; 0x800000 is the element's own flag */
+
+extern void sub_00054420(void);
+extern void sub_000546B0(void);
+
+static size_t fe_result_read(char *out, size_t cap)
+{
+    size_t n = 0;
+    while (n + 1 < cap && (out[n] = (char)MEM8(FE_RESULT + (uint32_t)n)) != 0) n++;
+    out[n] = 0;
+    return n;
+}
+
+static void fe_result_write(const char *text)
+{
+    size_t k, n = strlen(text);
+    for (k = 0; k <= n; k++) MEM8(FE_RESULT + (uint32_t)k) = (uint8_t)text[k];
+}
+
+void new_fighters_unlock_list(void)
+{
+    static uint8_t spill[FE_RESULT_SPILL];
+    static int told;
+    char text[FE_RESULT_SIZE + FE_RESULT_SPILL], out[FE_RESULT_SIZE];
+    size_t len, k, over;
+    int kept, left_out;
+    for (k = 0; k < FE_RESULT_SPILL; k++) spill[k] = MEM8(FE_RESULT + FE_RESULT_SIZE + (uint32_t)k);
+    sub_00054420();
+    if (g_eax != FE_RESULT) return;
+    len = fe_result_read(text, sizeof(text));
+    over = len + 1 > FE_RESULT_SIZE ? len + 1 - FE_RESULT_SIZE : 0;
+    if (!over && new_fighters_list(NULL) <= 0) return;
+    kept = unlock_list_filter(text, out, sizeof(out), &left_out);
+    if (left_out || over) {
+        fe_result_write(out);
+        for (k = 0; k < over && k < FE_RESULT_SPILL; k++) MEM8(FE_RESULT + FE_RESULT_SIZE + (uint32_t)k) = spill[k];
+        if (told++ < 4)
+            fprintf(stderr, "[UNLOCK] Unlock Fighters: %d fighters listed, %d new fighter(s) left out (the game's list "
+                            "was %u bytes, the result holds %u%s)\n", kept, left_out, (unsigned)len + 1,
+                    FE_RESULT_SIZE, over ? "; what ran past it was put back" : "");
+    }
+}
+
+void new_fighters_unlock_info(void)
+{
+    uint32_t self = g_ecx, set, ids, count, i;
+    int unlocked, total, new_rows = 0, new_ids = 0;
+    char text[96];
+    sub_000546B0();
+    if (g_eax != FE_RESULT || new_fighters_list(NULL) <= 0 || self < 0x10000u) return;
+    fe_result_read(text, sizeof(text));
+    if (sscanf(text, "unlockedChars=%d&total=%d", &unlocked, &total) != 2) return;
+    for (i = 0; i < sizeof(g_new_row); i++) new_rows += g_new_row[i];
+    set = MEM32(MEM32(self + 0xC0Cu) + 4u) + 4u + 0x1Cu;    /* as the handler reads it: {cap, count, saved, ids} */
+    count = MEM32(set + 4u);
+    ids = MEM32(set + 0xCu);
+    for (i = 0; ids && i < count && i < 256u; i++) {
+        uint32_t id = MEM32(ids + 4u * i);
+        if (id >> 24 == CHARACTER_TABLE_INDEX && new_fighter_row(id & 0x7FFFFFu)) new_ids++;
+    }
+    if (!new_rows && !new_ids) return;
+    snprintf(text, sizeof(text), "unlockedChars=%d&total=%d", unlocked - new_ids < 0 ? 0 : unlocked - new_ids,
+             total - new_rows);
+    fe_result_write(text);
 }

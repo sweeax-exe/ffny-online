@@ -27,12 +27,19 @@ typedef struct NewFighter {
 /* The new fighters of the database the game reads (read once). */
 int new_fighters_list(const NewFighter **out);
 int new_fighter_template(int fe_id);        /* -1 when fe_id is not a new fighter */
+int new_fighter_row(uint32_t row);          /* 1 when Character row `row` (an id's low bits) is a new fighter's */
 
 /* After a front-end call the game ran (the FuncCall hook, recomp_manual.c), and Game.GetNextFighter's
  * wrapper: the select screens show each new fighter as a cell of its own after the stock cells (the community
  * row), unlocked, by place. */
 void new_fighters_after_funccall(const char *text);
 void new_fighters_get_next(void);           /* recomp_lookup_manual: Game.GetNextFighter, 0x000480E0 */
+
+/* The Unlock Rewards screen (battle/unlockchar), recomp_lookup_manual: Unlock.GetCharacterList (0x00054420) and
+ * Unlock.GetGlobalCharUnlockInfo (0x000546B0) answer for the stock fighters only; a new fighter is unlocked by its
+ * own select cell, and with more than about six of them the list ran past the front end's result text. */
+void new_fighters_unlock_list(void);
+void new_fighters_unlock_info(void);
 
 /* A new fighter's own gameplay (fighter_gameplay.h; NULL: its template's), and the three match set-up points
  * that apply it: after Game.StartGame (the stat block and Blazin keys of the set-up, dev_unlock.c), the fight's
