@@ -165,6 +165,9 @@ void *netplay_sound_handler(uint32_t va) { (void)va; return NULL; }
 void netplay_on_pad_read(uint32_t a) { start_countdown_hold(a, start_countdown_offline_step(), 0); }
 int netplay_countdown_active(void) { return start_countdown_active(0); }
 int netplay_local_slot(void) { return -1; }
+int netplay_rts_match(void) { return 0; }
+int netplay_rts_room(void) { return 0; }
+int netplay_relay_rts(void) { return 0; }
 int netplay_delay_info(NetDelayInfo *o) { if (o) memset(o, 0, sizeof(*o)); return 0; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
 void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
@@ -499,6 +502,7 @@ static struct {
     AutoMatch cp_wait_m;
     int koth_match;                 /* this START is a King of the Hill fight (or an FFA rotation one) */
     int rot_match;                  /* this START is an FFA rotation fight: up to four, the winner stays */
+    int rts_match;                  /* this START is a Run the Streets fight (NETPLAY_MODE_RTS room) */
     int rot_out[MAXP];              /* FFA rotation: when each position was put out (1, 2, ...), 0 still in */
     int rot_outs;
     uint8_t koth_order[MAXP];       /* FFA rotation: the RESULT's finishing order (room slots, best first) */
@@ -797,6 +801,7 @@ static unsigned room_rb_class(void)
     if (N.rank.valid && N.rank.has_set && !memcmp(N.rank_room, N.roomv.code, 6) && !NETPLAY_IS_HILL(mode))
         return NETPLAY_RB_RANKED;
     if (NETPLAY_IS_FFAROT(mode)) return NETPLAY_RB_KOTH;    /* one fight per START, as on the hill */
+    if (NETPLAY_IS_RTS(mode)) return NETPLAY_RB_FFA;
     if (NETPLAY_IS_KOTH(mode))
         return N.crew.battle && !memcmp(N.crew_room, N.roomv.code, 7) ? NETPLAY_RB_CREW : NETPLAY_RB_KOTH;
     if (mode == ONLINE_MODE_TEAM) return NETPLAY_RB_TEAM;
@@ -882,6 +887,9 @@ int netplay_delay_info(NetDelayInfo *o)
     return ok;
 }
 int netplay_local_slot(void) { return N.lockstep && !N.watching ? N.pos : -1; }
+int netplay_rts_match(void) { return N.rts_match; }
+int netplay_rts_room(void) { return N.roomv.in_room && NETPLAY_IS_RTS(N.roomv.settings.mode); }
+int netplay_relay_rts(void) { return N.relay_caps > 0 && (N.relay_caps & NETPLAY_CAP_RTS) != 0; }
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
 {
@@ -2597,6 +2605,10 @@ static int every_player_rolls_back(void)
         if (koth < 0) koth = getenv("RECOMP_ROLLBACK_KOTH") && *getenv("RECOMP_ROLLBACK_KOTH") == '1';
         if (N.koth_match && !koth && !every_player_must()) return 0;
     }
+    /* Run the Streets (build 86) stays in lockstep: its respawns and scores are in every rollback save and the
+     * depth-8 soak ran clean offline, but no long online rollback run yet. Every PC knows the room's mode from ROOM.
+     * Tests: RECOMP_ROLLBACK_RTS=1 on every copy lifts it. */
+    if (N.rts_match && !(getenv("RECOMP_ROLLBACK_RTS") && *getenv("RECOMP_ROLLBACK_RTS") == '1')) return 0;
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
     if (match_has_created())
         for (i = 0; i < N.players; i++) if (!N.peer_rb_cp[i]) return 0;
@@ -3933,6 +3945,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.koth_match = NETPLAY_IS_HILL(N.roomv.settings.mode);
     /* FFA rotation: the same, with up to four; a player who leaves is out and the others fight on */
     N.rot_match = NETPLAY_IS_FFAROT(N.roomv.settings.mode);
+    N.rts_match = NETPLAY_IS_RTS(N.roomv.settings.mode);
     memset(N.rot_out, 0, sizeof(N.rot_out));
     N.rot_outs = N.koth_order_n = 0;
     /* a ranked set's game: its RESULT goes to the relay too (the set's score, the loser's venue pick) */
@@ -4583,7 +4596,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES |
-                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED | NETPLAY_CAP_RTS); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;

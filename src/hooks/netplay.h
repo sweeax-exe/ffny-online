@@ -47,6 +47,15 @@ enum NetplayState {
 #define NETPLAY_MODE_FFAROT      0x42
 #define NETPLAY_FFAROT_SLOTS     8
 #define NETPLAY_IS_FFAROT(mode)  ((mode) == NETPLAY_MODE_FFAROT)
+/* Run the Streets (build 86, the open-world mode; closed test): a Free for All room of 2..4 on the Run the
+ * Streets map with Big Arena rules (respawn, knockout score, score and time limit). START carries match type 3
+ * (Free for All); the room's mode tells the game the rules. Only relays answering CAPS with NETPLAY_CAP_RTS list,
+ * create or join such rooms, and only for accounts the account service grants "run_the_streets"
+ * (GET /api/features); the relay checks that itself. Lockstep only for now. */
+#define NETPLAY_MODE_RTS         0x43
+#define NETPLAY_RTS_SLOTS        4
+#define NETPLAY_IS_RTS(mode)     ((mode) == NETPLAY_MODE_RTS)
+#define NETPLAY_CAP_RTS          8388608u   /* 1 << 23, both ways */
 /* A room with a line (HILL): King of the Hill or FFA rotation. */
 #define NETPLAY_IS_HILL(mode)    (NETPLAY_IS_KOTH(mode) || NETPLAY_IS_FFAROT(mode))
 
@@ -496,6 +505,9 @@ typedef struct NetDelayInfo { int in_fight, estimate, rollback, frames, path_ms;
 int netplay_delay_info(NetDelayInfo *o);    /* 1 while rollback runs steps again */
 /* For diagnostics: one line on the online fight's step, rollback state and counters. */
 int netplay_rollback_brief(char *out, int size);
+int netplay_rts_match(void);    /* the running (or last) online fight came from a Run the Streets room */
+int netplay_rts_room(void);     /* this PC is in a Run the Streets room (between fights too) */
+int netplay_relay_rts(void);    /* the relay answered CAPS with NETPLAY_CAP_RTS */
 int netplay_local_slot(void);   /* tests: this PC's fighter slot in a lockstep fight, -1 otherwise */
 int netplay_countdown_active(void);  /* this fight has the start countdown (online always; offline per [gameplay] offline_countdown) */
 
