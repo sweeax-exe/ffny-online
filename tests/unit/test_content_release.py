@@ -216,10 +216,11 @@ def test_notice_sits_where_update_now_sits():
     assert title.index('"NEW COMMUNITY CONTENT IS OUT"') < title.index('content_release(head, sizeof(head)')
     assert title.count('IM_COL32(150, 14, 30, 230)') == 4               # the same badge as the three before it
     ui = src('src/hooks/pc_ui.cpp')
-    # the corner notice in the other menus: after UPDATE NOW's, in a menu only
+    # the corner notice: after UPDATE NOW's, and only once the main menu is up (the answer often comes during the
+    # intro, where 12 s of notice would be over unread)
     assert re.search(r'content_update_toast\(notice, sizeof\(notice\), [^;]*?\) \|\|\s*(//[^\n]*\n\s*)*'
-                     r'content_release_toast\(notice, sizeof\(notice\), !g_open\.load\(\) && !netplay_in_fight\(\) && '
-                     r'!netplay_active\(\)\);', ui)
+                     r'content_release_toast\(notice, sizeof\(notice\), !g_open\.load\(\) && '
+                     r'online_screen::exit_wanted\(\)\);', ui)
 
 
 def test_gallery_page():

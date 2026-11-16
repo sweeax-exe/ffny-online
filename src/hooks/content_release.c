@@ -7,7 +7,7 @@
  *     asked with the catalogue check (content_update_frame: every ten minutes in a menu while signed in, and on the
  *     online pages), on a thread of its own, one request at a time; no timer of its own;
  *   - while packs are scheduled: "NEW CONTENT AT 17:00" on the online pages (the corner badge of build 86's notice)
- *     with what it is and how long until then, and a corner notice in the other menus, once per schedule and once
+ *     with what it is and how long until then, and a corner notice on the main menu, once per schedule and once
  *     more ten minutes before. The time is the PC's own (content_release_logic.h);
  *   - once the time has passed the notice is gone, and one to three minutes later (spread, so the PCs do not all
  *     ask at once) the catalogue is checked, so the UPDATE NOW notice takes over without waiting for the next
@@ -205,12 +205,12 @@ void content_release_sample_lines(char *head, int head_size, char *detail, int d
     lines(&i, 1000, 0, 17, 0, 0, head, head_size, detail, detail_size);
 }
 
-int content_release_toast(char *out, int size, int in_menu)
+int content_release_toast(char *out, int size, int on_main_menu)
 {
     CrInfo i;
     long long now = (long long)time(NULL);
     int days, hour, minute;
-    if (!info(&i) || !cr_toast(&g_notice, &i, now, GetTickCount64(), in_menu)) return 0;
+    if (!info(&i) || !cr_toast(&g_notice, &i, now, GetTickCount64(), on_main_menu)) return 0;
     local_clock(&i, now, &days, &hour, &minute);
     if (out && size > 0) cr_toast_text(&i, now, days, hour, minute, clock_12h(), out, size);
     return 1;

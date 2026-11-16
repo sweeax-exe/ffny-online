@@ -21,8 +21,9 @@ int content_release_frame(int check_due, int in_fight);
 int content_release_lines(char *head, int head_size, char *detail, int detail_size);
 /* The same for the online screens' gallery page: a fixed sample (17:00, in 2h 15m, 3 new fighters and 1 skin). */
 void content_release_sample_lines(char *head, int head_size, char *detail, int detail_size);
-/* The corner notice in a menu (not in a fight): 1 and its text while it shows. */
-int content_release_toast(char *out, int size, int in_menu);
+/* The corner notice on the main menu (on_main_menu: it is up, with no fight, session or room): 1 and its text
+ * while it shows. */
+int content_release_toast(char *out, int size, int on_main_menu);
 
 #ifdef __cplusplus
 }

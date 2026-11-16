@@ -66,7 +66,8 @@ typedef struct CrNotice {
 } CrNotice;
 
 /* The corner notice shows now: once per schedule (a release time and a count), once more CR_SOON_S before it; in
- * a menu only, and a fight uses nothing up. now: this PC's clock (unix); now_ms: a millisecond clock. */
+ * a menu only (the game: the main menu), and anything else uses nothing up. now: this PC's clock (unix); now_ms: a
+ * millisecond clock. */
 int cr_toast(CrNotice *n, const CrInfo *i, long long now, unsigned long long now_ms, int in_menu);
 /* The release time has passed: once per release, CR_AFTER_S + spread seconds after it (spread: 0..CR_AFTER_SPREAD_S,
  * this PC's own), 1 so the caller looks at the catalogue now (the UPDATE NOW notice takes over) and asks for the

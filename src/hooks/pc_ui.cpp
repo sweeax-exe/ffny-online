@@ -4675,8 +4675,10 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
                  update_notice(notice, sizeof(notice)) ||                       // a newer build is out
                  // build 86: new community content, in any menu (the online screens say it themselves)
                  content_update_toast(notice, sizeof(notice), !g_open.load() && !netplay_in_fight() && !netplay_active()) ||
-                 // build 87: content to come at the next release window ("New content at 17:00 ...")
-                 content_release_toast(notice, sizeof(notice), !g_open.load() && !netplay_in_fight() && !netplay_active());
+                 // build 87: content to come at the next release window ("New content at 17:00 ..."), on the main
+                 // menu (the online pages have its badge): the answer often comes during the intro, where a notice
+                 // of 12 s would be over before anyone reads it
+                 content_release_toast(notice, sizeof(notice), !g_open.load() && online_screen::exit_wanted());
     // F9's picture is taken this frame: without the notice F9 itself put up ("taking a picture"), which
     // would cover the screen being reported. With nothing else drawn, the game's frame stays the picture.
     bool report = g_report_pending.exchange(false);
