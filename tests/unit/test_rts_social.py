@@ -47,6 +47,26 @@ int main(void)
     x = 320; y = 200; k = rts_clamp_to_box(&x, &y, 0, 0, 640, 480, 1); printf("clamp|behind|%d|%.1f|%.1f\n", k, x, y);
     printf("alpha|%.2f|%.2f|%.2f|%.2f|%.2f\n", rts_bubble_alpha(0), rts_bubble_alpha(75), rts_bubble_alpha(2000),
            rts_bubble_alpha(4600), rts_bubble_alpha(5000));
+    /* the fight chat's keys and clicks with the online screens shut: route|chat|typing|kind|vk|in_chat|result */
+    {
+        static const int cases[][5] = {
+            { RTS_CHAT_NONE, 0, RTS_MSG_KEYDOWN, 0x0D, 0 }, { RTS_CHAT_NONE, 1, RTS_MSG_KEYDOWN, 'W', 0 },
+            { RTS_CHAT_DOCK, 0, RTS_MSG_KEYDOWN, 0x0D, 0 }, { RTS_CHAT_DOCK, 0, RTS_MSG_KEYDOWN, 'W', 0 },
+            { RTS_CHAT_DOCK, 0, RTS_MSG_KEYDOWN, 'K', 0 }, { RTS_CHAT_DOCK, 1, RTS_MSG_KEYDOWN, 'W', 0 },
+            { RTS_CHAT_DOCK, 1, RTS_MSG_KEYDOWN, 0x0D, 0 }, { RTS_CHAT_DOCK, 1, RTS_MSG_KEYDOWN, 0x1B, 0 },
+            { RTS_CHAT_DOCK, 1, RTS_MSG_KEYDOWN, 0x09, 0 }, { RTS_CHAT_DOCK, 1, RTS_MSG_KEYUP, 'W', 0 },
+            { RTS_CHAT_DOCK, 0, RTS_MSG_KEYUP, 0x0D, 0 }, { RTS_CHAT_DOCK, 1, RTS_MSG_CHAR, 'w', 0 },
+            { RTS_CHAT_DOCK, 0, RTS_MSG_CHAR, 'w', 0 }, { RTS_CHAT_DOCK, 0, RTS_MSG_SYSKEYDOWN, 0x0D, 0 },
+            { RTS_CHAT_DOCK, 1, RTS_MSG_SYSKEYDOWN, 0x0D, 0 }, { RTS_CHAT_DOCK, 0, RTS_MSG_MOUSEDOWN, 1, 0 },
+            { RTS_CHAT_DOCK, 0, RTS_MSG_MOUSEDOWN, 1, 1 }, { RTS_CHAT_DOCK, 1, RTS_MSG_MOUSEDOWN, 1, 0 },
+            { RTS_CHAT_DOCK, 1, RTS_MSG_MOUSEUP, 0, 1 }, { RTS_CHAT_DOCK, 0, RTS_MSG_MOUSEMOVE, 0, 0 },
+            { RTS_CHAT_DOCK, 0, RTS_MSG_OTHER, 0, 0 }, { RTS_CHAT_BAR, 0, RTS_MSG_KEYDOWN, 0x0D, 0 },
+            { RTS_CHAT_BAR, 1, RTS_MSG_KEYDOWN, 'W', 0 },
+        };
+        for (i = 0; i < (int)(sizeof cases / sizeof cases[0]); i++)
+            printf("route|%d|%d|%d|%d|%d|%d\n", cases[i][0], cases[i][1], cases[i][2], cases[i][3], cases[i][4],
+                   rts_chat_route(cases[i][0], cases[i][1], cases[i][2], cases[i][3], cases[i][4]));
+    }
     return 0;
 }
 '''
@@ -68,6 +88,9 @@ def out():
     rows = {}
     for line in text.splitlines():
         parts = line.split('|')
+        if parts[0] == 'route':
+            rows.setdefault('route', {})[tuple(int(x) for x in parts[1:6])] = int(parts[6])
+            continue
         rows[(parts[0], parts[1])] = parts[2:]
     return rows
 
@@ -149,3 +172,62 @@ def test_the_dock_holds_input_through_the_fight_chat():
     assert 'if (rts_dock_live()) { rts_dock_send(); return; }' in ui
     screen = read('src/hooks/online_screen.cpp')
     assert 'bool fight_chat_typing() { return FC.typing ||' in screen   # pc_ui.cpp's fight chat hold reads FC.typing
+
+
+# rts_chat_route's values (rts_social_rules.h)
+NONE, BAR, DOCK = 0, 1, 2
+OTHER, KEYDOWN, SYSKEYDOWN, KEYUP, CHAR, MOUSEDOWN, MOUSEUP, MOUSEMOVE = range(8)
+UI, KEEP = 1, 2
+ENTER, ESC, TAB, W, K = 0x0D, 0x1B, 0x09, ord('W'), ord('K')
+
+
+def test_keyboard_reaches_the_dock_in_a_fight(out):
+    """Build 86.1: with the online screens shut the window's keys went to the game only, so ENTER never opened the Run
+    the Streets dock. Now the dock sees every key; ENTER is its own (it would be the game's START)."""
+    r = out['route']
+    assert r[(NONE, 0, KEYDOWN, ENTER, 0)] == 0 and r[(NONE, 1, KEYDOWN, W, 0)] == 0   # no chat: the game's alone
+    assert r[(DOCK, 0, KEYDOWN, ENTER, 0)] == UI | KEEP     # ENTER opens the dock, the game never sees START
+    assert r[(DOCK, 0, KEYDOWN, W, 0)] == UI                # shut: the fighter's keys stay the fight's
+    assert r[(DOCK, 0, KEYDOWN, K, 0)] == UI
+    assert r[(DOCK, 0, CHAR, ord('w'), 0)] == UI
+
+
+def test_typing_keeps_every_press_from_the_game(out):
+    r = out['route']
+    for vk in (W, ENTER, ESC, TAB):                         # letters (WASD walk), send, close, the tabs
+        assert r[(DOCK, 1, KEYDOWN, vk, 0)] == UI | KEEP
+    assert r[(DOCK, 1, CHAR, ord('w'), 0)] == UI | KEEP
+    assert r[(DOCK, 1, MOUSEDOWN, 1, 0)] == UI | KEEP       # MOUSE1 is A (a punch)
+    # releases always reach the game: a key held as the dock opened does not stay pressed
+    assert r[(DOCK, 1, KEYUP, W, 0)] == UI and r[(DOCK, 0, KEYUP, ENTER, 0)] == UI
+    assert r[(DOCK, 1, MOUSEUP, 0, 1)] == UI
+    assert r[(DOCK, 0, MOUSEMOVE, 0, 0)] == UI and r[(DOCK, 0, OTHER, 0, 0)] == 0
+    # ALT+ENTER stays the full-screen chord
+    assert r[(DOCK, 0, SYSKEYDOWN, ENTER, 0)] == UI and r[(DOCK, 1, SYSKEYDOWN, ENTER, 0)] == UI
+
+
+def test_clicks_on_the_dock_are_the_docks(out):
+    r = out['route']
+    assert r[(DOCK, 0, MOUSEDOWN, 1, 1)] == UI | KEEP       # on the chip: opens it, no punch
+    assert r[(DOCK, 0, MOUSEDOWN, 1, 0)] == UI              # elsewhere: the fight's MOUSE1
+
+
+def test_spectator_bar_gets_the_keyboard_too(out):
+    r = out['route']
+    assert r[(BAR, 0, KEYDOWN, ENTER, 0)] == UI             # a spectator's ENTER reaches the bar (and START as before)
+    assert r[(BAR, 1, KEYDOWN, W, 0)] == UI | KEEP
+
+
+def test_window_messages_reach_the_fight_chat():
+    ui = read('src/hooks/pc_ui.cpp')
+    # set once a frame from the fight chat, read by the window procedure before its "online screens shut" return
+    assert 'g_fc_keys = fightchat ? online_screen::fight_chat_keys() : RTS_CHAT_NONE;' in ui
+    assert 'g_fc_typing = fightchat && online_screen::fight_chat_typing();' in ui
+    i = ui.index('extern "C" int pc_ui_window_message(')
+    body = ui[i:ui.index('\n}\n', i)]
+    route = body.index('rts_chat_route(g_fc_keys.load()')
+    assert route < body.index('if (!g_open.load() && !note) return 0;')
+    assert 'ImGui_ImplWin32_WndProcHandler(window, msg, wp, lp)' in body[route:body.index('if (!g_open.load() && !note) return 0;')]
+    dock = read('src/hooks/rts_social_ui.inc')
+    assert 'if (rts_dock_live()) return RTS_CHAT_DOCK;' in dock
+    assert 'ImGui::IsKeyPressed(ImGuiKey_Enter, false)' in dock

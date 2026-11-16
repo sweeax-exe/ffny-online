@@ -6474,6 +6474,17 @@ bool draw_fight_chat(ImDrawList *dl, ImVec2 display)
 
 bool fight_chat_typing() { return FC.typing || (QW.open && QW.where == QW_FIGHT); }
 
+int fight_chat_keys()
+{
+    try {
+        return fight_chat_keys_impl();
+    } catch (...) {
+        return RTS_CHAT_NONE;
+    }
+}
+
+bool fight_chat_at(float x, float y) { return rts_dock_at(x, y); }
+
 // Run the Streets: the chat bubbles and speaker icons over the fighters (rts_social_ui.inc), drawing only.
 bool rts_world_wanted()
 {
@@ -6980,6 +6991,8 @@ void draw_fight_hud(ImDrawList *, ImVec2) {}
 bool fight_chat_wanted() { return false; }
 bool draw_fight_chat(ImDrawList *, ImVec2) { return false; }
 bool fight_chat_typing() { return false; }
+int fight_chat_keys() { return 0; }
+bool fight_chat_at(float, float) { return false; }
 bool test_pad(int *b, float *x, float *y) { *b = 0; *x = *y = 0; return false; }
 bool test_pad_r3() { return false; }
 }
