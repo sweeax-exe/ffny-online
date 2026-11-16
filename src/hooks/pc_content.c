@@ -181,6 +181,27 @@ void pc_content_set_off(const char *id, int off)
     recomp_settings_set_text("content", "off", out);
 }
 
+int pc_content_pack_file(const char *id, const char *name, char *out, int size)
+{
+    char path[1400];
+    const char *root = data_root();
+    FILE *f;
+    long len;
+    if (!out || size <= 1) return 0;
+    out[0] = 0;
+    if (!root || !id || !valid_id(id) || !name || strstr(name, "..") || strpbrk(name, "/\\:")) return 0;
+    snprintf(path, sizeof path, "%s" HOST_SEP "mods" HOST_SEP "%s" HOST_SEP "%s", root, id, name);
+    if (!(f = content_fopen(path, "rb"))) return 0;
+    fseek(f, 0, SEEK_END);
+    len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len < 0 || len > size - 1) { fclose(f); return len < 0 ? 0 : -1; }
+    len = (long)fread(out, 1, (size_t)len, f);
+    out[len] = 0;
+    fclose(f);
+    return (int)len;
+}
+
 int pc_content_list(PcContentPack *out, int max)
 {
     char path[1024], line[1200];
@@ -227,6 +248,9 @@ int pc_content_list(PcContentPack *out, int max)
             else if (!strcmp(k, "template_fe_id")) p->template_fe_id = atoi(v);
             else if (!strcmp(k, "fighter_mode")) p->skin = !strcmp(v, "skin");
             else if (!strcmp(k, "skin_of")) p->skin_of = atoi(v);
+            else if (!strcmp(k, "official")) p->official = atoi(v) == 1;
+            else if (!strcmp(k, "rts_map")) p->rts_map = atoi(v) == 1;
+            CONTENT_TEXT(venue_code);
 #undef CONTENT_TEXT
         }
     }

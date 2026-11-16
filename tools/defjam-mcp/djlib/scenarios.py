@@ -1845,6 +1845,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     logs = {}
     try:
         relay_extra = (["-created"] if created else []) + (["-test-venues", str(venues)] if venues else [])
+        # DJ_RELAY_ARGS (tests): more relay flags, space-separated (Run the Streets: "-rts-open")
+        relay_extra += os.environ.get("DJ_RELAY_ARGS", "").split()
         if rollback_max_ping:   # build 54: the relay's rollback ping limit (else the game's default)
             relay_extra += ["-rollback-max-ping", str(int(rollback_max_ping))]
             result["params"]["rollback_max_ping"] = int(rollback_max_ping)

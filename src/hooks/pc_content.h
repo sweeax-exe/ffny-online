@@ -50,6 +50,9 @@ typedef struct PcContentPack {
     char template_name[48]; /* ... and that fighter's name ("D-Mob"), "" unknown */
     int skin;               /* build 85: a new fighter the team accepted as a skin (fighter_mode=skin) */
     int skin_of;            /* ... the stock fighter it is an outfit of (its front-end ID), -1 none */
+    int official;           /* build 86: an official map of the FFNY team (catalogue kind "official-map"), always on */
+    int rts_map;            /* ... a Run the Streets map (openworld rts.c loads it) */
+    char venue_code[8];     /* ... its venue's code ("28A": V2BG_28A), "" unknown */
 } PcContentPack;
 
 /* Build 85, skins: a new-fighter pack the team accepted as an extra outfit of a stock fighter (same gameplay, new
@@ -68,6 +71,9 @@ int pc_content_skins(PcContentSkin *out, int max);
 /* The installed catalogue packs in catalogue order (re-read on every call; content.ini is small).
  * Returns the count (at most max). */
 int pc_content_list(PcContentPack *out, int max);
+/* Build 86: a small file of an installed pack's folder (<data>/mods/<id>/<name>, e.g. an official map's
+ * bigarena.json) read into out (NUL-terminated); the bytes read, 0 when missing, -1 when larger than size - 1. */
+int pc_content_pack_file(const char *id, const char *name, char *out, int size);
 
 /* The settings.ini switch for a replacement pack or one of the player's own packs ([content] off). Community
  * content packs cannot be off. */

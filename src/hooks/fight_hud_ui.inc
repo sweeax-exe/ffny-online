@@ -24,6 +24,10 @@
 //             the simulation does on every PC, and it stands still while the steps do (a pause, a wait
 //             for another player).
 //
+//   Big Arena (open-world phase 1): the score plate at the top (first to N, each fighter's knockouts, the leader
+//             crowned, this PC's own in orange, the time left), "BACK IN 3" while this PC's fighter is down, and
+//             the winner at the end. Read from openworld.c's state of the last step (ow_hud_view).
+//
 // Tests: RECOMP_TEST_NAME_TAGS=A,B,C,D names the fighters of an offline fight (the tags' pictures
 // without four copies of the game); RECOMP_TEST_PERFECT=1 is fight_hud.c's.
 
@@ -47,6 +51,11 @@ struct FightHudUi {
     bool match_live = false;
     std::vector<std::string> test_names;
     int test_read = 0;
+    // Big Arena (openworld.c): the scores, a respawn count, the winner
+    OwHudView arena{};
+    bool arena_on = false, arena_won = false;
+    uint32_t arena_end_round = 0;
+    unsigned long long arena_end_at = 0;
 } FH;
 
 bool fh_setting(const char *key) { return recomp_settings_get("online", key, 1) != 0; }
@@ -337,11 +346,91 @@ bool fight_hud_wanted()
             }
         }
     }
-    return FH.banner || FH.tags || FH.count >= 0;
+    // the plate while the steps run; the winner a few seconds on, through the game's own last knockout
+    bool arena = ow_hud_view(&FH.arena) != 0;
+    FH.arena_on = arena && (hud_up || steps_run);
+    FH.arena_won = false;
+    if (arena && FH.arena.ending && FH.arena.winner >= 0) {
+        if (FH.arena_end_round != FH.view.round) { FH.arena_end_round = FH.view.round; FH.arena_end_at = now; }
+        FH.arena_won = now - FH.arena_end_at < 4500;
+    }
+    if (FH.arena_on) {
+        static uint32_t logged_round;
+        if (logged_round != FH.view.round) {
+            logged_round = FH.view.round;
+            fprintf(stderr, "[FIGHTHUD] Big Arena score plate up (round %u, first to %d)\n", (unsigned)FH.view.round,
+                    FH.arena.score_limit);
+        }
+    }
+    return FH.banner || FH.tags || FH.count >= 0 || FH.arena_on || FH.arena_won;
+}
+
+std::string fh_arena_name(int slot)
+{
+    if (FH.match_live && slot < FH.match.count && !FH.match.cpu[slot] && FH.match.name[slot][0])
+        return upper(FH.match.name[slot]);
+    if (slot < (int)FH.test_names.size()) return upper(FH.test_names[slot].c_str());
+    char b[8];
+    snprintf(b, sizeof b, "P%d", slot + 1);
+    return b;
+}
+
+void fh_arena(ImDrawList *dl, ImVec2 display)
+{
+    const OwHudView &a = FH.arena;
+    Frame f = menu_frame(display);
+    int n = 0;
+    for (int s = 0; s < 4; s++) n += (a.present >> s) & 1;
+    if (n < 1) return;
+    // the plate, bottom centre between the lower health bars (the game's clock is top centre): "FIRST TO 5" over a
+    // chip per fighter, the time left at the right
+    const float chip = 58, top = 434;
+    float w = n * chip + 16 + (a.seconds_left >= 0 ? 44 : 0), x0 = 320 - w / 2;
+    ImU32 dark = IM_COL32(12, 10, 8, 200);
+    dl->AddRectFilled(f.p(x0, top), f.p(x0 + w, top + 38), dark, 4 * f.s());
+    dl->AddRectFilled(f.p(x0, top + 36), f.p(x0 + w, top + 38), with_alpha(GOLD, 0.85f));
+    char line[48];
+    snprintf(line, sizeof line, "%s  -  FIRST TO %d", ow_rts_active() ? "RUN THE STREETS" : "BIG ARENA", a.score_limit);
+    text(dl, f, g_body, 8.5f, 320, top + 2, with_alpha(CREAM, 0.8f), line, CENTER, 0);
+    float x = x0 + 8;
+    for (int s = 0; s < 4; s++) {
+        if (!((a.present >> s) & 1)) continue;
+        bool me = s == a.local, lead = s == a.leader, down = (a.down >> s) & 1;
+        ImU32 col = down ? GREY : me ? ORANGE : CREAM;
+        std::string name = fh_arena_name(s);
+        if (name.size() > 7) name.resize(7);
+        text(dl, f, g_title, 9.5f, x + chip / 2, top + 12, col, name.c_str(), CENTER, 1.0f);
+        char num[8];
+        snprintf(num, sizeof num, "%d", a.score[s]);
+        text(dl, f, g_stencil, 14, x + chip / 2, top + 21, lead ? GOLD : col, num, CENTER, 1.2f);
+        if (lead) crown(dl, f, x + chip / 2 + 13, top + 26, 9);
+        x += chip;
+    }
+    if (a.seconds_left >= 0) {
+        snprintf(line, sizeof line, "%d:%02d", a.seconds_left / 60, a.seconds_left % 60);
+        text(dl, f, g_title, 12, x + 20, top + 17, a.seconds_left <= 30 ? RED : CREAM, line, CENTER, 1.0f);
+    }
+    // this PC's fighter is down: the count back
+    int me = a.local;
+    if (!a.ending && ((a.down >> me) & 1)) {
+        int secs = (a.back_in[me] + 59) / 60;
+        fh_band(dl, f, 228, 0.85f, 0.7f);
+        text(dl, f, g_body, 13, 320, 196, CREAM, "KNOCKED OUT", CENTER, 1.2f);
+        snprintf(line, sizeof line, secs > 0 ? "BACK IN %d" : "GET UP", secs);
+        text(dl, f, g_stencil, 40, 320, 210, GOLD, line, CENTER, 2.0f);
+    }
+    // the end: the winner
+    if (FH.arena_won) {
+        std::string who = a.winner == me ? std::string("YOU WIN") : fh_arena_name(a.winner) + " WINS";
+        fh_band(dl, f, 228, 0.9f, 0.8f);
+        text(dl, f, g_stencil, 46, 320 + 3, 206, with_alpha(RED, 0.9f), who.c_str(), CENTER, 0);
+        text(dl, f, g_stencil, 46, 320, 203, GOLD, who.c_str(), CENTER, 2.4f);
+    }
 }
 
 void draw_fight_hud(ImDrawList *dl, ImVec2 display)
 {
+    if (FH.arena_on || FH.arena_won) fh_arena(dl, display);
     if (FH.tags) fh_tags(dl, display);
     if (FH.count >= 0) fh_countdown(dl, menu_frame(display), FH.count, FH.count_t);
     if (FH.banner) {

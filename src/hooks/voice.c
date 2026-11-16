@@ -25,6 +25,8 @@
 #include "netplay.h"
 #include "recomp_settings.h"
 #include "social.h"
+#include "rts_social.h"
+#include "rts_social_rules.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -103,7 +105,7 @@ static int16_t s_ring[SLOTS][RING];
 static unsigned s_rd[SLOTS], s_wr[SLOTS];       /* samples read and written, counted on (mod RING) */
 static HWAVEOUT s_out;
 static WAVEHDR s_ohdr[OUT_BUFS];
-static int16_t s_obuf[OUT_BUFS][MIX];
+static int16_t s_obuf[OUT_BUFS][MIX * 2];   /* mono, or stereo in Run the Streets (s_stereo) */
 static HWAVEIN s_in;
 static WAVEHDR s_ihdr[IN_BUFS];
 static int16_t s_ibuf[IN_BUFS][FRAME];
@@ -117,6 +119,11 @@ static int s_player_vol[SLOTS] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 
 static int s_mic_failed, s_out_failed;
 static INIT_ONCE s_once = INIT_ONCE_STATIC_INIT;
 static const WAVEFORMATEX k_format = { WAVE_FORMAT_PCM, 1, RATE, RATE * 2, 2, 16, 0 };
+/* Run the Streets (rts_social.h): the speakers are fed in stereo, each talker at the gain and pan of the distance and
+ * direction between their fighter and this PC's (proximity voice); elsewhere mono, exactly as before. */
+static const WAVEFORMATEX k_format_stereo = { WAVE_FORMAT_PCM, 2, RATE, RATE * 4, 4, 16, 0 };
+static int s_stereo;
+static float s_prox_l[SLOTS], s_prox_r[SLOTS];  /* the last block's channel gains, ramped from to avoid clicks */
 
 /* "T", "V", "F5", "Mouse4", "Tab", "CapsLock", "LAlt" ...: the key as a Windows virtual-key code, 0 if unknown */
 static int key_code(const char *name)
@@ -205,7 +212,9 @@ static int open_playback(void)
     int i;
     MMRESULT r;
     if (s_out_failed) return 0;
-    r = waveOutOpen(&s_out, WAVE_MAPPER, &k_format, 0, 0, CALLBACK_NULL);
+    s_stereo = rts_social_voice_stereo();
+    for (i = 0; i < SLOTS; i++) s_prox_l[i] = s_prox_r[i] = 1.0f;
+    r = waveOutOpen(&s_out, WAVE_MAPPER, s_stereo ? &k_format_stereo : &k_format, 0, 0, CALLBACK_NULL);
     if (r != MMSYSERR_NOERROR) {
         s_out = NULL;
         s_out_failed = 1;
@@ -215,33 +224,50 @@ static int open_playback(void)
     for (i = 0; i < OUT_BUFS; i++) {
         memset(&s_ohdr[i], 0, sizeof(WAVEHDR));
         s_ohdr[i].lpData = (LPSTR)s_obuf[i];
-        s_ohdr[i].dwBufferLength = MIX * 2;
+        s_ohdr[i].dwBufferLength = MIX * 2 * (s_stereo ? 2 : 1);
         waveOutPrepareHeader(s_out, &s_ohdr[i], sizeof(WAVEHDR));
         s_ohdr[i].dwFlags |= WHDR_DONE;         /* free to fill */
     }
     InterlockedExchange(&s_open, 1);
-    fprintf(stderr, "[VOICE] in a room: voice chat on\n");
+    fprintf(stderr, "[VOICE] in a room: voice chat on%s\n", s_stereo ? " (stereo: proximity voice in Run the Streets)" : "");
     return 1;
 }
 
-/* every free output block: the talkers' next 20 ms, mixed (silence when nobody talks) */
+/* every free output block: the talkers' next 20 ms, mixed (silence when nobody talks). In stereo (Run the Streets)
+ * each talker goes in at their proximity gain and pan (rts_social_voice: 1 and the middle outside its fights), ramped
+ * across the block from the last one's, so a talker walking away fades without steps. */
 static void feed_speakers(void)
 {
     float gain = (float)recomp_settings_get("online", "voice_volume", 100) / 100.0f;
     int b, i, k;
     for (b = 0; b < OUT_BUFS; b++) {
-        float mix[MIX];
+        float mix[MIX * 2];
         if (!(s_ohdr[b].dwFlags & WHDR_DONE)) continue;
         memset(mix, 0, sizeof(mix));
         AcquireSRWLockExclusive(&s_lock);
         for (k = 0; k < SLOTS; k++) {
             unsigned have = s_wr[k] - s_rd[k], n = have < MIX ? have : MIX;
             float pv = (float)s_player_vol[k] / 100.0f;
-            for (i = 0; i < (int)n; i++) mix[i] += s_ring[k][(s_rd[k] + (unsigned)i) % RING] * pv;
+            if (!s_stereo) {
+                for (i = 0; i < (int)n; i++) mix[i] += s_ring[k][(s_rd[k] + (unsigned)i) % RING] * pv;
+            } else {
+                float pg = 1.0f, pan = 0.0f, l, r, l0 = s_prox_l[k], r0 = s_prox_r[k];
+                if (n) rts_social_voice(k, &pg, &pan);
+                rts_voice_balance(pan, &l, &r);
+                l *= pg;
+                r *= pg;
+                for (i = 0; i < (int)n; i++) {
+                    float t = (float)(i + 1) / (float)MIX, v = s_ring[k][(s_rd[k] + (unsigned)i) % RING] * pv;
+                    mix[2 * i] += v * (l0 + (l - l0) * t);
+                    mix[2 * i + 1] += v * (r0 + (r - r0) * t);
+                }
+                s_prox_l[k] = l;
+                s_prox_r[k] = r;
+            }
             s_rd[k] += n;
         }
         ReleaseSRWLockExclusive(&s_lock);
-        for (i = 0; i < MIX; i++) {
+        for (i = 0; i < MIX * (s_stereo ? 2 : 1); i++) {
             float v = mix[i] * gain;
             s_obuf[b][i] = (int16_t)(v > 32767.0f ? 32767 : v < -32768.0f ? -32768 : v);
         }
@@ -411,6 +437,13 @@ static DWORD WINAPI voice_thread(LPVOID unused)
             if (s_open || s_in) close_all();
             continue;
         }
+        if (s_open && s_stereo != rts_social_voice_stereo()) {     /* into or out of a Run the Streets room */
+            int keep[SLOTS];                                        /* the same room: its volumes stay */
+            memcpy(keep, s_player_vol, sizeof keep);
+            close_all();
+            memcpy(s_player_vol, keep, sizeof keep);
+            continue;
+        }
         if (!s_open && !open_playback()) continue;
         feed_speakers();
         if (netplay_listen_only()) {    /* spectator mode: it hears the room, it never talks (a hill's watchers do) */
@@ -466,6 +499,14 @@ static BOOL CALLBACK start_once(PINIT_ONCE once, PVOID param, PVOID *ctx)
     return TRUE;
 }
 
+int voice_talking(int slot)
+{
+    if (slot < 0 || slot >= SLOTS || !s_open || !s_heard[slot]) return 0;
+    return GetTickCount64() - s_heard[slot] <= TALK_MS;
+}
+
+int voice_sending(void) { return s_open && s_sending; }
+
 int voice_overlay(char *out, int size)
 {
     ULONGLONG now = GetTickCount64();
@@ -491,5 +532,7 @@ int voice_overlay(char *out, int size) { (void)out; (void)size; return 0; }
 float voice_mic_meter(void) { return -1.0f; }
 int voice_player_volume(int slot) { (void)slot; return 100; }
 void voice_set_player_volume(int slot, int percent) { (void)slot; (void)percent; }
+int voice_talking(int slot) { (void)slot; return 0; }
+int voice_sending(void) { return 0; }
 
 #endif

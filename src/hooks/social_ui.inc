@@ -100,6 +100,13 @@ struct Chat {
 
 bool chat_mouse_blocked() { return C.mouse_off; }
 
+// Run the Streets' docked chat (rts_social_ui.inc) takes the fight chat's place in its fights, with this state (FC)
+bool rts_dock_live();
+bool rts_dock_draw(ImDrawList *dl, ImVec2 display);
+void rts_dock_send();
+void rts_dock_gone();
+const char *rts_dock_target();
+
 // ---- the quick-chat wheel (the Social Update; the owner's approved design "Quick chat wheel") ----
 //
 // Eight ready-made lines on a wheel. The pad's L3 opens it (R3 when L3 is push-to-talk); the stick (either)
@@ -2506,7 +2513,7 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     std::string who, head;
     if (C.kb_kind == KB_FRIEND) { head = "ADD FRIEND"; who = ""; }
     else if (C.kb_kind == KB_CREW_INVITE) { head = "INVITE TO"; who = C.v.crew_name; }
-    else if (C.kb_kind == KB_FIGHT) { head = "MESSAGE TO"; who = "the room"; }
+    else if (C.kb_kind == KB_FIGHT) { head = "MESSAGE TO"; who = rts_dock_live() ? rts_dock_target() : "the room"; }
     else if (C.kb_kind == KB_CREW_NAME) { head = "NEW CREW - ITS NAME"; who = ""; }
     else if (C.kb_kind == KB_CREW_TAG) { head = "NEW CREW - ITS TAG"; who = C.crew_new_name; }
     else if (C.kb_kind == KB_QUICK) { head = "QUICK CHAT - LINE"; who = std::to_string(QW.editing + 1); }
@@ -3597,6 +3604,7 @@ int &fight_cursor() { return FC.cursor; }
 // Sends the bar's line (ENTER, or SEND on the on-screen keyboard) and closes the bar.
 void fight_send()
 {
+    if (rts_dock_live()) { rts_dock_send(); return; }     // Run the Streets: the dock's tab, which stays open
     std::string t = FC.draft;
     while (!t.empty() && t.back() == ' ') t.pop_back();
     if (t.size() > 200) {
@@ -3640,8 +3648,11 @@ bool fight_chat_wanted_impl()
         FC.fight_at = 0;
         if (C.kb && C.kb_kind == KB_FIGHT) C.kb = false;
         if (QW.where == QW_FIGHT) quick_close("the match is over");
+        rts_dock_gone();
         return false;
     }
+    if (rts_dock_live()) return true;       // Run the Streets: the docked chat, always (its chip at the least)
+    rts_dock_gone();
     quick_test_tick();
     if (FC.typing) return true;
     NetRoom r;
@@ -3713,6 +3724,7 @@ void fight_chat_test(const NetRoom &r)
 // Draws the lines (and a spectator's bar); returns true while the bar takes the keyboard.
 bool fight_chat_draw_impl(ImDrawList *dl, ImVec2 display)
 {
+    if (rts_dock_live()) return rts_dock_draw(dl, display);
     Frame f = menu_frame(display);
     NetRoom r;
     lobby_room(&r);
