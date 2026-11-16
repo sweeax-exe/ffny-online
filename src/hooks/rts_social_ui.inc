@@ -660,6 +660,7 @@ bool rts_dock_draw(ImDrawList *dl, ImVec2 display)
     // the mouse (build 86.1): a click on the chip opens the dock to type, a click on a tab picks it
     if (!QW.open && !kb_up && ImGui::IsMouseClicked(0, false)) {
         ImVec2 m = ImGui::GetIO().MousePos;
+        fprintf(stderr, "[RTSDOCK] click at %d,%d (%s)\n", (int)m.x, (int)m.y, FC.typing ? "open" : "shut");
         if (!FC.typing && in_box(RS.hit_chip, m.x, m.y)) {
             FC.typing = true;
             FC.pad = false;

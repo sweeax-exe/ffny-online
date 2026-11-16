@@ -4512,7 +4512,16 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
             bool in_chat = kind == RTS_MSG_MOUSEDOWN &&
                            online_screen::fight_chat_at((float)(short)LOWORD(lp), (float)(short)HIWORD(lp));
             route = rts_chat_route(g_fc_keys.load(), g_fc_typing.load() ? 1 : 0, kind, (int)wp, in_chat ? 1 : 0);
-            if (route & RTS_ROUTE_UI) ImGui_ImplWin32_WndProcHandler(window, msg, wp, lp);
+            if (kind == RTS_MSG_MOUSEDOWN)
+                fprintf(stderr, "[UI] fight chat: click at %d,%d%s\n", (int)(short)LOWORD(lp), (int)(short)HIWORD(lp),
+                        in_chat ? " on the chat (kept from the game)" : "");
+            if (route & RTS_ROUTE_UI) {
+                // a click carries its own position: the overlay may have had no WM_MOUSEMOVE over the fight (or a
+                // WM_MOUSELEAVE after it), and the dock's hit test reads io.MousePos
+                if (kind == RTS_MSG_MOUSEDOWN || kind == RTS_MSG_MOUSEUP)
+                    ImGui::GetIO().AddMousePosEvent((float)(short)LOWORD(lp), (float)(short)HIWORD(lp));
+                ImGui_ImplWin32_WndProcHandler(window, msg, wp, lp);
+            }
         }
         ui_unlock();
         return (route & RTS_ROUTE_KEEP) ? 1 : 0;
