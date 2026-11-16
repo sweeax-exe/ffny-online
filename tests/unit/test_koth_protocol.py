@@ -87,7 +87,8 @@ def test_cpu_level_matches_the_relay():
         return int(m.group(1)) << int(m.group(2) or 0)
     assert c_define(NETPLAY_C, 'CAPS_CPULEVEL') == const('CapCPULevel') == c_define(NETPLAY_H, 'NETPLAY_CAP_CPULEVEL')
     assert [c_define(NETPLAY_H, 'NETPLAY_CPU_' + k) for k in ('HARD', 'NORMAL', 'EASY')] ==         [const('CPU' + k) for k in ('Hard', 'Normal', 'Easy')]
-    assert 'func cpuFill(mode uint8) bool { return mode == 2 || mode == 3 }' in go
+    # build 86: Run the Streets rooms (0x43) are filled as a Free for All; START tells the game type 3
+    assert 'func cpuFill(mode uint8) bool { return mode == 2 || mode == 3 || mode == ModeRTS }' in go
     assert '#define NETPLAY_CPU_FILL(mode) ((mode) == 2 || (mode) == 3)' in NETPLAY_H
     assert "CAPS_SPEC_LATE | CAPS_CPULEVEL |" in NETPLAY_C       # announced in CAPS
 
