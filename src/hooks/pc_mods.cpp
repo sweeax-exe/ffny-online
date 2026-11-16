@@ -149,6 +149,9 @@ static bool helper_args(const std::string &command, const std::string &id, std::
     // Build 85: new fighters at the 20 low places (new_fighter_places.h); the account service marks such packs
     // fighter-places-v2, and only index-v4.json lists them.
     args.insert(args.end(), {"--capability", "fighter-places-v2"});
+    // Build 86: the FFNY team's official maps (index-v5.json only, kind official-map; mods.py writes them into
+    // content.ini as always-on content with official=1, rts_map, venue_fe_id, venue_code).
+    args.insert(args.end(), {"--capability", "official-map-v1"});
     {
         auto game = fs::current_path(error) / "game";
         if (!error && fs::is_directory(game, error)) {

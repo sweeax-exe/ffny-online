@@ -154,7 +154,7 @@ def test_sync_moves_an_unowned_folder_aside(setup, tmp_path):
 
 
 def test_catalogue_url_is_ours_and_local_http_only_for_tests():
-    assert mods.CATALOGUE_URL == 'https://play.defjam.online/updates/content/index-v4.json'   # build 85: skins
+    assert mods.CATALOGUE_URL == 'https://play.defjam.online/updates/content/index-v5.json'   # build 86: official maps
     assert mods.local_test_url('http://127.0.0.1:8095/updates/content/index.json')
     assert not mods.local_test_url('http://example.com:80/index.json')
     assert not mods.local_test_url('http://127.0.0.1.evil.com:80/x')
@@ -168,6 +168,7 @@ def test_index_v4_falls_back_to_v3_on_an_older_server(monkeypatch):
     import urllib.error
     served = {mods.CATALOGUE_URL_V3: b'v3', mods.CATALOGUE_URL_V3 + '.sig': b's3'}
     asked = []
+    v4 = mods.CATALOGUE_URL_V4
 
     def fetch(url, limit):
         asked.append(url)
@@ -175,9 +176,9 @@ def test_index_v4_falls_back_to_v3_on_an_older_server(monkeypatch):
             raise urllib.error.HTTPError(url, 404, 'Not Found', None, None)
         return served[url]
     monkeypatch.setattr(mods, 'fetch_small', fetch)
-    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v3', b's3', mods.CATALOGUE_URL_V3)
-    served.update({mods.CATALOGUE_URL: b'v4', mods.CATALOGUE_URL + '.sig': b's4'})
-    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v4', b's4', mods.CATALOGUE_URL)
+    assert mods.fetch_index(v4) == (b'v3', b's3', mods.CATALOGUE_URL_V3)
+    served.update({v4: b'v4', v4 + '.sig': b's4'})
+    assert mods.fetch_index(v4) == (b'v4', b's4', v4)
     with pytest.raises(urllib.error.HTTPError):       # another index (a local test catalogue) does not fall back
         mods.fetch_index('https://play.defjam.online/updates/content/other.json')
 

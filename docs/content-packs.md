@@ -190,6 +190,45 @@ listing its mods (name and type, and an On/Off switch for a replacement such as 
 tagged **Single**. The Community tab tags each gallery card **Single** or **Pack (N mods)** (the gallery's `form`
 and `item_count`; a missing `form` is a single), and a pack's page lists its mods (`items`: title, type).
 
+## Official maps (build 86)
+
+The FFNY team's own maps (first **Knox and Jam**, the Run the Streets map) are not baked into the game build. The
+account service publishes them into the same signed catalogue (server repo `docs/content-catalogue.md`, "Official
+maps"; only the guild owner and the pack admins can, from FFNY Studio's Packs > Publish official map), and every
+player gets them like a content pack: always on, never switched off, updated by a new catalogue version without a
+game build.
+
+- **Catalogue.** Only `index-v5.json` lists them (build 86 reads it, falling back to `index-v4.json` and then
+  `index-v3.json` on a 404). Entry: `"kind": "official-map"`, `"type": "venue"`, an id starting `official-`,
+  `"venue_fe_id"` (the new venue's front-end ID, 28..63, unique among official maps) and `"rts_map": true` for a Run
+  the Streets map (absent: false). Versions need `official-map-v1` (offered by `pc_mods.cpp` from build 86). The
+  pack signature covers the kind `official-map`. `mod_catalogue.py` refuses `rts_map`/`venue_fe_id` on any other
+  mod.
+- **Install and compose.** `mods.py sync` installs it like any synced pack (receipt `kind` `official-map`,
+  `official`, `rts_map`, `venue_fe_id`); `content_compose` composes its install.json (a new-venue op) into the venue
+  slot the op names, like a community venue, and never switches it off (`ALWAYS_ON`). The account service's claims
+  keep its venue slot free of community packs; a player's own venue at the same slot comes later and is skipped.
+- **content.ini** (the game's view, `pc_content.c`): the map's section says `kind=content` (so the game of build
+  85 and later counts it as always-on content, in the content print), plus
+
+  ```
+  [pack.official-knox-and-jam]
+  kind=content
+  type=venue
+  official=1
+  rts_map=1
+  composed=1
+  venue_fe_id=28
+  venue_code=28A
+  ```
+
+  **The interface for Run the Streets:** the map to load is the `[pack.*]` section with `official=1` and
+  `rts_map=1` whose `composed=1` pack is applied (`files.ini`); `venue_fe_id` and `venue_code` name the venue
+  (`V2BG_<venue_code>`). With several, the lowest `order` wins. None: Run the Streets has no map on this PC.
+- **Original fighters only / STANDARD ONLY.** An official map is a venue, never a fighter or a skin, so it never
+  makes a pick "community". Its venue is a new venue, which STANDARD ONLY rooms leave out of their vote, and that is
+  wanted: it is a Run the Streets map, loaded by that mode whatever the room's setting.
+
 ## Testing
 
 ```

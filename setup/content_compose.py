@@ -53,6 +53,7 @@ NEW_DAYS = 14                   # a new fighter's select thumbs carry NEW for th
 HUB_ART = ('online-art', 'fighters')    # <data>/online-art/fighters/<feID>.png: the online hub's portraits
 SKIN_ART = ('online-art', 'skins')      # <data>/online-art/skins/<pack id>.png: a skin's picture in the skin window
 TYPES = ('fighter-body', 'clothing', 'venue', 'new-fighter')
+ALWAYS_ON = ('content', 'official-map')     # kinds the player cannot switch off
 OUT = 'content-files'
 LANG_DIR = 'lang'               # content-files/lang/<language pack>/<P>: the packs on top of that translation
 LANG_MAX = 8                    # language packs composed with (each costs a copy of the files it covers)
@@ -952,7 +953,8 @@ def compose(data, game, packs, off=None, root=None, log=print, languages=None, t
     off = read_off(data) if off is None else set(off)
     recover(root)
     packs = sorted(packs, key=lambda p: (p.get('order', 1 << 30), p['id']))
-    switched = sorted(p['id'] for p in packs if p.get('kind') != 'content' and p['id'] in off)
+    # content packs and the FFNY team's official maps (build 86) are always on; only replacements switch off
+    switched = sorted(p['id'] for p in packs if p.get('kind') not in ALWAYS_ON and p['id'] in off)
     chosen = [p for p in packs if p['id'] not in switched]
     settle_places(chosen, reserved, log)
     languages = language_packs(data, off, log) if languages is None else list(languages)
