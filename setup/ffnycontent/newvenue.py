@@ -96,6 +96,33 @@ def entity_block(entity_text, template, filename):
     raise KeyError("no entity.xml entity for %s" % template.filename)
 
 
+def set_fighter_light(block, entity_text, venue):
+    """An ``<entity>`` block whose fighters are lit like another retail venue's (``fighter_light``, e.g. ``01B``, the
+    night junkyard): that venue's ``<lighting><setting>`` (the ``.irr`` irradiance files; the shadow ``<proxy>`` stays) and its
+    ``<characterenvmap>``. Build 86, the Run the Streets map: a night block copied from a daytime template (03A) kept
+    the Power Plant's daylight on the fighters. VenueError for an unknown venue or one without lighting."""
+    if not isinstance(venue, str) or not re.fullmatch(r"\d\d[A-Z]", venue):
+        raise VenueError("invalid fighter_light %r" % (venue,))
+    src = None
+    for b in re.finditer(r"<entity>.*?</entity>", entity_text, re.S):
+        name = re.search(r"<name>\s*([^<]*?)\s*</name>", b.group(0))
+        if name and name.group(1).upper() == "V2BG_" + venue.upper():
+            src = b.group(0)
+            break
+    light = re.search(r"<lighting>.*?(<setting>.*?</setting>).*?</lighting>", src or "", re.S)
+    if not light:
+        raise VenueError("fighter_light: venue %s has no lighting" % venue)
+    # only the irradiance settings: the <proxy> (the shadow proxy of the template's geometry) stays the template's
+    out, n = re.subn(r"(<lighting>.*?)<setting>.*?</setting>", lambda m: m.group(1) + light.group(1), block, count=1,
+                     flags=re.S)
+    if not n:
+        raise VenueError("the template has no lighting block")
+    env = re.search(r"<characterenvmap>[^<]*</characterenvmap>", src)
+    if env:
+        out = re.sub(r"<characterenvmap>[^<]*</characterenvmap>", lambda m: env.group(0), out, count=1)
+    return out
+
+
 def drop_entity_models(block, main):
     """An ``entity.xml`` block with only the main model's ``<model>`` left."""
     def keep(m):
@@ -301,6 +328,8 @@ def apply(venue_xml, entity_xml, sod_blob, op, taken_names=()):
         block = add_entity_models(block, op["models"])
     if op.get("crowd_locator") is not None:
         block = set_crowd_locator(block, op["crowd_locator"])
+    if op.get("fighter_light") is not None:
+        block = set_fighter_light(block, ent, op["fighter_light"])
     end = ent.rindex("</entitylist>")
     entity_out = (ent[:end].rstrip("\r\n") + "\r\n\t" + block + "\r\n" + ent[end:]).encode("latin-1")
     sod_out, _ = sodmod.append_venue(sod_blob, int(op["template_fe_id"]), fe_id, filename,
