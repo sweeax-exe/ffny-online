@@ -106,6 +106,14 @@ int content_update_gate(char *why, int size)
 int content_update_request(const char *where, char *why, int size)
 {
     int r = content_update_gate(why, size);
+#if !defined(_WIN32)
+    /* the hand-off to the launcher is Windows only for now (pc_settings.c) */
+    if (r == CU_OK) {
+        if (why && size > 0) snprintf(why, (size_t)size, "Close the game and start it again to get it.");
+        fprintf(stderr, "[CONTENT] UPDATE NOW (%s): not on this system yet\n", where ? where : "?");
+        return CU_BUSY;
+    }
+#endif
     if (r != CU_OK) {
         fprintf(stderr, "[CONTENT] UPDATE NOW (%s) refused: %s\n", where ? where : "?", cu_refusal_text(r));
         return r;
