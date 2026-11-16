@@ -75,19 +75,23 @@ before the state handlers. The walker `sub_001CAC40` (state 1, `sub_001CB130`) t
 up 180, right 90, down 0, left -90), picking forward, strafe or back by the difference to the latched angle `+0x3EC`.
 The target changes only in two places, both from states 1 and 0x55: `sub_001C9610` (the target is down, `+0x932`
 0x400: the nearest standing fighter) and `sub_001C99B0` (White/Black newly pressed: the next slot down/up). A
-right-stick flick (`sub_001C9DF0`) enters state 0x55, a turn toward the target.
+right-stick flick (`sub_001C9DF0`) enters state 0x55, a gesture at the target (it does not turn). Standing, the
+walker turns the fighter toward its target by the target's joint position when it is more than 80 degrees off
+(`+0x910` bits 0/1, `+0x81C`; cool-down bit 1 for 10 steps). Walking at 20 units or more from the target
+(`+0x924` bit 4) the stock walker already faces the move direction (backward first when more than 120 degrees
+off, for 24 steps); closer it strafes around the target.
 
 Free roam (`ow_roam_input`, at `sub_001BA800`'s entry, after the cache and before the handlers) rewrites the cache
 of a **free** human fighter: the angle becomes the stick's heading (or its own facing when the stick rests) and the
-distance far, so it turns to where it walks and walks forward. Its `+0x00` stays on the nearest standing fighter so
+distance far, so it turns to where it walks and walks forward; standing, the game's idle turn toward the target (`+0x910`/`+0x81C`, by the target's joint) is held by its own cool-down (`+0x910` bit 1). Its `+0x00` stays on the nearest standing fighter so
 the game's retarget never turns it. Modes (per slot, in the Big Arena state, so saved, loaded and checksummed):
 
 | From | To | When |
 |---|---|---|
 | free | engaged | a fight button (`+0x9F0` & 0x30F0) with a fighter within ~6 m (it becomes the target), or a hit given or taken (the other one) |
-| free, engaged | locked | White/Black or a right-stick flick: the fighter best in front within ~26 m, else the nearest within ~12 m; the press goes on as a flick, so the game turns to it. Nobody: the press is dropped |
+| free, engaged | locked | White/Black or a right-stick flick: the fighter best in front within ~26 m, else the nearest within ~12 m; the press goes on as a flick, so the fighter gestures at it (state 0x55) while free roam turns it to face it (12 degrees a step). Nobody: the press is dropped |
 | locked | locked | White/Black: the game's own switch to the next fighter |
-| engaged | free | `roam_seconds` (3) without a fight button or a hit |
+| engaged | free | `roam_seconds` (3) without a fight button, a hit, or a standing fighter within ~4 m |
 | locked | free | White+Black together, or the target farther than ~40 m |
 | locked | engaged | the target is knocked out |
 

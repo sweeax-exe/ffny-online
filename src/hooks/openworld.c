@@ -710,7 +710,7 @@ void ow_hit(uint32_t attacker, uint32_t defender)
  *                    gesture, sub_001C9DF0 -> state 0x55): the fighter best in front within ROAM_PICK_RANGE, else the
  *                    nearest within ROAM_PICK_NEAR; the press goes on as a flick so the fighter gestures at it, and it turns to face it. Nobody
  *                    there: the press is dropped. While locked White/Black switch as in the game;
- *   engaged -> free: roam_steps without a fight button or a hit;
+ *   engaged -> free: roam_steps without a fight button, a hit or a standing fighter within ROAM_CALM_NEAR;
  *   locked -> free:  White and Black together, or the target farther than ROAM_LOCK_DROP;
  *   locked -> engaged: the target is knocked out.
  * CPU fighters keep the game's own targeting. Everything is read from the fight's records and inputs and kept in BA
@@ -724,6 +724,7 @@ void ow_hit(uint32_t attacker, uint32_t defender)
 #define ROAM_ENGAGE_RANGE   70.0f       /* ~6 m: a fight button engages a fighter this close, in front */
 #define ROAM_ENGAGE_NEAR    45.0f       /* ~4 m all around */
 #define ROAM_LOCK_DROP      470.0f      /* ~40 m */
+#define ROAM_CALM_NEAR      45.0f       /* ~4 m: a standing fighter this close keeps an engaged one engaged */
 #define ROAM_TURN_STEPS     30          /* the turn to a target just locked on to: at most this many steps */
 #define ROAM_TURN_RATE      12.0f       /* degrees a step */
 #define PAIR_DIST           0x003C04E8u
@@ -819,7 +820,12 @@ void ow_roam_input(uint32_t r)
             if (c >= 0) { roam_set_target(r, s, c); m = OW_ROAM_ENGAGED; why = "fight button"; }
         }
     }
-    if (m == OW_ROAM_ENGAGED && BA.step - BA.roam_last[s] >= BA.roam_steps) { m = OW_ROAM_FREE; why = "calm"; }
+    if (m == OW_ROAM_ENGAGED) {
+        /* someone standing right next to it is a fight too, hits or not (a CPU that blocks and circles) */
+        c = roam_pick(s, 0.0f, 0.0f, ROAM_CALM_NEAR, 1);
+        if (c >= 0) BA.roam_last[s] = BA.step;
+        else if (BA.step - BA.roam_last[s] >= BA.roam_steps) { m = OW_ROAM_FREE; why = "calm"; }
+    }
     if (m == OW_ROAM_LOCKED) {
         t = target_slot(r);
         if (t < 0 || t == s || !present(t) || (MEM16(rec(t) + 0x932u) & ENDED)) {
