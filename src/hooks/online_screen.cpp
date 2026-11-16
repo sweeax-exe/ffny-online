@@ -2201,11 +2201,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, "UP TO 8 PLAYERS, 4 FIGHT, WINNER STAYS", CENTER, 0.8f, 200);
         else if (S.quick_mode > 0 && mode_name(type))
             text(dl, f, g_hand, 12, 463 + door_dx(), 378, ORANGE, upper(mode_name(type)).c_str(), CENTER, 0.8f, 200);
-        // build 86: the fighters this search meets, under the logo; LB (or a click) switches
+        // build 86: the fighters this search meets, between the text and the mode; LB (or a click) switches
         {
             bool orig = search_original(type);
             const char *w = original_words(orig);
-            float tw = text_width(f, g_title, 11, w), bx = 463 + dx - tw / 2 - 10, by = 430;
+            float tw = text_width(f, g_title, 11, w), bx = 463 + dx - tw / 2 - 10, by = 352;
             if (mouse_click(f, bx, by, tw + 20, 18)) search_original_toggle(type);
             rect(dl, f, bx, by, tw + 20, 18, orig ? IM_COL32(40, 70, 120, 220) : IM_COL32(120, 12, 26, 200), 5);
             text(dl, f, g_title, 11, 463 + dx, by + 2, WHITE, w, CENTER, 0.8f);
