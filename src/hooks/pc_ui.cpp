@@ -4620,6 +4620,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (g_note.open) toast = false;     // F9's "taking a picture" would sit over the box
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
+    if (rtsworld) talking = false;      // Run the Streets: the speaker icons over the fighters say it (and the dock is there)
     if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !fighthud && !delayhud && !mschip && !offer && !rtsworld) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;

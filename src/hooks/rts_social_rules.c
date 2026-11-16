@@ -54,14 +54,19 @@ static int norm3(float v[3])
 int rts_project(const RtsView *v, const float p[3], float *nx, float *ny)
 {
     /* D3D's right-handed look-at (the game's view): z back toward the eye, x right, y up */
-    static const float up[3] = { 0.0f, 1.0f, 0.0f };
+    float up[3] = { 0.0f, 1.0f, 0.0f };
     float zx[3], xx[3], yx[3], d[3], vx, vy, vz, m00, m11, half;
     *nx = *ny = 0.0f;
     if (!v || !(v->fov_deg > 1.0f && v->fov_deg < 179.0f) || !(v->aspect > 0.1f && v->aspect < 10.0f)) return -1;
+    if (v->up[0] != 0.0f || v->up[1] != 0.0f || v->up[2] != 0.0f) { up[0] = v->up[0]; up[1] = v->up[1]; up[2] = v->up[2]; }
     sub3(v->eye, v->at, zx);
     if (!norm3(zx)) return -1;
     cross3(up, zx, xx);
-    if (!norm3(xx)) return -1;
+    if (!norm3(xx)) {                   /* up along the view: world up instead */
+        up[0] = 0.0f; up[1] = 1.0f; up[2] = 0.0f;
+        cross3(up, zx, xx);
+        if (!norm3(xx)) return -1;
+    }
     cross3(zx, xx, yx);
     sub3(p, v->eye, d);
     vx = dot3(d, xx);

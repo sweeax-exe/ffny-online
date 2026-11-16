@@ -28,10 +28,12 @@ float rts_voice_pan(float lx, float lz, float sx, float sz, float fx, float fz);
 void rts_voice_balance(float pan, float *left, float *right);
 
 /* The render camera and its lens: eye and target in world units, the horizontal field of view in degrees and the
- * picture's aspect (width / height) as the game's projection has them (m00 = cot(fov / 2), m11 = m00 * aspect). */
+ * picture's aspect (width / height) as the game's projection has them (m00 = cot(fov / 2), m11 = m00 * aspect), and
+ * the up vector the view is built with (D3D's right-handed look-at). */
 typedef struct RtsView {
     float eye[3], at[3];
     float fov_deg, aspect;
+    float up[3];            /* the camera's up (the game's third look-at vector); all 0: world up (+Y) */
 } RtsView;
 
 /* Projects a world point: *nx, *ny in -1..1 across the picture (x right, y up). Returns 1 in front of the camera,

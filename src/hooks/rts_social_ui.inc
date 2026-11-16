@@ -224,6 +224,8 @@ float rts_bubble(ImDrawList *dl, const Frame &f, float ax, float ay, const RtsBu
     return by;
 }
 
+void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, const std::vector<RtsBubble> &lines, uint32_t talking);
+
 // The bubbles and speaker icons; returns false when nothing is to be drawn.
 bool rts_world_draw_impl(ImDrawList *dl, ImVec2 display, bool draw)
 {
@@ -244,6 +246,13 @@ bool rts_world_draw_impl(ImDrawList *dl, ImVec2 display, bool draw)
     uint32_t talking = rts_talking(v);
     if (lines.empty() && !talking) return false;
     if (!draw) return true;
+    rts_world_paint(dl, display, v, lines, talking);
+    return true;
+}
+
+// Draws the bubbles and speaker icons of a view (the fight's, or the gallery's sample).
+void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, const std::vector<RtsBubble> &lines, uint32_t talking)
+{
     Frame f = menu_frame(display);
     float px, py, pw, ph;
     rts_picture(display, px, py, pw, ph);
@@ -255,6 +264,7 @@ bool rts_world_draw_impl(ImDrawList *dl, ImVec2 display, bool draw)
     memcpy(rv.at, v.at, sizeof rv.at);
     rv.fov_deg = v.fov_deg;
     rv.aspect = v.aspect;
+    memcpy(rv.up, v.up, sizeof rv.up);
     unsigned long long now = GetTickCount64();
     // farthest first, so the nearer fighters' bubbles lie on top
     int order[4] = { 0, 1, 2, 3 };
@@ -288,7 +298,7 @@ bool rts_world_draw_impl(ImDrawList *dl, ImVec2 display, bool draw)
             bool first = i == 0;
             top = rts_bubble(dl, f, ax, first ? ay : top - 3, b, a, first && !edge, first && edge, dir_x, dir_y, lo_x, hi_x,
                              lo_y, first, first && talks);
-            bool again = false;
+            bool again = gallery_on();     // the gallery's sample lines are new every frame: not logged
             for (auto &lt : RS.logged_test) if (lt.first == b.text && lt.second == b.at) again = true;
             if (!again) {
                 RS.logged_test.push_back({ b.text, b.at });
@@ -301,13 +311,12 @@ bool rts_world_draw_impl(ImDrawList *dl, ImVec2 display, bool draw)
             if (edge) rts_speaker(dl, f, ax, ay, 7.0f, 1.0f);
             else rts_speaker(dl, f, ax, ay - 9, 7.5f, 1.0f);
             static uint32_t logged_talk;
-            if (!(logged_talk & (1u << s))) {
+            if (!(logged_talk & (1u << s)) && !gallery_on()) {
                 logged_talk |= 1u << s;
                 fprintf(stderr, "[RTSBUBBLE] speaker icon over fighter %d at %.0f,%.0f%s\n", s, (double)ax, (double)ay, edge ? " (edge)" : "");
             }
         }
     }
-    return true;
 }
 
 // ---- the docked chat --------------------------------------------------------------------------------------------
@@ -316,7 +325,11 @@ const char *const k_dock_tabs[3] = { "ROOM", "GLOBAL", "PRIVATE" };
 
 bool rts_dock_live() { return !gallery_on() && fight_chat_live() && rts_social_on(); }
 
-int rts_dock_tabs() { return social_enabled() ? 3 : 1; }
+// The gallery's pages (RECOMP_TEST_ONLINE_GALLERY): the dock open on a tab (-1 none), its sample lines.
+int g_rts_gallery_tab = -1;
+bool g_rts_gallery_world = false;
+
+int rts_dock_tabs() { return g_rts_gallery_tab >= 0 || social_enabled() ? 3 : 1; }
 
 // Out of a Run the Streets fight (the fight chat's own rules again): the next one starts with everything read.
 void rts_dock_gone()
@@ -329,6 +342,7 @@ void rts_dock_gone()
 
 long long rts_dock_convo()
 {
+    if (g_rts_gallery_tab >= 0) return 7;
     if (RS.dm_with) {
         for (auto &c : C.v.convos) if (c.with.id == RS.dm_with) return RS.dm_with;
     }
@@ -339,7 +353,10 @@ const char *rts_dock_target()
 {
     static std::string who;
     if (RS.tab == 1) return "everyone on the server";
-    if (RS.tab == 2) { who = convo_name(rts_dock_convo()); return who.empty() ? "nobody yet" : who.c_str(); }
+    if (RS.tab == 2) {
+        who = g_rts_gallery_tab >= 0 ? "Kaze" : convo_name(rts_dock_convo());
+        return who.empty() ? "nobody yet" : who.c_str();
+    }
     return "the room";
 }
 
@@ -352,6 +369,7 @@ bool rts_blocked(long long id)
 
 int rts_unread(int tab)
 {
+    if (g_rts_gallery_tab >= 0) return tab == 0 ? 2 : tab == 1 ? 5 : 1;
     if (tab == 0) {
         static NetChatLine buf[NETPLAY_CHAT_LINES];
         int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, nullptr), u = 0;
@@ -399,6 +417,26 @@ struct DockLine { std::string name, text; bool mine = false, system = false, dim
 std::vector<DockLine> rts_dock_lines(int tab, int max)
 {
     std::vector<DockLine> out;
+    if (g_rts_gallery_tab >= 0) {
+        static const char *const room[][2] = { { "Rex", "who's by the park?" }, { "You", "north side, come get it" },
+                                               { "Nia", "GG" }, { "", "Kaze left the room." }, { "Rex", "rematch at the docks after this" } };
+        static const char *const glob[][2] = { { "Sol", "anyone up for KOTH on EU?" }, { "Oz", "new map is huge lol" },
+                                               { "You", "running the streets rn" }, { "Tia", "Knox and Jam park is the spot" },
+                                               { "Vic", "lf crew, msg me" } };
+        static const char *const dm[][2] = { { "Kaze", "you in the street fight?" }, { "You", "yeah, come join, room RTS01" },
+                                             { "Kaze", "omw" } };
+        const char *const (*src)[2] = tab == 0 ? room : tab == 1 ? glob : dm;
+        int n = tab == 0 ? 5 : tab == 1 ? 5 : 3;
+        for (int i = 0; i < n && i < max; i++) {
+            DockLine d;
+            d.name = src[i][0];
+            d.text = src[i][1];
+            d.mine = d.name == "You";
+            d.system = d.name.empty();
+            out.push_back(d);
+        }
+        return out;
+    }
     if (tab == 0) {
         static NetChatLine buf[NETPLAY_CHAT_LINES];
         int n = netplay_room_chat(buf, NETPLAY_CHAT_LINES, nullptr);
@@ -479,6 +517,8 @@ bool rts_dock_opens()
     return ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) || fight_pad_opens();
 }
 
+bool rts_dock_paint(ImDrawList *dl, ImVec2 display, int tabs, bool kb_up);
+
 // Draws the dock; returns true while it has the input (the game's input is held then).
 bool rts_dock_draw(ImDrawList *dl, ImVec2 display)
 {
@@ -547,7 +587,17 @@ bool rts_dock_draw(ImDrawList *dl, ImVec2 display)
     }
     social_set_typing(FC.typing);
 
-    const float X = 14, W = 286;
+    return rts_dock_paint(dl, display, tabs, kb_up);
+}
+
+// The dock as it stands (FC: open or not, the draft; RS: the tab).
+bool rts_dock_paint(ImDrawList *dl, ImVec2 display, int tabs, bool kb_up)
+{
+    Frame f = menu_frame(display);
+    // the picture's left edge (in widescreen the menus' 4:3 box is centred; the dock goes to the real corner)
+    float px, py, pw, ph;
+    rts_picture(display, px, py, pw, ph);
+    const float X = std::max(-f.o.x / f.sx, (px - f.o.x) / f.sx) + 14, W = 286;
     if (!FC.typing) {
         // closed: the room's last lines a few seconds each (as the fight chat), then the chip with the unread counts
         static NetChatLine buf[NETPLAY_CHAT_LINES];
@@ -633,10 +683,10 @@ bool rts_dock_draw(ImDrawList *dl, ImVec2 display)
     if (RS.tab == 0) { unsigned last = 0; static NetChatLine b2[NETPLAY_CHAT_LINES]; netplay_room_chat(b2, NETPLAY_CHAT_LINES, &last); RS.seen_room = last; }
     if (RS.tab == 1) for (auto &l : C.v.global) RS.seen_global = std::max(RS.seen_global, l.seq);
     if (RS.tab == 2 && rts_dock_convo()) {
-        std::string head = "WITH " + convo_name(rts_dock_convo());
+        std::string head = std::string("WITH ") + rts_dock_target();
         for (auto &c : head) c = (char)toupper((unsigned char)c);
         text(dl, f, g_title, 8, X + 10, ly0, GOLD_TEXT, head.c_str(), LEFT, 0);
-        if (C.v.convos.size() > 1) text(dl, f, g_body, 7, X + W - 8, ly0, DIM, FC.pad ? "UP / DOWN: OTHER CHATS" : "PGUP / PGDN: OTHER CHATS", RIGHT, 0);
+        if (C.v.convos.size() > 1 || g_rts_gallery_tab >= 0) text(dl, f, g_body, 7, X + W - 8, ly0, DIM, FC.pad ? "UP / DOWN: OTHER CHATS" : "PGUP / PGDN: OTHER CHATS", RIGHT, 0);
         ly0 += 12;
     }
     if (!empty.empty() && lines.empty()) text(dl, f, g_body, 10, X + W / 2, (ly0 + ly1) / 2 - 6, DIM, empty.c_str(), CENTER, 0, W - 30);
@@ -655,7 +705,7 @@ bool rts_dock_draw(ImDrawList *dl, ImVec2 display)
     float bx = X + 6, by = Y + H - BAR - 2, bw = W - 12, bh = BAR - 4;
     rect(dl, f, bx, by, bw, bh, IM_COL32(0, 0, 0, 170), 6);
     dl->AddRect(f.p(bx, by), f.p(bx + bw, by + bh), with_alpha(RED, 0.85f), 6 * f.s(), 0, 1.0f * f.s());
-    bool can = RS.tab == 0 ? room_chat_state() == 1 : RS.tab == 1 ? social_enabled() : rts_dock_convo() != 0;
+    bool can = g_rts_gallery_tab >= 0 || (RS.tab == 0 ? room_chat_state() == 1 : RS.tab == 1 ? social_enabled() : rts_dock_convo() != 0);
     if (FC.pad) {
         const char *a = ps_icons() ? "X" : "A", *b = ps_icons() ? "O" : "B";
         char hint[96];
@@ -694,4 +744,50 @@ const char *rts_shot_label()
     RtsSocialView v;
     if (rts_social_view(&v)) return "rtsworld";
     return nullptr;
+}
+
+// The gallery's pages: "rts-dock" (closed, its chip with unread counts), "rts-dock-room", "rts-dock-global",
+// "rts-dock-private" (open), "rts-bubbles" (bubbles and a speaker over three fighters), over a stand-in for the fight.
+void rts_gallery_page(ImDrawList *dl, ImVec2 display)
+{
+    if (g_rts_gallery_world) {
+        RtsSocialView v = {};
+        v.on = 1;
+        v.eye[0] = 0; v.eye[1] = 106; v.eye[2] = 140;
+        v.at[0] = 0; v.at[1] = 16; v.at[2] = 0;
+        v.fov_deg = 60.0f;
+        v.aspect = ws_aspect() > 0 ? ws_aspect() : 4.0f / 3.0f;
+        float pos[4][3] = { { 0, 0, 0 }, { -70, 0, -60 }, { 90, 0, -150 }, { 900, 0, 200 } };
+        memcpy(v.pos, pos, sizeof pos);
+        v.present = 0xF;
+        v.local = 0;
+        unsigned long long now = GetTickCount64();
+        std::vector<RtsBubble> lines;
+        auto add = [&](int fi, const char *name, const char *text, unsigned ago) {
+            RtsBubble b;
+            b.fighter = fi;
+            b.name = name;
+            b.text = text;
+            b.at = now - ago;
+            b.mine = fi == 0;
+            lines.push_back(b);
+        };
+        add(0, "You", "GG", 1200);
+        add(1, "Rex", "who's by the park?", 3000);
+        add(1, "Rex", "come get some, I'm right here", 900);
+        add(3, "Nia", "on my way", 1500);
+        rts_world_paint(dl, display, v, lines, (1u << 1) | (1u << 2));
+        return;
+    }
+    if (g_rts_gallery_tab < 0) return;
+    RS.tab = g_rts_gallery_tab % 3;
+    bool open = g_rts_gallery_tab < 3;
+    FC.typing = open;
+    FC.pad = false;
+    FC.draft = open && RS.tab == 0 ? "on my way to the park" : "";
+    FC.cursor = (int)FC.draft.size();
+    rts_dock_paint(dl, display, 3, false);
+    FC.typing = false;
+    FC.draft.clear();
+    FC.cursor = 0;
 }

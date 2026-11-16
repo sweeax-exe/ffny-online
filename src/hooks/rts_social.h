@@ -20,7 +20,8 @@ extern "C" {
 typedef struct RtsSocialView {
     int on;                 /* a Run the Streets fight runs and its steps run (the overlays may draw) */
     float eye[3], at[3];    /* the render camera as set this frame */
-    float fov_deg, aspect;  /* the scene's lens (the widescreen hook's last full view) */
+    float up[3];            /* its up vector (0x2DBF58) */
+    float fov_deg, aspect;  /* the scene's lens: its viewport's field of view, widened as the widescreen patch does */
     float pos[4][3];        /* the fighters' positions (feet) */
     uint32_t present;       /* fighter slots in the fight (bit per slot) */
     int local;              /* this PC's fighter, -1 none (a spectator or a watcher: the camera's target hears) */
@@ -40,9 +41,6 @@ int rts_social_on(void);
 int rts_social_voice(int room_slot, float *gain, float *pan);
 /* 1: the voice output is to be stereo (a Run the Streets room, or the test switch). */
 int rts_social_voice_stereo(void);
-
-/* The scene's lens from the widescreen hook (src/patches/widescreen.c, every full-screen 3D view). */
-void rts_social_lens(float fov_deg, float aspect);
 
 #ifdef __cplusplus
 }

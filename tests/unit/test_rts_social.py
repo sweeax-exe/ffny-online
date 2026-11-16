@@ -21,7 +21,7 @@ int main(void)
     static const float d[] = { -5.0f, 0.0f, 58.5f, 100.0f, 150.0f, 200.0f, 250.0f, 300.0f, 327.6f, 400.0f };
     float l, r, nx, ny, x, y;
     int i, k;
-    RtsView v = { { 0.0f, 106.0f, 140.0f }, { 0.0f, 16.0f, 0.0f }, 60.0f, 4.0f / 3.0f };
+    RtsView v = { { 0.0f, 106.0f, 140.0f }, { 0.0f, 16.0f, 0.0f }, 60.0f, 4.0f / 3.0f, { 0.0f, 0.0f, 0.0f } };
     for (i = 0; i < (int)(sizeof d / sizeof d[0]); i++) printf("gain|%.1f|%.4f\n", d[i], rts_voice_gain(d[i]));
     /* the camera looks along -Z: +X is right */
     printf("pan|right|%.3f\n", rts_voice_pan(0, 0, 100, 0, 0, -1));

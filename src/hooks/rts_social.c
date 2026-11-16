@@ -11,6 +11,7 @@
 #include "openworld.h"
 #include "rts_social.h"
 #include "rts_social_rules.h"
+#include "patches/widescreen.h"
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -21,6 +22,7 @@
 #define ACTORS      0x003B92E0u
 #define STRIDE      0x12E8u
 #define RCAM        0x002DBF28u     /* the render camera: eye +0x10, target +0x20 */
+#define VIEWS       0x002FB148u     /* the view list; [4] the scene viewport (sub_000443D0) */
 #define MATCH_STATE (0x00349760u + 0x2D820u)    /* 5 and 8: the fight's steps run (7 a special move's camera) */
 
 static unsigned long long now_ms(void)
@@ -41,18 +43,30 @@ static int env_on(const char *name)
 /* two copies: the game thread fills the one not shown, then shows it */
 static RtsSocialView s_buf[2];
 static volatile int s_shown;
-static volatile float s_fov = 30.0f, s_aspect = 4.0f / 3.0f;
 static int s_lens_logged;
+static float s_lens_last;
 
-void rts_social_lens(float fov_deg, float aspect)
+/* The scene's lens: the viewport the render camera is applied to (sub_000443D0: slot 4 of the view list at
+ * 0x2FB148) holds the camera's horizontal field of view at 4:3 (+0x0C); the widescreen patch widens it (Hor+) for the
+ * full-screen view exactly so (ws_view_params), and the picture's aspect is then the canvas's, else 4:3. */
+static void scene_lens(float *fov, float *aspect)
 {
-    if (!(fov_deg > 1.0f && fov_deg < 179.0f) || !(aspect > 0.1f && aspect < 10.0f)) return;
-    if (s_lens_logged < 3 && (fabsf(fov_deg - s_fov) > 0.01f || fabsf(aspect - s_aspect) > 0.001f)) {
-        s_lens_logged++;
-        fprintf(stderr, "[RTSSOCIAL] scene lens: fov %.2f, aspect %.4f\n", (double)fov_deg, (double)aspect);
+    uint32_t vp = MEM32(VIEWS + 4u * 4u);
+    float f = vp >= 0x10000u ? MEMF(vp + 0x0Cu) : 0.0f, a = ws_aspect();
+    if (!(f > 1.0f && f < 179.0f)) f = 30.0f;
+    if (a > 0.0f) {
+        f = ws_widen_fov(f, WS_DESIGN_ASPECT, a, ws_fov_cap());
+        *aspect = a;
+    } else {
+        *aspect = WS_DESIGN_ASPECT;
     }
-    s_fov = fov_deg;
-    s_aspect = aspect;
+    *fov = f;
+    if (s_lens_logged < 6 && fabsf(f - s_lens_last) > 0.5f) {
+        s_lens_logged++;
+        fprintf(stderr, "[RTSSOCIAL] scene lens: fov %.2f, aspect %.4f (viewport %08X, its fov %.2f)\n", (double)f,
+                (double)*aspect, vp, (double)(vp >= 0x10000u ? MEMF(vp + 0x0Cu) : 0.0f));
+    }
+    s_lens_last = f;
 }
 
 int rts_social_on(void)
@@ -79,8 +93,8 @@ void rts_social_camera(void)
     st = MEM32(MATCH_STATE);
     v->on = st == 5 || st == 7 || st == 8;
     for (i = 0; i < 3; i++) { v->eye[i] = MEMF(RCAM + 0x10u + 4u * i); v->at[i] = MEMF(RCAM + 0x20u + 4u * i); }
-    v->fov_deg = s_fov;
-    v->aspect = s_aspect;
+    for (i = 0; i < 3; i++) v->up[i] = MEMF(RCAM + 0x30u + 4u * i);
+    scene_lens(&v->fov_deg, &v->aspect);
     for (s = 0; s < 4; s++) {
         uint32_t r = ACTORS + (uint32_t)s * STRIDE;
         if (MEM32(r + 0x28u) == 0xFFFFFFFFu) continue;
