@@ -27,6 +27,7 @@
 #include "fighter_gameplay.h"
 #include "fighter_voice.h"
 #include "fighter_skins.h"
+#include "fighter_banks.h"
 
 unsigned int defjam_fe_call(const char *command);                   /* recomp_manual.c */
 FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c: as the print reads it */
@@ -99,7 +100,10 @@ static void load(void)
                 if (row + 4 * ROW_WORDS > size) continue;
                 fe = rd32(d + row + 4 * W_FE_ID);
                 core = rd32(d + row + 4 * W_CORE_ID);
-                if (new_fighter_is_place((int)fe)) {
+                if (new_fighter_is_place((int)fe) && fighter_banks_index((int)fe) >= 0 &&
+                    !strncmp(sod_string(d, size, rd32(d + row)), "FFNYBank", 8)) {
+                    continue;   /* a bank row (fighter_banks.h): its fighter is bound per match */
+                } else if (new_fighter_is_place((int)fe)) {
                     NewFighter *nf;
                     if (g_new_count >= NEW_FIGHTER_MAX) continue;
                     nf = &g_new[g_new_count++];
@@ -196,15 +200,33 @@ static int new_fighter_core(int fe_id)
 
 static uint32_t game_data(void) { return MEM32(MANAGERS + GAMEDATA_SLOT * 4); }
 
-/* The gameplay of slot s's new fighter (NULL for any other fighter, or one without its own). */
+/* The gameplay of slot s's new fighter (NULL for any other fighter, or one without its own). A bank (124..127,
+ * fighter_banks.h) has the gameplay of the fighter bound to it. */
+static FighterGameplay g_bank_gp[FB_BANKS];
 static const FighterGameplay *slot_gameplay(uint32_t gd, int s, int *fe_out)
 {
-    int fe;
+    int fe, b;
     if (gd < 0x10000u) return NULL;
     fe = (int)MEM8(gd + GD_FIGHTER + 5u * (uint32_t)s);
     if (fe_out) *fe_out = fe;
     if (!new_fighter_is_place(fe)) return NULL;
+    if ((b = fighter_banks_index(fe)) >= 0 && fighter_banks_ready()) {
+        const FighterBanksEntry *e = fighter_banks_bound(b);
+        if (!e || !fighter_gameplay_decode(e->words[W_BLAZINS], e->words[W_GAMEPLAY], &g_bank_gp[b])) return NULL;
+        return &g_bank_gp[b];
+    }
     return new_fighter_gameplay(fe);
+}
+
+/* The coreID a new fighter's row gives the slot (a bank's: its bound fighter's), -1 if none. */
+static int slot_fighter_core(int fe)
+{
+    int b = fighter_banks_index(fe);
+    if (b >= 0 && fighter_banks_ready()) {
+        const FighterBanksEntry *e = fighter_banks_bound(b);
+        return e ? e->core_id : -1;
+    }
+    return new_fighter_core(fe);
 }
 
 void new_fighters_start_game_done(uint32_t gd)
@@ -216,7 +238,7 @@ void new_fighters_start_game_done(uint32_t gd)
         uint32_t core;
         if (!g) continue;
         core = MEM32(gd + GD_CORE + 4u * (uint32_t)s);
-        if ((int)core != new_fighter_core(fe)) {
+        if ((int)core != slot_fighter_core(fe)) {
             /* not the row's slot as the game set it up (a Story or created-fighter slot): leave it */
             fprintf(stderr, "[NEWFIGHTER] slot %d feID %d: the slot holds coreID %u, not the row's; gameplay left\n",
                     s, fe, core);
@@ -286,7 +308,7 @@ void new_fighters_fight_setup(void)
         const FighterGameplay *g = slot_gameplay(gd, s, &fe);
         uint32_t at = CHAR_INDEX + 4u * (uint32_t)s, was = MEM32(at);
         if (!g) continue;
-        if ((int)was != new_fighter_core(fe) - 1) {
+        if ((int)was != slot_fighter_core(fe) - 1) {
             fprintf(stderr, "[NEWFIGHTER] slot %d feID %d: character index %u is not the template's; left\n", s,
                     fe, was);
             continue;
@@ -453,6 +475,8 @@ int new_fighter_template(int fe_id)
 
 #define LIST_MAX 256
 #define TEXT_MAX 160
+#define SHELF_MAX 30            /* community fighters beyond the places in the grid (the shelf); the rest by MORE */
+#define SHELF_TEST_MAX 160      /* RECOMP_TEST_SHELF's limit (LIST_MAX: 75 stock + 160 + MORE fit) */
 static char g_list[LIST_MAX][TEXT_MAX];
 static int g_list_n, g_list_pos, g_serving;
 static uint32_t g_self;
@@ -490,6 +514,59 @@ static void read_guest(uint32_t p, char *out, int size)
         out[k] = c;
     }
     out[p ? k : 0] = 0;
+}
+
+/* A cell of its own for front-end ID fe_id made from its template's string (tpl) with the row words' stat bars
+ * (U, L, S, T, H, C = words 17, 16, 22, 25, 12, 2), one outfit, unlocked. 0 when the template has no string. */
+static int cell_from_template(char raw[][TEXT_MAX], int n, int tpl, int fe_id, const uint32_t *w, char *add)
+{
+    int i;
+    add[0] = 0;
+    for (i = 0; i < n; i++)
+        if (field(raw[i], "FE_ID") == tpl) { snprintf(add, TEXT_MAX, "%s", raw[i]); break; }
+    if (!add[0]) return 0;
+    set_field(add, "FE_ID", fe_id);
+    set_field(add, "U", (int)w[17]);
+    set_field(add, "L", (int)w[16]);
+    set_field(add, "S", (int)w[22]);    /* the first S= is the speed bar, a later one a style */
+    set_field(add, "T", (int)w[25]);
+    set_field(add, "H", (int)w[12]);
+    set_field(add, "C", (int)w[2]);
+    set_field(add, "CLOTH", 1);
+    set_field(add, "LOCK", 1);
+    return 1;
+}
+
+/* ---- the shelf: community fighters beyond the places (fighter_banks.h) ----
+ *
+ * After the place fighters the grid shows up to SHELF_MAX of them, each a cell of its own with its logical ID
+ * (1000 and up; its pictures are composed under that ID): the ones picked last in this session first, then the
+ * rest in ID order. One more cell, MORE (NF_MORE_ID), opens the paged list of all of them (the community window,
+ * online_screen.cpp) for the slot that picked it. Nothing is saved. */
+static int g_recent[SHELF_MAX], g_recent_n;
+
+void new_fighters_shelf_played(int id)
+{
+    int i, k;
+    if (id < FB_FIRST_LOGICAL || id == NF_MORE_ID) return;
+    for (i = 0; i < g_recent_n && g_recent[i] != id; i++) {}
+    if (i == g_recent_n && g_recent_n < SHELF_MAX) g_recent_n++;
+    if (i >= SHELF_MAX) i = SHELF_MAX - 1;
+    for (k = i; k > 0; k--) g_recent[k] = g_recent[k - 1];
+    g_recent[0] = id;
+}
+
+int new_fighters_shelf(int *ids, int max)
+{
+    int n = 0, i, k, count = fighter_banks_count();
+    for (i = 0; i < g_recent_n && n < max; i++)
+        if (fighter_banks_find(g_recent[i])) ids[n++] = g_recent[i];
+    for (i = 0; i < count && n < max; i++) {
+        const FighterBanksEntry *e = fighter_banks_at(i);
+        for (k = 0; k < n && ids[k] != e->id; k++) {}
+        if (k == n) ids[n++] = e->id;
+    }
+    return n;
 }
 
 static void rebuild_list(void)
@@ -531,24 +608,42 @@ static void rebuild_list(void)
             if (field(raw[i], "FE_ID") == fe_place) { snprintf(add, sizeof(add), "%s", raw[i]); break; }
         if (!add[0]) {
             /* not in the game's own list (it always is today; kept for a list hook): its template's string
-             * with this row's ID and stat bars (U, L, S, T, H, C = words 17, 16, 22, 25, 12, 2) */
-            const uint32_t *w = g_words[k];
-            int tpl = g_new[k].template_fe_id;
-            for (i = 0; i < n; i++)
-                if (field(raw[i], "FE_ID") == tpl) { snprintf(add, sizeof(add), "%s", raw[i]); break; }
-            if (!add[0]) continue;
-            set_field(add, "FE_ID", fe_place);
-            set_field(add, "U", (int)w[17]);
-            set_field(add, "L", (int)w[16]);
-            set_field(add, "S", (int)w[22]);    /* the first S= is the speed bar, a later one a style */
-            set_field(add, "T", (int)w[25]);
-            set_field(add, "H", (int)w[12]);
-            set_field(add, "C", (int)w[2]);
+             * with this row's ID and stat bars */
+            if (!cell_from_template(raw, n, g_new[k].template_fe_id, fe_place, g_words[k], add)) continue;
         }
         set_field(add, "CLOTH", 1);
         set_field(add, "LOCK", 1);
         snprintf(g_list[g_list_n++], TEXT_MAX, "%s", add);
         moved++;
+    }
+    /* the shelf, then MORE (fighter_banks.h) */
+    {
+        static int shelf_max = -1;
+        int shelf[SHELF_TEST_MAX], m, j;
+        if (shelf_max < 0) {
+            /* RECOMP_TEST_SHELF=<n> (tests: the menu's capacity with more cells), else SHELF_MAX */
+            const char *e = getenv("RECOMP_TEST_SHELF");
+            shelf_max = e && atoi(e) > 0 ? (atoi(e) < SHELF_TEST_MAX ? atoi(e) : SHELF_TEST_MAX) : SHELF_MAX;
+        }
+        m = fighter_banks_count() ? new_fighters_shelf(shelf, shelf_max) : 0;
+        for (j = 0; j < m && g_list_n < LIST_MAX - 1; j++) {
+            const FighterBanksEntry *e = fighter_banks_find(shelf[j]);
+            char add[TEXT_MAX];
+            if (e && cell_from_template(raw, n, e->template_fe_id, e->id, e->words, add))
+                snprintf(g_list[g_list_n++], TEXT_MAX, "%s", add);
+        }
+        if (fighter_banks_count() > m) {
+            char add[TEXT_MAX];
+            const FighterBanksEntry *e = fighter_banks_at(0);
+            if (cell_from_template(raw, n, e->template_fe_id, NF_MORE_ID, e->words, add))
+                snprintf(g_list[g_list_n++], TEXT_MAX, "%s", add);
+        }
+        if (m) {
+            static int told_shelf;
+            if (told_shelf++ < 6)
+                fprintf(stderr, "[BANKS] select grid: %d of %d community fighters beyond the places on the shelf%s\n",
+                        m, fighter_banks_count(), fighter_banks_count() > m ? ", the rest under MORE" : "");
+        }
     }
     g_list_pos = 0;
     g_serving = 1;
@@ -594,6 +689,6 @@ void new_fighters_after_funccall(const char *text)
 {
     fighter_skins_after_funccall(text);    /* build 85: a pick of a fighter with skins: the skin window */
     if (strcmp(text, "Game.ResetFighterList()")) return;
-    if (new_fighters_list(NULL) <= 0) return;
+    if (new_fighters_list(NULL) <= 0 && fighter_banks_count() <= 0) return;
     rebuild_list();
 }

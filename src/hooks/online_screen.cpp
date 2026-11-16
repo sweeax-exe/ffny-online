@@ -60,6 +60,7 @@
 #include "milestones.h"
 #include "season_search.h"
 #include "fighter_skins.h"
+#include "fighter_banks.h"
 #include "pc_content.h"
 #include "pc_mods.h"
 #include "music_library.h"
@@ -3032,6 +3033,7 @@ int grid_pos(const std::vector<OnlineFighter> &list, int fighter)
 }
 
 #include "skins_ui.inc"
+#include "community_ui.inc"
 
 void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chosen, int *fighter)
 {
@@ -5637,6 +5639,42 @@ bool draw_skin_window(ImVec2 display)
     } else {
         fighter_skins_set_slot(g_sw.slot, g_sw.fe, 0);
         fprintf(stderr, "[SKINS] skin window: back (slot %d keeps the fighter's own look)\n", g_sw.slot);
+    }
+    return true;
+}
+
+// ---- the community window behind the select grid's MORE cell (community_ui.inc, fighter_banks.h) ----
+
+static struct { int slot, sel; ULONGLONG opened; } g_cw;
+
+bool take_community_window_request()
+{
+    int slot;
+    if (!fighter_banks_take_window(&slot)) return false;
+    g_cw.slot = slot;
+    const FighterBanksEntry *e = fighter_banks_bound(slot);
+    g_cw.sel = 0;
+    for (int i = 0; e && i < fighter_banks_count(); i++)
+        if (fighter_banks_at(i)->id == e->id) g_cw.sel = i;
+    g_cw.opened = GetTickCount64();
+    { Pad none = {}; community_test_keys(none, true); }
+    fprintf(stderr, "[BANKS] community window: slot %d, %d fighters, on %d\n", slot, fighter_banks_count(), g_cw.sel);
+    return true;
+}
+
+bool draw_community_window(ImVec2 display)
+{
+    Frame f = menu_frame(display);
+    Pad idle = {};
+    Pad pad = GetTickCount64() - g_cw.opened > 300 ? read_pad() : idle;    // not the A that picked MORE
+    int r = community_window(ImGui::GetForegroundDrawList(), f, pad, &g_cw.sel);
+    if (!r) return false;
+    if (r == 1) {
+        const FighterBanksEntry *e = fighter_banks_at(g_cw.sel);
+        if (e) fighter_banks_bind(g_cw.slot, e->id);
+        fprintf(stderr, "[BANKS] community window: slot %d takes %d\n", g_cw.slot, e ? e->id : -1);
+    } else {
+        fprintf(stderr, "[BANKS] community window: back (slot %d keeps what MORE gave it)\n", g_cw.slot);
     }
     return true;
 }

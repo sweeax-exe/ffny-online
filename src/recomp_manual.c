@@ -34,6 +34,7 @@
 #include "hooks/pc_launcher_saves.h"
 #include "hooks/test_observations.h"
 #include "hooks/new_fighters.h"
+#include "hooks/fighter_banks.h"
 #include "hooks/pc_settings.h"
 #include "recomp_settings.h"
 #include "hooks/netplay.h"
@@ -162,7 +163,7 @@ void sub_001C6CD0_enter(void)
  * stack argument. */
 void ws_apt_load_begin(uint32_t name);
 void ws_apt_load_done(uint32_t apt);
-void sub_001810B0_enter(void) { ws_apt_load_begin(MEM32(g_esp + 8)); }
+void sub_001810B0_enter(void) { ws_apt_load_begin(MEM32(g_esp + 8)); fighter_banks_movie_load(g_esp + 8); }
 void sub_00056F50_enter(void) { ws_apt_load_done(MEM32(g_esp + 8)); }
 /* DynamicLoader's ELF parser: the input descriptor's +0x10 is the raw header,
  * still before section fixup, relocation and vertex-buffer upload. */
@@ -255,6 +256,20 @@ void sub_00016810(void)
         return;
     }
     sub_00016810_gen();
+}
+/* The database's record lookup (sub_000BE760: thiscall on the database, (out, item ID, 0), ret 12; out[0] the
+ * record, out[1] the database, out[2] its type): a bank row of a slot bound to a community fighter beyond the
+ * places answers with that fighter's record (unindexed in the same database), so everything the match reads from
+ * the row is the fighter's (src/hooks/fighter_bank_hooks.c; Vlad's participant window does the same). */
+extern void sub_000BE760_gen(void);
+void sub_000BE760(void)
+{
+    uint32_t database = g_ecx, output = MEM32(g_esp + 4), caller = MEM32(g_esp), record, bound;
+    sub_000BE760_gen();
+    if (output < 0x10000u) return;
+    record = MEM32(output);
+    bound = fighter_banks_record(database, record, caller);
+    if (bound != record) MEM32(output) = bound;
 }
 /* The load (sub_00014540, thiscall on the record, ret 4) copies the saved record (record + 0x4C .. + 0x14DC)
  * back over the live one, the saved counts and the song store's buffers included. A save written while the
@@ -1910,6 +1925,9 @@ static void funccall_hook(void)
         text[i] = c;
     }
     text[i] = 0;
+    /* A ControllerSetup with a community fighter beyond the places (ID 1000 and up) reaches the game with the
+     * slot's bank; the original command string stays as it was (src/hooks/fighter_bank_hooks.c). */
+    fighter_banks_funccall_before(text, sizeof text);
     /* Online.Tick() comes every frame from the patched main menu (scripts/apt-patch.py). */
     /* the menu-list calls repeat a dozen times a screen; 4000 in all ran out early in a long online
      * session, and the end of a session is where a report needs them */
@@ -1929,6 +1947,7 @@ static void funccall_hook(void)
     if (!ffny_online_locked())
         cheats_on_funccall(text);          /* Story tracking and Story cheats, src/patches/cheats.c; never online */
     sub_00068BA0();
+    fighter_banks_funccall_after(text);    /* the loading/versus/result screens name a bound bank's fighter */
     new_fighters_after_funccall(text);     /* new fighters in cells of their own */
     options_audio_after_funccall(text);
     /* RECOMP_FE_INJECT: commands of a test's own, after a chosen call (src/hooks/fe_inject.c). */
@@ -1961,7 +1980,13 @@ static void first_time_help_hook(void)
  * guest address of the result string, or 0. */
 unsigned int defjam_fe_call(const char *command)
 {
-    uint32_t sp0 = g_esp, n = (uint32_t)strlen(command) + 1, s, i;
+    char bound[192];
+    uint32_t sp0 = g_esp, n, s, i;
+    if (fighter_banks_before_call(command, bound, sizeof bound)) {
+        fprintf(stderr, "[BANKS] host call %s runs as %s\n", command, bound);
+        command = bound;
+    }
+    n = (uint32_t)strlen(command) + 1;
     s = (sp0 - 0x40u - n) & ~3u;
     for (i = 0; i < n; i++)
         MEM8(s + i) = (uint8_t)command[i];
