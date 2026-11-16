@@ -61,11 +61,6 @@ static __inline int fighter_banks_index(int fe_id)
  * command is another (or names no logical fighter); *slot and *id say what it named. */
 int fighter_banks_rewrite_setup(const char *command, int replacement, char *out, size_t out_size, int *slot, int *id);
 
-/* text ("k=v&k=v...") with the value of each listed key that equals from[m] replaced by to[m], into out.
- * Returns 1 when something changed (out holds the result), else 0. */
-int fighter_banks_rewrite_fields(const char *text, const char *const *keys, int nkeys, const int *from, const int *to,
-                                 int nmap, char *out, size_t out_size);
-
 /* A fighter picture's name ("portrait/p_ML_125_2p.swf", "thumbs/thumb124off") that names a bank (its ID, or ID + 1
  * for the families that number so) with bank_to_id[bank] the fighter bound to it (FB_FIRST_LOGICAL and up), under
  * that fighter's ID instead, into out. 1 when it rewrote. */
@@ -90,15 +85,15 @@ int fighter_banks_before_call(const char *command, char *out, size_t out_size);
  * record for a bound bank's row, else record. caller: the lookup's return address, for the log. */
 uint32_t fighter_banks_record(uint32_t database, uint32_t record, uint32_t caller);
 
-/* A front-end answer after the game made it: Game.GetMatchInfo() ("0=<fighter>&1=..") names a bound bank by its
- * fighter's own ID, so the loading screen loads that fighter's pictures. Game.GetMatchSummary keeps the bank's ID
- * (the result screen stops with a fighter's own; its pictures come from fighter_banks_movie_load). Returns 1 with
- * the new answer in out. */
+/* A front-end answer after the game made it: 0 (the answers keep the bank's ID; see fighter_bank_hooks.c). */
 int fighter_banks_after_call(const char *command, const char *answer, char *out, size_t out_size);
 
 /* The FuncCall hook (recomp_manual.c): before the game runs a command (text is changed to the command it runs,
  * the guest argument re-pointed at a copy) and after it answered (g_eax re-pointed at a rewritten answer). */
 void fighter_banks_funccall_before(char *text, size_t text_size);
+/* After the game ran a front-end command (new_fighters_after_funccall): the end of Game.ResetFighterList, during
+ * which a bound bank's row is not redirected (the select list holds the bank rows as themselves, hidden). */
+void fighter_banks_call_done(const char *text);
 void fighter_banks_funccall_after(const char *text);
 
 /* The APT movie loader (sub_001810B0: archive, name, &apt, &const), name at guest address name_arg: a picture of a

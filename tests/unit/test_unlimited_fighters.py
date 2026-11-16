@@ -1,6 +1,6 @@
 """Community fighters beyond the places (phase 1, offline): the four bank rows and the unindexed records the
 composer writes (setup/ffnycontent/unlimited.py, content_compose.finish_logical), and the game's pure side
-(src/hooks/fighter_banks.c: the side file check, the set-up command, the answers' fields and the picture names),
+(src/hooks/fighter_banks.c: the side file check, the set-up command and the picture names),
 compiled natively. The composition tests need the user's own dump ($DEFJAM_DATA/extracted or game/)."""
 import os
 import shutil
@@ -140,13 +140,6 @@ int main(int argc, char **argv) {
         printf("%d %d %d %s\n", r, slot, id, r ? out : "-");
         return 0;
     }
-    if (!strcmp(argv[1], "fields")) {
-        static const char *keys[] = { "0", "1", "2", "3", "fid" };
-        int from[2] = { 124, 125 }, to[2] = { 1007, 1003 };
-        int r = fighter_banks_rewrite_fields(argv[2], keys, 5, from, to, 2, out, sizeof out);
-        printf("%d %s\n", r, r ? out : "-");
-        return 0;
-    }
     if (!strcmp(argv[1], "picture")) {
         int map[4] = { 1007, -1, 1003, -1 };
         int r = fighter_banks_picture_name(argv[2], map, out, sizeof out);
@@ -185,15 +178,6 @@ def test_c_set_up_command(banks_exe):
     assert banks_exe("setup", "Controller.ControllerSetup(-1,0,0,0)", 124) == "0 -1 0 -"     # the reset
     assert banks_exe("setup", "Controller.ControllerSetup(4,0,1007,0)", 124) == "0 4 1007 -"   # no fifth bank
     assert banks_exe("setup", "Game.StartGame()", 124) == "0 -1 -1 -"
-
-
-def test_c_answer_fields(banks_exe):
-    assert banks_exe("fields", "0=124&1=125&2=-99&3=-99&venue=1&matchtype=0") == \
-        "1 0=1007&1=1003&2=-99&3=-99&venue=1&matchtype=0"
-    assert banks_exe("fields", "win=1&isAI=0&fighter=Syn 1007&fid=124&cid=0&total=5850") == \
-        "1 win=1&isAI=0&fighter=Syn 1007&fid=1007&cid=0&total=5850"
-    assert banks_exe("fields", "0=55&1=22&venue=124&matchtype=0") == "0 -"    # only the fighters' keys
-    assert banks_exe("fields", "fid=1240&cid=124") == "0 -"
 
 
 def test_c_picture_names(banks_exe):

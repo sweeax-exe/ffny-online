@@ -22,6 +22,7 @@ static int g_ready;
 static int g_bound[FB_BANKS] = { -1, -1, -1, -1 };
 static uint32_t g_checked_base;     /* the loaded database whose bank rows were checked */
 static volatile int g_window_req, g_window_slot;
+static int g_listing;               /* Game.ResetFighterList runs: the bank rows read as themselves */
 
 /* RECOMP_BANKS_OFF=answers,movies (tests): leave that part out. */
 static int part_off(const char *part)
@@ -123,6 +124,9 @@ int fighter_banks_before_call(const char *command, char *out, size_t out_size)
 {
     int slot = -1, id = -1, idx, replacement;
     const FighterBanksEntry *e;
+    /* the select list is built from the rows themselves: a bound bank must not come out as its fighter there
+     * (until the next command, or fighter_banks_call_done) */
+    g_listing = !strcmp(command, "Game.ResetFighterList()");
     if (strncmp(command, "Controller.ControllerSetup(", 27)) return 0;
     fighter_banks_rewrite_setup(command, -1, out, out_size, &slot, &id);
     if (slot < 0 || slot >= FB_BANKS) return 0;
@@ -180,7 +184,7 @@ uint32_t fighter_banks_record(uint32_t database, uint32_t record, uint32_t calle
     for (k = 0; k < FB_BANKS; k++) {
         const FighterBanksEntry *e;
         if (g_bound[k] < 0 || record - base != g_bank_off[k]) continue;
-        if (ffny_online_locked()) return record;
+        if (ffny_online_locked() || g_listing) return record;
         e = &g_fb[g_bound[k]];
         if (g_checked_base != base) {
             /* the loaded file is the file (the game adds its base to every offset): check it is ours */
@@ -227,17 +231,13 @@ int fighter_banks_bind(int slot, int id)
 
 int fighter_banks_after_call(const char *command, const char *answer, char *out, size_t out_size)
 {
-    static const char *const info_keys[] = { "0", "1", "2", "3" };
-    int from[FB_BANKS], to[FB_BANKS], n = 0, k;
-    /* Game.GetMatchInfo() only: the loading screen takes its pictures by these IDs. Game.GetMatchSummary(n) keeps
-     * the bank's fid: answered with a fighter's own ID the result screen stopped presenting (0 fps after the
-     * summary, 2026-11-16, logs/dj/20261116-110206-offline; with the bank's ID, 20261116-110907-offline, fine). */
-    if (!g_ready || !answer || ffny_online_locked() || part_off("answers")) return 0;
-    if (strcmp(command, "Game.GetMatchInfo()")) return 0;
-    for (k = 0; k < FB_BANKS; k++)
-        if (g_bound[k] >= 0) { from[n] = FB_FIRST_BANK + k; to[n] = g_fb[g_bound[k]].id; n++; }
-    if (!n) return 0;
-    return fighter_banks_rewrite_fields(answer, info_keys, 4, from, to, n, out, out_size);
+    /* The game's answers keep the bank's ID. Answered with a fighter's own ID (1000 and up) the screens stopped:
+     * Game.GetMatchSummary(n) right after the summary (logs/dj/20261116-110206-offline) and Game.GetMatchInfo() on
+     * the loading screen (oldMLoad, 20261116-115258-unl-sel7: its AS takes the ID as an index). Their pictures are
+     * the bank's (the composer gives the banks placeholder pictures), mapped to the fighter's by the movie loader
+     * (fighter_banks_movie_load). */
+    (void)command; (void)answer; (void)out; (void)out_size;
+    return 0;
 }
 
 /* ---- the FuncCall hook's two calls (recomp_manual.c funccall_hook: cdecl, the command at g_esp + 4) ---- */
@@ -318,4 +318,10 @@ void fighter_banks_movie_load(uint32_t name_arg)
     if (!fighter_banks_picture_name(name, map, out, sizeof out) || !(buf = name_copy(out))) return;
     if (told++ < 40) fprintf(stderr, "[BANKS] picture %s loads as %s\n", name, out);
     MEM32(name_arg) = buf;
+}
+
+void fighter_banks_call_done(const char *text)
+{
+    (void)text;
+    g_listing = 0;
 }

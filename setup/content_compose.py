@@ -748,6 +748,16 @@ def finish_logical(work, applied, skipped, log):
         return
     work.set_loose(newfighter.SOD_PATH, sod)
     work.set_loose(unlimited.SIDE_FILE, side)
+    # the banks' own pictures (Doc's, as placeholders): the screens open a bank's pictures by its ID, and the game
+    # loads the bound fighter's in their place (src/hooks/fighter_bank_hooks.c, the movie loader)
+    files = FighterFiles(work)
+    there = {n.lower() for n in files.names(newfighter.SCREENS_ARCHIVE)}
+    for fe in unlimited.BANKS:
+        for name, data in newfighter.picture_copies(newfighter._View(files, newfighter.SCREENS_ARCHIVE),
+                                                    unlimited.BANK_TEMPLATE, fe):
+            if name.lower() not in there:
+                work.add(newfighter.SCREENS_ARCHIVE, name, data)
+                there.add(name.lower())
     log('[compose] %d community fighters beyond the places (banks 124..127)' % len(work.logical))
 
 

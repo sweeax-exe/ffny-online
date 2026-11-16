@@ -126,52 +126,6 @@ int fighter_banks_rewrite_setup(const char *command, int replacement, char *out,
     return 1;
 }
 
-int fighter_banks_rewrite_fields(const char *text, const char *const *keys, int nkeys, const int *from, const int *to,
-                                 int nmap, char *out, size_t out_size)
-{
-    size_t o = 0;
-    int changed = 0;
-    const char *p = text;
-    if (!text || !out || out_size < 2) return 0;
-    while (*p && o + 1 < out_size) {
-        /* at the start of a key=value pair */
-        const char *eq = strchr(p, '='), *amp = strchr(p, '&'), *end;
-        int k, done = 0;
-        end = amp ? amp : p + strlen(p);
-        if (eq && eq < end) {
-            for (k = 0; k < nkeys && !done; k++) {
-                size_t kl = strlen(keys[k]);
-                if ((size_t)(eq - p) == kl && !strncmp(p, keys[k], kl)) {
-                    char *stop = NULL;
-                    long v = strtol(eq + 1, &stop, 10);
-                    int m;
-                    if (stop == end && stop != eq + 1)
-                        for (m = 0; m < nmap; m++)
-                            if (v == from[m]) {
-                                int w = snprintf(out + o, out_size - o, "%.*s=%d", (int)kl, p, to[m]);
-                                if (w < 0 || (size_t)w >= out_size - o) return 0;
-                                o += (size_t)w;
-                                changed = done = 1;
-                                break;
-                            }
-                }
-            }
-        }
-        if (!done) {
-            size_t n = (size_t)(end - p);
-            if (o + n >= out_size) return 0;
-            memcpy(out + o, p, n);
-            o += n;
-        }
-        if (!*end) break;
-        if (o + 1 >= out_size) return 0;
-        out[o++] = '&';
-        p = end + 1;
-    }
-    out[o] = 0;
-    return changed;
-}
-
 /* Picture families of a fighter (setup/ffnycontent/newfighter.py PICTURE_FAMILIES): the name's prefix and whether
  * its number is the front-end ID + 1. */
 static const struct { const char *prefix; int plus; } k_families[] = {
