@@ -22,11 +22,14 @@ in a run or checked in code, **[U]** open.
   name, model, coreID, stats and the gameplay words reach the slot [V]. Bank *s* is slot *s*'s only, so the same
   fighter in two slots uses two banks (mirror). The binding is each slot's last set-up (a pure function of the
   lineup); a stock pick releases the slot's bank.
-* **Screens**: `Game.GetMatchInfo()` (`0=124&1=125..`, the loading screen) answers with the fighter's own ID; the
-  APT movie loader (`sub_001810B0` entry) loads any picture named after a bank (`p_ML_125_2p`, ...) under the
-  fighter's ID. `Game.GetMatchSummary(n)` keeps the bank's `fid`: answered with `fid=1007` the result screen stopped
-  presenting right after the summary (0 fps, `[HANG]`, logs/dj/20261116-110206-offline; the same run with the
-  bank's ID passed, 20261116-110907-offline) [V]. The fight HUD shows the record's display name by itself [V].
+* **Screens**: the game's answers keep the bank's ID. With a fighter's own ID (1000+) the screens stopped: the
+  result screen right after `Game.GetMatchSummary(n)` (0 fps, `[HANG]`, logs/dj/20261116-110206-offline; with the
+  bank's ID 20261116-110907-offline passes) and the loading screen after `Game.GetMatchInfo()` (oldMLoad uses the
+  ID as an index, 20261116-115258-unl-sel7) [V]. Instead the composer gives the four banks Doc's pictures as
+  placeholders, and the APT movie loader (`sub_001810B0` entry) loads any picture named after a bound bank under
+  its fighter's ID: `l_ML_124_2p -> l_ML_1043_2p`, `p_ML_125_2p -> p_ML_1044_2p` (loading screen), `t_MS_124_2p ->
+  t_MS_1043_2p`, `l_MS_125_2p -> l_MS_1029_2p` (results) [V, 20261116-120452-unl-sel7]. The fight HUD shows the
+  record's display name, the summary its `fighter=` name; intro and win cameras follow the record's model [V].
 * **Select grid**: the bank rows are hidden; after the place fighters a **shelf** of up to 30 logical fighters
   (picked this session first, then by ID) and a **MORE** cell (ID 999999) that opens the **community window**
   (`community_ui.inc`: 12 per page, d-pad, LB/RB pages, A takes, B keeps the default) for the slot that picked it.
