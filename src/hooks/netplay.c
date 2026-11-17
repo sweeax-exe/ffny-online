@@ -6916,7 +6916,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
              * 30 s; a player waiting there for this mode is met (at most three moves). The search time
              * runs from the first wait alone and is kept across moves. */
             if (!listed && !strcmp(mode, "quick") && r.in_room && r.phase == 0 && r.player_count < 2 &&
-                !NETPLAY_IS_HILL(r.settings.mode) && !netservers_moving() && moves < 3) {
+                !NETPLAY_IS_HILL(r.settings.mode) && !netservers_moving() && moves < 6) {
                 int waiting = 0, ping = -1, to, search_s, alone_s;
                 unsigned scope = 0;
                 ULONGLONG now = GetTickCount64();

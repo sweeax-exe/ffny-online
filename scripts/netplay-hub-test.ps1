@@ -44,6 +44,8 @@
 .PARAMETER SaRelayPort  build 91: with -NaRelayPort, a fourth local relay on this port plays "South America"
                     (relay -relay-name sa, RECOMP_NETPLAY_SERVER_SA); 0 (default): none (127.0.0.1:9).
 .PARAMETER SaLagMs  the same as -EuLagMs for "South America".
+.PARAMETER PingSum  every local relay lists its quick rooms' pings (relay -ping-sum): build 91's global quick-match
+                    pool (netservers_pool) needs them; without, the games fall back to the age rule.
 .PARAMETER Server   with -NaRelayPort: every copy's server choice, auto (default), eu, na, west or all (build 31
                     "both", which still works: the rooms of every relay). Quick Match searches the copy's relay,
                     then (auto, all) the other US relay from 10 s and every relay from 30 s (build 38).
@@ -72,7 +74,7 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
       [ValidateSet('online', 'online1', 'online3', 'online5', 'online8', 'online-rematch')][string]$Route = 'online', [int[]]$Fighters = @(55, 22, 9, 31),
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
-      [string]$DataPrefix = '', [int]$NaRelayPort = 0, [int]$WestRelayPort = 0, [int]$SaRelayPort = 0, [int]$SaLagMs = 0,
+      [string]$DataPrefix = '', [int]$NaRelayPort = 0, [int]$WestRelayPort = 0, [int]$SaRelayPort = 0, [int]$SaLagMs = 0, [switch]$PingSum,
       [ValidateSet('auto', 'eu', 'na', 'sg', 'sa', 'all', 'both')][string]$Server = 'auto',
       [int]$EuLagMs = 0, [int]$NaLagMs = 0, [int]$WestLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na', 'sg', 'sa')][string]$SwitchTo = '',
       [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'sg', 'sa', 'all', 'both')][string[]]$Servers = @(),
@@ -103,6 +105,7 @@ if ($ExtraEnv -match '^RECOMP_ROLLBACK=on') { $relayArgs += '-rollback' }
 if ($Created) { $relayArgs += '-created' }
 if ($NaRelayPort -and $EuLagMs) { $relayArgs += @('-test-lag', "$($EuLagMs)ms") }
 if ($Venues) { $relayArgs += @('-test-venues', $Venues) }
+if ($PingSum) { $relayArgs += '-ping-sum' }
 $env:HARNESS_SUMMARY_PRESSES = $SummaryPresses
 $env:HARNESS_FIGHT_SECS = "$FightSecs"
 # The local relay is built when a Go source is newer than it (an Oct 28 relay once tested Nov 1 rooms).
@@ -130,6 +133,7 @@ if ($NaRelayPort) {
     $naArgs = @('-listen', "127.0.0.1:$NaRelayPort", '-log-interval', '30s')
     if ($NaLagMs) { $naArgs += @('-test-lag', "$($NaLagMs)ms") }
     if ($Venues) { $naArgs += @('-test-venues', $Venues) }
+    if ($PingSum) { $naArgs += '-ping-sum' }
     $relayNa = Start-Process (Join-Path $relayDir 'dist\relay.exe') -ArgumentList $naArgs `
                -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay-na.err" -RedirectStandardOutput "$logs\relay-na.out"
 }
@@ -146,6 +150,7 @@ if ($NaRelayPort -and $SaRelayPort) {
     $saArgs = @('-listen', "127.0.0.1:$SaRelayPort", '-log-interval', '30s', '-relay-name', 'sa')
     if ($SaLagMs) { $saArgs += @('-test-lag', "$($SaLagMs)ms") }
     if ($Venues) { $saArgs += @('-test-venues', $Venues) }
+    if ($PingSum) { $saArgs += '-ping-sum' }
     $relaySa = Start-Process (Join-Path $relayDir 'dist\relay.exe') -ArgumentList $saArgs `
                -PassThru -WindowStyle Hidden -RedirectStandardError "$logs\relay-sa.err" -RedirectStandardOutput "$logs\relay-sa.out"
 }

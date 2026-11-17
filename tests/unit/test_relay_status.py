@@ -78,16 +78,16 @@ def test_room_ping_payload_is_its_own_type():
 def test_relays_setting_and_test_switches():
     # build 91: one table (netplay_servers_rules.c) names the relays, their fallback addresses and test switches
     for row in ('"play.defjam.online:27777", "49.12.78.32", "RECOMP_NETPLAY_SERVER_EU"',
-                '"nj.defjam.online:27777", NETSERVER_NJ_FALLBACK_IP, "RECOMP_NETPLAY_SERVER_NA"',
-                '"na2.defjam.online:27777", NETSERVER_NA2_FALLBACK_IP,',
-                '"sg2.defjam.online:27777", NETSERVER_SG2_FALLBACK_IP, "RECOMP_NETPLAY_SERVER_SG"',
+                '"nj.defjam.online:27777", "208.167.239.167", "RECOMP_NETPLAY_SERVER_NA"',
+                '"na2.defjam.online:27777", "140.82.31.133",',
+                '"sg2.defjam.online:27777", "139.180.129.88", "RECOMP_NETPLAY_SERVER_SG"',
                 '"sa.defjam.online:27777", "216.238.122.210", "RECOMP_NETPLAY_SERVER_SA"'):
         assert row in RULES_C, row
     assert 'netservers_def(i)' in SERVERS_C
     # the session's own DNS fallback uses the same table
     assert 'netservers_known_ip(host)' in NETPLAY_C
     # [online] server defaults to auto, and RECOMP_NETPLAY_SERVER still overrides it
-    m = re.search(r'\{ "online", "server", RECOMP_SETTING_STRING, .*?"RECOMP_NETPLAY_SERVER".*?\}', SETTINGS_C, re.S)
+    m = re.search(r'\{ "online", "server_debug", RECOMP_SETTING_STRING, .*?"RECOMP_NETPLAY_SERVER".*?\}', SETTINGS_C, re.S)
     assert m and m.group(0).rstrip('} ').endswith('"auto"')
     assert 'RECOMP_TEST_SERVER_SWITCH' in NETPLAY_C
     for param in ('NaRelayPort', 'WestRelayPort', 'SaRelayPort', 'Server', 'EuLagMs', 'NaLagMs', 'WestLagMs', 'SaLagMs',

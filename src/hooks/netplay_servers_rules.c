@@ -9,30 +9,37 @@
 #include <string.h>
 
 /* The relays, in the wire's order (netplay_servers_rules.h): a new relay is a new last row. */
-/* Build 91: US East (New Jersey), Miami and Asia (Singapore) run on new machines with new host names. Their
- * fallback addresses (used only when the name does not resolve) are not known yet: fill in each one here once the
- * machine is rented. "" = no fallback (the name must resolve). */
-#define NETSERVER_NJ_FALLBACK_IP  ""    /* PLACEHOLDER: nj.defjam.online's IPv4 address (US East, New Jersey) */
-#define NETSERVER_NA2_FALLBACK_IP ""    /* PLACEHOLDER: na2.defjam.online's IPv4 address (Miami) */
-#define NETSERVER_SG2_FALLBACK_IP ""    /* PLACEHOLDER: sg2.defjam.online's IPv4 address (Singapore) */
-
+/* Build 91: US East (New Jersey), Miami and Asia (Singapore) run on new machines with new host names. The fallback
+ * address is used only when the name does not resolve ("" = none: the name must resolve).
+ *
+ * Adding a relay (e.g. Dallas, "dfw"): one row at the END of this table (never in between: the index is the wire's
+ * order), NETSERVER_COUNT + 1 and a NETSERVER_<ID> index in netplay_servers_rules.h, and the same name at the end of
+ * the server's RelayNames (relay/relays.go). Choices, the picker, auto/all, quick-match widening, the pings trailers
+ * and the chat regions follow the table; tests set RECOMP_NETPLAY_SERVER_<ID> (tools/defjam-mcp/djlib/machine.py,
+ * scripts/test-*-launcher.py, scripts/netplay-hub-test.ps1). */
 static const NetRelayDef k_relays[] = {
     { "eu", "Europe", "EU", "play.defjam.online:27777", "49.12.78.32", "RECOMP_NETPLAY_SERVER_EU", "eu",
       "europe" },
     /* build 38: the North American relay of builds 30..37 is US East; its id stays "na". Build 91: New Jersey on
      * nj (Ashburn's na.defjam.online closes with build 90; its saved host name still means "na") */
-    { "na", "US East", "US EAST", "nj.defjam.online:27777", NETSERVER_NJ_FALLBACK_IP, "RECOMP_NETPLAY_SERVER_NA",
+    { "na", "US East", "US EAST", "nj.defjam.online:27777", "208.167.239.167", "RECOMP_NETPLAY_SERVER_NA",
       "us-east", "north_america|north america|northamerica|us|east|us_east|us east|useast|new jersey|newjersey|nj|"
       "na.defjam.online|na.defjam.online:27777" },
     /* build 89: Singapore takes US West's slot; build 91: a new machine, sg2 */
-    { "sg", "Asia (Singapore)", "ASIA", "sg2.defjam.online:27777", NETSERVER_SG2_FALLBACK_IP, "RECOMP_NETPLAY_SERVER_SG",
+    { "sg", "Asia (Singapore)", "ASIA", "sg2.defjam.online:27777", "139.180.129.88", "RECOMP_NETPLAY_SERVER_SG",
       "sg", "asia|singapore|sg.defjam.online|sg.defjam.online:27777" },
     /* build 91 */
-    { "sa", "South America", "S. AMERICA", "sa.defjam.online:27777", "216.238.122.210", "RECOMP_NETPLAY_SERVER_SA",
+    { "sa", "South America", "S.AMERICA", "sa.defjam.online:27777", "216.238.122.210", "RECOMP_NETPLAY_SERVER_SA",
       "sa", "southamerica|south america|south_america|south-america|brazil|brasil|saopaulo|sao paulo|sao_paulo" },
     /* build 91: US South and the Caribbean */
-    { "mia", "US South (Miami)", "MIAMI", "na2.defjam.online:27777", NETSERVER_NA2_FALLBACK_IP,
+    { "mia", "US South (Miami)", "MIAMI", "na2.defjam.online:27777", "140.82.31.133",
       "RECOMP_NETPLAY_SERVER_MIA", "mia", "miami|us south|us_south|ussouth|caribbean|florida" },
+    /* build 91: Dallas and Los Angeles (US West again; a saved "west" of builds 38..88 means it) */
+    { "dfw", "US Central (Dallas)", "DALLAS", "dfw.defjam.online:27777", "45.76.237.224",
+      "RECOMP_NETPLAY_SERVER_DFW", "dfw", "dallas|texas|us central|us_central|uscentral|central" },
+    { "lax", "US West (Los Angeles)", "LA", "lax.defjam.online:27777", "45.32.95.226",
+      "RECOMP_NETPLAY_SERVER_LAX", "lax", "los angeles|losangeles|la|california|west|us_west|us west|uswest|"
+      "west.defjam.online|west.defjam.online:27777" },
 };
 
 typedef char netservers_table_matches_count[sizeof(k_relays) / sizeof(k_relays[0]) == NETSERVER_COUNT &&
@@ -110,9 +117,7 @@ enum NetServerChoice netservers_parse_choice(const char *s)
         { "", NETCHOICE_AUTO }, { "auto", NETCHOICE_AUTO }, { "automatic", NETCHOICE_AUTO },
         /* the first server's name, saved by every build before 30: now the nearest */
         { "play.defjam.online", NETCHOICE_AUTO }, { "play.defjam.online:27777", NETCHOICE_AUTO },
-        /* US West (builds 38..88) closed in build 89: the saved choice falls back to Automatic */
-        { "west", NETCHOICE_AUTO }, { "us_west", NETCHOICE_AUTO }, { "us west", NETCHOICE_AUTO },
-        { "west.defjam.online", NETCHOICE_AUTO }, { "west.defjam.online:27777", NETCHOICE_AUTO },
+        /* US West (builds 38..88, Hillsboro) closed in build 89; build 91's Los Angeles takes its words (lax) */
         /* "both" (builds 31..37) is every relay now */
         { "all", NETCHOICE_ALL }, { "all servers", NETCHOICE_ALL }, { "all_servers", NETCHOICE_ALL },
         { "both", NETCHOICE_ALL }, { "both servers", NETCHOICE_ALL }, { "both_servers", NETCHOICE_ALL },
@@ -197,14 +202,11 @@ int netservers_partner(int relay)
 unsigned netservers_scope(enum NetServerChoice c, int cur, int search_s, unsigned up)
 {
     unsigned mask;
-    int p;
+    (void)search_s;
     if (c == NETCHOICE_CUSTOM || cur < 0 || cur >= NETSERVER_COUNT) return 0;
     mask = 1u << cur;
     up &= (1u << NETSERVER_COUNT) - 1;
-    if (search_s >= QUICK_ALL_S) return mask | up;
-    p = netservers_partner(cur);
-    if (netservers_choice_relay(c) < 0 && search_s >= QUICK_NEAR_S && p >= 0 && (up >> p & 1u)) mask |= 1u << p;
-    return mask;
+    return mask | up;   /* build 91: one global pool from the first second, whatever the choice */
 }
 
 int netservers_sum_move(int my_relay, int my_age, const int *mine, int their_relay, int their_age, const int *theirs)
@@ -227,6 +229,63 @@ int netservers_sum_move(int my_relay, int my_age, const int *mine, int their_rel
     if (here < there || (here == there && here_max < there_max))
         return their_age >= QUICK_ALL_S + QUICK_SUM_WAIT_S && my_age >= QUICK_SUM_WAIT_S ? -1 : 0;
     return -1;
+}
+
+int netservers_pool_limit(int age_s)
+{
+    return age_s >= 40 ? 0 : age_s >= 20 ? 250 : age_s >= 10 ? 180 : 120;
+}
+
+int netservers_pair_relay(const NetQuickSeat *a, const NetQuickSeat *b, int limit, int *sum, int *worse)
+{
+    int r, best = -1, best_sum = 0, best_worse = 0;
+    for (r = 0; r < NETSERVER_COUNT; r++) {
+        int pa = a->pings[r], pb = b->pings[r], s, w;
+        if (pa <= 0 || pb <= 0) continue;
+        s = pa + pb;
+        w = pa > pb ? pa : pb;
+        if (limit > 0 && w > limit) continue;
+        if (best < 0 || s < best_sum || (s == best_sum && w < best_worse)) { best = r; best_sum = s; best_worse = w; }
+    }
+    if (sum) *sum = best_sum;
+    if (worse) *worse = best_worse;
+    return best;
+}
+
+/* the pair key's codes, the smaller first */
+static void pair_codes(const NetQuickSeat *a, const NetQuickSeat *b, const char **lo, const char **hi)
+{
+    if (strcmp(a->code, b->code) <= 0) { *lo = a->code; *hi = b->code; } else { *lo = b->code; *hi = a->code; }
+}
+
+void netservers_pool(const NetQuickSeat *seats, int n, int *partner, int *relay)
+{
+    int i, j;
+    if (n > QUICK_POOL_MAX) n = QUICK_POOL_MAX;
+    for (i = 0; i < n; i++) partner[i] = relay[i] = -1;
+    for (;;) {      /* the best free pair, then again: at most n / 2 rounds of n * n */
+        int bi = -1, bj = -1, br = -1, bs = 0, bw = 0;
+        const char *blo = "", *bhi = "";
+        for (i = 0; i < n; i++) {
+            if (partner[i] >= 0) continue;
+            for (j = i + 1; j < n; j++) {
+                int s, w, r, age;
+                const char *lo, *hi;
+                if (partner[j] >= 0 || seats[i].relay == seats[j].relay) continue;
+                age = seats[i].age > seats[j].age ? seats[i].age : seats[j].age;
+                r = netservers_pair_relay(&seats[i], &seats[j], netservers_pool_limit(age), &s, &w);
+                if (r < 0) continue;
+                pair_codes(&seats[i], &seats[j], &lo, &hi);
+                if (bi < 0 || s < bs || (s == bs && (w < bw || (w == bw && (strcmp(lo, blo) < 0 ||
+                    (!strcmp(lo, blo) && strcmp(hi, bhi) < 0)))))) {
+                    bi = i; bj = j; br = r; bs = s; bw = w; blo = lo; bhi = hi;
+                }
+            }
+        }
+        if (bi < 0) return;
+        partner[bi] = bj; partner[bj] = bi;
+        relay[bi] = relay[bj] = br;
+    }
 }
 
 int netservers_should_move(int my_relay, int my_age, int their_relay, int their_age)

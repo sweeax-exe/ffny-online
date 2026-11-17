@@ -74,11 +74,13 @@ def test_setting_and_launcher_offer_all():
     # "all" is saved; the "both" of builds 31..37 still reads as all
     assert '{ "all", NETCHOICE_ALL }' in RULES_C and '{ "both", NETCHOICE_ALL }' in RULES_C
     assert 'c == NETCHOICE_ALL ? "all"' in RULES_C
-    m = re.search(r'\{ "online", "server", RECOMP_SETTING_STRING, .*?\}', SETTINGS_C, re.S)
-    assert m and 'all' in m.group(0) and 'sg' in m.group(0) and 'sa (South America' in m.group(0)
+    # build 91: no server choice for players; [online] server_debug is the hidden test override
+    m = re.search(r'\{ "online", "server_debug", RECOMP_SETTING_STRING, .*?\}', SETTINGS_C, re.S)
+    assert m and 'mia' in m.group(0) and 'lax' in m.group(0) and 'Tests and debugging only' in m.group(0)
+    assert '"server"' not in re.sub(r'//.*', '', PC_UI.split('static void page_basics')[1].split('static void ')[0])
     assert 'netservers_set_choice(NETCHOICE_ALL)' in PC_UI and 'netservers_set_choice(NETCHOICE_ALL)' in SCREEN
     # the picker explains All in one line
-    assert 'The rooms of every server (Europe, the US, Asia, South America) in one list; joining one moves you there. ' in SCREEN
+    assert 'The rooms of every server in one list; joining one moves you there. ' in SCREEN
 
 
 def test_staged_search_rule_and_gallery():

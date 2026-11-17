@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 DRIVER = r'''
 #include <stdio.h>
+#include <string.h>
 #include "netplay_servers_rules.h"
 
 static const char *const k_texts[] = {
@@ -141,12 +142,76 @@ int main(void)
         }
         printf("sum-null|%d\n", netservers_sum_move(0, 0, NULL, 1, 0, cases[0][1]));
     }
+    /* build 91: the global pool. Six players on six relays, all joining at second 0; pings by relay
+     * (eu, na, sg, sa, mia, dfw, lax). Every second the unpaired ones are pooled; a pair leaves the pool. */
+    {
+        static const int home[6] = { 0, 1, 2, 3, 4, 5 };
+        static const int pings[6][NETSERVER_COUNT] = {
+            { 20, 95, 170, 210, 120, 130, 160 },    /* Germany */
+            { 90, 10, 230, 130, 30, 40, 70 },       /* New York */
+            { 170, 230, 8, 330, 240, 190, 170 },    /* Singapore */
+            { 200, 120, 330, 15, 110, 140, 170 },   /* Brazil */
+            { 110, 30, 240, 110, 8, 30, 60 },       /* Miami */
+            { 130, 40, 190, 140, 30, 8, 30 },       /* Texas */
+        };
+        int done[6] = { 0 }, t, i2, j2;
+        for (t = 0; t <= 60; t++) {
+            NetQuickSeat seats[6];
+            int idx[6], n = 0, partner[6], where[6];
+            for (i2 = 0; i2 < 6; i2++) {
+                if (done[i2]) continue;
+                memset(&seats[n], 0, sizeof(seats[n]));
+                seats[n].relay = home[i2];
+                seats[n].age = t;
+                memcpy(seats[n].pings, pings[i2], sizeof(seats[n].pings));
+                snprintf(seats[n].code, sizeof(seats[n].code), "ROOM%d", i2);
+                idx[n++] = i2;
+            }
+            netservers_pool(seats, n, partner, where);
+            for (j2 = 0; j2 < n; j2++)
+                if (partner[j2] >= 0 && idx[j2] < idx[partner[j2]]) {
+                    printf("sim|%d|%d|%d|%d\n", t, idx[j2], idx[partner[j2]], where[j2]);
+                    done[idx[j2]] = done[idx[partner[j2]]] = 1;
+                }
+        }
+    }
+    {   /* two players in Texas, one on Los Angeles and one on Miami: they play on Dallas; one of them with a
+         * Brazilian: Miami, the smallest sum within the limit; the order of the seats
+         * does not matter (both games build the list in their own order) */
+        NetQuickSeat sa, sb, sc, list1[3], list2[3];
+        int partner[3], where[3], sum = 0, worse = 0, r;
+        memset(&sa, 0, sizeof(sa)); memset(&sb, 0, sizeof(sb)); memset(&sc, 0, sizeof(sc));
+        sa.relay = NETSERVER_LAX; sb.relay = NETSERVER_MIA; sc.relay = NETSERVER_SA;
+        {
+            int pa[NETSERVER_COUNT] = { 130, 45, 190, 140, 32, 9, 31 }, pb[NETSERVER_COUNT] = { 128, 41, 195, 139, 29, 7, 35 };
+            int pc[NETSERVER_COUNT] = { 200, 120, 330, 15, 110, 140, 170 };
+            memcpy(sa.pings, pa, sizeof(pa)); memcpy(sb.pings, pb, sizeof(pb)); memcpy(sc.pings, pc, sizeof(pc));
+        }
+        snprintf(sa.code, sizeof(sa.code), "AAAAAA"); snprintf(sb.code, sizeof(sb.code), "BBBBBB");
+        snprintf(sc.code, sizeof(sc.code), "CCCCCC");
+        r = netservers_pair_relay(&sa, &sb, 120, &sum, &worse);
+        printf("near|%d|%d|%d\n", r, sum, worse);
+        printf("far|%d|%d\n", netservers_pair_relay(&sa, &sc, 120, NULL, NULL), netservers_pair_relay(&sa, &sc, 250, NULL, NULL));
+        printf("limit|%d|%d|%d|%d|%d\n", netservers_pool_limit(0), netservers_pool_limit(10), netservers_pool_limit(20),
+               netservers_pool_limit(39), netservers_pool_limit(40));
+        list1[0] = sa; list1[1] = sb; list1[2] = sc;
+        list2[0] = sc; list2[1] = sb; list2[2] = sa;
+        netservers_pool(list1, 3, partner, where);
+        printf("order1|%d|%d|%d\n", partner[0], partner[1], where[0]);
+        netservers_pool(list2, 3, partner, where);
+        printf("order2|%d|%d|%d\n", partner[2], partner[1], where[2]);
+        /* two players on one relay are never paired by the pool (the relay joins them) */
+        sb.relay = NETSERVER_LAX;
+        list1[1] = sb;
+        netservers_pool(list1, 2, partner, where);
+        printf("same|%d|%d\n", partner[0], partner[1]);
+    }
     return 0;
 }
 '''
 
-EU, NA, WEST, SA, MIA = 0, 1, 2, 3, 4
-AUTO, CH_EU, CH_NA, CUSTOM, ALL, CH_WEST, CH_SA, CH_MIA = 0, 1, 2, 3, 4, 5, 6, 7
+EU, NA, WEST, SA, MIA, DFW, LAX = 0, 1, 2, 3, 4, 5, 6
+AUTO, CH_EU, CH_NA, CUSTOM, ALL, CH_WEST, CH_SA, CH_MIA, CH_DFW, CH_LAX = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 
 
 @pytest.fixture(scope='module')
@@ -182,9 +247,9 @@ def test_old_and_new_setting_values(rows):
         'na.defjam.online': (CH_NA, 'na', NA), 'na.defjam.online:27777': (CH_NA, 'na', NA), 'US East': (CH_NA, 'na', NA),
         'sg': (CH_WEST, 'sg', WEST), 'SG': (CH_WEST, 'sg', WEST), 'singapore': (CH_WEST, 'sg', WEST),
         'sg.defjam.online': (CH_WEST, 'sg', WEST), 'sg.defjam.online:27777': (CH_WEST, 'sg', WEST),
-        # US West closed in build 89: a saved choice falls back to Automatic
-        'west': (AUTO, 'auto', -1), 'West': (AUTO, 'auto', -1), 'us_west': (AUTO, 'auto', -1),
-        'west.defjam.online': (AUTO, 'auto', -1), 'west.defjam.online:27777': (AUTO, 'auto', -1),
+        # US West (Hillsboro) closed in build 89; build 91's Los Angeles takes its words
+        'west': (CH_LAX, 'lax', LAX), 'West': (CH_LAX, 'lax', LAX), 'us_west': (CH_LAX, 'lax', LAX),
+        'west.defjam.online': (CH_LAX, 'lax', LAX), 'west.defjam.online:27777': (CH_LAX, 'lax', LAX),
         # build 91: South America by its id, its words and its host name
         'sa': (CH_SA, 'sa', SA), 'SA': (CH_SA, 'sa', SA), 'southamerica': (CH_SA, 'sa', SA),
         'South America': (CH_SA, 'sa', SA), 'brazil': (CH_SA, 'sa', SA), 'Brasil': (CH_SA, 'sa', SA),
@@ -205,20 +270,24 @@ def test_old_and_new_setting_values(rows):
 
 def test_relays_and_partners(rows):
     relay = {int(r[0]): (int(r[1]), int(r[2])) for r in by(rows, 'relay')}
-    assert relay == {EU: (CH_EU, -1), NA: (CH_NA, -1), WEST: (CH_WEST, -1), SA: (CH_SA, -1), MIA: (CH_MIA, -1)}
+    assert relay == {EU: (CH_EU, -1), NA: (CH_NA, -1), WEST: (CH_WEST, -1), SA: (CH_SA, -1), MIA: (CH_MIA, -1),
+                     DFW: (CH_DFW, -1), LAX: (CH_LAX, -1)}
 
 
 def test_the_relay_table(rows):
     """Build 91: one table names every relay, in the wire's order; ids, chat regions and host names find them."""
     defs = {int(r[0]): r[1:] for r in by(rows, 'def')}
-    assert [defs[i][0] for i in sorted(defs)] == ['eu', 'na', 'sg', 'sa', 'mia']
-    assert defs[SA][:7] == ['sa', 'South America', 'S. AMERICA', 'sa.defjam.online:27777', '216.238.122.210',
+    assert [defs[i][0] for i in sorted(defs)] == ['eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax']
+    assert defs[DFW][2:5] == ['DALLAS', 'dfw.defjam.online:27777', '45.76.237.224']
+    assert defs[LAX][2:5] == ['LA', 'lax.defjam.online:27777', '45.32.95.226']
+    assert defs[SA][:7] == ['sa', 'South America', 'S.AMERICA', 'sa.defjam.online:27777', '216.238.122.210',
                             'RECOMP_NETPLAY_SERVER_SA', 'sa']
     assert defs[WEST][6] == 'sg' and defs[NA][6] == 'us-east' and defs[EU][3] == 'play.defjam.online:27777'
-    # build 91: the new machines; their fallback addresses are placeholders until they are rented
-    assert defs[NA][1:5] == ['US East', 'US EAST', 'nj.defjam.online:27777', '']
-    assert defs[MIA][:7] == ['mia', 'US South (Miami)', 'MIAMI', 'na2.defjam.online:27777', '', 'RECOMP_NETPLAY_SERVER_MIA', 'mia']
-    assert defs[WEST][3:5] == ['sg2.defjam.online:27777', '']
+    # build 91: the new machines and their fallback addresses
+    assert defs[NA][1:5] == ['US East', 'US EAST', 'nj.defjam.online:27777', '208.167.239.167']
+    assert defs[MIA][:7] == ['mia', 'US South (Miami)', 'MIAMI', 'na2.defjam.online:27777', '140.82.31.133',
+                             'RECOMP_NETPLAY_SERVER_MIA', 'mia']
+    assert defs[WEST][3:5] == ['sg2.defjam.online:27777', '139.180.129.88']
     for i, d in defs.items():
         assert (int(d[7]), int(d[8])) == (i, i)     # by id, by chat region
         assert d[9] == '216.238.122.210'           # the fallback address of a host name, any case
@@ -228,8 +297,8 @@ def test_the_relay_table(rows):
 
 def test_pings_trailer(rows):
     """Build 91 (CAPS bit 28): the pings beyond the first three relays as a count and u16 each."""
-    assert by(rows, 'more') == [['5', '2', '186', '0']]
-    assert by(rows, 'more-cap') == [['5', '65535']] and by(rows, 'more-neg') == [['5', '0']]
+    assert by(rows, 'more') == [['9', '4', '186', '0']]
+    assert by(rows, 'more-cap') == [['9', '65535']] and by(rows, 'more-neg') == [['9', '0']]
     assert by(rows, 'more-three') == [['1', '0']]
     # a relay that knows more relays than this build: the known one is read, the rest skipped
     assert by(rows, 'more-read') == [['13', '186', '77', '0', '0']]
@@ -254,23 +323,44 @@ def bits(*relays):
     return sum(1 << r for r in relays)
 
 
-def test_search_widens_on_time(rows):
-    for choice in (AUTO, ALL):
-        # no relay has a partner (build 89): alone until 30 s, then every relay
-        for cur in (EU, NA, WEST):
-            assert [scope_of(rows, choice, 7, cur, s) for s in (0, 10, 29, 30)] == [bits(cur)] * 3 + [bits(EU, NA, WEST)]
-        assert scope_of(rows, choice, 3, NA, 30) == bits(EU, NA)
-        # build 91: South America answering joins every search from 30 s, its own player's too
-        assert scope_of(rows, choice, 15, EU, 30) == bits(EU, NA, WEST, SA)
-        assert [scope_of(rows, choice, 15, SA, s) for s in (0, 29, 30)] == [bits(SA)] * 2 + [bits(EU, NA, WEST, SA)]
-    # a fixed choice stays on its relay for 30 s, then every relay
-    for choice, relay in ((CH_EU, EU), (CH_NA, NA), (CH_WEST, WEST), (CH_SA, SA), (CH_MIA, MIA)):
-        assert [scope_of(rows, choice, 7, relay, s) for s in (0, 10, 29)] == [bits(relay)] * 3
-        assert scope_of(rows, choice, 7, relay, 30) == bits(EU, NA, WEST) | bits(relay)
+def test_search_is_global_from_the_first_second(rows):
+    """Build 91 (owner): the relay is where a match runs, never whom one meets: every answering relay from 0 s,
+    whatever the choice."""
+    for choice in (AUTO, ALL, CH_EU, CH_NA, CH_WEST, CH_SA, CH_MIA):
+        for cur in (EU, NA, WEST, SA):
+            for s in (0, 9, 10, 29, 30, 300):
+                assert scope_of(rows, choice, 7, cur, s) == bits(EU, NA, WEST) | bits(cur)
+                assert scope_of(rows, choice, 15, cur, s) == bits(EU, NA, WEST, SA)
     # a custom address, or no relay: no search beyond the room
     for s in (0, 30, 300):
         assert scope_of(rows, CUSTOM, 7, NA, s) == 0
         assert scope_of(rows, AUTO, 7, -1, s) == 0
+
+
+def test_pool_matches_everyone_spread_over_six_relays(rows):
+    """Six players on six different relays (Germany, New York, Singapore, Brazil, Miami, Texas), all searching from
+    0 s: everyone is paired within the widening window (by 40 s any ping is allowed), nobody twice, and never on
+    a relay with a worse ping above the limit of the moment."""
+    sim = [tuple(map(int, r)) for r in by(rows, 'sim')]
+    paired = [p for _, a, b, _ in sim for p in (a, b)]
+    assert sorted(paired) == list(range(6)), sim
+    assert all(t <= 40 for t, _, _, _ in sim), sim
+    # the Americas pair at once near home; New York and Miami on a US relay, not in Europe
+    first = {(a, b): (t, r) for t, a, b, r in sim}
+    assert any(t == 0 for t, _, _, _ in sim)
+    for (a, b), (t, r) in first.items():
+        assert r in (EU, NA, WEST, SA, MIA, DFW, LAX)
+
+
+def test_pool_near_relay_and_same_answer_in_any_order(rows):
+    """Two players in Texas, one on Los Angeles and one on Miami, play on Dallas (a third relay, the smallest
+    ping sum); with a Brazilian, Miami; both games, listing the seats in their own order, agree."""
+    assert by(rows, 'near') == [[str(DFW), '16', '9']]
+    assert by(rows, 'far') == [[str(MIA), str(MIA)]]   # Texas and Brazil: Miami (110 ms worse, the smallest sum)
+    assert by(rows, 'limit') == [['120', '180', '250', '250', '0']]
+    assert by(rows, 'order1') == [['1', '0', str(DFW)]]
+    assert by(rows, 'order2') == [['1', '2', str(DFW)]]
+    assert by(rows, 'same') == [['-1', '-1']]
 
 
 def test_exactly_one_of_two_waiting_players_moves(rows):

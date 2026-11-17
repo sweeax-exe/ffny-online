@@ -1389,7 +1389,9 @@ int connected_server()
     return i >= 0 ? i : -2;
 }
 enum NetServerChoice server_choice() { return gallery_on() ? G.choice : netservers_choice(); }
-bool all_servers() { return server_choice() == NETCHOICE_ALL; }
+// build 91: every relay's rooms and players whatever the choice (the relay is where a match runs, not whom one
+// meets); only a custom address shows its own
+bool all_servers() { return server_choice() != NETCHOICE_CUSTOM; }
 // The room list FIND A ROOM shows: the relay the hub is on, and with All servers the others' too
 // (netservers_rooms: the lowest ping first).
 int list_rooms(NetServerRoom *out, int max)
@@ -1402,7 +1404,7 @@ int list_rooms(NetServerRoom *out, int max)
     int n = 0;
     for (const NetRoomInfo &r : G.rooms)
         if (n < max) { out[n].room = r; out[n].server = G.server_cur; out[n].ping_ms = G.servers[G.server_cur].ping_ms; out[n].age_s = -1; n++; }
-    if (G.choice == NETCHOICE_ALL)
+    if (G.choice != NETCHOICE_CUSTOM)
         for (const NetServerRoom &r : G.other_rooms) if (n < max) out[n++] = r;
     return n;
 }
@@ -1859,6 +1861,12 @@ bool online_count(ImDrawList *dl, const Frame &f, bool button = false)
     if (cur >= 0) {
         ping = s[cur].state == NETSERVER_UP ? s[cur].ping_ms : -1;
         if (online < 0 && s[cur].state == NETSERVER_UP) { online = s[cur].online; rooms = s[cur].rooms; }
+        if (all_servers()) {    // build 91: everyone online on every relay, not this relay's alone
+            int total = 0;
+            for (int i = 0; i < NETSERVER_COUNT; i++)
+                if (i != cur && s[i].state == NETSERVER_UP && s[i].online > 0) total += s[i].online;
+            if (online >= 0) online += total;
+        }
         std::string where = upper(s[cur].name);
         if (online >= 0)
             snprintf(line, sizeof(line), "%s  %s  %d ONLINE", where.c_str(),
@@ -1872,9 +1880,9 @@ bool online_count(ImDrawList *dl, const Frame &f, bool button = false)
         return false;
     }
     float size = 12, y = g_game_door ? 428 : 450, w = text_width(f, g_title, size, line);
-    // All servers: the label says so, in front of the relay the hub is on now
-    const char *tag = all_servers() ? "ALL SERVERS" : "SERVER";
-    bool tagged = button || all_servers();
+    // build 91: no label (every server is one pool); a custom address (tests) says SERVER
+    const char *tag = "SERVER";
+    bool tagged = button || !all_servers();
     float label = tagged ? text_width(f, g_title, 10, tag) + 8 : 0;
     float bars = cur >= 0 ? 24 : 0, glyph = button ? 22 : 0, content = w + bars + glyph + label + 16;
     // On our glass door the chip is as wide as the door above it, its content centred (owner, 2026-11-03);
@@ -1972,7 +1980,10 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
     // five rows (build 38: three relays) sit closer, so the panel still ends above the hints; more relays (build
     // 91: four) share the same height, each row a little flatter (sc: the row's scale)
     const int rows = 2 + NETSERVER_COUNT, ALL_ROW = 1 + NETSERVER_COUNT;
-    const float pitch = rows <= 5 ? 58.0f : floorf(290.0f / (float)rows), sc = pitch / 58.0f, row_h = 52 * sc;
+    const float pitch = rows <= 5 ? 58.0f : floorf(290.0f / (float)rows), sc = pitch / 58.0f, row_h = pitch - 4;
+    // compact rows (build 91, up to NETSERVER_MAX relays): a smaller title, one line under it for the tags and the text
+    const bool compact = sc < 0.85f;
+    const float title_px = compact ? std::min(21.0f, pitch * 0.5f) : 21.0f, line_y = compact ? title_px + 1 : 0;
     int cur = connected_server();
     enum NetServerChoice choice = server_choice();
     int fixed = netservers_choice_relay(choice);
@@ -1995,7 +2006,7 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
         bool all = k == ALL_ROW;
         const NetServerInfo *si = k && !all ? &s[k - 1] : nullptr;
         const char *title = k == 0 ? "AUTOMATIC" : all ? "ALL SERVERS" : si->name;
-        text(dl, f, g_title, 21 * std::max(sc, 0.9f), x + 14, y + 3 * sc, sel ? CREAM : with_alpha(GREY, 0.9f), upper(title).c_str(),
+        text(dl, f, g_title, title_px, x + 14, y + (compact ? 1 : 3), sel ? CREAM : with_alpha(GREY, 0.9f), upper(title).c_str(),
              LEFT, 1.5f);
         // right: the ping, large, in its colour, with its bars (OFFLINE in red for a relay that did not answer)
         char big[32] = "", sub[96] = "";
@@ -2032,41 +2043,42 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
             snprintf(sub, sizeof(sub), "CHECKING...");
         bool bars = !(shown && shown->state == NETSERVER_OFFLINE);
         float bx = x + w - (bars ? 30 : 8);
-        if (bars) ping_bars(dl, f, bx + 6, y + 6 * sc, 14 * sc, ms);
-        text(dl, f, g_title, 17 * std::max(sc, 0.9f), bx - (bars ? 4 : 0), y + 3 * sc, sel ? tone : with_alpha(tone, 0.75f), big,
-             RIGHT, 1.2f);
+        if (bars) ping_bars(dl, f, bx + 6, y + (compact ? 2 : 6), compact ? title_px - 2 : 14, ms);
+        text(dl, f, g_title, compact ? title_px * 0.85f : 17, bx - (bars ? 4 : 0), y + (compact ? 1 : 3),
+             sel ? tone : with_alpha(tone, 0.75f), big, RIGHT, 1.2f);
         // the tags: the player's choice, and where the hub is now (with All: its relay, on that relay's row). A
         // compact row (build 91: seven rows) has one line under the title: the tags first, then the text
-        const bool compact = sc < 0.85f;
-        const float tag_y = compact ? y + 21 : y + 38 * sc;
+        const float tag_y = compact ? y + line_y + 1 : y + 38;
+        const float tag_h = compact ? std::min(13.0f, row_h - line_y - 2) : 13;
         float tx = x + 16;
         if (si && cur == k - 1) {
             const char *tag = compact ? "HERE" : "YOU ARE HERE";
             float tw = text_width(f, g_title, 9, tag);
-            rect(dl, f, tx, tag_y, tw + 10, 13, IM_COL32(40, 120, 60, 230), 4);
+            rect(dl, f, tx, tag_y, tw + 10, tag_h, IM_COL32(40, 120, 60, 230), 4);
             text(dl, f, g_title, 9, tx + 5, tag_y + 1, WHITE, tag, LEFT, 0.6f);
             tx += tw + 16;
         }
         if (k == chosen_row) {
             const char *tag = compact ? "CHOSEN" : "YOUR CHOICE";
             float tw = text_width(f, g_title, 9, tag);
-            rect(dl, f, tx, tag_y, tw + 10, 13, with_alpha(RED, 0.9f), 4);
+            rect(dl, f, tx, tag_y, tw + 10, tag_h, with_alpha(RED, 0.9f), 4);
             text(dl, f, g_title, 9, tx + 5, tag_y + 1, WHITE, tag, LEFT, 0.6f);
             tx += tw + 16;
         }
         if (compact)
-            text(dl, f, g_hand, 12, tx - (tx > x + 16 ? 4 : 0), y + 20, sel ? ORANGE : with_alpha(ORANGE, 0.6f), sub, LEFT, 1.0f);
+            text(dl, f, g_hand, std::min(12.0f, row_h - line_y), tx - (tx > x + 16 ? 4 : 0), y + line_y,
+                 sel ? ORANGE : with_alpha(ORANGE, 0.6f), sub, LEFT, 1.0f);
         else
-            text(dl, f, g_hand, 13, x + 16, y + 24 * sc, sel ? ORANGE : with_alpha(ORANGE, 0.6f), sub, LEFT, 1.0f);
+            text(dl, f, g_hand, 13, x + 16, y + 24, sel ? ORANGE : with_alpha(ORANGE, 0.6f), sub, LEFT, 1.0f);
         if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
     }
     door_panel(dl, f);
     if (S.servers_sel == ALL_ROW)
         door_text(dl, f, &tex("ui/online_icon.png"), "ALL SERVERS", "YOU CHOOSE WHOM YOU PLAY",
-                  "The rooms of every server (Europe, the US, Asia, South America) in one list; joining one moves you there. "
+                  "The rooms of every server in one list; joining one moves you there. "
                   "Matches across the ocean have higher ping.");
     else
-        door_text(dl, f, &tex("ui/online_icon.png"), "SERVER", "EUROPE, THE US, ASIA OR S. AMERICA",
+        door_text(dl, f, &tex("ui/online_icon.png"), "SERVER", "SERVERS WORLDWIDE",
                   "The nearest one gives the lowest ping. When nobody is there, Quick Match looks on the other servers "
                   "too. Your account, stats and the leaderboard are the same on all.");
     if (checking) {
@@ -2156,7 +2168,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     }
 
     page_title(dl, f, "ONLINE");
-    if (online_count(dl, f, true) || pad.x) open_servers();
+    online_count(dl, f);    // build 91: no server choice; the hub is on the lowest ping, every room is listed
     // Ranked runs on the relays whose STATUS offers it (every relay reaches the central matchmaker
     // once its tunnel is up): on one that does not, the entry says so and switches over.
     int ranked_at = ranked_relay();
@@ -2840,7 +2852,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
     if (pad.y) { S.page = CODE; S.code_pos = 0; return; }
 
     page_title(dl, f, "FIND A ROOM");
-    if (all) text(dl, f, g_hand, 14, 54, 58, ORANGE, "All servers: the lowest ping first.", LEFT, 0.8f);
+    if (all) text(dl, f, g_hand, 14, 54, 58, ORANGE, "Every server: the lowest ping first.", LEFT, 0.8f);
     online_count(dl, f);
     // build 83: nobody's rooms show while many are online: most of them have other community content
     bool split = !n && content_split_shown();
@@ -2919,8 +2931,10 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         const NetRoomInfo &r = e.room;
         if (NETPLAY_IS_KOTH(r.mode)) say("King of the Hill rooms are watched from inside the hill.");
         else if (NETPLAY_IS_FFAROT(r.mode)) say("FFA rotation rooms are watched from inside the room: join the line.");
-        else if (e.server >= 0 && e.server != here) say(std::string("Watching works on this server's rooms for now: ") +
-                                                         "switch to " + sv[e.server].name + " to watch this one.", 6000);
+        else if (e.server >= 0 && e.server != here) {   // build 91: no server choice; the hub moves there first
+            if (!gallery_on()) { netservers_use(e.server); netservers_reconnect(hub_name().c_str()); }
+            say(std::string("Moving to ") + sv[e.server].name + ", where this room is: press the button again to watch.", 6000);
+        }
         else if (!gallery_on()) {
             netplay_lobby_spectate(r.code);
             say(r.phase == 2 ? "Watching... a match is on: you watch from its next fight." : "Watching...");
@@ -4682,7 +4696,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         } else if (!netservers_moving()) {
             int waiting = 0, ping = -1;
             int to = netservers_quick_move(S.last_quick, search_s, alone_s, r.code, &waiting, &ping, &scope);
-            if (to >= 0 && S.auto_moves < 3) {
+            if (to >= 0 && S.auto_moves < 6) {
                 char line[160];
                 snprintf(line, sizeof(line), "Nobody here yet: moving to %s (%d ms), where %d player%s waiting for %s.",
                          sv[to].name, ping, waiting, waiting == 1 ? " is" : "s are", mode_name(S.last_quick));
@@ -5481,6 +5495,13 @@ void gallery_step()
         G.servers[NETSERVER_WEST] = west;
         G.servers[NETSERVER_SA] = sa;
         G.servers[NETSERVER_MIA] = mia;
+        for (int i = NETSERVER_MIA + 1; i < NETSERVER_COUNT; i++) {   // the rest of the table (Dallas, Los Angeles...)
+            const NetRelayDef *d = netservers_def(i);
+            NetServerInfo x = {};
+            x.id = d->id; x.name = d->name; x.short_name = d->short_name; x.state = NETSERVER_UP; x.ping_ms = 140 + 6 * i;
+            x.online = 3 + i; x.rooms = 1; x.waiting = 0; x.idle = 1; x.flags = NETSERVER_KOTH; x.version = 1;
+            G.servers[i] = x;
+        }
         G.server_cur = NETSERVER_EU;
         G.choice = NETCHOICE_AUTO;
         G.ranked = false;
@@ -6981,14 +7002,11 @@ bool draw_pages(ImVec2 display)
             }
         }
         door_panel(dl, f);
-        door_text(dl, f, &tex("ui/online_icon.png"), "ONLINE", pending ? "CHOOSING A SERVER" : "CONNECTING",
-                  pending ? pad_text("Europe, US East, Miami, Asia or South America: the one with the lowest ping. Change it any time with "
-                                     "{x} in the online menu.").c_str()
+        door_text(dl, f, &tex("ui/online_icon.png"), "ONLINE", "CONNECTING",
+                  pending ? "To the nearest FFNY Online server. You meet players on every server."
                           : "To the FFNY Online server.");
         float hx = 54;
-        hx += hint(dl, f, hx, 392, "x", "SERVER");
         hint(dl, f, hx, 392, "b", "BACK");
-        if (pad.x) open_servers();
         return !pad.b;
     }
     if (st == NETPLAY_FAILED || st == NETPLAY_OFF) {
@@ -6996,7 +7014,7 @@ bool draw_pages(ImVec2 display)
         // down, or blocked on this network), before the player sees "no connection"
         // (not when the relay refused a second session from this PC: another relay would only hide it)
         if (!gallery_on() && st == NETPLAY_FAILED && !S.fallback_tried && !netplay_online_twice() &&
-            (server_choice() == NETCHOICE_AUTO || server_choice() == NETCHOICE_ALL)) {
+            server_choice() != NETCHOICE_CUSTOM && netservers_choice_relay(server_choice()) < 0) {
             NetServerInfo sv[NETSERVER_COUNT];
             servers(sv);
             int failed = netservers_current(), other = failed >= 0 ? other_server(sv, failed) : -1;
@@ -7017,14 +7035,11 @@ bool draw_pages(ImVec2 display)
         text(dl, f, g_title, 14, 54, 145, WHITE, status, LEFT, 0.8f, 265);
         door_panel(dl, f);
         door_text(dl, f, &tex("ui/online_icon.png"), "OFFLINE", "NO CONNECTION",
-                  pad_text("Check the internet connection, then press {a} to try again, or {x} to pick another "
-                           "server.").c_str());
+                  pad_text("Check the internet connection, then press {a} to try again.").c_str());
         float hx = 54;
         hx += hint(dl, f, hx, 392, "a", "TRY AGAIN");
-        hx += hint(dl, f, hx, 392, "x", "SERVER");
         hint(dl, f, hx, 392, "b", "BACK");
         if (pad.a) { S.fallback_tried = true; connect_if_needed(); }
-        if (pad.x) open_servers();
         return !pad.b;
     }
 

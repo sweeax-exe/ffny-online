@@ -22,11 +22,12 @@ const char *const k_tab_shots[TAB_COUNT] = { "social-room", "social-global", "so
 const int REGION_COUNT = 1 + NETSERVER_COUNT;
 // the chip's region id: "" all, else the relay's global chat region ("eu", "us-east", "sg", "sa")
 const char *region_id(int chip) { return chip > 0 && chip <= NETSERVER_COUNT ? netservers_def(chip - 1)->social : ""; }
-// the chip's label: "ALL SERVERS", "EUROPE", "US EAST", "ASIA", "SOUTH AMERICA" (the name before any " (")
+// the chip's label: "ALL SERVERS", then each relay's short name (with four relays or fewer its name before any " (")
 std::string region_chip(int chip)
 {
     if (chip <= 0 || chip > NETSERVER_COUNT) return "ALL SERVERS";
-    std::string n = netservers_def(chip - 1)->name;
+    // build 91: seven relays: their short names ("EU", "MIAMI", "LOS ANGELES"), so every chip fits the panel
+    std::string n = NETSERVER_COUNT > 4 ? netservers_def(chip - 1)->short_name : netservers_def(chip - 1)->name;
     size_t paren = n.find(" (");
     if (paren != std::string::npos) n.resize(paren);
     for (auto &c : n) c = (char)toupper((unsigned char)c);
@@ -1090,7 +1091,9 @@ void crew_join_battle()
     if (!netplay_in_lobby()) { say("Connect to the online hub first."); return; }
     std::string here = social::region_of_server(connected_server());
     if (!bt.region.empty() && !here.empty() && here != bt.region) {
-        say("The battle runs on " + region_name(bt.region) + ": switch the server in the hub, then JOIN BATTLE.");
+        int to = netservers_index_of_social(bt.region.c_str());     // build 91: no server choice; the hub moves
+        if (to >= 0) { netservers_use(to); netservers_reconnect(hub_name().c_str()); }
+        say("The battle runs on " + region_name(bt.region) + ": moving there, then press JOIN BATTLE again.");
         return;
     }
     if (!(lobby_caps() > 0 && (lobby_caps() & NETPLAY_CAP_CREW))) { say("This server does not run crew battles yet."); return; }

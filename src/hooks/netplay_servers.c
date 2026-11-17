@@ -22,7 +22,7 @@
 
 static const char *setting_server(char *buf, int size)
 {
-    return recomp_settings_get_text("online", "server", buf, (size_t)size, "auto");
+    return recomp_settings_get_text("online", "server_debug", buf, (size_t)size, "auto");   /* build 91: hidden */
 }
 
 /* The setting's text (netservers_parse_choice): auto, eu, na, sg, all; the old "both" is all. */
@@ -74,8 +74,16 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     InitializeCriticalSection(&g_cs);
     WSAStartup(MAKEWORD(2, 2), &wsa);
     P.pick = P.override = -1;
+    /* build 91: a test that points any relay elsewhere (RECOMP_NETPLAY_SERVER_EU etc.) never reaches a live relay
+     * it did not name, so a relay added to the table later needs no change to the test scripts: 127.0.0.1:9 */
+    const char *test_any = NULL;
+    for (i = 0; i < NETSERVER_COUNT && !test_any; i++) {
+        const char *e = getenv(k_relays(i).env);
+        if (e && *e) test_any = e;
+    }
     for (i = 0; i < NETSERVER_COUNT; i++) {
         const char *env = getenv(k_relays(i).env);
+        if (test_any && !(env && *env)) env = "127.0.0.1:9";
         P.s[i].id = k_relays(i).id;
         P.s[i].name = k_relays(i).name;
         P.s[i].short_name = k_relays(i).short_name;
@@ -320,7 +328,7 @@ void netservers_set_choice(enum NetServerChoice c)
     const char *text = netservers_choice_text(c);
     init();
     if (!text) return;
-    recomp_settings_set_text("online", "server", text);
+    recomp_settings_set_text("online", "server_debug", text);
     pc_settings_save();
     EnterCriticalSection(&g_cs);
     P.override = netservers_choice_relay(c);
@@ -755,9 +763,12 @@ static void fetch_rooms(unsigned mask)
     LeaveCriticalSection(&g_cs);
 }
 
+/* build 91: every relay's rooms whatever the choice (the relay is where a match runs, not whom one meets) */
+static int global_lists(void) { return netservers_choice() != NETCHOICE_CUSTOM; }
+
 void netservers_fetch_rooms(void)
 {
-    if (netservers_choice() == NETCHOICE_ALL) fetch_rooms((1u << NETSERVER_COUNT) - 1);
+    if (global_lists()) fetch_rooms((1u << NETSERVER_COUNT) - 1);
 }
 
 int netservers_rooms(NetServerRoom *out, int max, unsigned *version)
@@ -765,7 +776,7 @@ int netservers_rooms(NetServerRoom *out, int max, unsigned *version)
     NetServerInfo sv[NETSERVER_COUNT];
     NetRoomInfo own[32];
     int ping[NETSERVER_COUNT], order[NETSERVER_COUNT], cur = netservers_connected(), own_n = 0, n = 0, i, j, k;
-    int all = netservers_choice() == NETCHOICE_ALL, rtt = netplay_rtt();
+    int all = global_lists(), rtt = netplay_rtt();
     unsigned v = 0;
     ULONGLONG now = GetTickCount64();
     init();
@@ -840,7 +851,7 @@ static void fetch_players(unsigned mask)
 void netservers_fetch_players(void)
 {
     int cur;
-    if (netservers_choice() != NETCHOICE_ALL) return;
+    if (!global_lists()) return;
     cur = netservers_connected();
     fetch_players(((1u << NETSERVER_COUNT) - 1) & ~(cur >= 0 ? 1u << cur : 0u));    /* the hub's own: WHO */
 }
@@ -1010,7 +1021,7 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
     if (scope_out) *scope_out = scope;
     /* the lists of the relays searched now and in 3 s (this room's own for its age), every 3 s */
     soon = netservers_scope(c, cur, search_s + 3, up);
-    if (soon != (1u << cur)) fetch_rooms(soon);
+    fetch_rooms(soon | (1u << cur));
     if (scope == (1u << cur)) return -1;
     now = GetTickCount64();
     EnterCriticalSection(&g_cs);
@@ -1025,6 +1036,41 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
                     sum_on = 1;
                 }
             }
+    if (sum_on) {   /* build 91: the global pool (netservers_pool): every relay's waiting players, by ping sum */
+        static NetQuickSeat seats[QUICK_POOL_MAX];
+        int partner[QUICK_POOL_MAX], where[QUICK_POOL_MAX], n = 0, me = -1, known = 0, j;
+        for (j = 0; j < NETSERVER_COUNT; j++) known |= mine[j] > 0;
+        for (o = 0; o < NETSERVER_COUNT && known; o++) {
+            if (!(scope >> o & 1u) || !R.got[o] || now - R.got[o] >= MOVE_FRESH) continue;
+            for (k = 0; k < R.count[o] && n < QUICK_POOL_MAX; k++) {
+                const NetRoomInfo *x = &R.rooms[o][k];
+                int any = 0;
+                if (x->mode != mode || x->phase != 0 || x->players != 1 || x->max < 2) continue;
+                if (strncmp(x->name, "Quick: ", 7)) continue;
+                std_room = x->rules >= 0 && (x->rules & NETPLAY_RULES_STANDARD) != 0;
+                if (std_room != (original != 0)) continue;      /* each fighter choice is its own pool */
+                for (j = 0; j < NETSERVER_COUNT; j++) any |= R.pings[o][k][j] > 0;
+                if (!any) continue;                             /* a room without pings is not in the pool */
+                seats[n].relay = o;
+                seats[n].age = R.age[o][k] + (int)((now - R.got[o]) / 1000);
+                memcpy(seats[n].pings, R.pings[o][k], sizeof(seats[n].pings));
+                snprintf(seats[n].code, sizeof(seats[n].code), "%s", x->code);
+                if (o == cur && code && !strcmp(x->code, code)) me = n;
+                n++;
+            }
+        }
+        if (me >= 0) {
+            netservers_pool(seats, n, partner, where);
+            LeaveCriticalSection(&g_cs);
+            if (partner[me] < 0 || where[me] == cur) return -1;    /* nobody within the limit yet, or they come here */
+            if (waiting) *waiting = 1;
+            if (ping) *ping = sv[where[me]].ping_ms;
+            fprintf(stderr, "[SERVERS] quick: pool of %d, searching %d s (room age %d s) on %s; paired with %s on %s, "
+                    "playing on %s (%d ms): moving there\n", n, search_s, my_age, sv[cur].name, seats[partner[me]].code,
+                    sv[seats[partner[me]].relay].name, sv[where[me]].name, sv[where[me]].ping_ms);
+            return where[me];
+        }
+    }
     for (o = 0; o < NETSERVER_COUNT; o++) {
         int n = 0;
         if (o == cur || !(scope >> o & 1u)) continue;
