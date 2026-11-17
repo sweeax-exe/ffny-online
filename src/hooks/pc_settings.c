@@ -84,8 +84,8 @@ static RecompSetting g_display_settings[] = {
      * room, quick match and ranked search is one pool across the relays. This is a hidden test/debug override
      * (never shown in the launcher or the game; a [online] server of builds before 91 is not read any more). */
     { "online", "server_debug", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_NETPLAY_SERVER", 0,
-      "Tests and debugging only: auto (the relay with the lowest ping, the default), a relay's id (eu, na, mia, dfw, "
-      "lax, sa, sg) to put the hub there, or a relay's own address as host or host:port (port 27777 if left out).", "auto" },
+      "Tests and debugging only: auto (the server with the lowest ping, the default), or a server's own address as "
+      "host or host:port (port 27777 if left out).", "auto" },
     { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Your name, shown to the other player.", "Player" },
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
