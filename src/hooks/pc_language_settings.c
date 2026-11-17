@@ -9,8 +9,8 @@ static const char *const k_game[] = { "english", "french", NULL };
 size_t pc_language_settings(RecompSetting *out, size_t max)
 {
     size_t n = 0;
-    if (max < 5) return 0;
-    memset(out, 0, sizeof(*out) * 5);
+    if (max < 7) return 0;
+    memset(out, 0, sizeof(*out) * 7);
 #define ADD(...) do { RecompSetting s_ = { __VA_ARGS__ }; out[n++] = s_; } while (0)
     ADD("language", "pack", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_LANGUAGE_PACK", RECOMP_SETTING_RESTART,
         "Language mod: a folder in the mods folder with language.ini (the Mods page sets it); empty plays the "
@@ -30,6 +30,16 @@ size_t pc_language_settings(RecompSetting *out, size_t max)
     ADD("content", "picked", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
         "Community packs whose new fighter or venue you have picked (pack ids, newest first): they no longer show "
         "NEW. The game writes it.");
+    /* Build 90: FFNY Online's community content in offline play (pc_content.c, content_update_logic.h). */
+    ADD("content", "community_offline", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_CONTENT_OFFLINE",
+        RECOMP_SETTING_RESTART,
+        "Use FFNY Online's community content in offline play: its new fighters, clothing, venues, skins, maps and "
+        "retextures. Off starts the game with the original data only (your own packs still apply) and offline "
+        "Battle and Story show the standard fighters and venues. Nothing is deleted; on again needs no download. "
+        "Online always needs it on: the game then offers a restart with it, for that session only.");
+    /* Build 90: "Turn all mods off" (mods_master_logic.h): the state to bring back; empty when the switch was not used. */
+    ADD("content", "mods_backup", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+        "What was on before the launcher's Turn all mods off (the game writes it; empty: not used).");
 #undef ADD
     return n;
 }

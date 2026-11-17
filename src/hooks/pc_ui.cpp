@@ -41,6 +41,7 @@
 #include "pc_ui_actions.h"
 #include "pc_launcher_home.h"
 #include "pc_content.h"
+#include "mods_master_logic.h"
 #include "content_update.h"
 #include "content_release.h"
 
@@ -247,6 +248,7 @@ static const char *friendly(const char *section, const char *key)
         {"gamepad", "left_stick", "Left stick comes from"},
         {"gamepad", "right_stick", "Right stick comes from"},
         {"launcher", "skip", "Skip the launcher at start"},
+        {"content", "community_offline", "Community content in offline play"},
         {"ui", "scale", "Text and control size"},
         {"debug", "unlock_all", "Unlock all fighters and venues"},
         {"debug", "skip_intro", "Skip startup movies and legal screen"},
@@ -2885,6 +2887,10 @@ static void page_basics()
     p2p_setting();
     ImGui::SeparatorText("Gameplay");
     offline_countdown_setting();
+    ImGui::SeparatorText("Community content");
+    settings_group("content", { "community_offline" });
+    ImGui::TextDisabled("Off: offline play has only the game's own fighters and venues, so your own mods do not clash with "
+                        "the community packs (they stay installed). Online asks to restart with it on. Applies on the next start.");
     ImGui::SeparatorText("HD textures");
     settings_group("textures", { "enabled" });
     ImGui::TextDisabled("Experimental: they can cause white screens or wrong pictures. Make them under Advanced, Textures.");
@@ -4644,6 +4650,12 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         if (!g_open.load() && !g_note.open && !toggled && online_screen::take_skin_window_request()) {
             set_open(true);
             g_skin = true;
+        } else if (!g_open.load() && !g_note.open && !toggled && online_screen::take_content_prompt_request()) {
+            // build 90: ONLINE chosen with the community content off: "Online needs FFNY Online's community content.
+            // Restart with it now?" (the UPDATE NOW window; YES restarts with the content on for that run only)
+            set_open(true);
+            g_cupd = true;
+            online_screen::update_prompt_begin_online("online entry");
         } else if (!g_open.load() && !g_note.open && !toggled && content_update_offer_due(online_screen::exit_wanted())) {
             // build 86: new community content: once per news on the main menu, and after each fight
             set_open(true);
@@ -4780,7 +4792,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         // 0 open, 1 LATER, 2 UPDATE NOW (taken: the game closes), 3 the main menu went away
         int answer = g_note.open ? 0 : online_screen::draw_update_prompt(io.DisplaySize, true);
         if (answer) {
-            content_update_offer_answer(answer == 1);
+            online_screen::update_prompt_done(answer);      // (the UPDATE NOW popup's snooze; not the online prompt's)
             close_request = true;
         }
     } else if (g_community) {

@@ -86,6 +86,18 @@ void pc_content_set_off(const char *id, int off);
  * packs never count. RECOMP_TEST_CONTENT_PRINT=<hex> overrides it (tests). */
 uint32_t pc_content_print(void);
 
+/* Build 90, community content in offline play (settings.ini [content] community_offline, default on; the
+ * launcher's Content page and Basics). Off, a run leaves FFNY Online's synced community packs out: pc_content_list
+ * and the composed files then hold only the player's own packs and the language packs, the print is 0, and
+ * online is refused (netplay.c) until the game restarts with the content on (the online prompt's restart:
+ * --content-update, for that run only). pc_content_session_online(1): this run was started for online. The game
+ * decides once at its start (pc_content_decide, from pc_content_log_header or pc_content_start); the launcher
+ * never does, so its Content page lists everything. */
+void pc_content_session_online(int forced);
+void pc_content_decide(void);
+int pc_content_community_off(void);
+int pc_content_online_allowed(void);
+
 /* At game start, after the launcher and before pc_language_start: the synced texture packs
  * (kind content, and replacements that are on) go beneath the player's own texture packs in
  * RECOMP_TEXTURE_PACKS, in catalogue order; the files the launcher composed for fighter-body,

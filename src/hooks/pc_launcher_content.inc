@@ -172,6 +172,106 @@ static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, floa
     return y;
 }
 
+// Build 90, Turn all mods off (mods_master_logic.h): one button for the game as the original, one that brings back
+// exactly what was on. The settings it moves: community content in offline play, the player's own packs, HD
+// textures, the community graphics pack and a language pack.
+static ModsState mods_state_now()
+{
+    ModsState st;
+    memset(&st, 0, sizeof st);
+    st.community = recomp_settings_get("content", "community_offline", 1) != 0;
+    st.textures = recomp_settings_get("textures", "enabled", 0) != 0;
+    st.graphics = recomp_settings_get("graphics", "enabled", 0) != 0;
+    recomp_settings_get_text("language", "pack", st.language_pack, sizeof st.language_pack, "");
+    recomp_settings_get_text("content", "off", st.content_off, sizeof st.content_off, "");
+    return st;
+}
+
+static void mods_state_apply(const ModsState &st)
+{
+    recomp_settings_set("content", "community_offline", st.community ? 1 : 0);
+    recomp_settings_set("textures", "enabled", st.textures ? 1 : 0);
+    recomp_settings_set("graphics", "enabled", st.graphics ? 1 : 0);
+    recomp_settings_set_text("language", "pack", st.language_pack);
+    recomp_settings_set_text("content", "off", st.content_off);
+    pc_settings_save();
+}
+
+// The ids of the player's own packs, comma-separated.
+static std::string mods_local_ids(const PcContentPack *packs, int count)
+{
+    std::string ids;
+    for (int i = 0; i < count; i++)
+        if (packs[i].local) ids += (ids.empty() ? "" : ",") + std::string(packs[i].id);
+    return ids;
+}
+
+// Pressed: the master button. Returns true when it moved a setting (the own packs' files are composed again).
+static bool mods_master_press(const std::string &local_ids)
+{
+    char backup[MODS_TEXT];
+    recomp_settings_get_text("content", "mods_backup", backup, sizeof backup, "");
+    ModsState now = mods_state_now(), before;
+    if (backup[0] && mods_backup_decode(backup, &before)) {         // back on, exactly as it was
+        mods_state_apply(before);
+        recomp_settings_set_text("content", "mods_backup", "");
+        pc_settings_save();
+        fprintf(stderr, "[CONTENT] mods back on as before (community %d, textures %d, graphics %d, language pack '%s')\n",
+                before.community, before.textures, before.graphics, before.language_pack);
+        return true;
+    }
+    ModsState off;
+    char text[MODS_TEXT];
+    if (!mods_all_off(&now, local_ids.c_str(), &off) || !mods_backup_encode(&now, text, sizeof text)) return false;
+    recomp_settings_set_text("content", "mods_backup", text);
+    mods_state_apply(off);
+    fprintf(stderr, "[CONTENT] all mods off (saved: %s)\n", text);
+    return true;
+}
+
+static float mods_master_card(ImDrawList *ld, float lx, float y, float inner, float s, bool busy, const std::string &local_ids,
+                              bool &moved)
+{
+    char backup[MODS_TEXT];
+    recomp_settings_get_text("content", "mods_backup", backup, sizeof backup, "");
+    ModsState now = mods_state_now(), before;
+    bool saved = backup[0] && mods_backup_decode(backup, &before);
+    bool all_off = mods_is_all_off(&now, local_ids.c_str());
+    std::string title, line;
+    if (all_off) {
+        title = "Mods: OFF";
+        line = "The game starts as the original: no community content, no packs of yours, no HD textures, no graphics pack, no "
+               "language mod. Online still asks to restart with the community content.";
+    } else if (saved) {
+        title = "Mods: partly on";
+        line = "You turned all mods off and switched some back on. The button brings back what was on before.";
+    } else {
+        title = "Mods: ON";
+        std::string on;
+        auto add = [&](const char *what) { on += (on.empty() ? "" : ", ") + std::string(what); };
+        if (now.community) add("community content");
+        if (!local_ids.empty()) add("your own packs");
+        if (now.textures) add("HD textures");
+        if (now.graphics) add("graphics pack");
+        if (now.language_pack[0]) add("language mod");
+        line = "On: " + (on.empty() ? std::string("your own packs are off") : on) +
+               ". The button turns them all off at once and remembers them.";
+    }
+    ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 78 * s);
+    ld->AddRectFilled(ra, rb, col(k_white, 0.05f), 12 * s);
+    ld->AddRect(ra, rb, col(all_off ? k_gold : k_green, 0.55f), 12 * s);
+    ld->PushClipRect(ra, ImVec2(rb.x - 210 * s, rb.y), true);
+    ld->AddText(bold_font(), 18 * s, ImVec2(ra.x + 18 * s, ra.y + 8 * s), col(k_white), title.c_str());
+    ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 33 * s), col(ImVec4(0.80f, 0.80f, 0.82f, 1)),
+                line.c_str(), nullptr, inner - 250 * s);
+    ld->PopClipRect();
+    const char *label = saved ? "Turn mods back on" : "Turn all mods off";
+    if (glass_button("##content_mods_master", label, ImVec2(rb.x - 196 * s, ra.y + 21 * s), ImVec2(178 * s, 36 * s), s,
+                     saved ? GLASS_PLAIN : GLASS_RED, bold_font(), 14.5f * s, !busy && (saved || !all_off)))
+        moved = mods_master_press(local_ids);
+    return y + 90 * s;
+}
+
 static void content_dialog(ImVec2 o, float w, float h, float s)
 {
     static PcContentPack packs[PC_CONTENT_MAX];
@@ -233,6 +333,41 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
     ImGui::BeginChild("##content_list", ImVec2(inner, b.y - foot - top - 8 * s), ImGuiChildFlags_None);
     ImDrawList *ld = ImGui::GetWindowDrawList();
     float y = ImGui::GetCursorScreenPos().y;
+    {   // build 90: Turn all mods off / back on
+        bool moved = false;
+        y = mods_master_card(ld, lx, y, inner, s, busy, mods_local_ids(packs, count), moved);
+        ImGui::SetCursorScreenPos(ImVec2(lx, y));
+        ImGui::Dummy(ImVec2(1, 1));
+        if (moved) {
+            changed = true;
+            composing = pcui::mod_start("compose");     // the own packs' files follow the switches
+            count = -1;
+        }
+    }
+    {   // build 90: community content in offline play (settings.ini [content] community_offline, default on)
+        RecompSetting *sw = find("content", "community_offline");
+        bool on = recomp_settings_get("content", "community_offline", 1) != 0;
+        bool locked = sw && sw->source == RECOMP_SETTING_FROM_ENV;
+        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 78 * s);
+        ld->AddRectFilled(ra, rb, col(k_white, 0.05f), 12 * s);
+        ld->AddRect(ra, rb, col(on ? k_green : k_gold, 0.45f), 12 * s);
+        ld->PushClipRect(ra, ImVec2(rb.x - 150 * s, rb.y), true);
+        ld->AddText(bold_font(), 17 * s, ImVec2(ra.x + 18 * s, ra.y + 9 * s), col(k_white), "Community content in offline play");
+        ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 33 * s), col(ImVec4(0.80f, 0.80f, 0.82f, 1)),
+                    on ? "Offline Battle and Story use the community packs below. Online always needs them."
+                       : "Off: offline play has only the game's own fighters and venues; your own packs still apply. "
+                         "The packs stay installed. Online asks to restart with them on.",
+                    nullptr, inner - 190 * s);
+        ld->PopClipRect();
+        if (glass_button("##content_offline_switch", on ? "On" : "Off", ImVec2(rb.x - 136 * s, ra.y + 21 * s),
+                         ImVec2(118 * s, 36 * s), s, on ? GLASS_RED : GLASS_PLAIN, bold_font(), 14.5f * s, !locked)) {
+            recomp_settings_set("content", "community_offline", on ? 0 : 1);
+            pc_settings_save();
+        }
+        y += 90 * s;
+        ImGui::SetCursorScreenPos(ImVec2(lx, y));
+        ImGui::Dummy(ImVec2(1, 1));
+    }
     int community = 0, mine = 0;
     for (int i = 0; i < count; i++) (packs[i].local ? mine : community)++;
     if (community == 0) {

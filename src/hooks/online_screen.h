@@ -51,6 +51,15 @@ int draw_exit_prompt(ImVec2 display);
  * a room refused for other packs). draw_update_prompt: 0 still open, 1 LATER, 2 UPDATE NOW taken, 3 the menu went. */
 void update_prompt_begin(const char *where);
 int draw_update_prompt(ImVec2 display, bool main_menu);
+/* Build 90, community content in offline play: with it off, ONLINE (the hub, Run the Streets) opens this prompt
+ * instead ("Online needs FFNY Online's community content. Restart with it now?", YES / NO) through the same window:
+ * take_open_request() holds the screens back and take_content_prompt_request() (once) says it is due; YES is the
+ * restart with the content on for that session only (content_update_request_online). The answers are those of
+ * draw_update_prompt; update_prompt_done(answer) closes it (and tells the UPDATE NOW popup's snooze only when it was
+ * that popup). */
+bool take_content_prompt_request();
+void update_prompt_begin_online(const char *where);
+void update_prompt_done(int answer);
 
 /* MILESTONES (build 79, milestones_ui.inc): on the Battle user-ID screen and in the Story crib, a chip
  * (VIEW MILESTONES) that the pad's VIEW or a click opens into the profile's milestone progress. The
@@ -65,7 +74,7 @@ bool draw_milestones(ImVec2 display);
 bool take_milestones_test_request();
 bool milestone_toast(char *out, int size);
 
-/* The player chose ONLINE (once per choice). */
+/* The player chose ONLINE (once per choice); false, with the content prompt due, when the community content is off. */
 bool take_open_request();
 
 /* The online screens; returns false when the player leaves them (back to the main menu). */

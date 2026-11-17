@@ -1155,6 +1155,7 @@ class Manager:
             for line in moved:
                 if 'moved from place' in line or 'left out' in line:
                     self.progress(line.replace('[compose] ', ''))
+            self.compose_own(off)
         skipped = '; '.join('%s: %s' % s for s in result['skipped'] + result.get('lang_skipped', []))
         languages = sorted({i for i, _ in result.get('lang_files', [])})
         with_lang = ' (also with %s)' % ', '.join(languages) if languages else ''
@@ -1165,6 +1166,25 @@ class Manager:
                                                                                     len(result['files']), with_lang)
         self.progress(text + ('. Not applied: ' + skipped if skipped else ''))
         return result
+
+    OWN_DIR = 'own-packs'
+
+    def compose_own(self, off):
+        """Build 90, community content in offline play: the player's own packs alone, composed into
+        <data>/mod-manager/own-packs/content-files, which the game serves instead of content-files while the setting
+        [content] community_offline is off (pc_content.c), so no community fighter, venue or clothing is in an offline
+        game. Nothing is deleted from content-files: turning the setting on again needs no download or compose.
+        Called with the runtime lock held, after the composition of everything."""
+        try:
+            own = [p for p in self.local_packs() if p['composed'] and p['id'] not in off]
+            result = content_compose.compose(self.data, self.game, own, root=self.root / self.OWN_DIR,
+                                             log=lambda text: None)
+            if own:
+                self.progress('Your own packs ready for offline play without community content: %d applied'
+                              % len(result['applied']))
+        except (ValueError, OSError, content_compose.ComposeError) as error:
+            # the community content stays as composed; offline play without it then has none of the player's own files
+            self.progress('Could not prepare your own packs for offline play without community content: %s' % error)
 
     def keep_local_place(self, p):
         """Write a player's own pack's (new) place into its local.json when compose moved it; True when it did."""

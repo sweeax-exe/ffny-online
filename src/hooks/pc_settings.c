@@ -307,8 +307,8 @@ static RecompSetting g_display_settings[] = {
 
 /* The display table followed by the input tables (pc_input.c): one array, one
  * registration, one file. */
-/* + [language]/[content] (5) and [cheats] (5). */
-static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16 + 16 + 5 + 8];
+/* + [language]/[content] (7) and [cheats] (5). */
+static RecompSetting g_settings[DISPLAY_SETTING_COUNT + 64 + 16 + 16 + 7 + 8];
 static size_t g_setting_count;
 
 static char g_path[MAX_PATH * 4];   /* empty: do not load or save */
@@ -1146,7 +1146,7 @@ int pc_settings_init(void)
         pc_input_settings(g_settings + DISPLAY_SETTING_COUNT, 64);
     g_setting_count += pc_ui_settings(g_settings + g_setting_count, 16);
     g_setting_count += pc_debug_settings(g_settings + g_setting_count, 16);
-    g_setting_count += pc_language_settings(g_settings + g_setting_count, 5);
+    g_setting_count += pc_language_settings(g_settings + g_setting_count, 7);
     /* [cheats] was registered by the app only (pc_settings_catalog.c), so in the game every cheat read its
      * default and the cheats did nothing (build 82). tests/unit/test_settings_registered.py */
     g_setting_count += cheats_settings(g_settings + g_setting_count, 8);
