@@ -85,13 +85,22 @@ static int field(const char *from, const char *to, const char *tag, char *out, i
     return 1;
 }
 
+/* fighter.xml's style codes ("Doc (MAR)") and their names, in the order CHOOSE FIGHTER's style filter offers them */
+static const char *const k_styles[][2] = {
+    { "STF", "Street fighting" },
+    { "KIC", "Kickboxing" },
+    { "MAR", "Martial arts" },
+    { "WRE", "Wrestling" },
+    { "SUB", "Submissions" },
+};
+#define STYLE_COUNT ((int)(sizeof(k_styles) / sizeof(k_styles[0])))
+/* each one's bit in a Character row's style bits (word 18; new_fighters_style_bits), in k_styles' order */
+static const int k_style_bit[] = { 1, 0, 2, 3, 4 };
+
 static const char *style_name(const char *code)
 {
-    if (!strcmp(code, "STF")) return "Street fighting";
-    if (!strcmp(code, "MAR")) return "Martial arts";
-    if (!strcmp(code, "KIC")) return "Kickboxing";
-    if (!strcmp(code, "WRE")) return "Wrestling";
-    if (!strcmp(code, "SUB")) return "Submissions";
+    int i;
+    for (i = 0; i < STYLE_COUNT; i++) if (!strcmp(code, k_styles[i][0])) return k_styles[i][1];
     return NULL;
 }
 
@@ -234,6 +243,48 @@ static void load(void)
 #endif
 
 int online_fighters(const OnlineFighter **out) { load(); *out = g_fighters; return g_fighter_count; }
+
+/* Build 90: the styles the dump's fighters have (a style no offered fighter has is left out) */
+int online_styles(const char *const **out)
+{
+    static const char *list[STYLE_COUNT];
+    static int count = -1;
+    if (count < 0) {
+        int i, k, n = 0;
+        load();
+        for (i = 0; i < STYLE_COUNT; i++)
+            for (k = 0; k < g_fighter_count; k++)
+                if (g_fighters[k].style == k_styles[i][1]) { list[n++] = k_styles[i][1]; break; }
+        count = n;
+    }
+    *out = list;
+    return count;
+}
+
+unsigned online_style_bit(const char *style)
+{
+    int i;
+    for (i = 0; i < STYLE_COUNT; i++) if (style && !strcmp(style, k_styles[i][1])) return 1u << k_style_bit[i];
+    return 0;
+}
+
+int online_style_names(int bits, char *out, int size)
+{
+    int i, n = 0;
+    if (size > 0) out[0] = 0;
+    for (i = 0; i < STYLE_COUNT && size > 0; i++)
+        if (bits >= 0 && (bits >> k_style_bit[i] & 1))
+            n += snprintf(out + n, (size_t)(size - n > 0 ? size - n : 0), "%s%s", n ? " / " : "", k_styles[i][1]);
+    return n < size ? n : size - 1;
+}
+
+const char *online_fighter_style(int id)
+{
+    int k;
+    load();
+    for (k = 0; k < g_fighter_count; k++) if (g_fighters[k].id == id) return g_fighters[k].style;
+    return "";
+}
 
 /* The new fighters of the database the game reads (new_fighters.c: Character rows with a front-end ID of
  * a new fighter's place, a content pack's), named by their row and styled as their template. Kept apart from

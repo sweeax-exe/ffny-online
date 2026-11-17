@@ -63,6 +63,7 @@
 #include "start_countdown.h"
 #include "milestones.h"
 #include "season_search.h"
+#include "fighter_tabs.h"
 #include "fighter_skins.h"
 #include "fighter_banks.h"
 #include "new_fighters.h"
@@ -472,6 +473,19 @@ int content_news(char *names, int size);
 bool content_problem(char *out, int size);
 bool content_release(char *head, int head_size, char *detail, int detail_size);
 // The page title in the corner, as the game writes MAIN MENU.
+float chat_chips_right(const Frame &f);     // social_ui.inc
+// The red plate of a corner notice, top right ("NEW COMMUNITY CONTENT IS OUT"): smaller where the chat chips (top
+// centre, ENTER CHAT and in a room QUICK CHAT) would run into it (build 90; they overlapped on CHOOSE FIGHTER)
+void corner_plate(ImDrawList *dl, const Frame &f, const char *line)
+{
+    float size = 12, w = text_width(f, g_title, size, line), left = chat_chips_right(f) + 6;
+    if (left > 6 && 606 - w - 10 < left) {
+        size = std::max(8.0f, fit_size(f, g_title, 12, line, 606 - 10 - left));
+        w = text_width(f, g_title, size, line);
+    }
+    rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
+    text(dl, f, g_title, size, 606, 11 + (12 - size) * 0.5f, WHITE, line, RIGHT, 1.0f);
+}
 void page_title(ImDrawList *dl, const Frame &f, const char *title)
 {
     text(dl, f, g_stencil, 30, 50, 24, CREAM, title, LEFT, 1.6f);
@@ -481,32 +495,24 @@ void page_title(ImDrawList *dl, const Frame &f, const char *title)
     if (build > updater_local_build()) {
         char line[96];
         snprintf(line, sizeof(line), "UPDATE: BUILD %d IS OUT", build);
-        float w = text_width(f, g_title, 12, line);
-        rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
-        text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
+        corner_plate(dl, f, line);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "close the game: the launcher installs it", RIGHT, 0.8f);
     } else if (content_problem(nullptr, 0)) {
         // build 83: the last content sync (or the game's own check) failed: this PC may lack packs others have
         const char *line = "COMMUNITY CONTENT NOT UPDATED";
-        float w = text_width(f, g_title, 12, line);
-        rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
-        text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
+        corner_plate(dl, f, line);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "start the game from the launcher again", RIGHT, 0.8f);
     } else if (content_news(nullptr, 0) > 0) {
         // build 82: new community content is out (the game's own catalogue check): announced the same way
         const char *line = "NEW COMMUNITY CONTENT IS OUT";
-        float w = text_width(f, g_title, 12, line);
-        rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
-        text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
+        corner_plate(dl, f, line);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "UPDATE NOW on the hub (Y): the game comes back by itself", RIGHT, 0.8f);
     } else {
         // build 87: community content to come (the daily release window): when, on this PC's clock, and what;
         // nothing to do yet, so it comes last. Once its time has passed, the notice above takes over.
         char head[64], detail[224];
         if (content_release(head, sizeof(head), detail, sizeof(detail))) {
-            float w = text_width(f, g_title, 12, head);
-            rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
-            text(dl, f, g_title, 12, 606, 11, WHITE, head, RIGHT, 1.0f);
+            corner_plate(dl, f, head);
             float size = std::max(8.0f, fit_size(f, g_hand, 11, detail, 330));
             text(dl, f, g_hand, size, 606, 30, ORANGE, detail, RIGHT, 0.8f);
         }
@@ -982,9 +988,12 @@ struct State {
     unsigned long long quick_since = 0;
     unsigned quick_scope = 0;
     // FIGHTERS (build 83): the name search. TAB (or Ctrl+F) opens it and the letter keys type the name; the grid
-    // shows only the fighters that match. LT/RT jump by first letter, with or without it.
+    // shows only the fighters that match (build 90: of every tab offered).
     bool fsearch_on = false;
     std::string fsearch;
+    // FIGHTERS (build 90): the tab (FFNY, COMMUNITY, CREATED; fighter_tabs.h; -1: not read from [online] fighter_tab
+    // yet), the style filter (0 All, 1.. online_styles) and each tab's last selected card
+    int ftab = -1, fstyle = 0, ftab_sel[FTAB_COUNT] = { -1, -1, -1 };
 } S;
 
 // ---- the test gallery ----------------------------------------------------------------------------
@@ -1516,10 +1525,10 @@ Pad read_pad()
     p.lb_once = any({ ImGuiKey_GamepadL1, ImGuiKey_PageUp, ImGuiKey_Q }, false);
     p.lb_down = ImGui::IsKeyDown(ImGuiKey_GamepadL1) || ImGui::IsKeyDown(ImGuiKey_PageUp) || ImGui::IsKeyDown(ImGuiKey_Q);
     p.r3 = any({ ImGuiKey_GamepadR3, key(ImGuiKey_V) }, false);      // TURF WAR: watch the turf battle under way
-    p.lt = any({ ImGuiKey_GamepadL2 }, true);       // FIGHTERS: the previous first letter
-    p.rt = any({ ImGuiKey_GamepadR2 }, true);       // FIGHTERS: the next first letter
+    p.lt = any({ ImGuiKey_GamepadL2, key(ImGuiKey_Z) }, false);     // FIGHTERS (build 90): the previous tab
+    p.rt = any({ ImGuiKey_GamepadR2, key(ImGuiKey_C) }, false);     // FIGHTERS: the next tab
     p.keys = true;
-    {   // tests: RECOMP_TEST_OVERLAY_PAD="r,r,a,..." presses these (u d l r a b x y) one at a time, 0.7 s apart,
+    {   // tests: RECOMP_TEST_OVERLAY_PAD="r,r,a,..." presses these (u d l r a b x y; < > LT RT) one at a time, 0.7 s apart,
         // from 3 s after the first read: the online screens driven like a pad (Run the Streets' menu test)
         static const char *script = (const char *)-1;
         static unsigned long long t0, next;
@@ -1535,6 +1544,7 @@ Pad read_pad()
                     next = now + 700;
                     p.up |= c == 'u'; p.down |= c == 'd'; p.left |= c == 'l'; p.right |= c == 'r';
                     p.a |= c == 'a'; p.b |= c == 'b'; p.x |= c == 'x'; p.y |= c == 'y';
+                    p.lt |= c == '<'; p.rt |= c == '>';     // build 90: CHOOSE FIGHTER's tabs
                     fprintf(stderr, "[UI] test pad: %c (page %d)\n", c, (int)S.page);
                 }
             }
@@ -1995,7 +2005,6 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
         bool all = k == ALL_ROW;
         const NetServerInfo *si = k && !all ? &s[k - 1] : nullptr;
         const char *title = k == 0 ? "AUTOMATIC" : all ? "ALL SERVERS" : si->name;
-        text(dl, f, g_title, 21, x + 14, y + 3, sel ? CREAM : with_alpha(GREY, 0.9f), upper(title).c_str(), LEFT, 1.5f);
         // right: the ping, large, in its colour, with its bars (OFFLINE in red for a relay that did not answer)
         char big[32] = "", sub[96] = "";
         ImU32 tone = GREY;
@@ -2033,6 +2042,14 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
         float bx = x + w - (bars ? 30 : 8);
         if (bars) ping_bars(dl, f, bx + 6, y + 6, 14, ms);
         text(dl, f, g_title, 17, bx - (bars ? 4 : 0), y + 3, sel ? tone : with_alpha(tone, 0.75f), big, RIGHT, 1.2f);
+        {   // the name, left of the ping: smaller where it would run into it ("ASIA (SINGAPORE)" next to "168 MS"); the
+            // widths are in canvas units, so this holds at every resolution and with a stretched picture
+            std::string name = upper(title);
+            float room = bx - (bars ? 4 : 0) - text_width(f, g_title, 17, big) - 12 - (x + 14);
+            float size = std::max(12.0f, fit_size(f, g_title, 21, name.c_str(), room));
+            text(dl, f, g_title, size, x + 14, y + 3 + (21 - size) * 0.5f, sel ? CREAM : with_alpha(GREY, 0.9f), name.c_str(), LEFT,
+                 1.5f * size / 21);
+        }
         text(dl, f, g_hand, 13, x + 16, y + 24, sel ? ORANGE : with_alpha(ORANGE, 0.6f), sub, LEFT, 1.0f);
         // the tags: the player's choice, and where the hub is now (with All: its relay, on that relay's row)
         float tx = x + 16;
@@ -3358,11 +3375,24 @@ bool community_numbers_here(const NetRoom &r)
     if (ranked_room(r, &ri) || tset_room(r, &t) || crew_room(r, &cb)) return false;
     return (r.settings.fighter_rules & (NETPLAY_RULES_NO_CREATED | NETPLAY_RULES_STANDARD)) == 0;
 }
+int fighter_style_bits(int id);     // below
 const std::vector<OnlineFighter> &grid_fighters()
 {
     static std::vector<OnlineFighter> list;
     static std::vector<std::string> styles;
+    static std::map<int, std::string> row_styles;     // build 90: a fighter's styles from its row ("A / B")
     list = roster();
+    for (OnlineFighter &o : list) {
+        int bits = fighter_style_bits(o.id);
+        if (bits <= 0) continue;
+        auto it = row_styles.find(o.id);
+        if (it == row_styles.end()) {
+            char names[96];
+            online_style_names(bits, names, sizeof(names));
+            it = row_styles.emplace(o.id, std::string(names)).first;
+        }
+        o.style = it->second.c_str();
+    }
     NetRoom r;
     lobby_room(&r);
     // build 86: a room for original fighters only (STANDARD ONLY) shows no community fighters at all
@@ -3396,13 +3426,17 @@ const std::vector<OnlineFighter> &grid_fighters()
         // build 86: community fighters beyond the places: a shelf (played this session first, then by number) and
         // MORE, the paged list of every one (the community window)
         int shelf[32], m = new_fighters_shelf(shelf, 30);
+        static std::string shelf_styles[32];    // build 90: with its template's style (the style filter's)
         for (int k = 0; k < m; k++) {
             const FighterBanksEntry *e = fighter_banks_find(shelf[k]);
             if (!e) continue;
             OnlineFighter o{};
             o.id = e->id;
             snprintf(o.name, sizeof(o.name), "%s", e->name);
-            o.style = "COMMUNITY FIGHTER";
+            char tpl[96];
+            online_style_names(fighter_style_bits(e->id), tpl, sizeof(tpl));
+            shelf_styles[k] = *tpl ? "COMMUNITY: " + upper(tpl) : std::string("COMMUNITY FIGHTER");
+            o.style = shelf_styles[k].c_str();
             list.push_back(o);
             g_grid_cp.push_back(-1);
         }
@@ -3449,6 +3483,63 @@ int grid_pos(const std::vector<OnlineFighter> &list, int fighter)
 #include "skins_ui.inc"
 #include "community_ui.inc"
 
+// ---- build 90: CHOOSE FIGHTER's tabs and style filter (fighter_tabs.h) ----
+
+// A card's tab: a created fighter's CREATED, a new fighter's place, a community fighter by number and MORE COMMUNITY,
+// the game's own FFNY. RANDOM is in every tab (it draws from the tab's cards).
+int grid_tab(const std::vector<OnlineFighter> &list, int i)
+{
+    if (i < (int)g_grid_cp.size() && g_grid_cp[i] >= 0) return FTAB_CREATED;
+    int id = list[i].id;
+    return ONLINE_NEW_FIGHTER(id) || id >= FB_FIRST_LOGICAL ? FTAB_COMMUNITY : FTAB_FFNY;
+}
+
+// A card's fighting style from the game data: a stock fighter's and a new fighter's place's (its template's) from
+// fighter.xml, a community fighter by number its template's, a created fighter its own (two styles).
+// A fighter can have more than one style (Character row word 18, the select screen's; 2 of the 75 stock fighters
+// have two): a card matches the filter when any of its styles is the filter's.
+int fighter_style_bits(int id)
+{
+    if (id >= FB_FIRST_LOGICAL && id != FB_MORE_ID) {   // a community fighter by number: its own row, else its template's
+        const FighterBanksEntry *e = fighter_banks_find(id);
+        if (!e) return -1;
+        int own = (int)(e->words[18] & 0x1Fu);
+        return own ? own : new_fighters_style_bits(online_fighter_id(e->template_fe_id));
+    }
+    return new_fighters_style_bits(id);
+}
+bool grid_style_matches(const std::vector<OnlineFighter> &list, int i, const std::vector<CpCard> &cards, const char *filter)
+{
+    int cp = i < (int)g_grid_cp.size() ? g_grid_cp[i] : -1, id = list[i].id;
+    if (cp >= 0)        // a created fighter: its archetype's styles ("KICKBOXING / STREETFIGHTING")
+        return cp < (int)cards.size() && fighter_style_matches(cards[cp].style.c_str(), filter);
+    int bits = fighter_style_bits(id);
+    if (bits > 0) return (bits & online_style_bit(filter)) != 0;
+    return fighter_style_matches(list[i].style ? list[i].style : "", filter);     // no row: fighter.xml's one style
+}
+
+// "Original fighters only" where this pick counts: the room's STANDARD ONLY, else the search's choice (ranked, or
+// the hub's Quick Match type); Run the Streets' offline VS CPU has none.
+bool grid_originals_only(const NetRoom &r)
+{
+    if (r.in_room) return standard_only(r.settings.fighter_rules);
+    if (S.rts_pick) return false;
+    if (S.ranked_pick) return search_original(NETPLAY_ORIGINAL_RANKED);
+    std::vector<int> modes = mode_cycle();
+    return !modes.empty() && search_original(modes[std::max(0, std::min((int)modes.size() - 1, S.quick_mode))]);
+}
+
+const char *const FTAB_NAMES[FTAB_COUNT] = { "FFNY", "COMMUNITY", "CREATED" };
+
+// The trigger's plate (LT / RT; L2 / R2 with PlayStation icons) at (x, y); returns its width.
+float trigger_plate(ImDrawList *dl, const Frame &f, float x, float y, bool right, bool lit)
+{
+    const char *w = ps_icons() ? (right ? "R2" : "L2") : (right ? "RT" : "LT");
+    rect(dl, f, x, y, 22, 14, lit ? IM_COL32(90, 90, 90, 255) : IM_COL32(60, 60, 60, 200), 4);
+    text(dl, f, g_body, 10, x + 11, y + 1, lit ? WHITE : GREY, w, CENTER, 0);
+    return 22;
+}
+
 void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chosen, int *fighter)
 {
     // build 85: while the skin window is open the grid takes no input (the window does, below)
@@ -3478,18 +3569,135 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             const_cast<Pad &>(pad).b = false;
         }
     }
-    // the cards shown: every one, or the ones whose name matches (RANDOM only without a search)
-    std::vector<int> vis;
+    // build 68: the room's FIGHTER RULES leave some fighters out (greyed, not picked; RANDOM skips them)
+    NetRoom rules_room;
+    lobby_room(&rules_room);
+    auto blocked = [&](int i) { return list[i].id != FIGHTER_RANDOM && fighter_blocked(rules_room, list[i].id); };
+    // build 90: the tabs (players' idea): FFNY, COMMUNITY, CREATED, each offered when it has cards; COMMUNITY not
+    // where only original fighters count. LT/RT (Z/C) switch, the last one chosen is remembered ([online] fighter_tab).
+    bool originals = grid_originals_only(rules_room);
+    int counts[FTAB_COUNT] = {}, offered[FTAB_COUNT] = {};
+    for (int i = 0; i < n; i++) if (list[i].id != FIGHTER_RANDOM) counts[grid_tab(list, i)]++;
+    for (int t = 0; t < FTAB_COUNT; t++) offered[t] = counts[t] > 0 && !(t == FTAB_COMMUNITY && originals);
+    if (S.ftab < 0) S.ftab = gallery_on() ? FTAB_FFNY : recomp_settings_get("online", "fighter_tab", FTAB_FFNY);
+    int tab = fighter_tab_shown(S.ftab, offered);
+    auto go_tab = [&](int to) {
+        if (to == tab) return;
+        if (S.fighter_sel >= 0 && S.fighter_sel < n && grid_tab(list, S.fighter_sel) == tab) S.ftab_sel[tab] = S.fighter_sel;
+        S.ftab = tab = to;
+        S.fighter_sel = S.ftab_sel[to] >= 0 && S.ftab_sel[to] < n ? S.ftab_sel[to] : -1;     // else the tab's first card
+        S.fighter_top = 0;
+        if (!gallery_on() && recomp_settings_set("online", "fighter_tab", to) > 0) pc_settings_save();
+    };
+    if (pad.lt || pad.rt) {
+        int dir = pad.rt ? 1 : -1, to = fighter_tab_step(tab, dir, offered);
+        if (to != tab) go_tab(to);
+        else if (counts[FTAB_COMMUNITY] > 0 && originals && (dir > 0 ? tab < FTAB_COMMUNITY : tab > FTAB_COMMUNITY))
+            say(rules_room.in_room ? "This room is STANDARD ONLY: community fighters are off here."
+                                   : pad_text("Original fighters only: community fighters are off for this search ({LB} on the hub switches it)."));
+    }
+    // build 90: the style filter (Y; keyboard I or R): All, then each style the game data has
+    const char *const *styles = nullptr;
+    int style_count = online_styles(&styles);
+    if (S.fstyle > style_count) S.fstyle = 0;
+    if (pad.y && style_count > 0) { S.fstyle = fighter_style_next(S.fstyle, style_count); S.fighter_top = 0; }
+    const char *filter = S.fstyle > 0 ? styles[S.fstyle - 1] : nullptr;
+    {   // once per session: what each tab holds, and the FFNY fighters per style (any of a fighter's styles counts)
+        static bool logged;
+        if (!logged) {
+            logged = true;
+            const auto &cards = cp_cards();
+            fprintf(stderr, "[FIGHTERS] tabs: FFNY %d, COMMUNITY %d%s, CREATED %d; FFNY per style:", counts[FTAB_FFNY],
+                    counts[FTAB_COMMUNITY], offered[FTAB_COMMUNITY] ? "" : " (not offered)", counts[FTAB_CREATED]);
+            for (int k = 0; k < style_count; k++) {
+                int c = 0;
+                for (int i = 0; i < n; i++)
+                    if (list[i].id != FIGHTER_RANDOM && grid_tab(list, i) == FTAB_FFNY && grid_style_matches(list, i, cards, styles[k])) c++;
+                fprintf(stderr, " %s %d", styles[k], c);
+            }
+            fprintf(stderr, "\n");
+        }
+    }
+    std::vector<char> keep(n, 1);
+    if (filter) {
+        const auto &cards = cp_cards();
+        for (int i = 0; i < n; i++)     // MORE stays: the community window has every community fighter
+            keep[i] = list[i].id == FIGHTER_RANDOM || list[i].id == FB_MORE_ID ||
+                      grid_style_matches(list, i, cards, filter);
+    }
+    // the tab's cards of that style, and RANDOM where it has two or more to draw from (not MORE, not a fighter by
+    // number, none the room's rules leave out)
+    std::vector<int> base;
+    int drawable = 0;
     for (int i = 0; i < n; i++)
-        if (S.fsearch.empty() || (list[i].id != FIGHTER_RANDOM && fighter_name_matches(list[i].name, S.fsearch.c_str())))
-            vis.push_back(i);
-    bool none = vis.empty();
-    if (none) for (int i = 0; i < n; i++) vis.push_back(i);     // nothing matches: the full grid stays, the box says so
+        if (list[i].id != FIGHTER_RANDOM && keep[i] && grid_tab(list, i) == tab) {
+            base.push_back(i);
+            if (!blocked(i) && list[i].id < FB_FIRST_LOGICAL) drawable++;
+        }
+    if (list[n - 1].id == FIGHTER_RANDOM && drawable > 1) base.push_back(n - 1);
+    // the cards shown: the tab's, or with a name search the matching ones of every tab offered (RANDOM only without one)
+    bool searching = !S.fsearch.empty();
+    std::vector<int> vis;
+    if (searching) {
+        for (int i = 0; i < n; i++)
+            if (list[i].id != FIGHTER_RANDOM && keep[i] && offered[grid_tab(list, i)] &&
+                fighter_name_matches(list[i].name, S.fsearch.c_str()))
+                vis.push_back(i);
+    } else {
+        vis = base;
+    }
+    bool none = searching && vis.empty();
+    if (none) vis = base;       // nothing matches: the tab stays, the box says so
     int vn = (int)vis.size();
+
+    // the header over the grid: the tabs between LT and RT, the style filter on the right
+    float gx = 228, gy = 82, cw = 52, ch = 76;
+    auto header = [&]() {
+        float x = gx - 6, y = 54;
+        bool can_l = fighter_tab_step(tab, -1, offered) != tab, can_r = fighter_tab_step(tab, 1, offered) != tab;
+        x += trigger_plate(dl, f, x, y, false, can_l) + 5;
+        if (mouse_click(f, x - 27, y, 22, 14) && can_l) go_tab(fighter_tab_step(tab, -1, offered));
+        for (int t = 0; t < FTAB_COUNT; t++) {
+            float tw = text_width(f, g_title, 12, FTAB_NAMES[t]), w = tw + 16;
+            bool lit = t == tab && !searching;
+            rect(dl, f, x, y - 2, w, 18, lit ? with_alpha(RED, 0.9f) : IM_COL32(0, 0, 0, 150), 4);
+            ImU32 col = lit ? WHITE : offered[t] ? with_alpha(CREAM, 0.85f) : with_alpha(GREY, 0.35f);
+            text(dl, f, g_title, 12, x + 8, y, col, FTAB_NAMES[t], LEFT, 0.8f);
+            if (mouse_click(f, x, y - 2, w, 18) && offered[t]) go_tab(t);
+            x += w + 3;
+        }
+        x += 2;
+        trigger_plate(dl, f, x, y, true, can_r);
+        if (mouse_click(f, x, y, 22, 14) && can_r) go_tab(fighter_tab_step(tab, 1, offered));
+        // the filter: "ALL STYLES", or the style on an orange plate
+        std::string st = filter ? upper(filter) : std::string("ALL STYLES");
+        float right = gx + cols * (cw + 4) - 4, room = right - (x + 30) - 22;
+        float size = std::max(8.0f, fit_size(f, g_title, 12, st.c_str(), std::min(room, 150.0f)));
+        float sw = text_width(f, g_title, size, st.c_str()), sx = right - sw - 10;
+        if (filter) rect(dl, f, sx - 4, y - 2, sw + 14, 18, with_alpha(ORANGE, 0.9f), 4);
+        text(dl, f, g_title, size, sx + 3, y + (12 - size) * 0.5f, filter ? WHITE : with_alpha(CREAM, 0.85f), st.c_str(), LEFT, 0.8f);
+        hint(dl, f, sx - 24, y - 1, "y", "");
+        if (mouse_click(f, sx - 24, y - 2, sw + 34, 18) && style_count > 0) {
+            S.fstyle = fighter_style_next(S.fstyle, style_count);
+            S.fighter_top = 0;
+        }
+    };
+    if (!vn) {      // build 90: no card of this style in the tab: the tab, the box says so
+        page_title(dl, f, "CHOOSE FIGHTER");
+        header();
+        glass(dl, f, gx - 8, gy - 8, cols * (cw + 4) + 12, rows * (ch + 6) + 26);
+        std::string msg = "NO " + (filter ? upper(filter) : std::string()) + " FIGHTER IN " + FTAB_NAMES[tab];
+        text(dl, f, g_title, 15, gx + cols * (cw + 4) / 2, gy + 130, CREAM, msg.c_str(), CENTER, 1.0f);
+        text(dl, f, g_title, 11, gx + cols * (cw + 4) / 2, gy + 154, GREY, "Y: ANOTHER STYLE    LT / RT: ANOTHER TAB", CENTER, 0.6f);
+        S.fighters_cp = -1;
+        if (pad.b) { S.page = S.ranked_pick ? RANKED_MODES : S.rts_pick ? RTS : HUB; S.rts_pick = false; }
+        if (pad.b) { S.fsearch_on = false; S.fsearch.clear(); }
+        return;
+    }
     int at = 0;
     {
         auto it = std::find(vis.begin(), vis.end(), S.fighter_sel);
-        if (it == vis.end()) S.fighter_sel = vis[0];        // the selection follows the search to its first match
+        if (it == vis.end()) S.fighter_sel = vis[0];        // the selection follows the search (or the tab) to its first card
         else at = (int)(it - vis.begin());
     }
     if (pad.left) at = (at + vn - 1) % vn;
@@ -3498,24 +3706,17 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     if (pad.down) at = std::min(vn - 1, at + cols);
     if (pad.lb) at = std::max(0, at - cols * rows);
     if (pad.rb) at = std::min(vn - 1, at + cols * rows);
-    if (pad.lt || pad.rt) {         // LT/RT: the previous / next first letter among the cards shown
-        std::vector<const char *> names;
-        for (int i : vis) names.push_back(list[i].id == FIGHTER_RANDOM ? "" : list[i].name);
-        at = fighter_letter_jump(names.data(), vn, at, pad.rt ? 1 : -1);
-    }
     S.fighter_sel = vis[at];
+    if (!searching) S.ftab_sel[tab] = S.fighter_sel;
     int row = at / cols;
     if (row < S.fighter_top) S.fighter_top = row;
     if (row >= S.fighter_top + rows) S.fighter_top = row - rows + 1;
     if (S.fighter_top > std::max(0, (vn - 1) / cols - rows + 1)) S.fighter_top = std::max(0, (vn - 1) / cols - rows + 1);
 
     page_title(dl, f, "CHOOSE FIGHTER");
+    header();
     const OnlineFighter &cur = list[S.fighter_sel];
     int cur_cp = S.fighter_sel < (int)g_grid_cp.size() ? g_grid_cp[S.fighter_sel] : -1;
-    // build 68: the room's FIGHTER RULES leave some fighters out (greyed, not picked; RANDOM skips them)
-    NetRoom rules_room;
-    lobby_room(&rules_room);
-    auto blocked = [&](int i) { return list[i].id != FIGHTER_RANDOM && fighter_blocked(rules_room, list[i].id); };
     // the chosen fighter, large, with name and style
     glass(dl, f, 36, 74, 180, 308);
     if (cur.id == FIGHTER_RANDOM || cur.id == FB_MORE_ID) random_card(dl, f, 46, 84, 160, 240, true, 110);
@@ -3528,7 +3729,8 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             text(dl, f, g_title, 10, 126, 290, with_alpha(CREAM, 0.8f), ("USER ID " + cards[cur_cp].user_id).c_str(), CENTER, 1.0f);
         if (cur_cp < (int)cards.size() && !cards[cur_cp].saved.empty())
             text(dl, f, g_title, 10, 126, 304, with_alpha(CREAM, 0.8f), ("SAVED " + cards[cur_cp].saved).c_str(), CENTER, 1.0f);
-        if (pad.y && cur_cp < (int)cards.size()) {     // Y: the online name of this card
+        // X (keyboard J or F; build 90, Y before): the online name of this card. Ctrl+F opens the search instead.
+        if (pad.x && !ImGui::GetIO().KeyCtrl && cur_cp < (int)cards.size()) {
             S.name_cp = cur_cp;
             snprintf(S.name, sizeof(S.name), "%s", cards[cur_cp].online.c_str());
             S.name_pos = std::min((int)strlen(S.name), CP_NAME_MAX - 1);
@@ -3546,7 +3748,6 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     }
     text(dl, f, g_title, 13, 126, 356, WHITE, cur.style, CENTER, 0, 170);
     // the grid
-    float gx = 228, gy = 82, cw = 52, ch = 76;
     glass(dl, f, gx - 8, gy - 8, cols * (cw + 4) + 12, rows * (ch + 6) + 26);
     for (int r = 0; r < rows; r++)
         for (int c = 0; c < cols; c++) {
@@ -3613,7 +3814,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             if (none) text(dl, f, g_title, 11, gx + w + 6, sy + 1, ORANGE, "NO FIGHTER BY THAT NAME", LEFT, 0.6f);
             else text(dl, f, g_title, 10, gx + w + 6, sy + 2, GREY, "ESC CLOSES", LEFT, 0.6f);
         } else {
-            text(dl, f, g_title, 10, gx, sy + 2, GREY, "TAB: SEARCH BY NAME    LT / RT: BY FIRST LETTER", LEFT, 0.6f);
+            text(dl, f, g_title, 10, gx, sy + 2, GREY, "TAB: SEARCH BY NAME    Z / C: TABS    R: STYLE", LEFT, 0.6f);
         }
     }
     if (pad.a && blocked(S.fighter_sel)) {
@@ -3626,8 +3827,8 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         int pick = S.fighter_sel;
         S.random_pick = cur.id == FIGHTER_RANDOM;
         if (S.random_pick) {    // RANDOM is the last card: one of the others the room's rules allow
-            std::vector<int> allowed;
-            for (int i = 0; i + 1 < n; i++) if (!blocked(i) && list[i].id < FB_FIRST_LOGICAL) allowed.push_back(i);
+            std::vector<int> allowed;      // build 90: of the cards shown (this tab, this style)
+            for (int i : vis) if (list[i].id != FIGHTER_RANDOM && !blocked(i) && list[i].id < FB_FIRST_LOGICAL) allowed.push_back(i);
             pick = allowed.empty() ? online_random_below(n - 1) : allowed[online_random_below((int)allowed.size())];
         }
         int pick_cp = pick < (int)g_grid_cp.size() ? g_grid_cp[pick] : -1;
@@ -5318,6 +5519,11 @@ void gallery_step()
                                          "hub-original", "hub-koth-original", "ranked-modes-original",
                                          // build 83: the hub fighter search (a query; one nothing matches)
                                          "fighters-search", "fighters-search-none",
+                                         // build 90: CHOOSE FIGHTER's tabs and style filter (COMMUNITY with an override
+                                         // of community fighters; KICKBOXING on FFNY; CREATED, and CREATED with
+                                         // WRESTLING; Quick Match for original fighters only: COMMUNITY not offered)
+                                         "fighters-tab-community", "fighters-style", "fighters-tab-created",
+                                         "fighters-tab-created-style", "fighters-tab-original",
                                          // build 83: the last content sync failed (RECOMP_TEST_CONTENT_SYNC=<reason>), and the
                                          // empty room list while most players have other community content
                                          "hub-sync-failed", "rooms-split", "rooms-sync-failed",
@@ -5524,6 +5730,9 @@ void gallery_step()
     G.crew = NetCrew();
     G.my_crew = false;
     G.original = 0;                     // build 86: all fighters unless the page says
+    S.ftab = FTAB_FFNY;                 // build 90: the FFNY tab, every style, unless the page says
+    S.fstyle = 0;
+    for (int &k : S.ftab_sel) k = -1;
     G.rts = false;
     std::string p = page;
     // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
@@ -5622,8 +5831,33 @@ void gallery_step()
         S.fighter_sel = 0;
         S.fighter_top = 0;
     }
+    else if (p.rfind("fighters-tab-", 0) == 0 || p == "fighters-style") {     // build 90: the tabs and the style filter
+        S.page = FIGHTERS;
+        S.fighter_sel = -1;
+        S.fighter_top = 0;
+        auto style_at = [](const char *name) {
+            const char *const *st;
+            int n = online_styles(&st);
+            for (int k = 0; k < n; k++) if (!_stricmp(st[k], name)) return k + 1;
+            return 0;
+        };
+        if (p == "fighters-tab-community") S.ftab = FTAB_COMMUNITY;
+        if (p == "fighters-style") S.fstyle = style_at("Kickboxing");
+        if (p == "fighters-tab-created" || p == "fighters-tab-created-style") {
+            G.cp_slots = 1;
+            G.room = sample_room(0, 2, 2);
+            S.ftab = FTAB_CREATED;
+            if (p == "fighters-tab-created-style") S.fstyle = style_at("Wrestling");
+        }
+        if (p == "fighters-tab-original") {     // One on One's Quick Match for original fighters only
+            S.ftab = FTAB_COMMUNITY;
+            S.quick_mode = 0;
+            G.original = 1u << 0;
+        }
+    }
     else if (p == "fighters-standard" || p == "fighters-new") {  // the new fighters off here (STANDARD ONLY), or NEW
         S.page = FIGHTERS;
+        S.ftab = FTAB_COMMUNITY;
         G.room = sample_room(0, 2, 2);
         const auto &list = roster();
         if (p == "fighters-standard") {
@@ -5718,6 +5952,7 @@ void gallery_step()
     }
     else if (p == "fighters-community" || p == "fighters-more") {   // build 86: the shelf, or MORE's window open
         S.page = FIGHTERS;
+        S.ftab = FTAB_COMMUNITY;
         S.fighter_top = 0;
         const auto &list = grid_fighters();
         for (int i = 0; i < (int)list.size(); i++)
@@ -5778,6 +6013,7 @@ void gallery_step()
         G.cp_slots = 1;
         G.room = sample_room(0, 2, 2);
         S.page = FIGHTERS; S.fighter_sel = 0; S.fighter_top = 0;
+        S.ftab = FTAB_CREATED;
     }
     else if (p == "room-created-long") {    // One on One: both created fighters with 16-character names
         G.cp_slots = 3;
@@ -5789,12 +6025,14 @@ void gallery_step()
         G.cp_slots = 1;
         G.room = sample_room(0, 2, 2);
         S.page = FIGHTERS; S.fighter_sel = 0; S.fighter_top = 0;
+        S.ftab = FTAB_CREATED;
     }
     else if (p == "grid-created-pick") {    // three created fighters, the second one picked and remembered
         G.cp_slots = 1;
         G.cp_pick = 1;
         G.room = sample_room(0, 2, 2);
         S.page = FIGHTERS; S.fighter_top = 0;
+        S.ftab = FTAB_CREATED;
         S.fighter_sel = grid_pos(grid_fighters(), NETPLAY_CREATED_FIGHTER);
     }
     else if (p == "room-created") {         // One on One: Ann with her created fighter, Ben with his
@@ -7086,7 +7324,9 @@ bool draw_pages(ImVec2 display)
         if (S.page == FIGHTERS && !S.unl_open) {     // build 86: the community window has its own hints
             float hx = 54;
             hx += hint(dl, f, hx, 420, "a", "PICK");
-            if (S.fighters_cp >= 0) hx += hint(dl, f, hx, 420, "y", "ONLINE NAME");     // a created fighter's card
+            hx += hint(dl, f, hx, 420, "y", "STYLE");     // build 90
+            // a created fighter's card: under its panel (the row has no room left of the grid for a fourth)
+            if (S.fighters_cp >= 0) hint(dl, f, 54, 392, "x", "ONLINE NAME");
             hint(dl, f, hx, 420, "b", "BACK");
         }
     } else if (S.page == NAME) {

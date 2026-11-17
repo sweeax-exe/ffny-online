@@ -15,14 +15,14 @@
 .PARAMETER Server  The ssh hosts (entries in ~/.ssh/config), comma-separated: the project's server,
                    and the first one for as long as older installs ask there.
 .PARAMETER RelayOnly Relays that serve no downloads but need the manifest for their build gate
-                   (the North America relay): latest.json and its signature only.
+                   (US East, ffny-na, and Asia, ffny-sg): latest.json and its signature only.
 .PARAMETER NoUpload  Build and sign only (build/update/).
 .PARAMETER NoGitHub  Upload to the servers but make no GitHub release.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Notes,
     [string[]]$Server = @('ffny-online', 'hetzner-sweeax'),
-    [string[]]$RelayOnly = @('ffny-na', 'ffny-west'),
+    [string[]]$RelayOnly = @('ffny-na', 'ffny-sg'),
     [string]$Key = "$env:USERPROFILE\.defjam\update-signing-key.pem",
     [switch]$NoUpload,
     [switch]$NoGitHub

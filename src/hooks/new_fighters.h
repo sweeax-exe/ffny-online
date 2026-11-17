@@ -27,7 +27,10 @@ typedef struct NewFighter {
 /* The new fighters of the database the game reads (read once). */
 int new_fighters_list(const NewFighter **out);
 int new_fighter_template(int fe_id);        /* -1 when fe_id is not a new fighter */
-int new_fighter_row(uint32_t row);          /* 1 when Character row `row` (an id's low bits) is a new fighter's */
+int new_fighter_row(uint32_t row);
+/* Build 90: the fighting styles of a fighter's Character row (word 18, the select screen's: bit 0 Kickboxing, 1 Street
+ * fighting, 2 Martial arts, 3 Wrestling, 4 Submissions; a fighter can have more than one), -1 when no row has it. */
+int new_fighters_style_bits(int fe_id);          /* 1 when Character row `row` (an id's low bits) is a new fighter's */
 
 /* After a front-end call the game ran (the FuncCall hook, recomp_manual.c), and Game.GetNextFighter's
  * wrapper: the select screens show each new fighter as a cell of its own after the stock cells (the community

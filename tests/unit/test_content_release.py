@@ -214,7 +214,7 @@ def test_notice_sits_where_update_now_sits():
     # the online pages' corner badge: after the notices the player has to act on
     title = re.search(r'void page_title\(.*?\n\}\n', screen, re.S).group(0)
     assert title.index('"NEW COMMUNITY CONTENT IS OUT"') < title.index('content_release(head, sizeof(head)')
-    assert title.count('IM_COL32(150, 14, 30, 230)') == 4               # the same badge as the three before it
+    assert title.count('corner_plate(dl, f, ') == 4                     # the same badge as the three before it
     ui = src('src/hooks/pc_ui.cpp')
     # the corner notice: after UPDATE NOW's, and only once the main menu is up (the answer often comes during the
     # intro, where 12 s of notice would be over unread)
