@@ -271,6 +271,9 @@ static RecompSetting g_display_settings[] = {
       "Run the Streets: the minimap in the top right (the streets' walls, every fighter, up is where the camera looks)." },
     { "openworld", "minimap_range", RECOMP_SETTING_INT, 70, 30, 150, NULL, "RECOMP_OW_MINIMAP_RANGE", 0,
       "Run the Streets: how far the minimap reaches, in metres from your fighter to its edge." },
+    { "openworld", "combat_pings", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OW_COMBAT_PINGS", 0,
+      "Run the Streets: a fighter who hits, is hit or grabs shows as a red dot on the minimap for about 3 seconds "
+      "(on the rim as an arrow when far away), so you can see where the fighting is." },
     { "openworld", "free_roam", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OW_FREE_ROAM", 0,
       "Run the Streets / Big Arena: out of combat your fighter walks freely and faces where it goes; a fight button "
       "next to someone, a hit, or White/Black (or a right-stick flick) to lock on brings the fight stance back. "

@@ -54,6 +54,14 @@ int main(void)
     x = 320; y = 200; k = rts_clamp_to_box(&x, &y, 0, 0, 640, 480, 1); printf("clamp|behind|%d|%.1f|%.1f\n", k, x, y);
     printf("alpha|%.2f|%.2f|%.2f|%.2f|%.2f\n", rts_bubble_alpha(0), rts_bubble_alpha(75), rts_bubble_alpha(2000),
            rts_bubble_alpha(4600), rts_bubble_alpha(5000));
+    printf("ping|alpha|%.2f|%.2f|%.2f|%.3f|%.2f\n", rts_ping_alpha(0), rts_ping_alpha(1200), rts_ping_alpha(2100),
+           rts_ping_alpha(2999), rts_ping_alpha(3000));
+    {   /* build 91: a fighter 1000 east of this PC's lies beyond the minimap's rim: its ping is the arrow on the rim,
+         * pointing east (the same clamp as the grey rim arrows); one 100 away stays inside */
+        float mx, my; int mr;
+        mr = rts_minimap_point(0, -1, 0, 0, 1000, 0, 0.2f, 45, &mx, &my); printf("pingpos|far|%d|%.1f|%.1f\n", mr, mx, my);
+        mr = rts_minimap_point(0, -1, 0, 0, 100, 0, 0.2f, 45, &mx, &my); printf("pingpos|near|%d|%.1f|%.1f\n", mr, mx, my);
+    }
     /* the fight chat's keys and clicks with the online screens shut: route|chat|typing|kind|vk|in_chat|result */
     {
         static const int cases[][5] = {
@@ -247,3 +255,24 @@ def test_minimap_point(out):
     assert [float(x) for x in out[('mm', 'east')]] == [0, -10.0, -20.0]
     # 1000 east of the fighter: on the right rim
     assert [float(x) for x in out[('mm', 'rim')]] == [1, 40.0, 0.0]
+
+
+def test_combat_ping_fade_and_clamp(out):
+    # full for 1.2 s, down to nothing at 3 s, nothing after
+    a = [float(x) for x in out[('ping', 'alpha')]]
+    assert a[0] == 1.0 and a[1] == 1.0 and a[4] == 0.0
+    assert 0.0 < a[3] < 0.01 and 0.45 < a[2] < 0.55
+    # a far fighter is put on the rim, a near one is not
+    assert [float(x) for x in out[('pingpos', 'far')]] == [1, 45.0, 0.0]
+    assert [float(x) for x in out[('pingpos', 'near')]] == [0, 20.0, 0.0]
+
+
+def test_combat_ping_is_overlay_only():
+    # the hit hook writes host memory only; the pings are drawn from the view, behind the combat_pings setting
+    ow = read('src/hooks/openworld.c')
+    assert ow.index('rts_social_combat(attacker, defender);') < ow.index('if (!BA.on) return;', ow.index('void ow_hit'))
+    social = read('src/hooks/rts_social.c')
+    body = social[social.index('void rts_social_combat'):social.index('void rts_social_camera')]
+    assert 's_combat_ms[' in body and '= t;' in body and 'MEM8(' not in body and 'MEM16(' not in body
+    assert 'combat_pings' in read('src/hooks/pc_settings.c')
+    assert 'c.pings' in read('src/hooks/rts_social_ui.inc')

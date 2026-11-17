@@ -53,6 +53,11 @@ int rts_clamp_to_box(float *x, float *y, float x0, float y0, float x1, float y1,
 int rts_minimap_point(float fx, float fz, float lx, float lz, float wx, float wz, float scale, float half,
                       float *mx, float *my);
 
+/* Build 91, the minimap's combat pings: a fighter that landed or took a hit, or grabs, shows as a red dot for 3 s.
+ * Opacity `age_ms` after its last combat event: full for 1.2 s, then fading out linearly to nothing at 3 s. */
+#define RTS_PING_MS 3000
+float rts_ping_alpha(unsigned age_ms);
+
 /* A chat bubble's opacity `age_ms` after its line arrived: up within 150 ms, full until 4.2 s, gone at 5 s. */
 #define RTS_BUBBLE_MS 5000
 float rts_bubble_alpha(unsigned age_ms);

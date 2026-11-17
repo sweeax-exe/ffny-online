@@ -113,6 +113,13 @@ float rts_bubble_alpha(unsigned age_ms)
     return 1.0f;
 }
 
+float rts_ping_alpha(unsigned age_ms)
+{
+    if (age_ms >= RTS_PING_MS) return 0.0f;
+    if (age_ms <= 1200u) return 1.0f;
+    return (float)(RTS_PING_MS - age_ms) / (float)(RTS_PING_MS - 1200u);
+}
+
 int rts_minimap_point(float fx, float fz, float lx, float lz, float wx, float wz, float scale, float half,
                       float *mx, float *my)
 {

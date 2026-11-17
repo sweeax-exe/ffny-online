@@ -154,6 +154,13 @@ Overlay only (`rts_social_ui.inc`, from the view `rts_social.c` copies each fram
   colour with their name (8 letters), CPUs small grey dots, fighters beyond the range small arrows on the rim, the
   speaker by a player who talks; you are an arrow along your facing.
 - `[openworld] nameplates` (on), `nameplate_self` (off), `minimap` (on), `minimap_range` (70 m, 30..150).
+- **Combat pings (build 91):** a fighter who lands or takes a hit (the damage hook `sub_001A5DD0`, both sides), or is in
+  a grab (state 0x1E, 0x34, 0x35), gets a red dot with a pulsing ring on the minimap for 3 s: full for 1.2 s, then
+  fading out (`rts_ping_alpha`, unit-tested); every new hit refreshes it. Beyond `minimap_range` it is a larger red
+  arrow on the rim, pointing the way (the same clamp as the grey arrows). This PC's own fighter is not pinged. Only a
+  time per slot in host memory (`rts_social_combat`), read by the overlay: no network data, nothing the fight reads,
+  so lockstep and rollback do not see it. `[openworld] combat_pings` (on). Crew colours: not done (the mode does not
+  carry crews yet).
 - **A real map image later:** the pack would carry a top-down picture (e.g. `minimap.png`, north up, 1024 px) and
   its world rectangle (`"minimap": {"image": "minimap.png", "x0": .., "z0": .., "x1": .., "z1": ..}` in
   bigarena.json), rendered by the map generator / Studio from the same scene; the minimap would draw it under the

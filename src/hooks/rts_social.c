@@ -154,6 +154,19 @@ int rts_social_walls(float (*seg)[4], int max)
     return n;
 }
 
+/* Build 91: when each fighter last was in combat (GetTickCount64; 0 none). Written by the hit hook and by the grab
+ * poll below, both on the game thread; host memory the fight never reads, so rollback re-runs only refresh it. */
+static unsigned long long s_combat_ms[4];
+
+void rts_social_combat(uint32_t attacker, uint32_t defender)
+{
+    unsigned long long t;
+    if (attacker < ACTORS || defender < ACTORS || !rts_social_on()) return;
+    t = now_ms();
+    if (attacker < ACTORS + 4u * STRIDE && (attacker - ACTORS) % STRIDE == 0) s_combat_ms[(attacker - ACTORS) / STRIDE] = t;
+    if (defender < ACTORS + 4u * STRIDE && (defender - ACTORS) % STRIDE == 0) s_combat_ms[(defender - ACTORS) / STRIDE] = t;
+}
+
 void rts_social_camera(void)
 {
     RtsSocialView *v;
@@ -161,6 +174,7 @@ void rts_social_camera(void)
     int s, i, w;
     if (!rts_social_on()) {
         if (s_buf[s_shown].on) s_buf[s_shown].on = 0;
+        memset(s_combat_ms, 0, sizeof s_combat_ms);
         return;
     }
     w = s_shown ^ 1;
@@ -184,6 +198,11 @@ void rts_social_camera(void)
         v->pos[s][2] = MEMF(r + 0x4Cu);
         v->yaw[s] = MEMF(r + 0x54u);
         if (MEM8(r + 0x937u) & 1u) v->cpu |= 1u << s;
+        {   /* a grab starting, holding or held (0x1E, 0x34, 0x35: combo-log.md, match-end-state.md) is combat too */
+            uint32_t st = MEM32(r + 0x30u);
+            if (st == 0x1Eu || st == 0x34u || st == 0x35u) s_combat_ms[s] = now_ms();
+        }
+        v->combat_ms[s] = s_combat_ms[s];
     }
     walls_copy();
     v->local = netplay_local_slot();
