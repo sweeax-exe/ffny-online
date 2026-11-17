@@ -12,7 +12,7 @@ int cu_gate(const CuGate *g)
     if (g->in_fight) return CU_IN_FIGHT;
     if (g->match_locked || g->lockstep || g->room_phase == 2) return CU_IN_MATCH;
     if (g->room_phase == 1 || g->hill_busy) return CU_COUNTDOWN;
-    if (g->news <= 0) return CU_NO_NEWS;
+    if (g->news <= 0 && !g->force) return CU_NO_NEWS;
     return CU_OK;
 }
 

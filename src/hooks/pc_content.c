@@ -6,6 +6,7 @@
  * loader, the file system and the netplay which packs are on. */
 #define _CRT_SECURE_NO_WARNINGS
 #include "pc_content.h"
+#include "content_update_logic.h"
 #include "new_fighter_places.h"
 #include "recomp_settings.h"
 #include <ctype.h>
@@ -66,6 +67,54 @@ static const char *data_root(void)
 #endif
 }
 
+/* Build 90, community content in offline play: this run leaves FFNY Online's synced community packs out (the setting
+ * [content] community_offline is 0 and the run was not started for online). Decided once, by the game at its start
+ * (pc_content_decide); the launcher never decides, so its Content page keeps listing everything. */
+static int g_community_off;
+static int g_decided;
+static int g_session_on;        /* started for online (--content-update): on for this run, whatever the setting */
+
+void pc_content_session_online(int forced) { g_session_on = forced != 0; }
+
+/* A run started for online has --content-update on its command line (UPDATE NOW, or the online prompt's restart). */
+static int started_for_online(void)
+{
+#if defined(_WIN32)
+    const char *cmd = GetCommandLineA(), *flag = "--content-update", *p = cmd ? strstr(cmd, flag) : NULL;
+    size_t n = strlen(flag);
+    while (p) {
+        if ((p == cmd || p[-1] == ' ' || p[-1] == 9) && (!p[n] || p[n] == ' ' || p[n] == 9)) return 1;
+        p = strstr(p + n, flag);
+    }
+#endif
+    return 0;
+}
+
+/* Decided on first use: the game's start (the log header, pc_content_start) or the first online connection, whichever
+ * comes first (tests start one before the launcher is done). The launcher's own screens never ask. */
+void pc_content_decide(void)
+{
+    if (g_decided) return;
+    g_decided = 1;
+    g_session_on |= started_for_online();
+    g_community_off = cu_community_off(recomp_settings_get("content", "community_offline", 1), g_session_on);
+}
+
+int pc_content_community_off(void) { return g_community_off; }
+
+int pc_content_online_allowed(void)
+{
+    pc_content_decide();
+    return cu_online_allowed(g_community_off);
+}
+
+/* The folder the composed files are served from, relative to the data folder: the one composition of the community
+ * packs and the player's own, or, with the community content off, the composition of the player's own packs alone
+ * (setup/mods.py compose writes both). */
+#define COMPOSED_DIR "mod-manager" HOST_SEP "content-files"
+#define COMPOSED_OWN_DIR "mod-manager" HOST_SEP "own-packs" HOST_SEP "content-files"
+static const char *composed_dir(void) { return g_community_off ? COMPOSED_OWN_DIR : COMPOSED_DIR; }
+
 static int folder_exists(const char *path)
 {
 #if defined(_WIN32)
@@ -108,7 +157,7 @@ static int read_files_ini(const char *root, char *applied, size_t applied_size,
     if (applied_size) applied[0] = 0;
     if (nfiles) *nfiles = 0;
     if (!root) return 0;
-    snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "content-files" HOST_SEP "files.ini", root);
+    snprintf(path, sizeof path, "%s" HOST_SEP "%s" HOST_SEP "files.ini", root, composed_dir());
     if (!(f = content_fopen(path, "rb"))) return 0;
     while (fgets(line, sizeof line, f)) {
         char *s = trim(line), *eq;
@@ -202,7 +251,7 @@ int pc_content_pack_file(const char *id, const char *name, char *out, int size)
     return (int)len;
 }
 
-int pc_content_list(PcContentPack *out, int max)
+static int list_all(PcContentPack *out, int max)
 {
     char path[1024], line[1200];
     const char *root = data_root();
@@ -274,6 +323,17 @@ int pc_content_list(PcContentPack *out, int max)
     return n;
 }
 
+int pc_content_list(PcContentPack *out, int max)
+{
+    int n = list_all(out, max), i, m = 0;
+    if (!g_community_off) return n;
+    /* Build 90: without the community content only the player's own packs and the language packs (the Game language
+     * setting; they never clash with a player's own packs) remain: the rest is installed but not used in this run */
+    for (i = 0; i < n; i++)
+        if (out[i].local || !strcmp(out[i].type, "language")) out[m++] = out[i];
+    return m;
+}
+
 uint32_t pc_content_print(void)
 {
     static PcContentPack packs[PC_CONTENT_MAX];
@@ -315,7 +375,7 @@ int pc_content_skins(PcContentSkin *out, int max)
     int n = 0, np, in_section = 0;
     if (!root || max <= 0) return 0;
     np = pc_content_list(packs, PC_CONTENT_MAX);
-    snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "content-files" HOST_SEP "files.ini", root);
+    snprintf(path, sizeof path, "%s" HOST_SEP "%s" HOST_SEP "files.ini", root, composed_dir());
     if (!(f = fopen(path, "rb"))) return 0;
     while (fgets(line, sizeof line, f) && n < max) {
         char *s = trim(line), *fields[4], *q;
@@ -357,6 +417,7 @@ int pc_content_news(char *names, int size)
     FILE *f;
     int pending = 0, revision = 0, in_section = 0;
     if (names && size > 0) names[0] = 0;
+    if (g_community_off) return 0;      /* build 90: the content is off in this run: nothing to update */
     if (test && *test) {
         if (names && size > 0) snprintf(names, (size_t)size, "%s", atoi(test) > 0 ? "Doc Nine | The Block" : "");
         return atoi(test) > 0 ? atoi(test) : 0;
@@ -540,13 +601,25 @@ static void sync_line(char *out, size_t size, const char *prefix)
                  s.kind[0] ? s.kind : "-", s.revision, s.packs, s.packs == 1 ? "" : "s", s.time);
 }
 
+/* Build 90: "on", "OFF (setting: ...)" or "on for this run only (restarted for online; the setting is off)". */
+static const char *mode_text(void)
+{
+    if (g_community_off) return "OFF in this run (the setting Community content in offline play is off): the standard "
+                                "fighters, venues and looks only; online is refused until a restart with it on";
+    if (!recomp_settings_get("content", "community_offline", 1))
+        return "on for this run only (the game restarted for online; the saved setting stays off)";
+    return "on";
+}
+
 void pc_content_log_header(void)
 {
     char line[1400], state[1200];
+    pc_content_decide();
     g_print_at_start = pc_content_print();
     sync_line(line, sizeof line, "");
     content_state(state, sizeof state);
-    fprintf(stderr, "[CONTENT] %s\n[CONTENT] installed: %s\n", line, state);
+    fprintf(stderr, "[CONTENT] community content in offline play: %s\n[CONTENT] %s\n[CONTENT] installed: %s\n", mode_text(),
+            line, state);
 }
 
 void pc_content_report_line(void)
@@ -556,6 +629,7 @@ void pc_content_report_line(void)
     sync_line(line, sizeof line, "");
     content_state(state, sizeof state);
     pc_content_news_state(&news);
+    fprintf(stderr, "[REPORT] community content in offline play: %s\n", mode_text());
     fprintf(stderr, "[REPORT] content: %s; %s; check: %s", state, line,
             !news.known ? "none yet" : news.error[0] ? "FAILED" : "ok");
     if (news.known) fprintf(stderr, " (revision %d, %d pending%s%s, %s)", news.revision, news.pending,
@@ -733,7 +807,7 @@ static void read_lang_lines(const char *root)
     FILE *f;
     int in_section = 0;
     g_lang_count = 0;
-    snprintf(path, sizeof path, "%s" HOST_SEP "mod-manager" HOST_SEP "content-files" HOST_SEP "files.ini", root);
+    snprintf(path, sizeof path, "%s" HOST_SEP "%s" HOST_SEP "files.ini", root, composed_dir());
     if (!(f = content_fopen(path, "rb"))) return;
     while (fgets(line, sizeof line, f) && g_lang_count < CONTENT_FILES_MAX) {
         char *s = trim(line), *bar;
@@ -790,7 +864,7 @@ static void serve_composed_files(const char *root)
     static char applied[4096];
     int i, n = 0;
     if (!root || !read_files_ini(root, applied, sizeof applied, g_files, CONTENT_FILES_MAX, &n) || !n) return;
-    snprintf(g_files_dir, sizeof g_files_dir, "%s" HOST_SEP "mod-manager" HOST_SEP "content-files", root);
+    snprintf(g_files_dir, sizeof g_files_dir, "%s" HOST_SEP "%s", root, composed_dir());
     g_file_count = 0;
     for (i = 0; i < n; i++) {
         char host[1400];
@@ -876,13 +950,18 @@ void pc_content_start(const char *root)
 #if defined(_WIN32)
     if (data_root()) root = data_root();    /* the caller's root is in the ANSI code page; this one is UTF-8 */
 #endif
+    pc_content_decide();
     {
         const char *v = getenv("RECOMP_CONTENT");
         if (v && !strcmp(v, "0")) { fprintf(stderr, "[CONTENT] off for this run (RECOMP_CONTENT=0)\n"); return; }
     }
+    if (g_community_off)
+        fprintf(stderr, "[CONTENT] community packs are not used in this run: only the player's own packs and language "
+                        "packs (the files come from %s)\n", composed_dir());
     n = pc_content_list(packs, PC_CONTENT_MAX);
     if (!n) {
         PcContentSync last;
+        if (g_community_off) return;
         fprintf(stderr, "[CONTENT] no community packs installed\n");
         /* build 84: the launcher's sync says it installed some, yet this run finds none (the data folder) */
         if (!(tex_root && *tex_root) && pc_content_sync_result(&last) && last.packs > 0 &&

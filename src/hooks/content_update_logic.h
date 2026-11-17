@@ -46,9 +46,25 @@ typedef struct CuGate {
     int room_phase;     /* NetRoom.phase when in a room (0 lobby, 1 voting, 2 playing), else 0 */
     int hill_busy;      /* a hill/rotation room calls, votes or fights */
     int already;        /* UPDATE NOW was taken: the game is closing */
+    int force;          /* build 90: the restart for online with community content (offline switch): goes without news */
 } CuGate;
 
 int cu_gate(const CuGate *g);
+
+/* Build 90, community content in offline play (settings.ini [content] community_offline, default 1 = on).
+ * Off: the game starts with the original data only (the synced community packs are not mounted or composed; the
+ * player's own packs and language packs still are), and online is refused until a restart with the content on.
+ *   setting_on: the saved setting; forced_on: this run was started for online (--content-update: UPDATE NOW or the
+ *   online prompt's restart), which turns the content on for this run only. Returns 1 when this run leaves the
+ *   community packs out. */
+static inline int cu_community_off(int setting_on, int forced_on) { return !setting_on && !forced_on; }
+/* Online (the hub, a room, a match, Run the Streets) is allowed in a run with the content in this state. */
+static inline int cu_online_allowed(int community_off) { return !community_off; }
+/* The prompt over the online entry, "Online needs FFNY Online's community content. Restart with it now?" */
+#define CU_ONLINE_PROMPT_TEXT "Online needs FFNY Online's community content. Restart with it now?"
+/* Why a client with the content off never reaches a room (the status line of a refused connect). */
+#define CU_ONLINE_REFUSED_TEXT "Online needs FFNY Online's community content: turn it on in the launcher, or restart with it from the online entry."
+
 /* Plain words for a refusal ("" for CU_OK). */
 const char *cu_refusal_text(int why);
 

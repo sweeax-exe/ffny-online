@@ -32,7 +32,8 @@ def test_start_log_and_f9_report_carry_the_content_state():
     assert 'pc_content_log_header();' in SETTINGS_C
     assert SETTINGS_C.index('graphics_mod_log_header();') < SETTINGS_C.index('pc_content_log_header();') < \
         SETTINGS_C.index('pc_content_start(')
-    assert '"[CONTENT] %s\\n[CONTENT] installed: %s\\n"' in CONTENT_C
+    # build 90: the first line says the community-content-in-offline-play setting
+    assert '"[CONTENT] community content in offline play: %s\\n[CONTENT] %s\\n[CONTENT] installed: %s\\n"' in CONTENT_C
     assert 'last sync ok, revision %d, %d pack%s' in CONTENT_C and 'last sync %s: %s' in CONTENT_C
     assert '"FAILED"' in CONTENT_C
     # the F9 report (this session's log): the state at the moment F9 was pressed, from the send thread, which

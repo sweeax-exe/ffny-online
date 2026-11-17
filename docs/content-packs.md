@@ -239,6 +239,24 @@ game build.
   makes a pick "community". Its venue is a new venue, which STANDARD ONLY rooms leave out of their vote, and that is
   wanted: it is a Run the Streets map, loaded by that mode whatever the room's setting.
 
+## Community content in offline play (build 90)
+
+`settings.ini [content] community_offline` (default 1; the launcher's Content page and Basics, env
+`RECOMP_CONTENT_OFFLINE`) lets a player keep their own offline mods away from the always-on community packs.
+
+- **Off:** the game starts with the original data plus the player's own packs and the language packs. The synced
+  community packs (fighters, clothing, venues, skins, official maps, retextures) are not mounted: `pc_content_list`
+  leaves them out, the composed files come from `<data>/mod-manager/own-packs/content-files` (`mods.py compose` builds
+  that composition of the player's own packs alone next to `content-files`), and offline Battle and Story show the
+  standard roster and venues. Nothing is deleted or re-downloaded; the sync keeps running, so turning it on needs
+  nothing. Run the Streets needs its official map, so it is not offered offline while the content is off.
+- **Online needs it on.** With the setting off the game never connects (`netplay.c start()` refuses). ONLINE on the main
+  menu opens the prompt "Online needs FFNY Online's community content. Restart with it now?": YES closes the game
+  and the launcher in UPDATE NOW mode syncs, composes and starts it again with `--content-update`, which has the content
+  on for that run only (the saved setting stays off) and opens the online hub; NO goes back.
+- The log's `[CONTENT] community content in offline play:` line and F9's `[REPORT] community content in offline play:`
+  line say which. Tests: `tests/unit/test_content_offline.py`.
+
 ## Testing
 
 ```

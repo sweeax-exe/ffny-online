@@ -45,7 +45,7 @@ def test_game_registers_and_applies_the_cheats():
     init = text[text.index('int pc_settings_init(void)'):]
     init = init[:init.index('recomp_settings_register(')]
     assert 'cheats_settings(g_settings + g_setting_count' in init
-    assert 'pc_language_settings(g_settings + g_setting_count, 5)' in init
+    assert 'pc_language_settings(g_settings + g_setting_count, 7)' in init
     apply = text[text.index('void pc_settings_apply_display(void)'):]
     apply = apply[:apply.index('\n}')]
     assert 'cheats_apply_settings();' in apply

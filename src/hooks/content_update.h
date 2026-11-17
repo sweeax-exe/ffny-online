@@ -21,6 +21,9 @@ int content_update_gate(char *why, int size);
 /* UPDATE NOW pressed (where: for the log): CU_OK when taken (the game closes within a frame or two, after a save
  * being written), else the refusal (why as above). */
 int content_update_request(const char *where, char *why, int size);
+/* Build 90: the same restart for online when the community content is off in this run (the online prompt's YES), with
+ * no news needed; the game starts again with the content on for that run only (the saved setting stays off). */
+int content_update_request_online(const char *where, char *why, int size);
 /* 1 once UPDATE NOW was taken (the screens say "updating"). */
 int content_update_closing(void);
 

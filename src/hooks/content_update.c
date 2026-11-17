@@ -73,11 +73,12 @@ int content_update_news(char *names, int size)
     return cached;
 }
 
-static void gate_state(CuGate *g)
+static void gate_state(CuGate *g, int force)
 {
     NetRoom r;
     memset(g, 0, sizeof *g);
     g->news = content_update_news(NULL, 0);
+    g->force = force;
     g->in_fight = netplay_in_fight();
     g->match_locked = netplay_match_locked();
     g->lockstep = netplay_active();
@@ -94,19 +95,21 @@ static void gate_state(CuGate *g)
     }
 }
 
-int content_update_gate(char *why, int size)
+static int gate_for(char *why, int size, int force)
 {
     CuGate g;
     int r;
-    gate_state(&g);
+    gate_state(&g, force);
     r = cu_gate(&g);
     if (why && size > 0) snprintf(why, (size_t)size, "%s", cu_refusal_text(r));
     return r;
 }
 
-int content_update_request(const char *where, char *why, int size)
+int content_update_gate(char *why, int size) { return gate_for(why, size, 0); }
+
+static int request(const char *where, char *why, int size, int force)
 {
-    int r = content_update_gate(why, size);
+    int r = gate_for(why, size, force);
 #if !defined(_WIN32)
     /* the hand-off to the launcher is Windows only for now (pc_settings.c) */
     if (r == CU_OK) {
@@ -121,11 +124,21 @@ int content_update_request(const char *where, char *why, int size)
     }
     g_requested_at = now_ms();
     InterlockedExchange(&g_requested, 1);
-    fprintf(stderr, "[CONTENT] UPDATE NOW (%s): %d pack(s) waiting; the game closes, the launcher gets them and starts "
-                    "it again\n", where ? where : "?", content_update_news(NULL, 0));
+    if (force)
+        fprintf(stderr, "[CONTENT] restart for online (%s): the community content is off in this run; the game closes, the "
+                        "launcher syncs and starts it again with the content on (this run only)\n", where ? where : "?");
+    else
+        fprintf(stderr, "[CONTENT] UPDATE NOW (%s): %d pack(s) waiting; the game closes, the launcher gets them and starts "
+                        "it again\n", where ? where : "?", content_update_news(NULL, 0));
     fflush(stderr);
     return CU_OK;
 }
+
+int content_update_request(const char *where, char *why, int size) { return request(where, why, size, 0); }
+
+/* Build 90: the online prompt's YES, the same restart without news: the launcher in UPDATE NOW mode syncs, composes and
+ * starts the game with --content-update, which has the community content on for that run only. */
+int content_update_request_online(const char *where, char *why, int size) { return request(where, why, size, 1); }
 
 int content_update_closing(void) { return g_requested != 0; }
 

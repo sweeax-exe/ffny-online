@@ -5007,6 +5007,13 @@ static int start(const char *server, const char *name, int creating, const char 
         fprintf(stderr, "[NETPLAY] refused: online is off in this test session (RECOMP_OFFLINE_ONLY)\n");
         return -1;
     }
+    if (!pc_content_online_allowed()) {   /* build 90: the community content is off in this run (offline switch): another content
+                                           * print than everyone's, so never a room or a match; the game offers the restart */
+        InterlockedExchange(&N.state, NETPLAY_FAILED);
+        set_status("%s", CU_ONLINE_REFUSED_TEXT);
+        fprintf(stderr, "[NETPLAY] refused: the community content is off in this run (Community content in offline play)\n");
+        return -1;
+    }
     {   /* the player's own packs (FFNY Studio, "Use in my game") that add or change more than textures: other
          * PCs do not have them, so this PC stays offline until they are off (the launcher's Content page) */
         char names[256];

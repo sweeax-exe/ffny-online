@@ -6120,7 +6120,8 @@ long long g_exit_chip_ms = 0;       // when it was last drawn
 struct ExitPrompt { int sel = 1; long long opened = 0; } X;     // sel 0 YES, 1 NO
 // build 86: the UPDATE NOW prompt (sel 0 UPDATE NOW, 1 LATER)
 struct UpdatePrompt { bool open = false, test_done = false; int sel = 0; long long opened = 0; char where[64] = "";
-                      char refused[160] = ""; } UP;
+                      char refused[160] = ""; bool online = false; } UP;     // online: build 90, the content prompt (YES / NO)
+std::atomic<int> g_content_prompt_req{0};
 
 bool exit_wanted()
 {
@@ -6322,6 +6323,27 @@ void update_prompt_begin(const char *where)
     fflush(stderr);
 }
 
+bool take_content_prompt_request() { return g_content_prompt_req.exchange(0) != 0; }
+
+void update_prompt_begin_online(const char *where)
+{
+    UP = UpdatePrompt();
+    UP.open = true;
+    UP.online = true;
+    UP.sel = 0;
+    UP.opened = now_ms();
+    snprintf(UP.where, sizeof(UP.where), "%s", where ? where : "?");
+    fprintf(stderr, "[UI] community content prompt opened (%s): online needs it, it is off in this run\n", UP.where);
+    fflush(stderr);
+}
+
+void update_prompt_done(int answer)
+{
+    if (!UP.online) content_update_offer_answer(answer == 1);
+    UP.open = false;
+    UP.online = false;
+}
+
 int draw_update_prompt(ImVec2 display, bool main_menu)
 {
     if (main_menu && !exit_wanted() && !gallery_on()) {
@@ -6329,23 +6351,26 @@ int draw_update_prompt(ImVec2 display, bool main_menu)
         return 3;
     }
     if (!UP.opened) update_prompt_begin(main_menu ? "main menu" : "online screens");
+    const bool online = UP.online;      // build 90: "Online needs FFNY Online's community content. Restart with it now?"
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     Frame f = menu_frame(display);
     char names[256], line[300];
-    int n = gallery_on() ? pc_content_news(names, sizeof(names)) : content_news(names, sizeof(names));
+    int n = online ? 0 : gallery_on() ? pc_content_news(names, sizeof(names)) : content_news(names, sizeof(names));
     dl->AddRectFilled(ImVec2(0, 0), display, IM_COL32(0, 0, 0, 160));
     const float px = 130, py = 140, pw = 380, ph = 200;
     glass(dl, f, px, py, pw, ph, 14, IM_COL32(10, 10, 13, 255), 0.88f);
     rect(dl, f, px, py, 6, ph, RED, 3);
-    text(dl, f, g_title, 22, 320, py + 16, CREAM, "NEW COMMUNITY CONTENT IS OUT", CENTER, 1.6f);
-    snprintf(line, sizeof(line), "%d new pack%s%s%s", n, n == 1 ? "" : "s", names[0] ? ": " : "", names);
+    text(dl, f, g_title, 22, 320, py + 16, CREAM, online ? "ONLINE NEEDS COMMUNITY CONTENT" : "NEW COMMUNITY CONTENT IS OUT", CENTER, 1.6f);
+    if (online) snprintf(line, sizeof(line), "Community content is off for offline play");
+    else snprintf(line, sizeof(line), "%d new pack%s%s%s", n, n == 1 ? "" : "s", names[0] ? ": " : "", names);
     text(dl, f, g_hand, std::max(10.0f, fit_size(f, g_hand, 15, line, 340)), 320, py + 46, ORANGE, line, CENTER, 1.0f, 340);
-    const char *say_line = UP.refused[0] ? UP.refused : "Update now? The game closes, gets them and comes back by itself.";
+    const char *say_line = UP.refused[0] ? UP.refused
+        : online ? CU_ONLINE_PROMPT_TEXT : "Update now? The game closes, gets them and comes back by itself.";
     text(dl, f, g_body, std::max(9.0f, fit_size(f, g_body, 12, say_line, 340)), 320, py + 76,
          UP.refused[0] ? RED : with_alpha(CREAM, 0.9f), say_line, CENTER, 0.6f, 340);
     const float by = py + 112, bh = 34, bw = 150;
     const float bx[2] = { 320 - 10 - bw, 320 + 10 };
-    const char *label[2] = { "UPDATE NOW", "LATER" };
+    const char *label[2] = { online ? "YES" : "UPDATE NOW", online ? "NO" : "LATER" };
     int choose = -1;
     for (int i = 0; i < 2; i++) {
         if (mouse_pick(f, bx[i], by, bw, bh)) UP.sel = i;
@@ -6356,7 +6381,7 @@ int draw_update_prompt(ImVec2 display, bool main_menu)
     }
     float hx = px + 120;
     hx += hint(dl, f, hx, py + ph - 28, "a", "SELECT");
-    hint(dl, f, hx, py + ph - 28, "b", "LATER");
+    hint(dl, f, hx, py + ph - 28, "b", online ? "NO" : "LATER");
 
     auto pressed = [](std::initializer_list<ImGuiKey> keys) {
         for (ImGuiKey k : keys) if (ImGui::IsKeyPressed(k, false)) return true;
@@ -6378,17 +6403,17 @@ int draw_update_prompt(ImVec2 display, bool main_menu)
         if (test && *test && now_ms() - UP.opened > 2500 && !UP.test_done) {
             UP.test_done = true;
             choose = !strcmp(test, "later") ? 1 : 0;
-            fprintf(stderr, "[UI] UPDATE NOW prompt (test): %s\n", choose ? "LATER" : "UPDATE NOW");
+            fprintf(stderr, "[UI] UPDATE NOW prompt (test): %s\n", choose ? (online ? "NO" : "LATER") : (online ? "YES" : "UPDATE NOW"));
         }
     }
     if (choose < 0) return 0;
     if (choose == 1) {
-        fprintf(stderr, "[UI] UPDATE NOW prompt: later\n");
+        fprintf(stderr, "[UI] %s prompt: %s\n", online ? "community content" : "UPDATE NOW", online ? "no" : "later");
         return 1;
     }
     if (gallery_on()) return 0;
     char why[160];
-    if (content_update_request(UP.where, why, sizeof(why)) != CU_OK) {
+    if ((online ? content_update_request_online(UP.where, why, sizeof(why)) : content_update_request(UP.where, why, sizeof(why))) != CU_OK) {
         snprintf(UP.refused, sizeof(UP.refused), "%s", why);
         UP.sel = 1;
         return 0;
@@ -6745,6 +6770,12 @@ bool take_open_request()
 {
     // build 86: started again by UPDATE NOW: back where the player pressed it, the online hub
     if (!g_open_req.exchange(0) && !(exit_wanted() && content_update_take_open_hub())) return false;
+    if (!gallery_on() && !pc_content_online_allowed()) {
+        // build 90: the community content is off in this run: no hub, no room; the overlay asks for the restart
+        g_content_prompt_req = 1;
+        fprintf(stderr, "[UI] online refused: the community content is off in this run, asking for a restart\n");
+        return false;
+    }
     S = State();
     S.opened = GetTickCount64();
     C.open = C.kb = C.menu = false;
@@ -7168,6 +7199,9 @@ void draw_decor(ImDrawList *, ImVec2) {}
 bool exit_wanted() { return false; }
 void update_prompt_begin(const char *) {}
 int draw_update_prompt(ImVec2, bool) { return 1; }
+bool take_content_prompt_request() { return false; }
+void update_prompt_begin_online(const char *) {}
+void update_prompt_done(int) {}
 bool exit_chip_at(float, float) { return false; }
 bool take_exit_test_request() { return false; }
 void exit_prompt_begin() {}

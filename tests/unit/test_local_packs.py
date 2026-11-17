@@ -192,3 +192,22 @@ def test_compose_moves_an_own_fighter_and_keeps_the_new_place(tmp_path, monkeypa
     assert json.loads((folder / 'local.json').read_text(encoding='utf-8'))['fighter_fe_id'] == 100
     assert 'fighter_fe_id=100' in (data / 'mod-manager' / 'content.ini').read_text(encoding='utf-8')
     assert any('moved from place 117 to 100' in s for s in said)
+
+
+def test_compose_also_builds_the_own_packs_alone_for_offline_play_without_community_content(tmp_path, monkeypatch):
+    """Build 90: [content] community_offline=0 serves <data>/mod-manager/own-packs/content-files (only the player's
+    own packs), built by the same compose run that builds content-files."""
+    data = tmp_path / 'data'
+    own_pack(data, 'my-on', install=install_json(entries=[dict(ENTRY, entry='V2BG_03A.xsh', base_entry='V2BG_03A.xsh')]))
+    monkeypatch.delenv('RECOMP_SETTINGS', raising=False)
+    calls = []
+
+    def compose(data_, game, packs, root=None, log=None, reserved=()):
+        calls.append((Path(root).name, [p['id'] for p in packs]))
+        return {'applied': [], 'skipped': [], 'files': [], 'unchanged': True}
+    monkeypatch.setattr(mods.content_compose, 'compose', compose)
+    manager = mods.Manager(data)
+    monkeypatch.setattr(manager, 'composed_packs', lambda: [dict(id='community-fighter', version='1', content_sha256='x',
+                                                                  kind='content', order=1, folder=data)])
+    manager.compose()
+    assert calls == [('mod-manager', ['community-fighter', 'my-on']), ('own-packs', ['my-on'])]

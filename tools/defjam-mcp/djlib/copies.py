@@ -13,6 +13,7 @@ import io
 import json
 import os
 import socket
+import shlex
 import subprocess
 import time
 
@@ -276,11 +277,13 @@ class Session:
     def launch(self, i, env=None, root=None, core=None, control_port=None, watch=(), fixture=None):
         """Start copy i on its own data root and CPU. Refuses before starting when anything is missing.
         DJ_COPY_EXE=<path> in env (e.g. --copy-env 1:DJ_COPY_EXE=...) runs that game image for this copy
-        instead of this checkout's: a mixed-build sync check (two builds in one room)."""
+        instead of this checkout's: a mixed-build sync check (two builds in one room). DJ_COPY_ARGS="<args>" adds
+        command-line arguments (--copy-env 0:DJ_COPY_ARGS=--content-update)."""
         if self.closed or not self.lock.held:
             raise RuntimeError("open the session (take the lock) first")
         env = dict(env or {})
         own = env.pop("DJ_COPY_EXE", None)
+        args = shlex.split(env.pop("DJ_COPY_ARGS", "") or "")     # e.g. --content-update: a run the online prompt restarted
         exe = os.path.abspath(own) if own else self.copy_exe(i)
         root = root or self.make_root(i, fixture=fixture)
         bad = machine.preflight(exe, root)
@@ -300,7 +303,7 @@ class Session:
             json.dump({k: v for k, v in e.items() if k.startswith("RECOMP_") or k == "DEFJAM_DATA"}, f, indent=1)
         if exe != self.exe:
             self.log("copy %d runs %s (DJ_COPY_EXE)" % (i, exe))
-        p = subprocess.Popen([exe], cwd=machine.game_cwd(exe), env=e,
+        p = subprocess.Popen([exe] + args, cwd=machine.game_cwd(exe), env=e,
                              stdout=open(os.path.join(self.dir, "copy%d.log" % i), "wb"), stderr=open(log, "wb"))
         if self.job:
             self.job.add(p)
