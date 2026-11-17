@@ -76,7 +76,8 @@ def test_setting_and_launcher_offer_all():
     assert 'c == NETCHOICE_ALL ? "all"' in RULES_C
     # build 91: no server choice for players; [online] server_debug is the hidden test override
     m = re.search(r'\{ "online", "server_debug", RECOMP_SETTING_STRING, .*?\}', SETTINGS_C, re.S)
-    assert m and 'mia' in m.group(0) and 'lax' in m.group(0) and 'Tests and debugging only' in m.group(0)
+    # its comment goes into every player's settings.ini: it lists no relay (owner: no server places, no server count)
+    assert m and 'Tests and debugging only' in m.group(0) and not re.search(r'(mia|dfw|lax|sa|sg|na|eu)', m.group(0))
     assert '"server"' not in re.sub(r'//.*', '', PC_UI.split('static void page_basics')[1].split('static void ')[0])
     assert 'netservers_set_choice(NETCHOICE_ALL)' in PC_UI and 'netservers_set_choice(NETCHOICE_ALL)' in SCREEN
     # the picker explains All in one line
