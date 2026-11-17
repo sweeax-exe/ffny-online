@@ -71,6 +71,28 @@ int main(void)
                 for (b = 0; b <= 60; b += 1)
                     printf("move|%d|%d|%d|%d|%d|%d\n", i, a, s, b, netservers_should_move(i, a, s, b),
                            netservers_should_move(s, b, i, a));
+    /* build 90: the ping sum (pings by relay index; the other player's view swaps the two) */
+    {
+        static const int cases[][2][NETSERVER_COUNT] = {
+            { { 20, 90, 200 }, { 100, 40, 230 } },     /* eu 120 < na 130 */
+            { { 20, 90, 200 }, { 120, 30, 230 } },     /* na 120 < eu 140 */
+            { { 10, 60, 0 }, { 110, 60, 0 } },         /* tie 120: na's worse ping 60 < eu's 110 */
+            { { 50, 70, 0 }, { 70, 50, 0 } },          /* a full tie */
+            { { 0, 90, 0 }, { 100, 40, 0 } },          /* a ping unknown */
+            { { 20, 180, 170 }, { 180, 220, 10 } },    /* me on eu, them on sg: sg 180 < eu 200 */
+        };
+        static const int ages[][2] = { { 0, 0 }, { 31, 5 }, { 41, 11 }, { 42, 12 }, { 12, 42 } };
+        int c, g;
+        for (c = 0; c < (int)(sizeof(cases) / sizeof(cases[0])); c++)
+            for (g = 0; g < (int)(sizeof(ages) / sizeof(ages[0])); g++) {
+                int their = c == 5 ? 2 : 1;   /* me on eu (0), them on na (1), or on sg for the last case */
+                printf("sum|%d|%d|%d|%d\n", c, g,
+                       netservers_sum_move(0, ages[g][0], cases[c][0], their, ages[g][1], cases[c][1]),
+                       netservers_sum_move(their, ages[g][1], cases[c][1], 0, ages[g][0], cases[c][0]));
+            }
+        printf("sum-same|%d\n", netservers_sum_move(1, 0, cases[0][0], 1, 0, cases[0][1]));
+        printf("sum-null|%d\n", netservers_sum_move(0, 0, NULL, 1, 0, cases[0][1]));
+    }
     return 0;
 }
 '''
@@ -204,3 +226,23 @@ def test_players_see_regions_not_addresses(rows):
     for address in ('127.0.0.1:27900', 'relay.example.org', 'play.defjam.online:27900',
                     'na.defjam.online.evil.org', ''):
         assert shown[address] == ('0', address), address
+
+
+def test_ping_sum_move(rows):
+    """Build 90: the relay with the smaller sum of the two pings; exactly one of the two moves, and the other
+    side reads the same numbers; the sum does not decide (-1: the ages do) on an unknown ping, a full tie, the
+    same relay, or when the player who should come has not (its room 42 s old, this one listed 12 s)."""
+    got = {(int(r[0]), int(r[1])): (int(r[2]), int(r[3])) for r in by(rows, 'sum')}
+    # me (eu) / them (na): eu 120 < na 130: I stay, they come; the staying side falls back to the ages only
+    # once the other room is 42 s old and its own listed 12 s (ages row 4: me 12, them 42)
+    assert [got[(0, g)] for g in range(5)] == [(0, 1), (0, 1), (0, 1), (0, 1), (-1, 1)]
+    # na 120 < eu 140: I move; the na player stays, unless I have not come (ages row 3 seen from its side)
+    assert [got[(1, g)] for g in range(5)] == [(1, 0), (1, 0), (1, 0), (1, -1), (1, 0)]
+    # a tie on the sum: the lower worse ping (na)
+    assert got[(2, 0)] == (1, 0)
+    # a full tie, an unknown ping: the ages decide
+    assert all(got[(3, g)] == (-1, -1) for g in range(5))
+    assert all(got[(4, g)] == (-1, -1) for g in range(5))
+    # eu 200 vs sg 180: the sg player's relay
+    assert got[(5, 0)] == (1, 0)
+    assert by(rows, 'sum-same') == [['-1']] and by(rows, 'sum-null') == [['-1']]

@@ -80,6 +80,23 @@ unsigned netservers_scope(enum NetServerChoice c, int cur, int search_s, unsigne
     return mask;
 }
 
+int netservers_sum_move(int my_relay, int my_age, const int *mine, int their_relay, int their_age, const int *theirs)
+{
+    int here, there, here_max, there_max;
+    if (!mine || !theirs || my_relay == their_relay || my_relay < 0 || my_relay >= NETSERVER_COUNT || their_relay < 0 ||
+        their_relay >= NETSERVER_COUNT)
+        return -1;
+    if (mine[my_relay] <= 0 || mine[their_relay] <= 0 || theirs[my_relay] <= 0 || theirs[their_relay] <= 0) return -1;
+    here = mine[my_relay] + theirs[my_relay];
+    there = mine[their_relay] + theirs[their_relay];
+    here_max = mine[my_relay] > theirs[my_relay] ? mine[my_relay] : theirs[my_relay];
+    there_max = mine[their_relay] > theirs[their_relay] ? mine[their_relay] : theirs[their_relay];
+    if (there < here || (there == here && there_max < here_max)) return 1;
+    if (here < there || (here == there && here_max < there_max))
+        return their_age >= QUICK_ALL_S + QUICK_SUM_WAIT_S && my_age >= QUICK_SUM_WAIT_S ? -1 : 0;
+    return -1;
+}
+
 int netservers_should_move(int my_relay, int my_age, int their_relay, int their_age)
 {
     if (my_relay == their_relay) return 0;
