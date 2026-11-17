@@ -87,7 +87,7 @@ typedef struct DrpcGameState {
     int where;                  /* DRPC_IN_* */
     int offline;                /* DRPC_OFF_*, for DRPC_IN_MENUS */
     int offline_fight;          /* 1 while an offline fight runs */
-    char server[DRPC_NAME];     /* "Europe", "US East", "US West"; "" unknown */
+    char server[DRPC_NAME];     /* "Europe", "US East", "Asia"; "" unknown */
     int ranked_search;          /* lobby: searching for a ranked match */
     /* the room */
     char mode[DRPC_NAME];       /* "One on One", "Team 2v2", "King of the Hill", ... */

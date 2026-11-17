@@ -231,8 +231,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define PROJECT_SERVER_ADDRESS "49.12.78.32"
 #define PROJECT_NA_NAME        "na.defjam.online"     /* US East (build 30; "North America" until 37) */
 #define PROJECT_NA_ADDRESS     "5.161.206.134"
-#define PROJECT_WEST_NAME      "west.defjam.online"   /* US West (build 38) */
-#define PROJECT_WEST_ADDRESS   "5.78.214.178"
+#define PROJECT_WEST_NAME      "sg.defjam.online"     /* Asia (Singapore) (build 89; the NETSERVER_WEST slot) */
+#define PROJECT_WEST_ADDRESS   "5.223.88.150"
 #define PROTO         1
 #define T_HELLO       0x01
 #define T_WELCOME     0x02
@@ -6651,8 +6651,8 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
     static char chosen[128];
     int i;
     (void)unused;
-    /* RECOMP_NETPLAY_SERVER=auto|eu|na|west|all: the server choice as a player makes it (build 30), with
-     * RECOMP_NETPLAY_SERVER_EU/_NA/_WEST for the relays' addresses; anything else is the address */
+    /* RECOMP_NETPLAY_SERVER=auto|eu|na|sg|all: the server choice as a player makes it (build 30), with
+     * RECOMP_NETPLAY_SERVER_EU/_NA/_SG for the relays' addresses; anything else is the address */
     if (netservers_choice() != NETCHOICE_CUSTOM) {
         server = netservers_address_wait(chosen, sizeof(chosen), 4000);
         fprintf(stderr, "[NETPLAY] tests: server %s\n", server);
@@ -6721,7 +6721,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         int idle_from = idle_env && *idle_env ? atoi(idle_env) : 0, call_no = 0, idle_told = 0;
         netplay_lobby(server, name && *name ? name : "Test player");
         for (i = 0; i < 600 && N.state == NETPLAY_CONNECTING; i++) Sleep(100);
-        {   /* RECOMP_TEST_SERVER_SWITCH="<ms>,<eu|na|west|auto>": after that long in the lobby, switch the
+        {   /* RECOMP_TEST_SERVER_SWITCH="<ms>,<eu|na|sg|auto>": after that long in the lobby, switch the
              * server the way the hub's server picker does (netservers_reconnect), then quick-match there */
             const char *sw = getenv("RECOMP_TEST_SERVER_SWITCH");
             if (sw && *sw && strchr(sw, ',')) {

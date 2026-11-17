@@ -76,11 +76,11 @@ def test_room_ping_payload_is_its_own_type():
 
 def test_relays_setting_and_test_switches():
     assert '"play.defjam.online:27777"' in SERVERS_C and '"na.defjam.online:27777"' in SERVERS_C
-    assert '"west.defjam.online:27777", "5.78.214.178"' in SERVERS_C
-    for env in ('RECOMP_NETPLAY_SERVER_EU', 'RECOMP_NETPLAY_SERVER_NA', 'RECOMP_NETPLAY_SERVER_WEST'):
+    assert '"sg.defjam.online:27777", "5.223.88.150"' in SERVERS_C
+    for env in ('RECOMP_NETPLAY_SERVER_EU', 'RECOMP_NETPLAY_SERVER_NA', 'RECOMP_NETPLAY_SERVER_SG'):
         assert env in SERVERS_C, env
     # the session's own DNS fallback knows the third relay too
-    assert '"west.defjam.online"' in NETPLAY_C and '"5.78.214.178"' in NETPLAY_C
+    assert '"sg.defjam.online"' in NETPLAY_C and '"5.223.88.150"' in NETPLAY_C
     # [online] server defaults to auto, and RECOMP_NETPLAY_SERVER still overrides it
     m = re.search(r'\{ "online", "server", RECOMP_SETTING_STRING, .*?"RECOMP_NETPLAY_SERVER".*?\}', SETTINGS_C, re.S)
     assert m and m.group(0).rstrip('} ').endswith('"auto"')

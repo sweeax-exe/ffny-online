@@ -75,10 +75,10 @@ def test_setting_and_launcher_offer_all():
     assert '{ "all", NETCHOICE_ALL }' in RULES_C and '{ "both", NETCHOICE_ALL }' in RULES_C
     assert 'case NETCHOICE_ALL: return "all";' in RULES_C
     m = re.search(r'\{ "online", "server", RECOMP_SETTING_STRING, .*?\}', SETTINGS_C, re.S)
-    assert m and 'all' in m.group(0) and 'west' in m.group(0)
+    assert m and 'all' in m.group(0) and 'sg' in m.group(0)
     assert 'netservers_set_choice(NETCHOICE_ALL)' in PC_UI and 'netservers_set_choice(NETCHOICE_ALL)' in SCREEN
     # the picker explains All in one line
-    assert 'The rooms of Europe, US East and US West in one list; joining one moves you there.' in SCREEN
+    assert 'The rooms of Europe, US East and Asia in one list; joining one moves you there.' in SCREEN
 
 
 def test_staged_search_rule_and_gallery():
@@ -103,5 +103,5 @@ def test_hub_test_switches():
     assert 'RECOMP_TEST_JOIN_LISTED' in NETPLAY_C
     for param in ('Servers', 'JoinListed', 'JoinListedSecs', 'CopyGapSecs', 'WestRelayPort', 'WestLagMs'):
         assert re.search(r'\$%s\b' % param, HUB_TEST), param
-    assert "'both'" in HUB_TEST and "'all'" in HUB_TEST and "'west'" in HUB_TEST
+    assert "'both'" in HUB_TEST and "'all'" in HUB_TEST and "'sg'" in HUB_TEST
     assert '0x25' in PROTOCOL_DOC and '`ROOMLIST`' in PROTOCOL_DOC

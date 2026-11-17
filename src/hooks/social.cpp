@@ -1258,7 +1258,7 @@ std::vector<Toast> take_toasts()
 
 std::string region_of_server(int index)
 {
-    return index == NETSERVER_EU ? "eu" : index == NETSERVER_NA ? "us-east" : index == NETSERVER_WEST ? "us-west" : "";
+    return index == NETSERVER_EU ? "eu" : index == NETSERVER_NA ? "us-east" : index == NETSERVER_WEST ? "sg" : "";
 }
 
 void send_global(const char *region, const std::string &text)

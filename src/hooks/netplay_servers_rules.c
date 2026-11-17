@@ -18,8 +18,11 @@ enum NetServerChoice netservers_parse_choice(const char *s)
         { "na", NETCHOICE_NA }, { "north_america", NETCHOICE_NA }, { "north america", NETCHOICE_NA },
         { "us", NETCHOICE_NA }, { "east", NETCHOICE_NA }, { "us_east", NETCHOICE_NA }, { "us east", NETCHOICE_NA },
         { "na.defjam.online", NETCHOICE_NA }, { "na.defjam.online:27777", NETCHOICE_NA },
-        { "west", NETCHOICE_WEST }, { "us_west", NETCHOICE_WEST }, { "us west", NETCHOICE_WEST },
-        { "west.defjam.online", NETCHOICE_WEST }, { "west.defjam.online:27777", NETCHOICE_WEST },
+        { "sg", NETCHOICE_WEST }, { "asia", NETCHOICE_WEST }, { "singapore", NETCHOICE_WEST },
+        { "sg.defjam.online", NETCHOICE_WEST }, { "sg.defjam.online:27777", NETCHOICE_WEST },
+        /* US West (builds 38..88) closed in build 89: the saved choice falls back to Automatic */
+        { "west", NETCHOICE_AUTO }, { "us_west", NETCHOICE_AUTO }, { "us west", NETCHOICE_AUTO },
+        { "west.defjam.online", NETCHOICE_AUTO }, { "west.defjam.online:27777", NETCHOICE_AUTO },
         /* "both" (builds 31..37) is every relay now */
         { "all", NETCHOICE_ALL }, { "all servers", NETCHOICE_ALL }, { "all_servers", NETCHOICE_ALL },
         { "both", NETCHOICE_ALL }, { "both servers", NETCHOICE_ALL }, { "both_servers", NETCHOICE_ALL },
@@ -42,7 +45,7 @@ const char *netservers_choice_text(enum NetServerChoice c)
     case NETCHOICE_AUTO: return "auto";
     case NETCHOICE_EU: return "eu";
     case NETCHOICE_NA: return "na";
-    case NETCHOICE_WEST: return "west";
+    case NETCHOICE_WEST: return "sg";
     case NETCHOICE_ALL: return "all";
     default: return NULL;
     }
@@ -60,7 +63,8 @@ enum NetServerChoice netservers_relay_choice(int index)
 
 int netservers_partner(int relay)
 {
-    return relay == NETSERVER_NA ? NETSERVER_WEST : relay == NETSERVER_WEST ? NETSERVER_NA : -1;
+    (void)relay;   /* build 89: no two relays are close to each other any more */
+    return -1;
 }
 
 unsigned netservers_scope(enum NetServerChoice c, int cur, int search_s, unsigned up)
@@ -90,6 +94,7 @@ const char *netservers_known_name(const char *address)
     static const struct { const char *host, *name; } k_hosts[] = {
         { "play.defjam.online", "Europe" }, { "49.12.78.32", "Europe" }, { "142.132.178.17", "Europe" },
         { "na.defjam.online", "US East" }, { "5.161.206.134", "US East" },
+        { "sg.defjam.online", "Asia (Singapore)" }, { "5.223.88.150", "Asia (Singapore)" },
         { "west.defjam.online", "US West" }, { "5.78.214.178", "US West" },
     };
     char host[128];

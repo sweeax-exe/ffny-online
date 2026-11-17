@@ -39,7 +39,7 @@
                     relay, "North America" until build 37; RECOMP_NETPLAY_SERVER_NA), the one on -RelayPort
                     "Europe" (RECOMP_NETPLAY_SERVER_EU); 0 (default): one relay, as before.
 .PARAMETER WestRelayPort  build 38: with -NaRelayPort, a third local relay on this port plays "US West"
-                    (RECOMP_NETPLAY_SERVER_WEST); 0 (default): none (the copies' US West is 127.0.0.1:9, which
+                    (RECOMP_NETPLAY_SERVER_SG); 0 (default): none (the copies' US West is 127.0.0.1:9, which
                     never answers, so no test reaches the live one).
 .PARAMETER Server   with -NaRelayPort: every copy's server choice, auto (default), eu, na, west or all (build 31
                     "both", which still works: the rooms of every relay). Quick Match searches the copy's relay,
@@ -70,10 +70,10 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
       [string]$DataPrefix = '', [int]$NaRelayPort = 0, [int]$WestRelayPort = 0,
-      [ValidateSet('auto', 'eu', 'na', 'west', 'all', 'both')][string]$Server = 'auto',
-      [int]$EuLagMs = 0, [int]$NaLagMs = 0, [int]$WestLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na', 'west')][string]$SwitchTo = '',
-      [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'west', 'all', 'both')][string[]]$Servers = @(),
-      [ValidateSet('', 'auto', 'eu', 'na', 'west')][string[]]$SwitchTos = @(),
+      [ValidateSet('auto', 'eu', 'na', 'sg', 'all', 'both')][string]$Server = 'auto',
+      [int]$EuLagMs = 0, [int]$NaLagMs = 0, [int]$WestLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na', 'sg')][string]$SwitchTo = '',
+      [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'sg', 'all', 'both')][string[]]$Servers = @(),
+      [ValidateSet('', 'auto', 'eu', 'na', 'sg')][string[]]$SwitchTos = @(),
       [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3, [switch]$NoOverride,
       [string]$Venues = '', [string]$SummaryPresses = '4+3x12', [int]$FightSecs = 1200,
       [switch]$Created, [string[]]$CpRecords = @(), [int]$Mode = -1, [string]$LogName = 'hub-test')
@@ -177,10 +177,10 @@ for ($i = 0; $i -lt $Players; $i++) {
     $westAt = if ($WestRelayPort) { "127.0.0.1:$WestRelayPort" } else { '127.0.0.1:9' }
     $serverEnv = if ($NaRelayPort) {
         @('--env', "RECOMP_NETPLAY_SERVER=$choice", '--env', "RECOMP_NETPLAY_SERVER_EU=127.0.0.1:$RelayPort",
-          '--env', "RECOMP_NETPLAY_SERVER_NA=127.0.0.1:$NaRelayPort", '--env', "RECOMP_NETPLAY_SERVER_WEST=$westAt")
+          '--env', "RECOMP_NETPLAY_SERVER_NA=127.0.0.1:$NaRelayPort", '--env', "RECOMP_NETPLAY_SERVER_SG=$westAt")
     } else {
         @('--env', "RECOMP_NETPLAY_SERVER=127.0.0.1:$RelayPort", '--env', 'RECOMP_NETPLAY_SERVER_EU=127.0.0.1:9',
-          '--env', 'RECOMP_NETPLAY_SERVER_NA=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_WEST=127.0.0.1:9')
+          '--env', 'RECOMP_NETPLAY_SERVER_NA=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_SG=127.0.0.1:9')
     }
     $switch = if ($i -lt $SwitchTos.Count) { $SwitchTos[$i] } else { $SwitchTo }
     if ($NaRelayPort -and $switch) { $serverEnv += @('--env', "RECOMP_TEST_SERVER_SWITCH=$SwitchAfterMs,$switch") }

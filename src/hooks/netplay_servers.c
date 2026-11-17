@@ -23,7 +23,7 @@ static const struct {
     { "eu", "Europe", "EU", "play.defjam.online:27777", "49.12.78.32", "RECOMP_NETPLAY_SERVER_EU" },
     /* build 38: the North American relay of builds 30..37 is US East; its id stays "na" */
     { "na", "US East", "US EAST", "na.defjam.online:27777", "5.161.206.134", "RECOMP_NETPLAY_SERVER_NA" },
-    { "west", "US West", "US WEST", "west.defjam.online:27777", "5.78.214.178", "RECOMP_NETPLAY_SERVER_WEST" },
+    { "sg", "Asia (Singapore)", "ASIA", "sg.defjam.online:27777", "5.223.88.150", "RECOMP_NETPLAY_SERVER_SG" },
 };
 
 static const char *setting_server(char *buf, int size)
@@ -31,7 +31,7 @@ static const char *setting_server(char *buf, int size)
     return recomp_settings_get_text("online", "server", buf, (size_t)size, "auto");
 }
 
-/* The setting's text (netservers_parse_choice): auto, eu, na, west, all; the old "both" is all. */
+/* The setting's text (netservers_parse_choice): auto, eu, na, sg, all; the old "both" is all. */
 enum NetServerChoice netservers_choice(void)
 {
     char buf[128];

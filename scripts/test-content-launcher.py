@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXE = ROOT / 'build/win-x64-release/defjam_recomp.exe'
 SAFE = {
     'RECOMP_ACCOUNT_SERVER': '127.0.0.1:9', 'RECOMP_NETPLAY_SERVER_EU': '127.0.0.1:9',
-    'RECOMP_NETPLAY_SERVER_NA': '127.0.0.1:9', 'RECOMP_NETPLAY_SERVER_WEST': '127.0.0.1:9',
+    'RECOMP_NETPLAY_SERVER_NA': '127.0.0.1:9', 'RECOMP_NETPLAY_SERVER_SG': '127.0.0.1:9',
     'RECOMP_NO_UPDATE_CHECK': '1', 'RECOMP_WINDOW_BACKGROUND': '1',
 }
 OWN = []

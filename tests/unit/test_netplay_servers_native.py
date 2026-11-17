@@ -19,6 +19,7 @@ DRIVER = r'''
 static const char *const k_texts[] = {
     "", "auto", "AUTO", " Automatic ", "play.defjam.online", "play.defjam.online:27777",
     "eu", "Europe", "na", "NA", "north_america", "us", "na.defjam.online", "na.defjam.online:27777", "US East",
+    "sg", "SG", "singapore", "sg.defjam.online", "sg.defjam.online:27777",
     "west", "West", "us_west", "west.defjam.online", "west.defjam.online:27777",
     "all", "All servers", "both", "Both", "both_servers",
     "127.0.0.1:27900", "relay.example.org", "westeros",
@@ -37,6 +38,7 @@ int main(void)
             "play.defjam.online:27777", "PLAY.defjam.online", "49.12.78.32:27777", "49.12.78.32",
             "142.132.178.17", "na.defjam.online:27777", "na.defjam.online", "5.161.206.134:27777",
             "5.161.206.134", "west.defjam.online:27777", "5.78.214.178", "5.78.214.178:27777",
+            "sg.defjam.online:27777", "5.223.88.150",
             "127.0.0.1:27900", "relay.example.org", "play.defjam.online:27900", "na.defjam.online.evil.org", "",
         };
         for (i = 0; i < (int)(sizeof(shown) / sizeof(shown[0])); i++) {
@@ -108,8 +110,11 @@ def test_old_and_new_setting_values(rows):
         # "na" (builds 30..37: North America) is US East and stays saved as "na"
         'na': (CH_NA, 'na', NA), 'NA': (CH_NA, 'na', NA), 'north_america': (CH_NA, 'na', NA), 'us': (CH_NA, 'na', NA),
         'na.defjam.online': (CH_NA, 'na', NA), 'na.defjam.online:27777': (CH_NA, 'na', NA), 'US East': (CH_NA, 'na', NA),
-        'west': (CH_WEST, 'west', WEST), 'West': (CH_WEST, 'west', WEST), 'us_west': (CH_WEST, 'west', WEST),
-        'west.defjam.online': (CH_WEST, 'west', WEST), 'west.defjam.online:27777': (CH_WEST, 'west', WEST),
+        'sg': (CH_WEST, 'sg', WEST), 'SG': (CH_WEST, 'sg', WEST), 'singapore': (CH_WEST, 'sg', WEST),
+        'sg.defjam.online': (CH_WEST, 'sg', WEST), 'sg.defjam.online:27777': (CH_WEST, 'sg', WEST),
+        # US West closed in build 89: a saved choice falls back to Automatic
+        'west': (AUTO, 'auto', -1), 'West': (AUTO, 'auto', -1), 'us_west': (AUTO, 'auto', -1),
+        'west.defjam.online': (AUTO, 'auto', -1), 'west.defjam.online:27777': (AUTO, 'auto', -1),
         # "both" (builds 31..37) is every relay now and is saved again as "all"
         'all': (ALL, 'all', -1), 'All servers': (ALL, 'all', -1), 'both': (ALL, 'all', -1), 'Both': (ALL, 'all', -1),
         'both_servers': (ALL, 'all', -1),
@@ -122,7 +127,7 @@ def test_old_and_new_setting_values(rows):
 
 def test_relays_and_partners(rows):
     relay = {int(r[0]): (int(r[1]), int(r[2])) for r in by(rows, 'relay')}
-    assert relay == {EU: (CH_EU, -1), NA: (CH_NA, WEST), WEST: (CH_WEST, NA)}
+    assert relay == {EU: (CH_EU, -1), NA: (CH_NA, -1), WEST: (CH_WEST, -1)}
 
 
 def scope_of(rows, choice, up, cur, secs):
@@ -138,15 +143,9 @@ def bits(*relays):
 
 def test_search_widens_on_time(rows):
     for choice in (AUTO, ALL):
-        # US East: alone 10 s, then with US West, every relay from 30 s
-        assert [scope_of(rows, choice, 7, NA, s) for s in (0, 9, 10, 29, 30, 300)] == \
-            [bits(NA)] * 2 + [bits(NA, WEST)] * 2 + [bits(EU, NA, WEST)] * 2
-        assert [scope_of(rows, choice, 7, WEST, s) for s in (0, 9, 10, 29, 30)] == \
-            [bits(WEST)] * 2 + [bits(NA, WEST)] * 2 + [bits(EU, NA, WEST)]
-        # Europe has no partner: alone until 30 s
-        assert [scope_of(rows, choice, 7, EU, s) for s in (0, 10, 29, 30)] == [bits(EU)] * 3 + [bits(EU, NA, WEST)]
-        # a partner that does not answer is not searched; at 30 s every relay that answers
-        assert scope_of(rows, choice, 3, NA, 10) == bits(NA)
+        # no relay has a partner (build 89): alone until 30 s, then every relay
+        for cur in (EU, NA, WEST):
+            assert [scope_of(rows, choice, 7, cur, s) for s in (0, 10, 29, 30)] == [bits(cur)] * 3 + [bits(EU, NA, WEST)]
         assert scope_of(rows, choice, 3, NA, 30) == bits(EU, NA)
     # a fixed choice stays on its relay for 30 s, then every relay
     for choice, relay in ((CH_EU, EU), (CH_NA, NA), (CH_WEST, WEST)):
@@ -191,11 +190,13 @@ def test_the_older_side_goes_once_the_younger_room_waited_40_s(rows):
 def test_players_see_regions_not_addresses(rows):
     shown = {r[0]: (r[1], r[2]) for r in by(rows, 'shown')}
     eu, east, west = 'the Europe server', 'the US East server', 'the US West server'
+    asia = 'the Asia (Singapore) server'
     expect = {
         'play.defjam.online:27777': eu, 'PLAY.defjam.online': eu, '49.12.78.32:27777': eu, '49.12.78.32': eu,
         '142.132.178.17': eu, 'na.defjam.online:27777': east, 'na.defjam.online': east,
         '5.161.206.134:27777': east, '5.161.206.134': east, 'west.defjam.online:27777': west,
         '5.78.214.178': west, '5.78.214.178:27777': west,
+        'sg.defjam.online:27777': asia, '5.223.88.150': asia,
     }
     for address, text in expect.items():
         assert shown[address] == ('1', text), address

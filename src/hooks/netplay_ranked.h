@@ -38,7 +38,7 @@ const char *netranked_mode_title(int mode);
 int netranked_mode_of_key(const char *key);
 
 /* The long RANKED's 14 bytes: modes (bit per mode), flags (bit 0 rollback, bits 4-5 the primary),
- * pings (ms to EU, NA, West; <= 0 unknown, capped at 65535) and code (6 bytes, NULL zeros).
+ * pings (ms to EU, NA, Singapore; <= 0 unknown, capped at 65535) and code (6 bytes, NULL zeros).
  * The primary is always among the modes. Returns NETRANK_EXT_LEN. */
 int netranked_encode_ext(uint8_t *out, unsigned modes, int primary, int rollback, const int pings[3], const char *code);
 
