@@ -780,6 +780,7 @@ static int slot_of_record(uint32_t r)
 void ow_hit(uint32_t attacker, uint32_t defender)
 {
     int a, d;
+    rts_social_combat(attacker, defender);      /* build 91: the minimap's combat pings (host memory only) */
     if (!BA.on) return;
     a = slot_of_record(attacker);
     d = slot_of_record(defender);

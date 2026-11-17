@@ -251,8 +251,8 @@ void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, con
 
 // ---- build 88: nameplates over the heads and the minimap ---------------------------------------------------------
 // Drawing only, from the view the game thread copied (rts_social.c): nothing reaches a fight's input or checksums.
-// [openworld] nameplates (on), nameplate_self (off), minimap (on), minimap_range (70 m).
-struct RtsOverlayCfg { bool plates = true, plate_self = false, map = true; float range_m = 70.0f; };
+// [openworld] nameplates (on), nameplate_self (off), minimap (on), minimap_range (70 m), combat_pings (on, build 91).
+struct RtsOverlayCfg { bool plates = true, plate_self = false, map = true, pings = true; float range_m = 70.0f; };
 RtsOverlayCfg rts_overlay_cfg()
 {
     static RtsOverlayCfg c;
@@ -264,6 +264,7 @@ RtsOverlayCfg rts_overlay_cfg()
         c.plate_self = recomp_settings_get("openworld", "nameplate_self", 0) != 0;
         c.map = recomp_settings_get("openworld", "minimap", 1) != 0;
         c.range_m = (float)recomp_settings_get("openworld", "minimap_range", 70);
+        c.pings = recomp_settings_get("openworld", "combat_pings", 1) != 0;
     }
     return c;
 }
@@ -341,6 +342,32 @@ void rts_minimap(ImDrawList *dl, const Frame &f, const RtsSocialView &v, float r
     dl->PopClipRect();
     dl->AddRect(f.p(x0, y0), f.p(x0 + half * 2, y0 + half * 2), IM_COL32(255, 255, 255, 70), 9 * f.s(), 0,
                 std::max(1.0f, 1.0f * f.s()));
+    if (c.pings) {      // build 91: combat pings, red under the fighters' own dots: a fighter in range gets a red dot with a
+                        // pulsing ring, one beyond the range a larger red arrow on the rim; 3 s from its last hit
+                        // given or taken, or grab, fading out (rts_ping_alpha); this PC's own fighter is not pinged
+        unsigned long long tnow = GetTickCount64();
+        for (int s = 0; s < 4; s++) {
+            if (!(v.present & (1u << s)) || s == me || !v.combat_ms[s] || tnow < v.combat_ms[s]) continue;
+            unsigned age = (unsigned)(tnow - v.combat_ms[s]);
+            float a = rts_ping_alpha(age);
+            if (a <= 0.01f) continue;
+            float mx, my;
+            int rim = rts_minimap_point(fx, fz, lx, lz, v.pos[s][0], v.pos[s][2], scale, half - 3, &mx, &my);
+            ImU32 red = IM_COL32(235, 40, 40, (int)(255.0f * a));
+            if (rim) {
+                float l = sqrtf(mx * mx + my * my), ux = mx / l, uy = my / l, tx = cx + mx, ty = cy + my;
+                ImVec2 tri[3] = { f.p(tx + ux * 5.5f, ty + uy * 5.5f), f.p(tx - uy * 3.6f - ux * 2.5f, ty + ux * 3.6f - uy * 2.5f),
+                                  f.p(tx + uy * 3.6f - ux * 2.5f, ty - ux * 3.6f - uy * 2.5f) };
+                dl->AddConvexPolyFilled(tri, 3, red);
+                dl->AddPolyline(tri, 3, IM_COL32(40, 0, 0, (int)(200.0f * a)), ImDrawFlags_Closed, std::max(1.0f, 0.8f * f.s()));
+            } else {
+                float ph = (float)(age % 800u) / 800.0f;
+                dl->AddCircleFilled(f.p(cx + mx, cy + my), 4.4f * f.s(), red, 14);
+                dl->AddCircle(f.p(cx + mx, cy + my), (4.4f + 5.0f * ph) * f.s(), IM_COL32(255, 70, 70, (int)(210.0f * a * (1.0f - ph))),
+                              16, std::max(1.0f, 1.0f * f.s()));
+            }
+        }
+    }
     for (int pass = 0; pass < 2; pass++)        // CPUs first, the humans over them
         for (int s = 0; s < 4; s++) {
             if (!(v.present & (1u << s)) || s == me) continue;
@@ -1079,6 +1106,12 @@ void rts_gallery_page(ImDrawList *dl, ImVec2 display)
         v.local = 0;
         v.cpu = 1u << 3;                    // build 88: fighter 3 is a CPU (grey on the minimap, "CPU" plate)
         v.yaw[0] = 200.0f;
+        {   // build 91: combat pings, one fresh in range, one fading, the far CPU's on the rim
+            unsigned long long gn = GetTickCount64();
+            v.combat_ms[1] = gn - 400u;
+            v.combat_ms[2] = gn - 2000u;
+            v.combat_ms[3] = gn - 600u;
+        }
         v.roam_mode = OW_ROAM_LOCKED;      // free roam's lock marker over fighter 1
         v.lock_target = 1;
         unsigned long long now = GetTickCount64();
