@@ -51,12 +51,14 @@ int cr_parse(const char *json, long long local_time, CrInfo *out)
         char key[32], word[32];
         const char *after;
         if (*p != '"') { p++; continue; }
-        if (!(after = read_string(p, key, (int)sizeof key))) return 0;
+        after = read_string(p, key, (int)sizeof key);
+        if (!after) return 0;
         p = skip_space(after);
         if (*p != ':') continue;                /* a value (a title), not a name */
         p = skip_space(p + 1);
         if (*p == '"') {                        /* a text value: only "kind" matters; a title is passed over whole */
-            if (!(after = read_string(p, word, (int)sizeof word))) return 0;
+            after = read_string(p, word, (int)sizeof word);
+            if (!after) return 0;
             p = after;
             if (!strcmp(key, "kind")) {
                 int k;
