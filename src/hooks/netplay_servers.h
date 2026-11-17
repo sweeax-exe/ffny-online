@@ -1,18 +1,20 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Copyright (c) 2026 sweeax-exe (FFNY Online) */
-/* The online relays and the choice between them (build 30; build 38: three): Europe
- * (play.defjam.online), US East (na.defjam.online) and US West (west.defjam.online), all port 27777.
+/* The online relays and the choice between them (build 30; build 38: three; build 91: the relay table of
+ * netplay_servers_rules.c, today Europe (play.defjam.online), US East (na.defjam.online), Asia (Singapore,
+ * sg2.defjam.online), South America (Sao Paulo, sa.defjam.online) and US South (Miami, na2.defjam.online), all port
+ * 27777; US East is nj.defjam.online).
  *
  * Each relay answers STATUS (docs/netplay-protocol.md, "Relay status") without a session: a
  * background thread asks every relay every 10 s while the online screens or the launcher's settings
- * show, and keeps each one's round trip and player counts. The setting [online] server is auto, eu,
- * na (US East), west or all (netplay_servers_rules.h; auto: the relay with the lowest ping, decided
+ * show, and keeps each one's round trip and player counts. The setting [online] server is auto, a
+ * relay's id (eu, na, sg, sa) or all (netplay_servers_rules.h; auto: the relay with the lowest ping, decided
  * once per session; all: the same, and the rooms of every relay; "both" of builds 31..37 reads as
  * all); anything else is a custom address (tests, a private relay) used as it is. Accounts,
  * statistics and updates stay on the Europe server whatever is chosen.
  *
- * Tests: RECOMP_NETPLAY_SERVER_EU / _NA / _WEST replace the relays' addresses (e.g. local relays,
- * one started with -test-lag). */
+ * Tests: RECOMP_NETPLAY_SERVER_EU / _NA / _SG / _SA (each relay's `env`) replace the relays' addresses (e.g.
+ * local relays, one started with -test-lag). */
 #ifndef DEFJAM_NETPLAY_SERVERS_H
 #define DEFJAM_NETPLAY_SERVERS_H
 
@@ -36,9 +38,9 @@ enum NetServerState {
 #define NETSERVER_SAME     8   /* build 83 relays: `same` is set */
 
 typedef struct NetServerInfo {
-    const char *id;         /* "eu", "na", "west" */
-    const char *name;       /* "Europe", "US East", "US West" */
-    const char *short_name; /* "EU", "US EAST", "US WEST" */
+    const char *id;         /* "eu", "na", "sg", "sa" (the table's) */
+    const char *name;       /* "Europe", "US East", "Asia (Singapore)", "South America" */
+    const char *short_name; /* "EU", "US EAST", "ASIA", "S. AMERICA" */
     char address[128];      /* host:port */
     int state;              /* NETSERVER_* */
     int ping_ms;            /* the best round trip of the last round, -1 unknown */
@@ -58,12 +60,12 @@ int netservers_get(NetServerInfo *out, int max);
 int netservers_probing(void);
 
 enum NetServerChoice netservers_choice(void);
-/* Stores the choice ("auto", "eu", "na", "west", "all") and drops any switch made this session. */
+/* Stores the choice ("auto", "eu", "na", "sg", "sa", "all") and drops any switch made this session. */
 void netservers_set_choice(enum NetServerChoice c);
 /* This session only, beating the setting: the quick-match hint's "search there", the ranked switch. */
 void netservers_use(int index);
 
-/* The relay to connect to now (NETSERVER_EU / _NA / _WEST), -1 while Automatic still waits for the first
+/* The relay to connect to now (NETSERVER_EU / _NA / _SG / _SA), -1 while Automatic still waits for the first
  * answers (at most about 2.5 s after the first probe), -2 for a custom address. The automatic
  * choice is made once and kept for the session. */
 int netservers_current(void);
@@ -73,7 +75,7 @@ int netservers_current(void);
 int netservers_reconsider(void);
 /* The address for netplay_lobby(): the chosen relay's, or the custom one. NULL while undecided. */
 const char *netservers_address(char *buf, int size);
-/* Tests (RECOMP_NETPLAY=quick with RECOMP_NETPLAY_SERVER=auto|eu|na|west|all): like netservers_address,
+/* Tests (RECOMP_NETPLAY=quick with RECOMP_NETPLAY_SERVER=auto|eu|na|sg|sa|all): like netservers_address,
  * but waits up to wait_ms for Automatic's first answers. */
 const char *netservers_address_wait(char *buf, int size, int wait_ms);
 /* Moves the hub session to the relay chosen now (after netservers_set_choice or netservers_use):

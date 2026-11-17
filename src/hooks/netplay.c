@@ -228,12 +228,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #endif
 
 #define DEFAULT_PORT  27777
-#define PROJECT_SERVER_NAME    "play.defjam.online"
-#define PROJECT_SERVER_ADDRESS "49.12.78.32"
-#define PROJECT_NA_NAME        "na.defjam.online"     /* US East (build 30; "North America" until 37) */
-#define PROJECT_NA_ADDRESS     "5.161.206.134"
-#define PROJECT_WEST_NAME      "sg.defjam.online"     /* Asia (Singapore) (build 89; the NETSERVER_WEST slot) */
-#define PROJECT_WEST_ADDRESS   "5.223.88.150"
+/* the project's relays, their host names and fallback addresses: the table in netplay_servers_rules.c (build 91) */
 #define PROTO         1
 #define T_HELLO       0x01
 #define T_WELCOME     0x02
@@ -359,6 +354,10 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                  * with the players' numbers, START (WATCH, WATCHLATE) after the skins with the match's
                                  * numbers; the relay keeps one only where every member announced this bit and has the
                                  * room's content print (server docs/unlimited-fighters-online.md) */
+#define CAPS_RELAYS   268435456u /* 1 << 28 (build 91), both ways: the pings to the relays beyond the first three
+                                 * (South America...): QUICK's and the long RANKED's pings get a trailer (a count, then
+                                 * u16 each, netservers_put_more_pings), and ROOMLIST's listed pings too (server
+                                 * relay/relays.go). Sent only to a relay that answered the bit */
 #define CAPS_PINGSUM  67108864u /* 1 << 26 (build 90), both ways: QUICK ends with this PC's pings to the three relays
                                  * (u16 each, after the search's choice), and ROOMLIST lists each quick room's (server
                                  * relay/ping_sum.go): two players meeting across relays play on the one with the
@@ -4922,8 +4921,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
-                              CAPS_PINGSUM | CAPS_DIRECT |
-                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                              CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
+                              CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -5167,9 +5166,7 @@ static int resolve(const char *server)
     if (getaddrinfo(host, port, &hints, &res) || !res) {
         /* The project's server by its address when its name does not resolve (a resolver that
          * still remembers the name as missing, or a DNS outage). */
-        const char *known = !_stricmp(host, PROJECT_SERVER_NAME) ? PROJECT_SERVER_ADDRESS :
-                            !_stricmp(host, PROJECT_NA_NAME) ? PROJECT_NA_ADDRESS :
-                            !_stricmp(host, PROJECT_WEST_NAME) ? PROJECT_WEST_ADDRESS : NULL;
+        const char *known = netservers_known_ip(host);
         res = NULL;
         if (!known || getaddrinfo(known, port, &hints, &res) || !res)
             return -1;
@@ -5891,22 +5888,30 @@ int netplay_spectating(void)
 void netplay_lobby_quick(int mode, int max)
 {
     int most = room_max(mode), n, original = netplay_original(mode), i;
-    uint8_t b[11] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > most ? most : max) };
+    uint8_t b[11 + 1 + 2 * (NETSERVER_MAX - NETSERVER_LEGACY)] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > most ? most : max) };
     n = 2 + put_ping(b + 2);
     if (relay_has(CAPS_ORIGINAL)) {     /* build 86: the search's choice after the ping (unknown: 0xFFFF) */
         if (n == 2) { b[2] = b[3] = 0xFF; n = 4; }
         b[n++] = (uint8_t)(original ? 1 : 0);
         if (relay_has(CAPS_PINGSUM)) {  /* build 90: the pings to the three relays (0 unknown), listed with the room */
             NetServerInfo sv[NETSERVER_COUNT];
-            int got = netservers_get(sv, NETSERVER_COUNT);
-            for (i = 0; i < 3; i++) {
+            int got = netservers_get(sv, NETSERVER_COUNT), pings[NETSERVER_COUNT];
+            char line[160];
+            int at = 0;
+            for (i = 0; i < NETSERVER_COUNT; i++) {
                 int ms = i < got && sv[i].state == NETSERVER_UP && sv[i].ping_ms > 0 ? sv[i].ping_ms : 0;
-                if (ms > 0xFFFF) ms = 0xFFFF;
-                b[n++] = (uint8_t)ms;
-                b[n++] = (uint8_t)(ms >> 8);
+                pings[i] = ms > 0xFFFF ? 0xFFFF : ms;
+                at += snprintf(line + at, sizeof(line) - (size_t)at, "%s%s %d", i ? ", " : "", sv[i].id, pings[i]);
+                if (at >= (int)sizeof(line)) at = (int)sizeof(line) - 1;
             }
-            fprintf(stderr, "[NETPLAY] quick match: pings eu %d, na %d, sg %d ms\n", b[n - 6] | b[n - 5] << 8,
-                    b[n - 4] | b[n - 3] << 8, b[n - 2] | b[n - 1] << 8);
+            for (i = 0; i < NETSERVER_LEGACY; i++) {
+                b[n++] = (uint8_t)pings[i];
+                b[n++] = (uint8_t)(pings[i] >> 8);
+            }
+            if (relay_has(CAPS_RELAYS))     /* build 91: and to the relays beyond the three */
+                n += netservers_put_more_pings(b + n, pings, NETSERVER_COUNT);
+            fprintf(stderr, "[NETPLAY] quick match: pings %s ms%s\n", line,
+                    relay_has(CAPS_RELAYS) ? "" : " (the relay takes the first three)");
         }
     }
     fprintf(stderr, "[NETPLAY] quick match: mode %d, %s%s\n", mode, original ? "original fighters only" : "all fighters",
@@ -5918,8 +5923,8 @@ void netplay_lobby_quick(int mode, int max)
 static DWORD WINAPI ranked_thread(LPVOID param)
 {
     char ticket[33];
-    uint8_t b[TICKET_LEN + 1 + NETRANK_EXT_LEN];
-    int i, fighter = (int)(INT_PTR)param, pings[3] = { 0, 0, 0 }, n;
+    uint8_t b[TICKET_LEN + 1 + NETRANK_EXT_LEN + 1 + 2 * (NETSERVER_MAX - NETSERVER_LEGACY)];
+    int i, fighter = (int)(INT_PTR)param, pings[NETSERVER_COUNT] = { 0 }, n, len = TICKET_LEN + 1 + NETRANK_EXT_LEN;
     NetServerInfo sv[NETSERVER_COUNT];
     unsigned modes;
     int primary;
@@ -5944,7 +5949,7 @@ static DWORD WINAPI ranked_thread(LPVOID param)
     b[TICKET_LEN] = (uint8_t)fighter;
     /* the long form: the modes, the primary, rollback, the pings to the three relays, a MOVE's code */
     n = netservers_get(sv, NETSERVER_COUNT);
-    for (i = 0; i < n && i < 3; i++) pings[i] = sv[i].state == NETSERVER_UP ? sv[i].ping_ms : 0;
+    for (i = 0; i < n && i < NETSERVER_COUNT; i++) pings[i] = sv[i].state == NETSERVER_UP ? sv[i].ping_ms : 0;
     EnterCriticalSection(&g_cs);
     modes = N.rk_modes;
     primary = N.rk_primary;
@@ -5960,15 +5965,18 @@ static DWORD WINAPI ranked_thread(LPVOID param)
         EnterCriticalSection(&g_cs);
         if (relay_has(CAPS_ORIGINAL) && netplay_original(NETPLAY_ORIGINAL_RANKED))
             b[TICKET_LEN + 1 + 1] |= NETRANK_FLAG_ORIGINAL;    /* build 86: original fighters only: no skins */
+        if (relay_has(CAPS_RELAYS))     /* build 91: the pings to the relays beyond the three, after the code */
+            len += netservers_put_more_pings(b + len, pings, NETSERVER_COUNT);
         LeaveCriticalSection(&g_cs);
     }
-    fprintf(stderr, "[NETPLAY] ranked: queueing for %s (modes %u)%s%s, pings %d/%d/%d ms\n", netranked_mode_title(primary),
-            modes, code[0] ? ", set " : "", code, pings[0], pings[1], pings[2]);
+    fprintf(stderr, "[NETPLAY] ranked: queueing for %s (modes %u)%s%s, pings %d/%d/%d/%d/%d ms (eu/na/sg/sa/mia)\n",
+            netranked_mode_title(primary), modes, code[0] ? ", set " : "", code, pings[0], pings[1], pings[2],
+            pings[NETSERVER_SA], pings[NETSERVER_MIA]);
     EnterCriticalSection(&g_cs);
     i = N.queue_state == NETQUEUE_TICKET;   /* not cancelled meanwhile */
     if (i) N.queue_state = NETQUEUE_CHECKING;
     LeaveCriticalSection(&g_cs);
-    if (i) request(T_RANKED, b, (int)sizeof(b));
+    if (i) request(T_RANKED, b, len);
     return 0;
 }
 
@@ -6884,8 +6892,8 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
     static char chosen[128];
     int i;
     (void)unused;
-    /* RECOMP_NETPLAY_SERVER=auto|eu|na|sg|all: the server choice as a player makes it (build 30), with
-     * RECOMP_NETPLAY_SERVER_EU/_NA/_SG for the relays' addresses; anything else is the address */
+    /* RECOMP_NETPLAY_SERVER=auto|eu|na|sg|sa|all: the server choice as a player makes it (build 30), with
+     * RECOMP_NETPLAY_SERVER_EU/_NA/_SG/_SA for the relays' addresses; anything else is the address */
     if (netservers_choice() != NETCHOICE_CUSTOM) {
         server = netservers_address_wait(chosen, sizeof(chosen), 4000);
         fprintf(stderr, "[NETPLAY] tests: server %s\n", server);
@@ -6954,7 +6962,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         int idle_from = idle_env && *idle_env ? atoi(idle_env) : 0, call_no = 0, idle_told = 0;
         netplay_lobby(server, name && *name ? name : "Test player");
         for (i = 0; i < 600 && N.state == NETPLAY_CONNECTING; i++) Sleep(100);
-        {   /* RECOMP_TEST_SERVER_SWITCH="<ms>,<eu|na|sg|auto>": after that long in the lobby, switch the
+        {   /* RECOMP_TEST_SERVER_SWITCH="<ms>,<eu|na|sg|sa|auto>": after that long in the lobby, switch the
              * server the way the hub's server picker does (netservers_reconnect), then quick-match there */
             const char *sw = getenv("RECOMP_TEST_SERVER_SWITCH");
             if (sw && *sw && strchr(sw, ',')) {
@@ -7124,7 +7132,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
              * 30 s; a player waiting there for this mode is met (at most three moves). The search time
              * runs from the first wait alone and is kept across moves. */
             if (!listed && !strcmp(mode, "quick") && r.in_room && r.phase == 0 && r.player_count < 2 &&
-                !NETPLAY_IS_HILL(r.settings.mode) && !netservers_moving() && moves < 3) {
+                !NETPLAY_IS_HILL(r.settings.mode) && !netservers_moving() && moves < 6) {
                 int waiting = 0, ping = -1, to, search_s, alone_s;
                 unsigned scope = 0;
                 ULONGLONG now = GetTickCount64();

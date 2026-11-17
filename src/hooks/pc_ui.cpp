@@ -255,7 +255,6 @@ static const char *friendly(const char *section, const char *key)
         {"ui", "overlay_pad", "Overlay pad buttons"},
         {"ui", "overlay_key", "Overlay key"},
         {"ui", "button_icons", "Button icons"},
-        {"online", "server", "Server"},
         {"online", "name", "Your name"},
         {"online", "input_delay", "Input delay (steps)"},
         {"online", "rollback", "Rollback netcode (beta)"},
@@ -1946,7 +1945,7 @@ static void page_online(UiMode mode)
     ImGui::SeparatorText("Account");
     page_account();
     ImGui::SeparatorText("Connection");
-    settings_group("online", { "server", "name" });
+    settings_group("online", { "name" });  // build 91: no server choice
     {
         char shown[32];
         if (account_game_name(shown, sizeof(shown)))
@@ -2814,7 +2813,7 @@ static void quality_widget()
                           "next time the game starts.");
 }
 
-// The online server (build 30; build 38: three relays): Automatic, Europe, US East or Asia, each with
+// The online server (build 30; build 91: the relay table): Automatic or one of the relays (Europe, US East, Asia, South America, Miami), each with
 // its ping and players as the relays answer (netplay_servers.c), or All servers. A custom address
 // (Advanced, Online) shows as such.
 static std::string server_line(const NetServerInfo &s)
@@ -2829,7 +2828,7 @@ static std::string server_line(const NetServerInfo &s)
     return line;
 }
 
-static void server_widget()
+[[maybe_unused]] static void server_widget()  // build 91: no longer shown (no server choice)
 {
     netservers_probe();
     NetServerInfo s[NETSERVER_COUNT];
@@ -2844,7 +2843,7 @@ static void server_widget()
     char buf[128];
     int fixed = netservers_choice_relay(choice);
     std::string preview = choice == NETCHOICE_AUTO ? automatic : choice == NETCHOICE_ALL ? all :
-        choice == NETCHOICE_CUSTOM ? std::string("Custom: ") + recomp_settings_get_text("online", "server", buf, sizeof(buf), "") :
+        choice == NETCHOICE_CUSTOM ? std::string("Custom: ") + recomp_settings_get_text("online", "server_debug", buf, sizeof(buf), "") :
         fixed >= 0 && fixed < n ? server_line(s[fixed]) : automatic;
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 20);
     if (ImGui::BeginCombo("Server", preview.c_str())) {
@@ -2857,9 +2856,8 @@ static void server_widget()
         ImGui::EndCombo();
     }
     ImGui::SetItemTooltip("Where you play online. Automatic takes the server with the lowest ping when you go online. "
-                          "Quick Match looks on your server first, then (when nobody is there) on the other US server "
-                          "after 10 s and on every server after 30 s; accounts and stats are shared. All servers: the "
-                          "rooms of Europe, US East and Asia in one list; matches across the ocean have higher ping.");
+                          "Quick Match looks on your server first, then (when nobody is there) on every server after 30 s; "
+                          "accounts and stats are shared. All servers: the rooms of every server in one list; matches across the ocean have higher ping.");
 }
 
 static void page_basics()
@@ -2871,7 +2869,6 @@ static void page_basics()
     ImGui::SeparatorText("Voice chat");
     settings_group("online", { "voice", "voice_key", "voice_pad" });
     ImGui::SeparatorText("Online");
-    server_widget();
     settings_group("ui", { "button_icons" });
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });

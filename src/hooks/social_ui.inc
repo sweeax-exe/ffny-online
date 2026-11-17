@@ -18,8 +18,21 @@ enum ChatTab { TAB_ROOM, TAB_GLOBAL, TAB_FRIENDS, TAB_ONLINE, TAB_MESSAGES, TAB_
 const char *const k_tab_names[TAB_COUNT] = { "ROOM", "GLOBAL", "FRIENDS", "ONLINE", "MESSAGES", "CREW" };
 const char *const k_tab_shots[TAB_COUNT] = { "social-room", "social-global", "social-friends", "social-online", "social-messages",
                                              "social-crew" };
-const char *const k_region_ids[4] = { "", "eu", "us-east", "sg" };
-const char *const k_region_names[4] = { "ALL SERVERS", "EUROPE", "US EAST", "US WEST" };
+// GLOBAL's server chips: ALL SERVERS, then one per relay (build 91: the relay table, netservers_def)
+const int REGION_COUNT = 1 + NETSERVER_COUNT;
+// the chip's region id: "" all, else the relay's global chat region ("eu", "us-east", "sg", "sa")
+const char *region_id(int chip) { return chip > 0 && chip <= NETSERVER_COUNT ? netservers_def(chip - 1)->social : ""; }
+// the chip's label: "ALL SERVERS", then each relay's short name (with four relays or fewer its name before any " (")
+std::string region_chip(int chip)
+{
+    if (chip <= 0 || chip > NETSERVER_COUNT) return "ALL SERVERS";
+    // build 91: seven relays: their short names ("EU", "MIAMI", "LOS ANGELES"), so every chip fits the panel
+    std::string n = NETSERVER_COUNT > 4 ? netservers_def(chip - 1)->short_name : netservers_def(chip - 1)->name;
+    size_t paren = n.find(" (");
+    if (paren != std::string::npos) n.resize(paren);
+    for (auto &c : n) c = (char)toupper((unsigned char)c);
+    return n;
+}
 
 const ImU32 GOLD_TEXT = IM_COL32(255, 205, 60, 255), BLUE_NAME = IM_COL32(142, 199, 255, 255),
             LIVE = IM_COL32(123, 224, 123, 255), DIM = IM_COL32(242, 230, 200, 115),
@@ -463,12 +476,13 @@ std::string ago_text(long long unix_s)
 
 std::string region_label(const std::string &relay)
 {
-    return relay == "eu" ? "Europe" : relay == "us-east" ? "US East" : relay == "sg" ? "Asia (Singapore)" : "";
+    int i = netservers_index_of_social(relay.c_str());
+    return i >= 0 ? netservers_def(i)->name : "";
 }
 
 int server_of_region(const std::string &relay)
 {
-    return relay == "eu" ? NETSERVER_EU : relay == "us-east" ? NETSERVER_NA : relay == "sg" ? NETSERVER_WEST : -1;
+    return netservers_index_of_social(relay.c_str());
 }
 
 // What a friend does, as the FRIENDS list says it, and its colour.
@@ -586,7 +600,7 @@ void chat_send()
     if (lead == std::string::npos) return;
     text = text.substr(lead);
     if (t == TAB_GLOBAL) {
-        std::string region = k_region_ids[C.region];
+        std::string region = region_id(C.region);
         if (region.empty()) region = social::region_of_server(connected_server());
         social::send_global(region.empty() ? "eu" : region.c_str(), text);
     } else if (t == TAB_MESSAGES && C.dm_with) {
@@ -744,7 +758,7 @@ void input_bar(ImDrawList *dl, const Frame &f, float x0, const std::string &plac
 bool line_shown(const social::Line &l)
 {
     if (C.tab != TAB_GLOBAL || C.region == 0) return true;
-    return l.channel == k_region_ids[C.region];
+    return l.channel == region_id(C.region);
 }
 
 // Draws the lines from the bottom of the box up; sel (from the newest, -1 none) gets the marker.
@@ -905,11 +919,12 @@ void draw_global(ImDrawList *dl, const Frame &f, const ChatKeys &k)
 {
     // the server chips
     float x = PX + 14, y = TABS_B + 8;
-    for (int i = 0; i < 4; i++) {
-        float w = text_width(f, g_title, 8.5f, k_region_names[i]) + 14;
+    for (int i = 0; i < REGION_COUNT; i++) {
+        std::string chip = region_chip(i);
+        float w = text_width(f, g_title, 8.5f, chip.c_str()) + 14;
         bool on = C.region == i;
         rect(dl, f, x, y, w, 17, on ? RED : IM_COL32(255, 255, 255, 18), 8.5f);
-        text(dl, f, g_title, 8.5f, x + w / 2, y + 3.5f, on ? IM_COL32(255, 245, 230, 255) : DIM, k_region_names[i], CENTER, 0);
+        text(dl, f, g_title, 8.5f, x + w / 2, y + 3.5f, on ? IM_COL32(255, 245, 230, 255) : DIM, chip.c_str(), CENTER, 0);
         if (mouse_click(f, x, y, w, 17)) C.region = i;
         x += w + 5;
     }
@@ -917,11 +932,11 @@ void draw_global(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     if (C.v.slow_mode > 0) snprintf(info, sizeof(info), "%d online - slow mode %d s", C.v.online, C.v.slow_mode);
     else snprintf(info, sizeof(info), "%d online", C.v.online);
     text(dl, f, g_body, 9, PX + PW - 14, y + 3, DIM, info, RIGHT, 0);
-    if (k.lt) C.region = (C.region + 3) % 4;
-    if (k.rt) C.region = (C.region + 1) % 4;
+    if (k.lt) C.region = (C.region + REGION_COUNT - 1) % REGION_COUNT;
+    if (k.rt) C.region = (C.region + 1) % REGION_COUNT;
     if (C.draft[TAB_GLOBAL].empty() && C.sel[TAB_GLOBAL] < 0) {
-        if (k.left) C.region = (C.region + 3) % 4;
-        if (k.right) C.region = (C.region + 1) % 4;
+        if (k.left) C.region = (C.region + REGION_COUNT - 1) % REGION_COUNT;
+        if (k.right) C.region = (C.region + 1) % REGION_COUNT;
     }
     std::vector<const social::Line *> lines;
     for (auto &l : C.v.global) if (line_shown(l)) lines.push_back(&l);
@@ -938,10 +953,10 @@ void draw_global(ImDrawList *dl, const Frame &f, const ChatKeys &k)
             menu_report_line(lines, (size_t)(n - 1 - s), l.channel);
         }
     }
-    std::string where = C.region ? std::string(k_region_names[C.region]) : "";
+    std::string where = C.region ? region_chip(C.region) : "";
     for (auto &c : where) c = (char)tolower((unsigned char)c);
     std::string ph = C.region == 0 ? "Message everyone on your server" : "Message everyone on " +
-                     std::string(C.region == 1 ? "Europe" : C.region == 2 ? "US East" : "Asia (Singapore)");
+                     region_label(region_id(C.region));
     input_bar(dl, f, PX, ph, "SEND");
 }
 
@@ -951,7 +966,8 @@ void open_keyboard(int kind);       // the on-screen keyboard, below
 
 std::string region_name(const std::string &r)
 {
-    return r == "eu" ? "Europe" : r == "us-east" ? "US East" : r == "sg" ? "Asia (Singapore)" : r;
+    int i = netservers_index_of_social(r.c_str());
+    return i >= 0 ? netservers_def(i)->name : r;
 }
 
 std::string month_year(long long unix_s)
@@ -1075,7 +1091,9 @@ void crew_join_battle()
     if (!netplay_in_lobby()) { say("Connect to the online hub first."); return; }
     std::string here = social::region_of_server(connected_server());
     if (!bt.region.empty() && !here.empty() && here != bt.region) {
-        say("The battle runs on " + region_name(bt.region) + ": switch the server in the hub, then JOIN BATTLE.");
+        int to = netservers_index_of_social(bt.region.c_str());     // build 91: no server choice; the hub moves
+        if (to >= 0) { netservers_use(to); netservers_reconnect(hub_name().c_str()); }
+        say("The battle runs on " + region_name(bt.region) + ": moving there, then press JOIN BATTLE again.");
         return;
     }
     if (!(lobby_caps() > 0 && (lobby_caps() & NETPLAY_CAP_CREW))) { say("This server does not run crew battles yet."); return; }
@@ -2520,7 +2538,7 @@ void draw_keyboard(ImDrawList *dl, const Frame &f, ImVec2 display)
     else if (C.kb_kind == KB_CREW_CHALLENGE) { head = "CHALLENGE A CREW - ITS TAG"; who = ""; }
     else if (C.tab == TAB_MESSAGES) { head = "MESSAGE TO"; who = convo_name(C.dm_with); }
     else if (C.tab == TAB_CREW) { head = "MESSAGE TO"; who = "your crew"; }
-    else { head = "MESSAGE TO"; who = C.region ? k_region_names[C.region] : "everyone"; }
+    else { head = "MESSAGE TO"; who = C.region ? region_chip(C.region) : "everyone"; }
     text(dl, f, g_title, 13, x + in, y + 14, IM_COL32(242, 230, 200, 180), head.c_str(), LEFT, 0);
     if (!who.empty())
         text(dl, f, g_hand, 17, x + in + text_width(f, g_title, 13, head.c_str()) + 6, y + 12, CREAM, who.c_str(), LEFT, 0.6f);
@@ -2912,7 +2930,7 @@ bool quick_send(int where, int tab, int i)
     if (where != QW_TAB || tab == TAB_ROOM) {
         ok = room_chat_state() == 1 && netplay_room_chat_send(text.c_str());
     } else if (tab == TAB_GLOBAL) {
-        std::string region = k_region_ids[C.region];
+        std::string region = region_id(C.region);
         if (region.empty()) region = social::region_of_server(connected_server());
         social::send_global(region.empty() ? "eu" : region.c_str(), text);
         to = "global";

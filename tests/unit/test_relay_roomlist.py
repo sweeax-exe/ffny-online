@@ -73,12 +73,14 @@ def test_setting_and_launcher_offer_all():
     assert 'NETCHOICE_ALL' in RULES_H and 'NETCHOICE_BOTH' not in SERVERS_H + RULES_H
     # "all" is saved; the "both" of builds 31..37 still reads as all
     assert '{ "all", NETCHOICE_ALL }' in RULES_C and '{ "both", NETCHOICE_ALL }' in RULES_C
-    assert 'case NETCHOICE_ALL: return "all";' in RULES_C
-    m = re.search(r'\{ "online", "server", RECOMP_SETTING_STRING, .*?\}', SETTINGS_C, re.S)
-    assert m and 'all' in m.group(0) and 'sg' in m.group(0)
+    assert 'c == NETCHOICE_ALL ? "all"' in RULES_C
+    # build 91: no server choice for players; [online] server_debug is the hidden test override
+    m = re.search(r'\{ "online", "server_debug", RECOMP_SETTING_STRING, .*?\}', SETTINGS_C, re.S)
+    assert m and 'mia' in m.group(0) and 'lax' in m.group(0) and 'Tests and debugging only' in m.group(0)
+    assert '"server"' not in re.sub(r'//.*', '', PC_UI.split('static void page_basics')[1].split('static void ')[0])
     assert 'netservers_set_choice(NETCHOICE_ALL)' in PC_UI and 'netservers_set_choice(NETCHOICE_ALL)' in SCREEN
     # the picker explains All in one line
-    assert 'The rooms of Europe, US East and Asia in one list; joining one moves you there.' in SCREEN
+    assert 'The rooms of every server in one list; joining one moves you there. ' in SCREEN
 
 
 def test_staged_search_rule_and_gallery():
@@ -88,7 +90,7 @@ def test_staged_search_rule_and_gallery():
     assert c_define(RULES_H, 'QUICK_ALL_S') == 30
     assert c_define(RULES_H, 'QUICK_LAST_S') == 40
     assert 'if (their_age > my_age + 2 || (their_age >= my_age - 2 && my_relay > their_relay)) return 1;' in RULES_C
-    assert '} else if (netservers_should_move(cur, my_age, o, age)) {' in SERVERS_C     # build 90: after the ping-sum rule
+    assert '} else if (netservers_should_move(cur, my_age, o, age)) {' in SERVERS_C
     assert 'scope = netservers_scope(c, cur, search_s, up);' in SERVERS_C
     # the screens and the test thread both run it, for every choice but a custom address
     assert 'netservers_quick_move(S.last_quick, search_s, alone_s, r.code, &waiting, &ping, &scope)' in SCREEN
@@ -101,7 +103,8 @@ def test_staged_search_rule_and_gallery():
 
 def test_hub_test_switches():
     assert 'RECOMP_TEST_JOIN_LISTED' in NETPLAY_C
-    for param in ('Servers', 'JoinListed', 'JoinListedSecs', 'CopyGapSecs', 'WestRelayPort', 'WestLagMs'):
+    for param in ('Servers', 'JoinListed', 'JoinListedSecs', 'CopyGapSecs', 'WestRelayPort', 'WestLagMs', 'SaRelayPort',
+                  'SaLagMs'):
         assert re.search(r'\$%s\b' % param, HUB_TEST), param
-    assert "'both'" in HUB_TEST and "'all'" in HUB_TEST and "'sg'" in HUB_TEST
+    assert "'both'" in HUB_TEST and "'all'" in HUB_TEST and "'sg'" in HUB_TEST and "'sa'" in HUB_TEST
     assert '0x25' in PROTOCOL_DOC and '`ROOMLIST`' in PROTOCOL_DOC

@@ -80,12 +80,12 @@ static RecompSetting g_display_settings[] = {
       "Capture source textures for making a pack, in hd-work/runtime under the data folder." },
     { "textures", "dump_limit", RECOMP_SETTING_INT, 2000, 0, 65536, NULL, "RECOMP_TEXTURE_DUMP_LIMIT", RECOMP_SETTING_RESTART,
       "Maximum new source images captured in one run." },
-    { "online", "server", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_NETPLAY_SERVER", 0,
-      "The server for online play: auto (the one with the lowest ping of Europe, US East and Singapore), eu, na "
-      "(US East), sg (Asia (Singapore)), all (the rooms of every server; the hub connects to the lowest ping and moves "
-      "to join; \"both\" of older builds means all), or a relay's own address as host or host:port (port 27777 "
-      "if left out). Quick Match widens to the other servers when nobody is waiting. Accounts and stats stay on "
-      "Europe.", "auto" },
+    /* build 91 (owner): players never pick a server. The hub connects to the relay with the lowest ping and every
+     * room, quick match and ranked search is one pool across the relays. This is a hidden test/debug override
+     * (never shown in the launcher or the game; a [online] server of builds before 91 is not read any more). */
+    { "online", "server_debug", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_NETPLAY_SERVER", 0,
+      "Tests and debugging only: auto (the relay with the lowest ping, the default), a relay's id (eu, na, mia, dfw, "
+      "lax, sa, sg) to put the hub there, or a relay's own address as host or host:port (port 27777 if left out).", "auto" },
     { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Your name, shown to the other player.", "Player" },
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
@@ -743,7 +743,8 @@ static int local_address(const char *v)
 static int may_run_beside_another(void)
 {
     static const char *const vars[] = { "RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA",
-                                        "RECOMP_NETPLAY_SERVER_SG", "RECOMP_ACCOUNT_SERVER" };
+                                        "RECOMP_NETPLAY_SERVER_SG", "RECOMP_NETPLAY_SERVER_SA", "RECOMP_NETPLAY_SERVER_MIA",
+                                        "RECOMP_NETPLAY_SERVER_DFW", "RECOMP_NETPLAY_SERVER_LAX", "RECOMP_ACCOUNT_SERVER" };
     const char *settings = getenv("RECOMP_SETTINGS"), *one = getenv("RECOMP_NETPLAY_SERVER");
     int i, test_run = (settings && !_stricmp(settings, "none")) ||
                       (getenv("RECOMP_PAD_SCRIPT") && !getenv("RECOMP_PAD_HOST"));
@@ -1153,16 +1154,8 @@ int pc_settings_init(void)
     recomp_settings_register(g_settings, g_setting_count);
     recomp_settings_set_log(settings_log);
     read = g_path[0] ? recomp_settings_load(g_path) : 0;
-    {   /* The first server was known by its address; installs that saved it move to the name. */
-        char server[128];
-        recomp_settings_get_text("online", "server", server, sizeof(server), "");
-        /* Build 30: the old default, the Europe relay's name, becomes "auto" (the nearest relay); a
-         * player who wants Europe only picks it again in the hub or the launcher. */
-        if ((!strcmp(server, "142.132.178.17") || !_stricmp(server, "play.defjam.online") ||
-             !_stricmp(server, "play.defjam.online:27777")) && !getenv("RECOMP_NETPLAY_SERVER") &&
-            recomp_settings_reset_to_default("online", "server") > 0 && g_path[0])
-            recomp_settings_save(g_path);
-    }
+    /* Build 91: the server choice is gone ([online] server of older builds is not read; server_debug is the hidden
+     * test override), so the migration of build 30's saved address went with it. */
     /* "Skip the launcher at start" left the players' menus (2026-10-22): players who had ticked it
      * kept asking how to get the launcher back. A player's own settings.ini that still has it is
      * set back once; a settings file a test names (RECOMP_SETTINGS) keeps it. */

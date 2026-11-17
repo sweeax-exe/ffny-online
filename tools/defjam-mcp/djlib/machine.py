@@ -374,15 +374,21 @@ BASE_ENV = {
     "RECOMP_ACCOUNT_SERVER": "127.0.0.1:9",     # never the live account service / leaderboard
     "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:9",  # never the live relays (also not their pings)
     "RECOMP_NETPLAY_SERVER_NA": "127.0.0.1:9",
-    "RECOMP_NETPLAY_SERVER_SG": "127.0.0.1:9",    # build 89: slot 3 is Singapore
-    "RECOMP_NETPLAY_SERVER_WEST": "127.0.0.1:9",  # builds before 89 (a mixed-build run)
+    "RECOMP_NETPLAY_SERVER_WEST": "127.0.0.1:9",  # builds 38..88
+    "RECOMP_NETPLAY_SERVER_SG": "127.0.0.1:9",    # build 89: Asia (Singapore) in the third slot
+    "RECOMP_NETPLAY_SERVER_SA": "127.0.0.1:9",    # build 91: South America (Sao Paulo)
+    "RECOMP_NETPLAY_SERVER_MIA": "127.0.0.1:9",   # build 91: US South (Miami)
+    "RECOMP_NETPLAY_SERVER_DFW": "127.0.0.1:9",   # build 91: Dallas
+    "RECOMP_NETPLAY_SERVER_LAX": "127.0.0.1:9",   # build 91: Los Angeles (any relay a test does not name is 127.0.0.1:9 too)
     "RECOMP_NO_UPDATE_CHECK": "1",
 }
 
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
-ADDRESS_VARS = ("RECOMP_ACCOUNT_SERVER", "RECOMP_NETPLAY_SERVER", "RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA",
-                "RECOMP_NETPLAY_SERVER_SG", "RECOMP_NETPLAY_SERVER_WEST")
-SERVER_CHOICES = ("auto", "eu", "na", "sg", "west", "all", "both")
+RELAY_VARS = ("RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA", "RECOMP_NETPLAY_SERVER_WEST",
+              "RECOMP_NETPLAY_SERVER_SG", "RECOMP_NETPLAY_SERVER_SA", "RECOMP_NETPLAY_SERVER_MIA",
+              "RECOMP_NETPLAY_SERVER_DFW", "RECOMP_NETPLAY_SERVER_LAX")
+ADDRESS_VARS = ("RECOMP_ACCOUNT_SERVER", "RECOMP_NETPLAY_SERVER") + RELAY_VARS
+SERVER_CHOICES = ("auto", "eu", "na", "west", "sg", "sa", "mia", "dfw", "lax", "all", "both")
 
 
 def check_env(env):
@@ -398,7 +404,7 @@ def check_env(env):
         if host.lower() not in LOCAL_HOSTS:
             bad.append("%s=%s is not a local address" % (k, v))
     if env.get("RECOMP_NETPLAY_SERVER", "").lower() in SERVER_CHOICES:
-        for k in ("RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA", "RECOMP_NETPLAY_SERVER_SG"):
+        for k in RELAY_VARS:
             if not env.get(k):
                 bad.append("RECOMP_NETPLAY_SERVER=%s needs a local %s" % (env["RECOMP_NETPLAY_SERVER"], k))
     return bad
