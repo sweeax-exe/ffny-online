@@ -473,6 +473,19 @@ int content_news(char *names, int size);
 bool content_problem(char *out, int size);
 bool content_release(char *head, int head_size, char *detail, int detail_size);
 // The page title in the corner, as the game writes MAIN MENU.
+float chat_chips_right(const Frame &f);     // social_ui.inc
+// The red plate of a corner notice, top right ("NEW COMMUNITY CONTENT IS OUT"): smaller where the chat chips (top
+// centre, ENTER CHAT and in a room QUICK CHAT) would run into it (build 90; they overlapped on CHOOSE FIGHTER)
+void corner_plate(ImDrawList *dl, const Frame &f, const char *line)
+{
+    float size = 12, w = text_width(f, g_title, size, line), left = chat_chips_right(f) + 6;
+    if (left > 6 && 606 - w - 10 < left) {
+        size = std::max(8.0f, fit_size(f, g_title, 12, line, 606 - 10 - left));
+        w = text_width(f, g_title, size, line);
+    }
+    rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
+    text(dl, f, g_title, size, 606, 11 + (12 - size) * 0.5f, WHITE, line, RIGHT, 1.0f);
+}
 void page_title(ImDrawList *dl, const Frame &f, const char *title)
 {
     text(dl, f, g_stencil, 30, 50, 24, CREAM, title, LEFT, 1.6f);
@@ -482,32 +495,24 @@ void page_title(ImDrawList *dl, const Frame &f, const char *title)
     if (build > updater_local_build()) {
         char line[96];
         snprintf(line, sizeof(line), "UPDATE: BUILD %d IS OUT", build);
-        float w = text_width(f, g_title, 12, line);
-        rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
-        text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
+        corner_plate(dl, f, line);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "close the game: the launcher installs it", RIGHT, 0.8f);
     } else if (content_problem(nullptr, 0)) {
         // build 83: the last content sync (or the game's own check) failed: this PC may lack packs others have
         const char *line = "COMMUNITY CONTENT NOT UPDATED";
-        float w = text_width(f, g_title, 12, line);
-        rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
-        text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
+        corner_plate(dl, f, line);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "start the game from the launcher again", RIGHT, 0.8f);
     } else if (content_news(nullptr, 0) > 0) {
         // build 82: new community content is out (the game's own catalogue check): announced the same way
         const char *line = "NEW COMMUNITY CONTENT IS OUT";
-        float w = text_width(f, g_title, 12, line);
-        rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
-        text(dl, f, g_title, 12, 606, 11, WHITE, line, RIGHT, 1.0f);
+        corner_plate(dl, f, line);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "UPDATE NOW on the hub (Y): the game comes back by itself", RIGHT, 0.8f);
     } else {
         // build 87: community content to come (the daily release window): when, on this PC's clock, and what;
         // nothing to do yet, so it comes last. Once its time has passed, the notice above takes over.
         char head[64], detail[224];
         if (content_release(head, sizeof(head), detail, sizeof(detail))) {
-            float w = text_width(f, g_title, 12, head);
-            rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
-            text(dl, f, g_title, 12, 606, 11, WHITE, head, RIGHT, 1.0f);
+            corner_plate(dl, f, head);
             float size = std::max(8.0f, fit_size(f, g_hand, 11, detail, 330));
             text(dl, f, g_hand, size, 606, 30, ORANGE, detail, RIGHT, 0.8f);
         }

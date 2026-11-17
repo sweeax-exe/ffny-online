@@ -3375,6 +3375,21 @@ void open_my_crew()
     fprintf(stderr, "[SOCIAL-UI] chat opened (MY CREW, %s)\n", C.v.crew ? "the crew's page" : "no crew");
 }
 
+// Build 90: where the chips (chat_chip) end on the right, 0 when none show: page_title's corner notice keeps clear.
+float chat_chips_right(const Frame &f)
+{
+    if (!social_enabled() && room_chat_state() < 0) return 0;
+    if (C.open || S.page == CODE || S.page == NAME || S.page == QUICK) return 0;
+    int n = C.v.unread + C.v.requests + room_unread();
+    float w = text_width(f, g_title, 10, "CHAT") + text_width(f, g_body, 9, "ENTER") + 26 + (n ? 16 : 0);
+    float right = 320 + w / 2;
+    NetRoom r;
+    lobby_room(&r);
+    if (r.in_room && room_chat_state() == 1)
+        right += 5 + text_width(f, g_title, 10, "QUICK CHAT") + text_width(f, g_body, 9, quick_button_name()) + 23;
+    return right;
+}
+
 // The small CHAT chip on every online page while the window is shut: what opens it, and what is new.
 void chat_chip(ImDrawList *dl, const Frame &f)
 {
