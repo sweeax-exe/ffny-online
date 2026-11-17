@@ -62,6 +62,8 @@ static void set_reason(const char *text)
 static SRWLOCK g_live_lock = SRWLOCK_INIT;
 /* How many bytes the last request_full of this thread read (account_fetch: binary answers). */
 static __declspec(thread) int g_last_len;
+/* Extra request headers of this thread's next request_full ("Name: value\r\n" lines; account_send). */
+static __declspec(thread) const char *g_extra_headers;
 
 static int request_full(const wchar_t *method, const wchar_t *path, const char *token, const char *ctype,
                         const void *body, DWORD blen, char *buf, int size, int limit_ms, int receive_ms,
@@ -101,9 +103,11 @@ static int request_full(const wchar_t *method, const wchar_t *path, const char *
         ReleaseSRWLockExclusive(&g_live_lock);
     }
     if (req && !canceled) {
-        wchar_t headers[300] = L"";
+        wchar_t headers[1024] = L"";
         if (token && *token) swprintf(headers, 200, L"Authorization: Bearer %hs\r\n", token);
         if (body) swprintf(headers + wcslen(headers), 300 - wcslen(headers), L"Content-Type: %hs\r\n", ctype);
+        if (g_extra_headers && strlen(g_extra_headers) < 600)
+            swprintf(headers + wcslen(headers), 1024 - wcslen(headers), L"%hs", g_extra_headers);
         if (WinHttpSendRequest(req, headers[0] ? headers : WINHTTP_NO_ADDITIONAL_HEADERS, headers[0] ? (DWORD)-1L : 0,
                                (LPVOID)body, blen, blen, 0) &&
             WinHttpReceiveResponse(req, NULL) &&
@@ -831,6 +835,28 @@ int account_call(const char *method, const char *path, const char *json, char *b
     return status;
 }
 
+int account_send(const char *method, const char *path, const char *ctype, const void *body, int len,
+                 const char *headers, char *buf, int size)
+{
+    char token[65];
+    wchar_t wmethod[16], wpath[512];
+    int status;
+    if (size > 0) buf[0] = 0;
+    if (g_state != ACCOUNT_IN && g_state != ACCOUNT_CHECKING) return -1;
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 512)) return -1;
+    swprintf(wmethod, 16, L"%hs", method);
+    AcquireSRWLockShared(&g_lock);
+    memcpy(token, g_token, sizeof(token));
+    ReleaseSRWLockShared(&g_lock);
+    g_extra_headers = headers;
+    status = request_full(wmethod, wpath, token, ctype ? ctype : "application/octet-stream", body, (DWORD)(body ? len : 0),
+                          buf, size, 0, 0, NULL);
+    g_extra_headers = NULL;
+    SecureZeroMemory(token, sizeof(token));
+    if (status == 401) { forget(); set_reason("Your sign-in ran out; sign in again."); set_state(ACCOUNT_OUT); }
+    return status;
+}
+
 /* The launcher's rename (POST /api/me/name) answered with the account: keep its new FFNY name. */
 void account_take_renamed(const char *json)
 {
@@ -1030,6 +1056,9 @@ int account_call(const char *method, const char *path, const char *json, char *b
                  void *volatile *live)
 { (void)method; (void)path; (void)json; (void)receive_ms; (void)live; if (size > 0) buf[0] = 0; return -1; }
 void account_cancel_call(void *volatile *live) { (void)live; }
+int account_send(const char *method, const char *path, const char *ctype, const void *body, int len,
+                 const char *headers, char *buf, int size)
+{ (void)method; (void)path; (void)ctype; (void)body; (void)len; (void)headers; if (size > 0) buf[0] = 0; return -1; }
 int account_download(const char *path, unsigned long long from, int (*sink)(void *ctx, const char *data, unsigned n),
                      void *ctx, int *partial)
 { (void)path; (void)from; (void)sink; (void)ctx; if (partial) *partial = 0; return -1; }

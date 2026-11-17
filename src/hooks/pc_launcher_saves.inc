@@ -20,8 +20,18 @@
 //
 // Unlock all (save_unlock.h): the profile and the Options file are edited to everything unlocked, after
 // a backup; Undo (at the foot, until the page closes) restores that backup, as Restore in the list does.
+//
+// Cloud saves (build 91, pc_launcher_cloud.h): the right column's CLOUD view beside BACKUPS lists the versions
+// on the account service (when, from which PC, profiles, size) with Restore, which fetches and checks the
+// version and then asks, listing what it changes; Sync now; Delete my cloud saves (asks); the setting. The
+// launcher's start-up question (a new PC, newer cloud saves, a conflict) is cloud_start_prompt. Test steps:
+// cloud (the CLOUD view), cloud-sync, cloud-restore:<row>, cloud-restore-ok, cloud-off, cloud-on, cloud-delete,
+// cloud-delete-ok, cloud-name:<label> (this PC's name in the list: a random label made once, never the Windows
+// computer name; Rename on the view); RECOMP_LAUNCHER_PAGE=saves-cloud opens the page on it; RECOMP_TEST_CLOUD_PROMPT=
+// "<frame>:restore|restore-ok|keep|later" answers the start-up question.
 
 #include "pc_launcher_saves.h"
+#include "pc_launcher_cloud.h"
 #include "created_fighter.h"     // cp_names_setting_get: the created fighters' online names
 #include "save_unlock.h"
 
@@ -51,6 +61,11 @@ struct SavesPage
     // Unlock all: the profile asked about, the cash box, and the backup Undo restores
     std::string unlock_folder, unlock_name, undo_backup, undo_name;
     bool unlock_cash = false, open_unlock = false, want_unlock_ok = false;
+    // Cloud saves: the CLOUD view, a Restore waiting for its fetch, the two confirms
+    bool cloud_tab = false, cloud_fetching = false, open_cloud_restore = false, open_cloud_delete = false;
+    bool want_cloud_restore_ok = false, want_cloud_delete_ok = false, cloud_delete_off = false;
+    bool renaming = false;                          // this PC's label in the cloud's list, being renamed
+    char label_text[32] = "";
 };
 SavesPage g_sp;
 
@@ -240,6 +255,213 @@ void saves_open_folder()
     pcui::open_path(pcui::path_utf8(pcsaves::save_dir()));
 }
 
+// ---- cloud saves ----
+
+void saves_row(ImDrawList *dl, ImVec2 a, ImVec2 b, float s, const char *head, const char *detail, const ImVec4 &detail_c,
+               float room);
+
+void saves_cloud_ask_restore(int row)
+{
+    auto st = pccloud::status();
+    if (row < 0 || row >= (int)st.versions.size()) return;
+    if (saves_refuse_while_running("a cloud save can be restored")) return;
+    pccloud::fetch(st.versions[row].id);
+    g_sp.cloud_fetching = true;
+    g_sp.open_cloud_restore = true;
+}
+
+std::string saves_size_text(int64_t bytes)
+{
+    char text[32];
+    if (bytes >= (1 << 20)) snprintf(text, sizeof(text), "%.1f MB", bytes / 1048576.0);
+    else snprintf(text, sizeof(text), "%d KB", (int)((bytes + 1023) / 1024));
+    return text;
+}
+
+std::string saves_version_head(const cloud::Version &v)
+{
+    std::string head = saves::describe_time(v.uploaded);
+    if (!head.empty()) head[0] = (char)toupper((unsigned char)head[0]);
+    return head;
+}
+
+// What a restore changes, one line a profile (the restore confirm and the start-up question).
+void saves_cloud_changes(const std::vector<cloud::Change> &changes)
+{
+    int shown = 0;
+    for (auto &c : changes) {
+        if (shown++ >= 12) {
+            ImGui::TextDisabled("and %d more", (int)changes.size() - 12);
+            break;
+        }
+        ImGui::PushFont(bold_font(), 0.0f);
+        ImGui::TextUnformatted(c.name.c_str());
+        ImGui::PopFont();
+        ImGui::SameLine();
+        if (c.aside) { ImGui::TextDisabled("(put aside)"); ImGui::SameLine(); }
+        switch (c.what) {
+        case cloud::Change::ADDED: ImGui::TextColored(k_green, "comes from the cloud"); break;
+        case cloud::Change::REPLACED: ImGui::TextColored(k_gold, "the cloud's copy replaces this PC's"); break;
+        case cloud::Change::SAME: ImGui::TextDisabled("no change"); break;
+        case cloud::Change::ONLY_HERE: ImGui::TextColored(k_gold, "only on this PC: leaves the game (kept in the backup)"); break;
+        case cloud::Change::KEPT: ImGui::TextDisabled("this PC's copy stays (the cloud's is kept in a backup)"); break;
+        }
+    }
+    if (changes.empty()) ImGui::TextDisabled("No profile changes.");
+}
+
+void saves_cloud_do_restore()
+{
+    if (saves_refuse_while_running("a cloud save can be restored")) return;
+    std::string message;
+    bool ok = pccloud::restore_pending(&message);
+    saves_say(message, ok ? 1 : 2);
+    saves_refresh();
+}
+
+void saves_cloud_view(float w, float h, float s)
+{
+    ImGui::BeginChild("##cloud", ImVec2(w, h), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float row_h = 60 * s, gap = 8 * s, rw = ImGui::GetContentRegionAvail().x;
+    auto st = pccloud::status();
+    bool on = pccloud::enabled();
+    // the setting and where things stand
+    if (ImGui::Checkbox("Keep my saves in the cloud", &on)) pccloud::set_enabled(on);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("While you are signed in: your saves go up when the game closes (the newest 5 are kept), "
+                          "and a new PC offers them. See Privacy.");
+    // this PC's name in the list: a random label made once, never the Windows computer name; renamable
+    if (!g_sp.renaming) {
+        std::string label = pccloud::pc_label();
+        ImGui::TextColored(ImVec4(1, 1, 1, 0.7f), "This PC is \"%s\" in the list.", label.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Rename")) {
+            snprintf(g_sp.label_text, sizeof(g_sp.label_text), "%s", label.c_str());
+            g_sp.renaming = true;
+        }
+    } else {
+        ImGui::SetNextItemWidth(rw * 0.5f);
+        bool enter = ImGui::InputText("##pc_label", g_sp.label_text, sizeof(g_sp.label_text),
+                                      ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Save") || enter) {
+            std::string why;
+            bool ok = pccloud::set_pc_label(g_sp.label_text, &why);
+            saves_say(why, ok ? 1 : 2);
+            if (ok) g_sp.renaming = false;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Cancel")) g_sp.renaming = false;
+    }
+    ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + rw);
+    std::string line = !st.busy.empty() ? st.busy + "..." : st.line;
+    ImVec4 c = st.phase == pccloud::Phase::FAILED ? k_gold
+             : st.decision == cloud::Decision::CONFLICT || st.decision == cloud::Decision::CLOUD_NEWER ? k_gold
+             : st.decision == cloud::Decision::IN_SYNC ? k_green : ImVec4(1, 1, 1, 0.7f);
+    if (!line.empty()) ImGui::TextColored(c, "%s", line.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::Dummy(ImVec2(rw, 4 * s));
+    bool listed = st.phase != pccloud::Phase::SIGNED_OUT && st.phase != pccloud::Phase::UNAVAILABLE;
+    for (int i = 0; listed && i < (int)st.versions.size(); i++) {
+        auto &v = st.versions[i];
+        ImVec2 a = ImGui::GetCursorScreenPos(), z(a.x + rw, a.y + row_h);
+        std::string head = saves_version_head(v) + (i == 0 ? "  \xC2\xB7  newest" : "");
+        std::string detail = (v.pc.empty() ? std::string("From a PC") : "From " + v.pc) + "  \xC2\xB7  " +
+                             std::to_string(v.profiles) + (v.profiles == 1 ? " profile" : " profiles") + "  \xC2\xB7  " +
+                             saves_size_text(v.size);
+        if (!st.local_hash.empty() && v.hash == st.local_hash) detail += "  \xC2\xB7  as on this PC";
+        saves_row(dl, a, z, s, head.c_str(), detail.c_str(), ImVec4(0.80f, 0.80f, 0.82f, 1), 96 * s);
+        ImGui::PushID(2000 + i);
+        if (glass_button("##cloud_restore", "Restore", ImVec2(z.x - 96 * s, a.y + 16 * s), ImVec2(82 * s, 28 * s), s,
+                         GLASS_PLAIN, bold_font(), 13.5f * s, st.busy.empty()))
+            saves_cloud_ask_restore(i);
+        ImGui::PopID();
+        ImGui::SetCursorScreenPos(a);
+        ImGui::Dummy(ImVec2(rw, row_h + gap));
+    }
+    if (listed && st.versions.empty() && st.phase == pccloud::Phase::READY)
+        ImGui::TextColored(ImVec4(1, 1, 1, 0.65f), "No cloud saves yet.");
+    if (listed && !st.versions.empty()) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + rw);
+        ImGui::TextColored(ImVec4(1, 1, 1, 0.5f), "The newest %d are kept. Restore shows what changes and asks first; "
+                                                  "this PC's saves are backed up before.", cloud::kKeep);
+        ImGui::PopTextWrapPos();
+    }
+    ImGui::EndChild();
+}
+
+void saves_cloud_restore_confirm()
+{
+    if (!begin_glass_modal("Restore a cloud save##confirm", ImGui::GetFontSize() * 32)) return;
+    auto p = pccloud::pending();
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30);
+    bool go = false, close = false;
+    if (!p.ready && !p.failed) {
+        ImGui::TextUnformatted("Fetching the cloud save and checking it...");
+    } else if (p.failed) {
+        ImGui::TextColored(k_gold, "%s", p.error.c_str());
+        ImGui::TextDisabled("Nothing was changed.");
+    } else {
+        std::string from = saves::describe_time(p.version.uploaded) + (p.version.pc.empty() ? "" : " from " + p.version.pc);
+        ImGui::Text("Put your cloud save of %s on this PC?", from.c_str());
+        ImGui::Spacing();
+        saves_cloud_changes(p.changes);
+        ImGui::Spacing();
+        ImGui::TextWrapped("This PC's saves are backed up first, and the cloud save is kept as a backup too, so you "
+                           "can go back either way.");
+    }
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (p.ready) {
+        ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+        go = ImGui::Button("Restore", ImVec2(ImGui::GetFontSize() * 9, 0));
+        ImGui::PopStyleColor(2);
+        if (g_sp.want_cloud_restore_ok) { g_sp.want_cloud_restore_ok = false; go = true; }
+        ImGui::SameLine();
+    }
+    if (!go && ImGui::Button(p.ready ? "Cancel" : "Close", ImVec2(ImGui::GetFontSize() * 8, 0))) close = true;
+    if (go) saves_cloud_do_restore();
+    if (go || close) {
+        pccloud::drop_pending();
+        g_sp.cloud_fetching = false;
+        ImGui::CloseCurrentPopup();
+    }
+    end_glass_modal();
+}
+
+void saves_cloud_delete_confirm()
+{
+    if (!begin_glass_modal("Delete my cloud saves##confirm", ImGui::GetFontSize() * 30)) return;
+    auto st = pccloud::status();
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
+    ImGui::Text("Delete all %d cloud save%s of your account from the server?", (int)st.versions.size(),
+                st.versions.size() == 1 ? "" : "s");
+    ImGui::TextWrapped("Your saves on this PC and its backups stay as they are. This cannot be undone.");
+    ImGui::Spacing();
+    if (pccloud::enabled()) {
+        ImGui::Checkbox("and turn cloud saves off", &g_sp.cloud_delete_off);
+        ImGui::TextDisabled("Left on, this PC's saves go up again after you next play.");
+    }
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+    bool go = ImGui::Button("Delete", ImVec2(ImGui::GetFontSize() * 9, 0));
+    ImGui::PopStyleColor(2);
+    if (g_sp.want_cloud_delete_ok) { g_sp.want_cloud_delete_ok = false; go = true; }
+    ImGui::SameLine();
+    if (go) {
+        if (g_sp.cloud_delete_off) pccloud::set_enabled(false);
+        pccloud::delete_all();     // the CLOUD view says how it went
+        ImGui::CloseCurrentPopup();
+    } else if (ImGui::Button("Cancel", ImVec2(ImGui::GetFontSize() * 8, 0))) {
+        ImGui::CloseCurrentPopup();
+    }
+    end_glass_modal();
+}
+
 void saves_test_steps()
 {
     static bool parsed;
@@ -291,6 +513,25 @@ void saves_test_steps()
             for (auto &e : g_sp.aside)
                 if (e.name == s.arg && stash.empty()) stash = e.stash;
             if (!stash.empty()) saves_bring_back_aside(stash);
+        } else if (s.action == "cloud") {
+            g_sp.cloud_tab = true;
+        } else if (s.action == "cloud-sync") {
+            pccloud::check(false);
+        } else if (s.action == "cloud-restore") {
+            saves_cloud_ask_restore(atoi(s.arg.c_str()));
+        } else if (s.action == "cloud-restore-ok") {
+            g_sp.want_cloud_restore_ok = true;
+        } else if (s.action == "cloud-off" || s.action == "cloud-on") {
+            pccloud::set_enabled(s.action == "cloud-on");
+        } else if (s.action == "cloud-delete") {
+            g_sp.cloud_delete_off = false;
+            g_sp.open_cloud_delete = true;
+        } else if (s.action == "cloud-delete-ok") {
+            g_sp.want_cloud_delete_ok = true;
+        } else if (s.action == "cloud-name") {
+            std::string why;
+            bool ok = pccloud::set_pc_label(s.arg, &why);
+            saves_say(why, ok ? 1 : 2);
         }
     }
 }
@@ -586,6 +827,97 @@ void saves_unlock_confirm()
 
 } // namespace
 
+// The launcher's start-up question about cloud saves (pccloud::start_prompt): a new PC whose cloud has saves,
+// newer cloud saves from another PC, or both changed. Once per run, after the update offer and the crash
+// report; it never restores without the player's Restore, and lists what a restore changes first.
+static void cloud_start_prompt()
+{
+    static bool opened, show_saves;
+    static int test_frame = -1;
+    if (show_saves && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
+        show_saves = false;         // after a restore: the Saves page shows what happened
+        ImGui::OpenPopup("Saves");
+    }
+    static std::string test_answer;
+    if (test_frame < 0) {
+        const char *t = getenv("RECOMP_TEST_CLOUD_PROMPT");     // "<frame>:restore|restore-ok|keep|later"
+        test_frame = t && strchr(t, ':') ? atoi(t) : 0;
+        if (t && strchr(t, ':')) test_answer = strchr(t, ':') + 1;
+    }
+    if (!opened && pccloud::start_prompt() && notice_may_open()) {
+        opened = true;
+        fprintf(stderr, "[CLOUD] start-up question: %s\n", cloud::decision_name(pccloud::status().decision));
+        fflush(stderr);
+        ImGui::OpenPopup("Cloud saves##start");
+    }
+    if (!begin_glass_modal("Cloud saves##start", ImGui::GetFontSize() * 34)) return;
+    auto st = pccloud::status();
+    auto p = pccloud::pending();
+    std::string from = p.version.id.empty() ? std::string("the cloud")
+                                            : saves::describe_time(p.version.uploaded) + (p.version.pc.empty() ? "" : " from " + p.version.pc);
+    bool offer = st.decision == cloud::Decision::OFFER_RESTORE;
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32);
+    ImGui::PushFont(bold_font(), ImGui::GetStyle().FontSizeBase * 1.15f);
+    if (offer) ImGui::TextColored(k_gold, "Your saves are in the cloud");
+    else if (st.decision == cloud::Decision::CLOUD_NEWER) ImGui::TextColored(k_gold, "Newer saves in the cloud");
+    else ImGui::TextColored(k_gold, "This PC and the cloud both changed");
+    ImGui::PopFont();
+    if (offer) ImGui::Text("Restore your cloud save of %s on this PC?", from.c_str());
+    else if (st.decision == cloud::Decision::CLOUD_NEWER)
+        ImGui::Text("Your cloud save of %s is newer than this PC's saves. Use it here?", from.c_str());
+    else ImGui::Text("Your cloud save of %s and this PC's saves differ, and both changed since they last matched.",
+                     from.c_str());
+    ImGui::Spacing();
+    if (p.failed) ImGui::TextColored(k_gold, "%s", p.error.c_str());
+    else saves_cloud_changes(p.changes);
+    ImGui::Spacing();
+    if (offer) ImGui::TextDisabled("Not now keeps this PC as it is; your cloud saves stay in the cloud (Saves, Cloud).");
+    else ImGui::TextWrapped("Both are kept, whatever you choose: the saves you do not use stay as a backup on this PC "
+                            "and in the cloud's list (Saves).");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    bool restore = false, keep = false, later = false;
+    if (test_frame > 0 && ImGui::GetFrameCount() >= test_frame && !test_answer.empty()) {
+        restore = test_answer == "restore" || test_answer == "restore-ok";
+        keep = test_answer == "keep";
+        later = test_answer == "later";
+        test_answer.clear();
+    }
+    ImGui::BeginDisabled(!p.ready);
+    ImGui::PushStyleColor(ImGuiCol_Button, k_red);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_red_hi);
+    if (ImGui::Button(offer ? "Restore" : "Use the cloud save", ImVec2(ImGui::GetFontSize() * (offer ? 8 : 11), 0))) restore = true;
+    ImGui::PopStyleColor(2);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (!offer && ImGui::Button("Keep this PC's saves", ImVec2(ImGui::GetFontSize() * 11, 0))) keep = true;
+    if (!offer) ImGui::SameLine();
+    if (ImGui::Button(offer ? "Not now" : "Decide later", ImVec2(ImGui::GetFontSize() * 8, 0))) later = true;
+    if (restore && p.ready) {
+        if (pcsaves::game_running()) {
+            saves_say("Close the game first: a cloud save can be restored only while it is closed. Nothing was changed.", 2);
+        } else {
+            std::string message;
+            bool ok = pccloud::restore_pending(&message);
+            saves_say(message, ok ? 1 : 2);
+            show_saves = true;
+            fprintf(stderr, "[CLOUD] start-up question answered: restore (%s)\n", ok ? "done" : "failed");
+        }
+    } else if (keep) {
+        pccloud::keep_this_pc();
+        fprintf(stderr, "[CLOUD] start-up question answered: keep this PC's saves\n");
+    } else if (later) {
+        if (offer) pccloud::keep_this_pc();     // "Not now": this PC starts without them, not asked again
+        fprintf(stderr, "[CLOUD] start-up question answered: %s\n", offer ? "not now" : "decide later");
+    }
+    if (restore || keep || later) {
+        fflush(stderr);
+        pccloud::prompt_answered();
+        ImGui::CloseCurrentPopup();
+    }
+    end_glass_modal();
+}
+
 static void saves_dialog(ImVec2 o, float w, float h, float s)
 {
     ImVec2 size(std::min(w - 40 * s, 900 * s), std::min(h - 40 * s, 620 * s));
@@ -629,11 +961,29 @@ static void saves_dialog(ImVec2 o, float w, float h, float s)
         dl->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(lx + left_w - cw, a.y + top + 4 * s),
                     col(in_game >= saves::kMaxUserIds ? k_gold : ImVec4(1, 1, 1, 0.5f)), count);
     }
-    dl->AddText(display_font(), 17 * s, ImVec2(rx, a.y + top), col(ImVec4(0.86f, 0.84f, 0.80f, 1)), "BACKUPS");
-    {
-        const char *hint = "Before every update and once a day you play. The newest 10 are kept.";
-        float hw = text_size(ImGui::GetFont(), 12.5f * s, hint).x, room = right_w - 80 * s;
-        dl->PushClipRect(ImVec2(rx + 80 * s, a.y + top), ImVec2(rx + right_w, a.y + top + 24 * s), true);
+    {   // BACKUPS | CLOUD: two headings, the one shown bright, the other a button
+        const char *names[2] = {"BACKUPS", "CLOUD"};
+        float x = rx, tab_w[2];
+        for (int i = 0; i < 2; i++) {
+            bool shown = g_sp.cloud_tab == (i == 1);
+            tab_w[i] = text_size(display_font(), 17 * s, names[i]).x;
+            ImGui::SetCursorScreenPos(ImVec2(x, a.y + top - 2 * s));
+            ImGui::PushID(names[i]);
+            if (ImGui::InvisibleButton("##tab", ImVec2(tab_w[i], 24 * s))) {
+                g_sp.cloud_tab = i == 1;
+                if (g_sp.cloud_tab) pccloud::check(false);
+            }
+            bool hot = ImGui::IsItemHovered();
+            ImGui::PopID();
+            dl->AddText(display_font(), 17 * s, ImVec2(x, a.y + top),
+                        col(ImVec4(0.86f, 0.84f, 0.80f, 1), shown ? 1.0f : hot ? 0.75f : 0.4f), names[i]);
+            if (shown) dl->AddRectFilled(ImVec2(x, a.y + top + 22 * s), ImVec2(x + tab_w[i], a.y + top + 24 * s), col(k_red_hi));
+            x += tab_w[i] + 18 * s;
+        }
+        const char *hint = g_sp.cloud_tab ? "On the FFNY Online server while you are signed in."
+                                          : "Before every update and once a day you play. The newest 10 are kept.";
+        float left = x - rx, hw = text_size(ImGui::GetFont(), 12.5f * s, hint).x, room = right_w - left;
+        dl->PushClipRect(ImVec2(rx + left, a.y + top), ImVec2(rx + right_w, a.y + top + 24 * s), true);
         dl->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(rx + right_w - std::min(hw, room), a.y + top + 4 * s),
                     col(k_white, 0.5f), hint);
         dl->PopClipRect();
@@ -641,15 +991,29 @@ static void saves_dialog(ImVec2 o, float w, float h, float s)
     ImGui::SetCursorScreenPos(ImVec2(lx, a.y + list_top));
     saves_profiles(left_w, list_h, s);
     ImGui::SetCursorScreenPos(ImVec2(rx, a.y + list_top));
-    saves_backups(right_w, list_h, s);
+    if (g_sp.cloud_tab) saves_cloud_view(right_w, list_h, s);
+    else saves_backups(right_w, list_h, s);
 
     float by = a.y + list_top + list_h + 12 * s;
     if (glass_button("##saves_import", "Import saves", ImVec2(lx, by), ImVec2(190 * s, button_h), s, GLASS_PLAIN,
                      bold_font(), 14.5f * s))
         ImGui::OpenPopup("##import_from");
-    if (glass_button("##saves_backup", "Back up now", ImVec2(rx, by), ImVec2(150 * s, button_h), s, GLASS_PLAIN, bold_font(),
-                     14.5f * s))
-        saves_backup_now();
+    if (!g_sp.cloud_tab) {
+        if (glass_button("##saves_backup", "Back up now", ImVec2(rx, by), ImVec2(150 * s, button_h), s, GLASS_PLAIN,
+                         bold_font(), 14.5f * s))
+            saves_backup_now();
+    } else {
+        auto st = pccloud::status();
+        bool idle = st.busy.empty();
+        if (glass_button("##cloud_sync", "Sync now", ImVec2(rx, by), ImVec2(120 * s, button_h), s, GLASS_PLAIN, bold_font(),
+                         14.5f * s, idle && pccloud::enabled()))
+            pccloud::check(false);
+        if (glass_button("##cloud_delete", "Delete my cloud saves", ImVec2(rx + 130 * s, by), ImVec2(200 * s, button_h), s,
+                         GLASS_PLAIN, bold_font(), 14.5f * s, idle && !st.versions.empty())) {
+            g_sp.cloud_delete_off = false;
+            g_sp.open_cloud_delete = true;
+        }
+    }
     ImGui::SetNextWindowPos(ImVec2(lx, by + button_h + 4 * s));
     if (ImGui::BeginPopup("##import_from")) {
         void *window = nullptr;
@@ -687,9 +1051,19 @@ static void saves_dialog(ImVec2 o, float w, float h, float s)
         g_sp.open_unlock = false;
         ImGui::OpenPopup("Unlock everything##confirm");
     }
+    if (g_sp.open_cloud_restore) {
+        g_sp.open_cloud_restore = false;
+        ImGui::OpenPopup("Restore a cloud save##confirm");
+    }
+    if (g_sp.open_cloud_delete) {
+        g_sp.open_cloud_delete = false;
+        ImGui::OpenPopup("Delete my cloud saves##confirm");
+    }
     saves_import_confirm(s);
     saves_restore_confirm();
     saves_unlock_confirm();
+    saves_cloud_restore_confirm();
+    saves_cloud_delete_confirm();
     pop_glass_style();
 
     float undo_w = g_sp.undo_backup.empty() ? 0 : 110 * s;

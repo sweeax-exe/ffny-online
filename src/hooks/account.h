@@ -56,6 +56,12 @@ int account_send_report_note(const char *ctype, const void *body, int len, char 
 int account_call(const char *method, const char *path, const char *json, char *buf, int size, int receive_ms,
                  void *volatile *live);
 void account_cancel_call(void *volatile *live);
+/* Cloud saves (pc_launcher_cloud.cpp): one request with a body of any type (len bytes, ctype) and extra
+ * request headers ("Name: value\r\n" lines, NULL none), with this session's token. Blocks (off the game's
+ * threads only); the answer goes to buf. Returns the HTTP status, 0 unreachable, -1 not signed in; a 401
+ * signs out. */
+int account_send(const char *method, const char *path, const char *ctype, const void *body, int len,
+                 const char *headers, char *buf, int size);
 /* A public file of the account service (the social features' avatars, GET /api/avatar/N.png): no
  * session token is sent. Blocks (off the game's threads only); *len gets the bytes read (a 200 only;
  * an answer of size - 1 bytes or more is cut). Returns the HTTP status, 0 when unreachable. */

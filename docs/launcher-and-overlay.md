@@ -67,6 +67,34 @@ runs, and a second copy of the same `defjam_recomp.exe` counts as running). A pr
 without importing shows as *Signed by another Xbox*. The page says what it did in one line at its foot
 ("Imported 2 profiles: ...", "Backup restored from ...").
 
+#### Cloud saves (build 91)
+
+While a player is signed in (Account), the launcher keeps the save area on the account service as well
+(`src/hooks/pc_launcher_cloud.h`, `cloud_saves.h`; server `relay/accounts/cloudsaves.go`). Only
+`save/UserData/45410049` and `save/aside` go, and in them only save files (a `.xbx` file or a "20CM" profile or
+Options file, 64 KiB each at most), as one zip with a content hash; never the partition images beside them.
+
+- **When:** at every launcher start, which includes the launcher opening again after the game closes (with the
+  launcher skipped, the waiting process sends it before it ends). Nothing goes when the saves did not change
+  (the hash), when there is no profile, or with `[cloud] saves = 0` (*Keep my saves in the cloud* on the page).
+- **Versions:** the service keeps the newest 5 per account. The **CLOUD** view beside **BACKUPS** lists them
+  (when, the PC's label, profiles, size; the label is a random one each PC makes once, such as *PC 7K2F*, kept in <data folder>/cloud-pc.txt and renamable there with **Rename**, never the Windows computer name); **Restore** fetches one, checks it again (the zip, every name and
+  file kind, the hash) and asks, listing per profile what changes. It keeps the cloud version as a backup
+  (*From your cloud saves*) and then restores it as Restore does, so the saves before it are a backup too
+  (*Before a restore*). Profiles put aside in the cloud come into `save/aside` where that folder is free; the
+  PC's own stay.
+- **The start-up question:** a PC without a profile whose cloud has saves is offered them (*Restore* / *Not now*);
+  newer cloud saves from another PC, or both sides changed since they last matched, ask *Use the cloud save* /
+  *Keep this PC's saves* / *Decide later*. Nothing is ever restored or replaced without the answer, and both
+  are kept: keeping this PC's saves first keeps the cloud's newest as a local backup, and the cloud's list keeps
+  the older versions.
+- **Delete my cloud saves** deletes every version of the account (asks; with a box to turn cloud saves off too).
+  Deleting the account deletes them as well. `<data folder>/cloud-saves.txt` holds which version this PC last
+  agreed on.
+
+Tests: `tests/unit/test_cloud_saves.py`; end to end against a local account service with two data roots,
+`scripts/test-cloud-saves.py` (under the dj lock).
+
 ## The overlay
 
 Press **F1** in the game (or the pad's guide button, or hold both stick clicks for half a second) to open it

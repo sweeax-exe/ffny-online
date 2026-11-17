@@ -15,6 +15,7 @@ editing it. CMake picks up every `.c` and `.cpp` file in this directory.
 | `options_audio.c`, `options_audio.h` | Hands the saved music / effects / announcer volumes to the sound system after the save is read |
 | `custom_music.cpp`, `custom_music.h`, `custom_music_guest.c` | Custom music: plays the player's own songs on a host audio voice and silences the game's music players meanwhile |
 | `music_decode.c`, `music_decode.h`, `music_library.cpp`, `music_library.h` | Custom music: MP3/OGG/FLAC/WAV decoding (vendored decoders in `thirdparty/audio/`) and the `<data>/music` folder |
+| `cloud_saves.cpp`, `cloud_saves.h`, `pc_launcher_cloud.cpp`, `pc_launcher_cloud.h` | Cloud saves (build 91): the save area as one checked archive on the account service, restore through the Saves page's backups, the start-up decision ([docs](../../docs/launcher-and-overlay.md#cloud-saves-build-91)) |
 | `pc_launcher_music.cpp`, `pc_launcher_music.h`, `pc_launcher_music.inc` | The launcher's Music card and dialog (add, remove, what plays, shuffle, dropped files) |
 | `test_telemetry.c`, `test_observations.c` | Read-only game-state probes for the test harness (`RECOMP_TEST_OBSERVATIONS=1`) |
 | `watchpoint.c`, `codeguard.c`, `postcmd.c` | Diagnostics: write watchpoints, code-overwrite detection, synthetic front-end commands |
