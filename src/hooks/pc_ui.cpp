@@ -3400,6 +3400,10 @@ static UiResult draw_launcher(float x, float y, float width, float height)
         static bool opened;
         const char *want = getenv("RECOMP_LAUNCHER_PAGE");
         if (!opened && want && !strcmp(want, "saves")) ImGui::OpenPopup("Saves");
+        else if (!opened && want && !strcmp(want, "saves-cloud")) {
+            g_sp.cloud_tab = true;      // the Saves page on its CLOUD view (cloud saves, build 91)
+            ImGui::OpenPopup("Saves");
+        }
         else if (!opened && want && !strcmp(want, "content")) ImGui::OpenPopup("Content");
         else if (!opened && start_page >= 0) ImGui::OpenPopup("Settings");
         opened = true;
@@ -3415,6 +3419,12 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     crash_popup();
     outside_launcher_notice();
     gpu_notice();
+    // Cloud saves (build 91): once per run, signed in: the saves go up when they changed here, or a question
+    // when the cloud has saves this PC does not (pc_launcher_cloud.h). The launcher opens again when the game
+    // closes, so this is also the upload after a game.
+    account_init();
+    pccloud::check(true);
+    cloud_start_prompt();
     ImGui::End();
     return result;
 }

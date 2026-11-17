@@ -883,6 +883,8 @@ int pc_settings_start_content_update(void)
  * "Skip the launcher" made it work (2026-10-21). Waiting keeps DefJamLauncher's play.lock held
  * for the game's whole life, as before. Returns only when the process could not be started (the
  * game then starts here, as it used to). */
+void cloud_saves_after_game(void);     /* pc_launcher_cloud.cpp: the saves go up when they changed */
+
 static void start_game_process(int reopen_launcher)
 {
     static WCHAR exe[32768];
@@ -921,6 +923,8 @@ static void start_game_process(int reopen_launcher)
         WaitForSingleObject(pi.hProcess, INFINITE);
         graphics_mod_settled();
         GetExitCodeProcess(pi.hProcess, &code);
+        /* build 91: no launcher opens after the game, so its saves go up from here (pc_launcher_cloud.h) */
+        if (!cu_after_child_exit(code)) cloud_saves_after_game();
         /* build 86: the game closed for UPDATE NOW: the launcher, in update mode, gets the content */
         if (cu_after_child_exit(code) && pc_settings_start_content_update()) ExitProcess(0);
         ExitProcess(code);

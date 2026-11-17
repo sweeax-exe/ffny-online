@@ -46,6 +46,10 @@ size_t pc_ui_settings(RecompSetting *out, size_t max)
         "The button symbols on the online screens: auto shows PlayStation symbols (cross, circle, square, "
         "triangle) when player 1 plays with a PlayStation controller and Xbox letters otherwise, also on "
         "the keyboard. The game's own menus keep their Xbox letters.");
+    ADD("cloud", "saves", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_CLOUD_SAVES", 0,
+        "Cloud saves (build 91): while you are signed in, the launcher keeps your saves on the FFNY Online "
+        "server (the newest 5 copies) and offers them on a new PC. Off sends nothing; the launcher's Saves page "
+        "can also delete what is stored.");
 #undef ADD
     return n;
 }

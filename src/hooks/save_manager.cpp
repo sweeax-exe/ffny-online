@@ -886,6 +886,7 @@ std::string describe_reason(const std::string &reason)
     if (reason == "import") return "Before an import";
     if (reason == "unlock") return "Before Unlock everything";
     if (reason == "leftover") return "Left by an unfinished restore";
+    if (reason == "cloud") return "From your cloud saves";     // cloud_saves.h: a cloud version, kept here too
     return "Backup";
 }
 
