@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define OW_STATE_BYTES 160  /* room for the Big Arena state in each rollback save (netplay.c): 132 used in build 87 */
+#define OW_STATE_BYTES 160  /* room for the Big Arena state in each rollback save (netplay.c): 132 used in build 87, 156 in 88 */
 
 /* rollback: the Big Arena state goes with every save and comes back with every load */
 void ow_state_save(uint8_t out[OW_STATE_BYTES]);
@@ -90,6 +90,11 @@ float ow_rules_angle_diff(float a, float b);
 int ow_rules_roam_pick(float x, float z, float yaw, const float cx[4], const float cz[4], uint32_t cand, float range,
                        float cone, float near_);
 int ow_rules_nibble_heading(uint32_t nibble, float *yaw);
+/* CPU fighters that stop fighting: one step of the stillness count (the anchor in whole units, the steps there);
+ * busy (attacking, hit, down...) or a move beyond radius restarts it. 1 when it reaches limit (then it restarts). */
+int ow_rules_cpu_idle_step(int16_t *ax, int16_t *az, uint16_t *still, float x, float z, int busy, int radius, int limit);
+/* the nearest candidate (bit per slot) other than self and the current target; -1 none (ties: the lower slot) */
+int ow_rules_cpu_retarget(int self, int current, const float x[4], const float z[4], uint32_t cand);
 #define OW_ROAM_FREE    0       /* no target: walks where the stick points and faces that way */
 #define OW_ROAM_ENGAGED 1       /* fighting (attacked or hit): the game's own target, back to free after the calm */
 #define OW_ROAM_LOCKED  2       /* a target chosen on purpose (White/Black or the right stick): kept until dropped */

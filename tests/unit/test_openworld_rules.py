@@ -59,6 +59,24 @@ int main(void)
         for (k = 0; k < 9; k++) { y = -1.0f; n[k] = ow_rules_nibble_heading(nib[k], &y) ? (int)y : 999; }
         printf("nib|%d|%d|%d|%d|%d|%d|%d|%d|%d\n", n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8]);
     }
+    {   /* CPU fighters that stop fighting: the stillness count and the new target */
+        static const float cpx[4] = { 0.0f, 13.0f, 300.0f, 20.0f }, cpz[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        int16_t ax = 0, az = 0;
+        uint16_t still = 0;
+        int k, fired = -1, busy_reset, moved_reset;
+        for (k = 1; k <= 300 && fired < 0; k++)
+            if (ow_rules_cpu_idle_step(&ax, &az, &still, 1.0f, 2.0f, 0, 6, 240)) fired = k;
+        ow_rules_cpu_idle_step(&ax, &az, &still, 1.0f, 2.0f, 0, 6, 240);
+        ow_rules_cpu_idle_step(&ax, &az, &still, 1.0f, 2.0f, 1, 6, 240);
+        busy_reset = still;
+        ow_rules_cpu_idle_step(&ax, &az, &still, 1.0f, 2.0f, 0, 6, 240);
+        ow_rules_cpu_idle_step(&ax, &az, &still, 30.0f, 2.0f, 0, 6, 240);
+        moved_reset = still;
+        printf("cpuidle|%d|%d|%d|%d|%d|%d|%d|%d\n", fired, busy_reset, moved_reset,
+               ow_rules_cpu_retarget(1, 0, cpx, cpz, 0xD), ow_rules_cpu_retarget(1, 3, cpx, cpz, 0xD),
+               ow_rules_cpu_retarget(1, 0, cpx, cpz, 0x1), ow_rules_cpu_retarget(0, 1, cpx, cpz, 0xE),
+               ow_rules_cpu_retarget(2, -1, cpx, cpz, 0xB));
+    }
     return 0;
 }
 '''
@@ -91,6 +109,14 @@ def test_spawn_pick(out):
     assert out[('pick', 'north')][2] == '1'         # tie between 1 and 7: the lower index
     # no point is safe (400): the one farthest from its nearest fighter, a diagonal
     assert out[('pick', 'crowd')][2] in ('1', '3', '5', '7')
+
+
+def test_cpu_idle_retarget(out):
+    # 240 still steps fire (then the count restarts); busy or a move beyond the radius restarts the count
+    assert out['cpuidle'][1:4] == ['240', '0', '0']
+    # slot 1 at x 13 targeting 0: the nearest other is 3 (x 20); targeting 3: 0 (x 0); only 0 left: none;
+    # slot 0 targeting 1: 3 (nearer than 2); slot 2 (x 300) with no current target: 3
+    assert out['cpuidle'][4:] == ['3', '0', '-1', '3', '3']
 
 
 def test_free_roam_pick_and_headings(out):
@@ -149,10 +175,10 @@ def test_state_holds_the_round_rules_and_free_roam_without_holes():
             names.append(m.group(1))
     assert offset % 4 == 0, 'padding at the end'
     for field in ('rules', 'end_kind', 'unlimited', 'end_step', 'roam_on', 'roam_steps', 'roam_speed', 'roam_mode',
-                  'roam_pending', 'roam_last', 'roam_turn', 'spawn_hash'):
+                  'roam_pending', 'roam_last', 'roam_turn', 'spawn_hash', 'cpu_ax', 'cpu_az', 'cpu_still'):
         assert names.count(field) == 1, field
     room = int(re.search(r'#define OW_STATE_BYTES (\d+)', read('src/hooks/openworld.h')).group(1))
-    assert offset == 132 and offset <= room
+    assert offset == 156 and offset <= room     # build 88: the CPU idle watch (cpu_ax, cpu_az, cpu_still)
     # both sets are zeroed at a fight's start and hashed whole
     assert 'memset(&BA, 0, sizeof BA);' in ow
     assert 'for (i = 0; i < sizeof BA; i++) h = (h ^ p[i]) * 16777619u;' in ow

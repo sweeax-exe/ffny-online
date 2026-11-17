@@ -254,3 +254,35 @@ int ow_rules_nibble_heading(uint32_t nibble, float *yaw)
     *yaw = table[idx];
     return 1;
 }
+
+/* CPU fighters that stop fighting (build 88; openworld.c cpu_idle_step). */
+int ow_rules_cpu_idle_step(int16_t *ax, int16_t *az, uint16_t *still, float x, float z, int busy, int radius, int limit)
+{
+    int ix = (int)floorf(x + 0.5f), iz = (int)floorf(z + 0.5f), dx = ix - *ax, dz = iz - *az;
+    if (busy || dx * dx + dz * dz > radius * radius || ix < -32768 || ix > 32767 || iz < -32768 || iz > 32767) {
+        *ax = (int16_t)(ix < -32768 ? -32768 : ix > 32767 ? 32767 : ix);
+        *az = (int16_t)(iz < -32768 ? -32768 : iz > 32767 ? 32767 : iz);
+        *still = 0;
+        return 0;
+    }
+    if (*still < 65535) (*still)++;
+    if (*still < limit) return 0;
+    *still = 0;
+    return 1;
+}
+
+int ow_rules_cpu_retarget(int self, int current, const float x[4], const float z[4], uint32_t cand)
+{
+    int k, best = -1;
+    float best_d = 0.0f;
+    if (self < 0 || self > 3) return -1;
+    for (k = 0; k < 4; k++) {
+        float dx, dz, d;
+        if (k == self || k == current || !(cand & (1u << k))) continue;
+        dx = x[k] - x[self];
+        dz = z[k] - z[self];
+        d = dx * dx + dz * dz;
+        if (best < 0 || d < best_d) { best = k; best_d = d; }
+    }
+    return best;
+}

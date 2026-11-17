@@ -386,6 +386,9 @@ typedef struct {
     int8_t roam_pending[4];         /* a hit while free: engage this attacker at the slot's next input (-1 none) */
     uint32_t roam_last[4];          /* the step of the slot's last fight button or hit */
     uint8_t roam_turn[4];           /* steps left of the turn toward a target just locked on to */
+    /* build 88: CPU fighters that stand still too long take another target (cpu_idle_step) */
+    int16_t cpu_ax[4], cpu_az[4];   /* where the CPU stood when its stillness began (whole units) */
+    uint16_t cpu_still[4];          /* steps it has stood there, idle or blocking */
 } BigArena;
 static BigArena BA;
 typedef char ow_state_fits[sizeof(BigArena) <= OW_STATE_BYTES ? 1 : -1];
@@ -657,6 +660,9 @@ static float ba_spawn_scale(void)
     return r / 260.0f;
 }
 
+static int slot_of_record(uint32_t r);
+static void cpu_idle_step(uint32_t pres);
+
 /* Once per step before the generated body, in normal and re-run steps alike. */
 static void bigarena_step(void)
 {
@@ -721,6 +727,47 @@ static void bigarena_step(void)
         if ((pres & (1u << s)) && BA.down[s] && BA.step - BA.down_at[s] >= BA.respawn_steps &&
             (MEM16(rec(s) + 0x932u) & ENDED))
             ba_revive(s, 1);
+    cpu_idle_step(pres);
+}
+
+/* CPU fighters that stop fighting (build 88). On a big map two CPUs that target each other can stand face to face,
+ * idle or blocking, for minutes (run logs/dj/20261117-100442-offline: slots 1 and 3, 13 units apart, states 1/2,
+ * the whole rest of a 3-minute round), and only a hit from someone else (the game's retarget on a hit) wakes them.
+ * The game changes a target only when it is down (sub_001C9610) or on the target buttons (sub_001C99B0, which the AI
+ * presses itself in a small ring, where everyone is in reach). Here: a CPU that has stood within CPU_IDLE_RADIUS of
+ * one place in states 1 (stand/walk) or 2 (block) for CPU_IDLE_STEPS takes the nearest other standing fighter as its
+ * target (+0x00, which its AI follows); the same rule with nobody else keeps the target. Decided from the records and
+ * BA inside the step, so every PC does the same; BA is saved and checksummed. */
+#define CPU_IDLE_STEPS  240         /* 4 s */
+#define CPU_IDLE_RADIUS 6           /* units */
+static void cpu_idle_step(uint32_t pres)
+{
+    int s, k;
+    float x[4], z[4];
+    for (k = 0; k < 4; k++) { x[k] = MEMF(rec(k) + 0x44u); z[k] = MEMF(rec(k) + 0x4Cu); }
+    for (s = 0; s < 4; s++) {
+        uint32_t r = rec(s), st, cand = 0;
+        int cur, c, busy;
+        if (!(pres & (1u << s)) || !(MEM8(r + 0x937u) & 1u)) continue;
+        st = MEM32(r + 0x30u);
+        busy = (st != 1u && st != 2u) || (MEM16(r + 0x932u) & (ENDED | 0x400u)) != 0;
+        if (!ow_rules_cpu_idle_step(&BA.cpu_ax[s], &BA.cpu_az[s], &BA.cpu_still[s], x[s], z[s], busy,
+                                    CPU_IDLE_RADIUS, CPU_IDLE_STEPS))
+            continue;
+        for (k = 0; k < 4; k++) {
+            uint16_t fl;
+            if (k == s || !(pres & (1u << k))) continue;
+            fl = MEM16(rec(k) + 0x932u);
+            if (!(fl & (ENDED | 0x400u))) cand |= 1u << k;
+        }
+        cur = slot_of_record(MEM32(r));
+        c = ow_rules_cpu_retarget(s, cur, x, z, cand);
+        if (c < 0) continue;
+        MEM32(r) = rec(c);
+        if (!netplay_rerunning())
+            fprintf(stderr, "[BIGARENA] step %u: CPU slot %d stood still %d s (state %u): target %d -> %d\n", BA.step, s,
+                    CPU_IDLE_STEPS / 60, st, cur, c);
+    }
 }
 
 static int slot_of_record(uint32_t r)
