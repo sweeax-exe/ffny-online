@@ -78,7 +78,7 @@ def test_setting_and_launcher_offer_all():
     assert m and 'all' in m.group(0) and 'sg' in m.group(0) and 'sa (South America' in m.group(0)
     assert 'netservers_set_choice(NETCHOICE_ALL)' in PC_UI and 'netservers_set_choice(NETCHOICE_ALL)' in SCREEN
     # the picker explains All in one line
-    assert 'The rooms of Europe, North America, Asia and South America in one list; joining one moves you there. ' in SCREEN
+    assert 'The rooms of every server (Europe, the US, Asia, South America) in one list; joining one moves you there. ' in SCREEN
 
 
 def test_staged_search_rule_and_gallery():

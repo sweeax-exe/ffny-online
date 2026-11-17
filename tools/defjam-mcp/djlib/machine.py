@@ -377,14 +377,15 @@ BASE_ENV = {
     "RECOMP_NETPLAY_SERVER_WEST": "127.0.0.1:9",  # builds 38..88
     "RECOMP_NETPLAY_SERVER_SG": "127.0.0.1:9",    # build 89: Asia (Singapore) in the third slot
     "RECOMP_NETPLAY_SERVER_SA": "127.0.0.1:9",    # build 91: South America (Sao Paulo)
+    "RECOMP_NETPLAY_SERVER_MIA": "127.0.0.1:9",   # build 91: US South (Miami)
     "RECOMP_NO_UPDATE_CHECK": "1",
 }
 
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
 RELAY_VARS = ("RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA", "RECOMP_NETPLAY_SERVER_WEST",
-              "RECOMP_NETPLAY_SERVER_SG", "RECOMP_NETPLAY_SERVER_SA")
+              "RECOMP_NETPLAY_SERVER_SG", "RECOMP_NETPLAY_SERVER_SA", "RECOMP_NETPLAY_SERVER_MIA")
 ADDRESS_VARS = ("RECOMP_ACCOUNT_SERVER", "RECOMP_NETPLAY_SERVER") + RELAY_VARS
-SERVER_CHOICES = ("auto", "eu", "na", "west", "sg", "sa", "all", "both")
+SERVER_CHOICES = ("auto", "eu", "na", "west", "sg", "sa", "mia", "all", "both")
 
 
 def check_env(env):

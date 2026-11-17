@@ -2778,7 +2778,7 @@ static void quality_widget()
                           "next time the game starts.");
 }
 
-// The online server (build 30; build 91: the relay table): Automatic, Europe, North America, Asia or South America, each with
+// The online server (build 30; build 91: the relay table): Automatic or one of the relays (Europe, US East, Asia, South America, Miami), each with
 // its ping and players as the relays answer (netplay_servers.c), or All servers. A custom address
 // (Advanced, Online) shows as such.
 static std::string server_line(const NetServerInfo &s)
@@ -2822,8 +2822,7 @@ static void server_widget()
     }
     ImGui::SetItemTooltip("Where you play online. Automatic takes the server with the lowest ping when you go online. "
                           "Quick Match looks on your server first, then (when nobody is there) on every server after 30 s; "
-                          "accounts and stats are shared. All servers: the rooms of Europe, North America, Asia and South "
-                          "America in one list; matches across the ocean have higher ping.");
+                          "accounts and stats are shared. All servers: the rooms of every server in one list; matches across the ocean have higher ping.");
 }
 
 static void page_basics()

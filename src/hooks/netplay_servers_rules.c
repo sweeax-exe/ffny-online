@@ -9,27 +9,30 @@
 #include <string.h>
 
 /* The relays, in the wire's order (netplay_servers_rules.h): a new relay is a new last row. */
-/* Build 91: North America (Miami) and Asia (Singapore) move to new machines with new host names. Their fallback
- * addresses (used only when the name does not resolve) are not known yet: fill in each one here once the machine
- * is rented. "" = no fallback (the name must resolve). */
-#define NETSERVER_NA2_FALLBACK_IP ""    /* PLACEHOLDER: na2.defjam.online's IPv4 address */
-#define NETSERVER_SG2_FALLBACK_IP ""    /* PLACEHOLDER: sg2.defjam.online's IPv4 address */
+/* Build 91: US East (New Jersey), Miami and Asia (Singapore) run on new machines with new host names. Their
+ * fallback addresses (used only when the name does not resolve) are not known yet: fill in each one here once the
+ * machine is rented. "" = no fallback (the name must resolve). */
+#define NETSERVER_NJ_FALLBACK_IP  ""    /* PLACEHOLDER: nj.defjam.online's IPv4 address (US East, New Jersey) */
+#define NETSERVER_NA2_FALLBACK_IP ""    /* PLACEHOLDER: na2.defjam.online's IPv4 address (Miami) */
+#define NETSERVER_SG2_FALLBACK_IP ""    /* PLACEHOLDER: sg2.defjam.online's IPv4 address (Singapore) */
 
 static const NetRelayDef k_relays[] = {
     { "eu", "Europe", "EU", "play.defjam.online:27777", "49.12.78.32", "RECOMP_NETPLAY_SERVER_EU", "eu",
       "europe" },
-    /* build 38: the North American relay of builds 30..37 is US East; its id stays "na". Build 91: North America
-     * (Miami) on na2 (US East on na.defjam.online closes with build 90; its saved host name still means "na") */
-    { "na", "North America (Miami)", "N. AMERICA", "na2.defjam.online:27777", NETSERVER_NA2_FALLBACK_IP,
-      "RECOMP_NETPLAY_SERVER_NA", "us-east",
-      "north_america|north america|northamerica|us|east|us_east|us east|useast|miami|na.defjam.online|"
-      "na.defjam.online:27777" },
+    /* build 38: the North American relay of builds 30..37 is US East; its id stays "na". Build 91: New Jersey on
+     * nj (Ashburn's na.defjam.online closes with build 90; its saved host name still means "na") */
+    { "na", "US East", "US EAST", "nj.defjam.online:27777", NETSERVER_NJ_FALLBACK_IP, "RECOMP_NETPLAY_SERVER_NA",
+      "us-east", "north_america|north america|northamerica|us|east|us_east|us east|useast|new jersey|newjersey|nj|"
+      "na.defjam.online|na.defjam.online:27777" },
     /* build 89: Singapore takes US West's slot; build 91: a new machine, sg2 */
     { "sg", "Asia (Singapore)", "ASIA", "sg2.defjam.online:27777", NETSERVER_SG2_FALLBACK_IP, "RECOMP_NETPLAY_SERVER_SG",
       "sg", "asia|singapore|sg.defjam.online|sg.defjam.online:27777" },
     /* build 91 */
     { "sa", "South America", "S. AMERICA", "sa.defjam.online:27777", "216.238.122.210", "RECOMP_NETPLAY_SERVER_SA",
       "sa", "southamerica|south america|south_america|south-america|brazil|brasil|saopaulo|sao paulo|sao_paulo" },
+    /* build 91: US South and the Caribbean */
+    { "mia", "US South (Miami)", "MIAMI", "na2.defjam.online:27777", NETSERVER_NA2_FALLBACK_IP,
+      "RECOMP_NETPLAY_SERVER_MIA", "mia", "miami|us south|us_south|ussouth|caribbean|florida" },
 };
 
 typedef char netservers_table_matches_count[sizeof(k_relays) / sizeof(k_relays[0]) == NETSERVER_COUNT &&

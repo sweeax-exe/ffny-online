@@ -81,8 +81,8 @@ static RecompSetting g_display_settings[] = {
     { "textures", "dump_limit", RECOMP_SETTING_INT, 2000, 0, 65536, NULL, "RECOMP_TEXTURE_DUMP_LIMIT", RECOMP_SETTING_RESTART,
       "Maximum new source images captured in one run." },
     { "online", "server", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_NETPLAY_SERVER", 0,
-      "The server for online play: auto (the one with the lowest ping of Europe, Miami, Singapore and Sao Paulo), "
-      "eu, na (North America (Miami)), sg (Asia (Singapore)), sa (South America (Sao Paulo); also southamerica or brazil), all (the "
+      "The server for online play: auto (the one with the lowest ping of Europe, US East, Singapore, Sao Paulo and Miami), "
+      "eu, na (US East), mia (US South (Miami); also miami), sg (Asia (Singapore)), sa (South America (Sao Paulo); also southamerica or brazil), all (the "
       "rooms of every server; the hub connects to the lowest ping and moves "
       "to join; \"both\" of older builds means all), or a relay's own address as host or host:port (port 27777 "
       "if left out). Quick Match widens to the other servers when nobody is waiting. Accounts and stats stay on "
@@ -736,7 +736,7 @@ static int local_address(const char *v)
 static int may_run_beside_another(void)
 {
     static const char *const vars[] = { "RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA",
-                                        "RECOMP_NETPLAY_SERVER_SG", "RECOMP_NETPLAY_SERVER_SA", "RECOMP_ACCOUNT_SERVER" };
+                                        "RECOMP_NETPLAY_SERVER_SG", "RECOMP_NETPLAY_SERVER_SA", "RECOMP_NETPLAY_SERVER_MIA", "RECOMP_ACCOUNT_SERVER" };
     const char *settings = getenv("RECOMP_SETTINGS"), *one = getenv("RECOMP_NETPLAY_SERVER");
     int i, test_run = (settings && !_stricmp(settings, "none")) ||
                       (getenv("RECOMP_PAD_SCRIPT") && !getenv("RECOMP_PAD_HOST"));

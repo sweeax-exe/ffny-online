@@ -190,11 +190,11 @@ for ($i = 0; $i -lt $Players; $i++) {
     $serverEnv = if ($NaRelayPort) {
         @('--env', "RECOMP_NETPLAY_SERVER=$choice", '--env', "RECOMP_NETPLAY_SERVER_EU=127.0.0.1:$RelayPort",
           '--env', "RECOMP_NETPLAY_SERVER_NA=127.0.0.1:$NaRelayPort", '--env', "RECOMP_NETPLAY_SERVER_SG=$westAt",
-          '--env', "RECOMP_NETPLAY_SERVER_SA=$saAt")
+          '--env', "RECOMP_NETPLAY_SERVER_SA=$saAt", '--env', 'RECOMP_NETPLAY_SERVER_MIA=127.0.0.1:9')
     } else {
         @('--env', "RECOMP_NETPLAY_SERVER=127.0.0.1:$RelayPort", '--env', 'RECOMP_NETPLAY_SERVER_EU=127.0.0.1:9',
           '--env', 'RECOMP_NETPLAY_SERVER_NA=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_SG=127.0.0.1:9',
-          '--env', 'RECOMP_NETPLAY_SERVER_SA=127.0.0.1:9')
+          '--env', 'RECOMP_NETPLAY_SERVER_SA=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_MIA=127.0.0.1:9')
     }
     $switch = if ($i -lt $SwitchTos.Count) { $SwitchTos[$i] } else { $SwitchTo }
     if ($NaRelayPort -and $switch) { $serverEnv += @('--env', "RECOMP_TEST_SERVER_SWITCH=$SwitchAfterMs,$switch") }

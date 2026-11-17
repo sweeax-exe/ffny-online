@@ -5753,8 +5753,9 @@ static DWORD WINAPI ranked_thread(LPVOID param)
             len += netservers_put_more_pings(b + len, pings, NETSERVER_COUNT);
         LeaveCriticalSection(&g_cs);
     }
-    fprintf(stderr, "[NETPLAY] ranked: queueing for %s (modes %u)%s%s, pings %d/%d/%d/%d ms\n", netranked_mode_title(primary),
-            modes, code[0] ? ", set " : "", code, pings[0], pings[1], pings[2], pings[NETSERVER_SA]);
+    fprintf(stderr, "[NETPLAY] ranked: queueing for %s (modes %u)%s%s, pings %d/%d/%d/%d/%d ms (eu/na/sg/sa/mia)\n",
+            netranked_mode_title(primary), modes, code[0] ? ", set " : "", code, pings[0], pings[1], pings[2],
+            pings[NETSERVER_SA], pings[NETSERVER_MIA]);
     EnterCriticalSection(&g_cs);
     i = N.queue_state == NETQUEUE_TICKET;   /* not cancelled meanwhile */
     if (i) N.queue_state = NETQUEUE_CHECKING;

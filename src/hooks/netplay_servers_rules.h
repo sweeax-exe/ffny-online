@@ -17,11 +17,12 @@ extern "C" {
  * names for the ranked matchmaker. A new relay is one row in k_relays (netplay_servers_rules.c) and one
  * name at the end of the server's RelayNames. */
 #define NETSERVER_EU    0       /* "eu"   Europe,  play.defjam.online */
-#define NETSERVER_NA    1       /* "na"   North America (Miami), na2.defjam.online (build 91; US East, Ashburn, before) */
+#define NETSERVER_NA    1       /* "na"   US East, nj.defjam.online (build 91 New Jersey; Ashburn before) */
 #define NETSERVER_SG    2       /* "sg"   Asia (Singapore), sg2.defjam.online (build 91; sg. in 89..90, US West before) */
 #define NETSERVER_SA    3       /* "sa"   South America (Sao Paulo), sa.defjam.online (build 91) */
+#define NETSERVER_MIA   4       /* "mia"  US South (Miami), na2.defjam.online (build 91) */
 #define NETSERVER_WEST  NETSERVER_SG    /* the slot's name of builds 38..88 */
-#define NETSERVER_COUNT 4       /* the rows of k_relays (checked there) */
+#define NETSERVER_COUNT 5       /* the rows of k_relays (checked there) */
 #define NETSERVER_MAX   8       /* the most the wire's trailers and the picker take */
 #define NETSERVER_LEGACY 3      /* the relays every build since 38 has in this order: the fixed three pings */
 
@@ -52,12 +53,12 @@ const char *netservers_known_ip(const char *host);
  * of builds 38..90 stay (relay 2's choice is 5); relays from index 3 on are NETCHOICE_RELAY3 + (index - 3). */
 enum NetServerChoice {
     NETCHOICE_AUTO = 0, NETCHOICE_EU, NETCHOICE_NA, NETCHOICE_CUSTOM, NETCHOICE_ALL, NETCHOICE_SG,
-    NETCHOICE_RELAY3 = 6, NETCHOICE_SA = NETCHOICE_RELAY3,
+    NETCHOICE_RELAY3 = 6, NETCHOICE_SA = NETCHOICE_RELAY3, NETCHOICE_MIA = NETCHOICE_RELAY3 + 1,
     NETCHOICE_END = NETCHOICE_RELAY3 + NETSERVER_MAX - NETSERVER_LEGACY,
     NETCHOICE_WEST = NETCHOICE_SG
 };
 
-/* The setting's text: "auto", "all" or a relay's id ("eu", "na", "sg", "sa"); also each relay's other
+/* The setting's text: "auto", "all" or a relay's id ("eu", "na", "sg", "sa", "mia"); also each relay's other
  * words (names, "brazil"), its host name with or without the port, the old "both" (= all), the old
  * default play.defjam.online (= auto) and US West's words (closed in build 89: auto). Anything else is a
  * custom relay address. */

@@ -22,7 +22,7 @@ static const char *const k_texts[] = {
     "sg", "SG", "singapore", "sg.defjam.online", "sg.defjam.online:27777",
     "west", "West", "us_west", "west.defjam.online", "west.defjam.online:27777",
     "sa", "SA", "southamerica", "South America", "brazil", "Brasil", "sao paulo", "sa.defjam.online",
-    "sa.defjam.online:27777", "SA.DEFJAM.ONLINE:27777", "na2.defjam.online", "sg2.defjam.online:27777", "Miami",
+    "sa.defjam.online:27777", "SA.DEFJAM.ONLINE:27777", "na2.defjam.online", "sg2.defjam.online:27777", "Miami", "mia", "nj.defjam.online",
     "all", "All servers", "both", "Both", "both_servers",
     "127.0.0.1:27900", "relay.example.org", "westeros",
 };
@@ -89,11 +89,11 @@ int main(void)
     /* the scope: every choice, every relay, the seconds around each step, all up and US West down */
     {
         static const enum NetServerChoice cs[] = { NETCHOICE_AUTO, NETCHOICE_EU, NETCHOICE_NA, NETCHOICE_WEST,
-                                                   NETCHOICE_ALL, NETCHOICE_CUSTOM, NETCHOICE_SA };
+                                                   NETCHOICE_ALL, NETCHOICE_CUSTOM, NETCHOICE_SA, NETCHOICE_MIA };
         static const int secs[] = { 0, 9, 10, 29, 30, 300 };
         unsigned ups[] = { 7u, 3u, 15u };
         int c, u;
-        for (c = 0; c < 7; c++)
+        for (c = 0; c < 8; c++)
             for (u = 0; u < 3; u++)
                 for (i = -1; i < NETSERVER_COUNT; i++)
                     for (s = 0; s < 6; s++)
@@ -145,8 +145,8 @@ int main(void)
 }
 '''
 
-EU, NA, WEST, SA = 0, 1, 2, 3
-AUTO, CH_EU, CH_NA, CUSTOM, ALL, CH_WEST, CH_SA = 0, 1, 2, 3, 4, 5, 6
+EU, NA, WEST, SA, MIA = 0, 1, 2, 3, 4
+AUTO, CH_EU, CH_NA, CUSTOM, ALL, CH_WEST, CH_SA, CH_MIA = 0, 1, 2, 3, 4, 5, 6, 7
 
 
 @pytest.fixture(scope='module')
@@ -191,8 +191,8 @@ def test_old_and_new_setting_values(rows):
         'sao paulo': (CH_SA, 'sa', SA), 'sa.defjam.online': (CH_SA, 'sa', SA),
         'sa.defjam.online:27777': (CH_SA, 'sa', SA), 'SA.DEFJAM.ONLINE:27777': (CH_SA, 'sa', SA),
         # build 91: North America (Miami) and Asia on their new machines; the old host names still name them
-        'na2.defjam.online': (CH_NA, 'na', NA), 'sg2.defjam.online:27777': (CH_WEST, 'sg', WEST),
-        'Miami': (CH_NA, 'na', NA),
+        'na2.defjam.online': (CH_MIA, 'mia', MIA), 'sg2.defjam.online:27777': (CH_WEST, 'sg', WEST),
+        'Miami': (CH_MIA, 'mia', MIA), 'mia': (CH_MIA, 'mia', MIA), 'nj.defjam.online': (CH_NA, 'na', NA),
         # "both" (builds 31..37) is every relay now and is saved again as "all"
         'all': (ALL, 'all', -1), 'All servers': (ALL, 'all', -1), 'both': (ALL, 'all', -1), 'Both': (ALL, 'all', -1),
         'both_servers': (ALL, 'all', -1),
@@ -205,18 +205,19 @@ def test_old_and_new_setting_values(rows):
 
 def test_relays_and_partners(rows):
     relay = {int(r[0]): (int(r[1]), int(r[2])) for r in by(rows, 'relay')}
-    assert relay == {EU: (CH_EU, -1), NA: (CH_NA, -1), WEST: (CH_WEST, -1), SA: (CH_SA, -1)}
+    assert relay == {EU: (CH_EU, -1), NA: (CH_NA, -1), WEST: (CH_WEST, -1), SA: (CH_SA, -1), MIA: (CH_MIA, -1)}
 
 
 def test_the_relay_table(rows):
     """Build 91: one table names every relay, in the wire's order; ids, chat regions and host names find them."""
     defs = {int(r[0]): r[1:] for r in by(rows, 'def')}
-    assert [defs[i][0] for i in sorted(defs)] == ['eu', 'na', 'sg', 'sa']
+    assert [defs[i][0] for i in sorted(defs)] == ['eu', 'na', 'sg', 'sa', 'mia']
     assert defs[SA][:7] == ['sa', 'South America', 'S. AMERICA', 'sa.defjam.online:27777', '216.238.122.210',
                             'RECOMP_NETPLAY_SERVER_SA', 'sa']
     assert defs[WEST][6] == 'sg' and defs[NA][6] == 'us-east' and defs[EU][3] == 'play.defjam.online:27777'
     # build 91: the new machines; their fallback addresses are placeholders until they are rented
-    assert defs[NA][1:5] == ['North America (Miami)', 'N. AMERICA', 'na2.defjam.online:27777', '']
+    assert defs[NA][1:5] == ['US East', 'US EAST', 'nj.defjam.online:27777', '']
+    assert defs[MIA][:7] == ['mia', 'US South (Miami)', 'MIAMI', 'na2.defjam.online:27777', '', 'RECOMP_NETPLAY_SERVER_MIA', 'mia']
     assert defs[WEST][3:5] == ['sg2.defjam.online:27777', '']
     for i, d in defs.items():
         assert (int(d[7]), int(d[8])) == (i, i)     # by id, by chat region
@@ -227,8 +228,8 @@ def test_the_relay_table(rows):
 
 def test_pings_trailer(rows):
     """Build 91 (CAPS bit 28): the pings beyond the first three relays as a count and u16 each."""
-    assert by(rows, 'more') == [['3', '1', '186', '0']]
-    assert by(rows, 'more-cap') == [['3', '65535']] and by(rows, 'more-neg') == [['3', '0']]
+    assert by(rows, 'more') == [['5', '2', '186', '0']]
+    assert by(rows, 'more-cap') == [['5', '65535']] and by(rows, 'more-neg') == [['5', '0']]
     assert by(rows, 'more-three') == [['1', '0']]
     # a relay that knows more relays than this build: the known one is read, the rest skipped
     assert by(rows, 'more-read') == [['13', '186', '77', '0', '0']]
@@ -263,7 +264,7 @@ def test_search_widens_on_time(rows):
         assert scope_of(rows, choice, 15, EU, 30) == bits(EU, NA, WEST, SA)
         assert [scope_of(rows, choice, 15, SA, s) for s in (0, 29, 30)] == [bits(SA)] * 2 + [bits(EU, NA, WEST, SA)]
     # a fixed choice stays on its relay for 30 s, then every relay
-    for choice, relay in ((CH_EU, EU), (CH_NA, NA), (CH_WEST, WEST), (CH_SA, SA)):
+    for choice, relay in ((CH_EU, EU), (CH_NA, NA), (CH_WEST, WEST), (CH_SA, SA), (CH_MIA, MIA)):
         assert [scope_of(rows, choice, 7, relay, s) for s in (0, 10, 29)] == [bits(relay)] * 3
         assert scope_of(rows, choice, 7, relay, 30) == bits(EU, NA, WEST) | bits(relay)
     # a custom address, or no relay: no search beyond the room
