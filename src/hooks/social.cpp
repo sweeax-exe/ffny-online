@@ -1258,7 +1258,8 @@ std::vector<Toast> take_toasts()
 
 std::string region_of_server(int index)
 {
-    return index == NETSERVER_EU ? "eu" : index == NETSERVER_NA ? "us-east" : index == NETSERVER_WEST ? "sg" : "";
+    const NetRelayDef *d = netservers_def(index);    /* build 91: the relay table's global chat region */
+    return d ? d->social : "";
 }
 
 void send_global(const char *region, const std::string &text)

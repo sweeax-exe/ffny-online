@@ -531,6 +531,18 @@ that relay.
   quick room once its quick match searches other relays (build 38: any choice but a custom address; the
   `age` lets two such players decide who moves; see `docs/netplay.md`).
 
+### Pings to every relay (build 91, CAPS bit 28)
+
+The relays form one table, in the same order in the game (`src/hooks/netplay_servers_rules.c`) and the relay
+(`relay/relays.go` `RelayNames`): eu, na, sg, sa. It only grows at its end. QUICK's pings (CAPS bit 26), the long
+RANKED's pings and ROOMLIST's listed pings carry the first three in their fixed fields. To a relay that answered
+CAPS bit 28 the game adds a trailer to QUICK (after the three pings) and to the long RANKED (after the code): a
+count byte E, then E u16 LE pings to the relays from the fourth on. A ROOMLIST request with bits 16, 26 and 28
+gets, after the listed pings, the count once and E u16 pings per listed room. A side reads at most 8 relays and
+keeps those it knows. The relay tells the matchmaker which relays each queued game knows, so a ranked set never
+moves a build before 91 to a relay it does not know (South America); the South America relay runs with
+`-min-build 91`.
+
 ## Who is online without a session (all servers)
 
 Since build 47 the PLAYERS ONLINE page lists every relay's players when the player chose **All

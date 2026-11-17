@@ -968,7 +968,7 @@ struct State {
     unsigned long long give_up_at = 0, lb_since = 0;    // King of the Hill: LB gave up the spot; LB held since
     bool lb_long_done = false;      // the long LB press has acted
     // the server (netplay_servers.h)
-    int servers_sel = 0;            // SERVERS: 0 Automatic, 1 Europe, 2 US East, 3 Asia, 4 All servers
+    int servers_sel = 0;            // SERVERS: 0 Automatic, 1 Europe, 2 North America, 3 Asia, 4 South America, 5 All servers
     bool connect_pending = false;   // Automatic waits for the relays' first answers before connecting
     bool fallback_tried = false;    // Automatic: another relay was tried once after a failed connection
     int auto_moves = 0;             // quick matches moved to another relay since QUICK MATCH
@@ -1372,7 +1372,7 @@ void status_text(char *out, int size)
     else netplay_status(out, size);
 }
 
-// The relays (Europe, US East, US West): their state, the one the hub is on, the choice.
+// The relays (Europe, US East, Asia, South America): their state, the one the hub is on, the choice.
 int servers(NetServerInfo *out)
 {
     if (gallery_on()) { for (int i = 0; i < NETSERVER_COUNT; i++) out[i] = G.servers[i]; return NETSERVER_COUNT; }
@@ -1963,15 +1963,16 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_title, 10, 592, 394, GREY, "and others on other versions or not shown", RIGHT, 1.0f);
 }
 
-// ---- the server picker: Automatic, Europe, US East, US West, each with its ping and players, and All ----
+// ---- the server picker: Automatic, every relay of the table, each with its ping and players, and All ----
 
 void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     NetServerInfo s[NETSERVER_COUNT];
     servers(s);
-    // five rows (build 38: three relays) sit closer, so the panel still ends above the hints
+    // five rows (build 38: three relays) sit closer, so the panel still ends above the hints; more relays (build
+    // 91: four) share the same height, each row a little flatter (sc: the row's scale)
     const int rows = 2 + NETSERVER_COUNT, ALL_ROW = 1 + NETSERVER_COUNT;
-    const float pitch = 58, row_h = 52;
+    const float pitch = rows <= 5 ? 58.0f : floorf(290.0f / (float)rows), sc = pitch / 58.0f, row_h = 52 * sc;
     int cur = connected_server();
     enum NetServerChoice choice = server_choice();
     int fixed = netservers_choice_relay(choice);
@@ -1994,7 +1995,8 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
         bool all = k == ALL_ROW;
         const NetServerInfo *si = k && !all ? &s[k - 1] : nullptr;
         const char *title = k == 0 ? "AUTOMATIC" : all ? "ALL SERVERS" : si->name;
-        text(dl, f, g_title, 21, x + 14, y + 3, sel ? CREAM : with_alpha(GREY, 0.9f), upper(title).c_str(), LEFT, 1.5f);
+        text(dl, f, g_title, 21 * std::max(sc, 0.9f), x + 14, y + 3 * sc, sel ? CREAM : with_alpha(GREY, 0.9f), upper(title).c_str(),
+             LEFT, 1.5f);
         // right: the ping, large, in its colour, with its bars (OFFLINE in red for a relay that did not answer)
         char big[32] = "", sub[96] = "";
         ImU32 tone = GREY;
@@ -2030,23 +2032,24 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
             snprintf(sub, sizeof(sub), "CHECKING...");
         bool bars = !(shown && shown->state == NETSERVER_OFFLINE);
         float bx = x + w - (bars ? 30 : 8);
-        if (bars) ping_bars(dl, f, bx + 6, y + 6, 14, ms);
-        text(dl, f, g_title, 17, bx - (bars ? 4 : 0), y + 3, sel ? tone : with_alpha(tone, 0.75f), big, RIGHT, 1.2f);
-        text(dl, f, g_hand, 13, x + 16, y + 24, sel ? ORANGE : with_alpha(ORANGE, 0.6f), sub, LEFT, 1.0f);
+        if (bars) ping_bars(dl, f, bx + 6, y + 6 * sc, 14 * sc, ms);
+        text(dl, f, g_title, 17 * std::max(sc, 0.9f), bx - (bars ? 4 : 0), y + 3 * sc, sel ? tone : with_alpha(tone, 0.75f), big,
+             RIGHT, 1.2f);
+        text(dl, f, g_hand, 13, x + 16, y + 24 * sc, sel ? ORANGE : with_alpha(ORANGE, 0.6f), sub, LEFT, 1.0f);
         // the tags: the player's choice, and where the hub is now (with All: its relay, on that relay's row)
         float tx = x + 16;
         if (si && cur == k - 1) {
             const char *tag = "YOU ARE HERE";
             float tw = text_width(f, g_title, 9, tag);
-            rect(dl, f, tx, y + 38, tw + 10, 13, IM_COL32(40, 120, 60, 230), 4);
-            text(dl, f, g_title, 9, tx + 5, y + 39, WHITE, tag, LEFT, 0.6f);
+            rect(dl, f, tx, y + 38 * sc, tw + 10, 13, IM_COL32(40, 120, 60, 230), 4);
+            text(dl, f, g_title, 9, tx + 5, y + 38 * sc + 1, WHITE, tag, LEFT, 0.6f);
             tx += tw + 16;
         }
         if (k == chosen_row) {
             const char *tag = "YOUR CHOICE";
             float tw = text_width(f, g_title, 9, tag);
-            rect(dl, f, tx, y + 38, tw + 10, 13, with_alpha(RED, 0.9f), 4);
-            text(dl, f, g_title, 9, tx + 5, y + 39, WHITE, tag, LEFT, 0.6f);
+            rect(dl, f, tx, y + 38 * sc, tw + 10, 13, with_alpha(RED, 0.9f), 4);
+            text(dl, f, g_title, 9, tx + 5, y + 38 * sc + 1, WHITE, tag, LEFT, 0.6f);
             tx += tw + 16;
         }
         if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
@@ -2054,10 +2057,10 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
     door_panel(dl, f);
     if (S.servers_sel == ALL_ROW)
         door_text(dl, f, &tex("ui/online_icon.png"), "ALL SERVERS", "YOU CHOOSE WHOM YOU PLAY",
-                  "The rooms of Europe, US East and Asia in one list; joining one moves you there. Matches across "
-                  "the ocean have higher ping.");
+                  "The rooms of Europe, North America, Asia and South America in one list; joining one moves you there. "
+                  "Matches across the ocean have higher ping.");
     else
-        door_text(dl, f, &tex("ui/online_icon.png"), "SERVER", "EUROPE, US EAST OR ASIA",
+        door_text(dl, f, &tex("ui/online_icon.png"), "SERVER", "EUROPE, N. AMERICA, ASIA OR S. AMERICA",
                   "The nearest one gives the lowest ping. When nobody is there, Quick Match looks on the other servers "
                   "too. Your account, stats and the leaderboard are the same on all.");
     if (checking) {
@@ -5396,29 +5399,29 @@ void gallery_step()
                  "board=9|Tia|31|25|0\nboard=10|Ann|27|14|0\nboard_page=0\nboard_pages=4\n",
                  main ? main->id : -1, main ? main->name : "");
         G.stats = buf;
-        // All servers: US East's and US West's rooms as a player in Europe sees them (112 and 168 ms)
-        static const char *const na_names[] = { "Brooklyn bruisers", "Quick: Rex", "Night market" };
-        static const int na_modes[] = { 0, 0, NETPLAY_MODE_KOTH_RANDOM };
-        for (int i = 0; i < 3; i++) {
+        // All servers: US East's, Asia's and South America's rooms as a player in Europe sees them (112, 168, 196 ms)
+        static const char *const na_names[] = { "Brooklyn bruisers", "Quick: Rex", "Night market", "Sao Paulo slam" };
+        static const int na_modes[] = { 0, 0, NETPLAY_MODE_KOTH_RANDOM, 0 };
+        for (int i = 0; i < 4; i++) {
             NetServerRoom e = {};
             snprintf(e.room.code, sizeof(e.room.code), "NAROM%d", i);
             snprintf(e.room.name, sizeof(e.room.name), "%s", na_names[i]);
             e.room.mode = na_modes[i];
             e.room.max = NETPLAY_IS_KOTH(e.room.mode) ? 8 : 2;
             e.room.players = i == 2 ? 4 : 1;
-            e.server = i == 2 ? NETSERVER_WEST : NETSERVER_NA;
-            e.ping_ms = i == 2 ? 168 : 112;
+            e.server = i == 3 ? NETSERVER_SA : i == 2 ? NETSERVER_WEST : NETSERVER_NA;
+            e.ping_ms = i == 3 ? 196 : i == 2 ? 168 : 112;
             e.age_s = 40 + i * 15;
             G.other_rooms.push_back(e);
         }
-        // All servers: US East's and US West's players (build 47)
+        // All servers: US East's, Asia's and South America's players (build 47)
         static const char *const far_who[] = { "Brooklyn Bruiser", "Kingpin", "Rex", "Dmx Fan", "Queens", "NightOwl",
-                                               "Cali", "Oak", "Tre" };
+                                               "Cali", "Oak", "Tre", "Rio", "Paulista" };
         for (int i = 0; i < (int)(sizeof(far_who) / sizeof(far_who[0])); i++) {
             NetServerPlayer e = {};
             snprintf(e.player.name, sizeof(e.player.name), "%s", far_who[i]);
             e.player.state = i % 3;
-            e.server = i < 6 ? NETSERVER_NA : NETSERVER_WEST;
+            e.server = i < 6 ? NETSERVER_NA : i < 9 ? NETSERVER_WEST : NETSERVER_SA;
             G.other_players.push_back(e);
         }
     }
@@ -5456,16 +5459,19 @@ void gallery_step()
     S.note_until = 0;
     S.settings_edit = false;
     {   // the relays as a player in Europe sees them, the hub on Europe
-        NetServerInfo eu = {}, na = {}, west = {};
+        NetServerInfo eu = {}, na = {}, west = {}, sa = {};
         eu.id = "eu"; eu.name = "Europe"; eu.short_name = "EU"; eu.state = NETSERVER_UP; eu.ping_ms = 38;
         eu.online = 142; eu.rooms = 12; eu.waiting = 2; eu.idle = 5; eu.flags = NETSERVER_RANKED | NETSERVER_KOTH; eu.version = 1;
-        na.id = "na"; na.name = "US East"; na.short_name = "US EAST"; na.state = NETSERVER_UP; na.ping_ms = 112;
+        na.id = "na"; na.name = "North America (Miami)"; na.short_name = "N. AMERICA"; na.state = NETSERVER_UP; na.ping_ms = 112;
         na.online = 12; na.rooms = 3; na.waiting = 3; na.idle = 1; na.flags = NETSERVER_KOTH; na.version = 1;
         west.id = "sg"; west.name = "Asia (Singapore)"; west.short_name = "ASIA"; west.state = NETSERVER_UP; west.ping_ms = 168;
         west.online = 4; west.rooms = 1; west.waiting = 0; west.idle = 2; west.flags = NETSERVER_KOTH; west.version = 1;
+        sa.id = "sa"; sa.name = "South America"; sa.short_name = "S. AMERICA"; sa.state = NETSERVER_UP; sa.ping_ms = 196;
+        sa.online = 9; sa.rooms = 2; sa.waiting = 1; sa.idle = 3; sa.flags = NETSERVER_KOTH; sa.version = 1;
         G.servers[NETSERVER_EU] = eu;
         G.servers[NETSERVER_NA] = na;
         G.servers[NETSERVER_WEST] = west;
+        G.servers[NETSERVER_SA] = sa;
         G.server_cur = NETSERVER_EU;
         G.choice = NETCHOICE_AUTO;
         G.ranked = false;
@@ -6030,7 +6036,7 @@ void gallery_step()
         G.room_pings[0] = 38;
         snprintf(S.quick_room, sizeof(S.quick_room), "%s", G.room.code);
         S.alone_since = S.quick_since = now - 31000;
-        S.note = "Nobody here yet: moving to US East (112 ms), where 1 player is waiting for One on One.";
+        S.note = "Nobody here yet: moving to North America (Miami) (112 ms), where 1 player is waiting for One on One.";
         S.note_until = now + 60000;
     }
 }
@@ -6951,7 +6957,7 @@ bool draw_pages(ImVec2 display)
             to = netplay_lobby_address(address, sizeof(address)) ? netservers_index_of(address) : -1;
         }
         page_title(dl, f, "ONLINE");
-        glass(dl, f, 36, 104, 290, pending ? 96 : 76);
+        glass(dl, f, 36, 104, 290, pending ? 96 + 16 * (NETSERVER_COUNT - 3) : 76);
         std::string head = pending ? "Finding the nearest server..." :
                            to >= 0 ? std::string("Connecting to ") + sv[to].name + "..." : "Connecting...";
         text(dl, f, g_hand, 20, 54, 116, ORANGE, head.c_str(), LEFT, 1.0f, 265);
@@ -6967,7 +6973,7 @@ bool draw_pages(ImVec2 display)
         }
         door_panel(dl, f);
         door_text(dl, f, &tex("ui/online_icon.png"), "ONLINE", pending ? "CHOOSING A SERVER" : "CONNECTING",
-                  pending ? pad_text("Europe, US East or Asia: the one with the lowest ping. Change it any time with "
+                  pending ? pad_text("Europe, North America, Asia or South America: the one with the lowest ping. Change it any time with "
                                      "{x} in the online menu.").c_str()
                           : "To the FFNY Online server.");
         float hx = 54;

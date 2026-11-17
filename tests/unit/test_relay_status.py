@@ -12,6 +12,7 @@ if RELAY_SRC is None:
     pytest.skip(SKIP, allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[2]
+RULES_C = (ROOT / 'src/hooks/netplay_servers_rules.c').read_text(encoding='utf-8')
 SERVERS_C = (ROOT / 'src/hooks/netplay_servers.c').read_text(encoding='utf-8')
 SERVERS_H = (ROOT / 'src/hooks/netplay_servers.h').read_text(encoding='utf-8')
 NETPLAY_C = (ROOT / 'src/hooks/netplay.c').read_text(encoding='utf-8')
@@ -75,16 +76,30 @@ def test_room_ping_payload_is_its_own_type():
 
 
 def test_relays_setting_and_test_switches():
-    assert '"play.defjam.online:27777"' in SERVERS_C and '"na.defjam.online:27777"' in SERVERS_C
-    assert '"sg.defjam.online:27777", "5.223.88.150"' in SERVERS_C
-    for env in ('RECOMP_NETPLAY_SERVER_EU', 'RECOMP_NETPLAY_SERVER_NA', 'RECOMP_NETPLAY_SERVER_SG'):
-        assert env in SERVERS_C, env
-    # the session's own DNS fallback knows the third relay too
-    assert '"sg.defjam.online"' in NETPLAY_C and '"5.223.88.150"' in NETPLAY_C
+    # build 91: one table (netplay_servers_rules.c) names the relays, their fallback addresses and test switches
+    for row in ('"play.defjam.online:27777", "49.12.78.32", "RECOMP_NETPLAY_SERVER_EU"',
+                '"na2.defjam.online:27777", NETSERVER_NA2_FALLBACK_IP,',
+                '"sg2.defjam.online:27777", NETSERVER_SG2_FALLBACK_IP, "RECOMP_NETPLAY_SERVER_SG"',
+                '"sa.defjam.online:27777", "216.238.122.210", "RECOMP_NETPLAY_SERVER_SA"'):
+        assert row in RULES_C, row
+    assert 'netservers_def(i)' in SERVERS_C
+    # the session's own DNS fallback uses the same table
+    assert 'netservers_known_ip(host)' in NETPLAY_C
     # [online] server defaults to auto, and RECOMP_NETPLAY_SERVER still overrides it
     m = re.search(r'\{ "online", "server", RECOMP_SETTING_STRING, .*?"RECOMP_NETPLAY_SERVER".*?\}', SETTINGS_C, re.S)
     assert m and m.group(0).rstrip('} ').endswith('"auto"')
     assert 'RECOMP_TEST_SERVER_SWITCH' in NETPLAY_C
-    for param in ('NaRelayPort', 'WestRelayPort', 'Server', 'EuLagMs', 'NaLagMs', 'WestLagMs', 'SwitchTo'):
+    for param in ('NaRelayPort', 'WestRelayPort', 'SaRelayPort', 'Server', 'EuLagMs', 'NaLagMs', 'WestLagMs', 'SaLagMs',
+                  'SwitchTo'):
         assert re.search(r'\$%s\b' % param, HUB_TEST), param
     assert '0x24' in PROTOCOL_DOC and '`STATUS`' in PROTOCOL_DOC
+
+
+def test_relays_trailer_caps_bit_28():
+    """Build 91: CAPS bit 28 carries the pings to the relays beyond the first three; QUICK and RANKED add the
+    trailer only to a relay that answered it, and ROOMLIST asks for it with the same bit."""
+    assert re.search(r'#define CAPS_RELAYS\s+268435456u', NETPLAY_C)
+    assert 'CAPS_PINGSUM | CAPS_RELAYS |' in NETPLAY_C
+    assert NETPLAY_C.count('if (relay_has(CAPS_RELAYS))') == 2
+    assert 'req[22] = 4 | 16;' in SERVERS_C
+    assert 'netservers_get_more_pings(b + p, n - p, count, &pings[0][0])' in SERVERS_C

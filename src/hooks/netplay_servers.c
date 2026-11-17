@@ -17,14 +17,8 @@
 #include "recomp_settings.h"
 #include "pc_settings.h"
 
-static const struct {
-    const char *id, *name, *short_name, *address, *fallback_ip, *env;
-} k_relays[NETSERVER_COUNT] = {
-    { "eu", "Europe", "EU", "play.defjam.online:27777", "49.12.78.32", "RECOMP_NETPLAY_SERVER_EU" },
-    /* build 38: the North American relay of builds 30..37 is US East; its id stays "na" */
-    { "na", "US East", "US EAST", "na.defjam.online:27777", "5.161.206.134", "RECOMP_NETPLAY_SERVER_NA" },
-    { "sg", "Asia (Singapore)", "ASIA", "sg.defjam.online:27777", "5.223.88.150", "RECOMP_NETPLAY_SERVER_SG" },
-};
+/* The relays: the table in netplay_servers_rules.c (netservers_def). */
+#define k_relays(i) (*netservers_def(i))
 
 static const char *setting_server(char *buf, int size)
 {
@@ -40,12 +34,12 @@ enum NetServerChoice netservers_choice(void)
 
 const char *netservers_name(int index)
 {
-    return index >= 0 && index < NETSERVER_COUNT ? k_relays[index].name : "custom";
+    return index >= 0 && index < NETSERVER_COUNT ? k_relays(index).name : "custom";
 }
 
 const char *netservers_short(int index)
 {
-    return index >= 0 && index < NETSERVER_COUNT ? k_relays[index].short_name : "custom";
+    return index >= 0 && index < NETSERVER_COUNT ? k_relays(index).short_name : "custom";
 }
 
 #if defined(_WIN32)
@@ -81,13 +75,13 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     WSAStartup(MAKEWORD(2, 2), &wsa);
     P.pick = P.override = -1;
     for (i = 0; i < NETSERVER_COUNT; i++) {
-        const char *env = getenv(k_relays[i].env);
-        P.s[i].id = k_relays[i].id;
-        P.s[i].name = k_relays[i].name;
-        P.s[i].short_name = k_relays[i].short_name;
-        snprintf(P.s[i].address, sizeof(P.s[i].address), "%s", env && *env ? env : k_relays[i].address);
+        const char *env = getenv(k_relays(i).env);
+        P.s[i].id = k_relays(i).id;
+        P.s[i].name = k_relays(i).name;
+        P.s[i].short_name = k_relays(i).short_name;
+        snprintf(P.s[i].address, sizeof(P.s[i].address), "%s", env && *env ? env : k_relays(i).address);
         P.s[i].ping_ms = -1;
-        if (env && *env) fprintf(stderr, "[SERVERS] tests: %s is %s\n", k_relays[i].name, P.s[i].address);
+        if (env && *env) fprintf(stderr, "[SERVERS] tests: %s is %s\n", k_relays(i).name, P.s[i].address);
     }
     P.wake = CreateEventW(NULL, FALSE, FALSE, NULL);
     return TRUE;
@@ -128,8 +122,9 @@ static int resolve(int i, const char *address, struct sockaddr_in *out)
     if (getaddrinfo(host, port, &hints, &res) || !res) {
         char known[128], kport[16];
         res = NULL;
-        split(k_relays[i].address, known, sizeof(known), kport, sizeof(kport));
-        if (_stricmp(host, known) || getaddrinfo(k_relays[i].fallback_ip, port, &hints, &res) || !res) return -1;
+        split(k_relays(i).address, known, sizeof(known), kport, sizeof(kport));
+        if (_stricmp(host, known) || !k_relays(i).fallback_ip[0] ||   /* build 91: "" while not known yet */
+            getaddrinfo(k_relays(i).fallback_ip, port, &hints, &res) || !res) return -1;
     }
     memcpy(out, res->ai_addr, sizeof(*out));
     freeaddrinfo(res);
@@ -341,7 +336,7 @@ void netservers_use(int index)
     EnterCriticalSection(&g_cs);
     P.override = index;
     LeaveCriticalSection(&g_cs);
-    fprintf(stderr, "[SERVERS] this session: %s\n", k_relays[index].name);
+    fprintf(stderr, "[SERVERS] this session: %s\n", k_relays(index).name);
 }
 
 /* Automatic: the answering relay with the lowest ping; none answering: Europe. */
@@ -429,7 +424,7 @@ const char *netservers_address_wait(char *buf, int size, int wait_ms)
     ULONGLONG until = GetTickCount64() + (ULONGLONG)wait_ms;
     netservers_probe();
     while (!(a = netservers_address(buf, size)) && GetTickCount64() < until) Sleep(50);
-    return a ? a : (snprintf(buf, (size_t)size, "%s", k_relays[NETSERVER_EU].address), buf);
+    return a ? a : (snprintf(buf, (size_t)size, "%s", k_relays(NETSERVER_EU).address), buf);
 }
 
 int netservers_reconnect(const char *name)
@@ -507,7 +502,8 @@ static void list_round(void)
         req[18] = 0xFF;                 /* every match type */
         req[19] = 1;                    /* caps: King of the Hill rooms too */
         req[21] = 1;                    /* caps bit 16 (room rules): build 82 relays add each room's rules bits */
-        req[22] = 4;                    /* caps bit 26 (build 90, relay ping_sum.go): then each room's player's pings */
+        req[22] = 4 | 16;               /* caps bit 26 (build 90, relay ping_sum.go): then each room's player's pings;
+                                         * bit 28 (build 91): to the relays beyond the first three too */
         sendto(s, (const char *)req, (int)sizeof(req), 0, (const struct sockaddr *)&addr[i], sizeof(addr[i]));
         open++;
     }
@@ -550,10 +546,13 @@ static void list_round(void)
         if (at + count <= n)            /* build 82 relays: each room's FIGHTER RULES bits (the STANDARD tag) */
             for (k = 0; k < count; k++) list[k].rules = b[at + k] & NETPLAY_RULES_MASK;
         memset(pings, 0, sizeof(pings));
-        if (at + count + 2 * NETSERVER_COUNT * count <= n) { /* build 90 relays with the ping-sum switch on */
+        if (at + count + 2 * NETSERVER_LEGACY * count <= n) { /* build 90 relays with the ping-sum switch on */
             int p = at + count, j;
             for (k = 0; k < count; k++)
-                for (j = 0; j < NETSERVER_COUNT; j++, p += 2) pings[k][j] = rd16(b + p);
+                for (j = 0; j < NETSERVER_LEGACY; j++, p += 2) pings[k][j] = rd16(b + p);
+            /* build 91 relays: the pings to the relays beyond the first three (netservers_get_more_pings) */
+            if (netservers_get_more_pings(b + p, n - p, count, &pings[0][0]) < 0)
+                fprintf(stderr, "[SERVERS] %s: a short ROOMLIST pings trailer\n", P.s[who].name);
         }
         want[who] = 0;
         open--;
@@ -975,7 +974,7 @@ int netservers_ranked_move(const char *name)
     to = netservers_index_of(q.addr);
     if (to < 0 && netservers_connected() == -2) {
         /* a custom address (tests): one relay plays both sides, so a move never comes; refuse */
-        fprintf(stderr, "[SERVERS] move: ranked set %s on %s, not one of the three relays\n", q.code, q.addr);
+        fprintf(stderr, "[SERVERS] move: ranked set %s on %s, not one of the relays\n", q.code, q.addr);
         netplay_lobby_ranked_moved(0);
         return -1;
     }
@@ -1101,7 +1100,7 @@ void netservers_set_choice(enum NetServerChoice c) { (void)c; }
 void netservers_use(int index) { (void)index; }
 int netservers_current(void) { return NETSERVER_EU; }
 int netservers_reconsider(void) { return NETSERVER_EU; }
-const char *netservers_address(char *buf, int size) { snprintf(buf, (size_t)size, "%s", k_relays[0].address); return buf; }
+const char *netservers_address(char *buf, int size) { snprintf(buf, (size_t)size, "%s", k_relays(0).address); return buf; }
 const char *netservers_address_wait(char *buf, int size, int wait_ms) { (void)wait_ms; return netservers_address(buf, size); }
 int netservers_index_of(const char *address) { (void)address; return -1; }
 
