@@ -6989,8 +6989,10 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             fighter = online_random_fighter();
             fprintf(stderr, "[NETPLAY] tests: RANDOM fighter: %d (%s)\n", fighter, online_fighter_name(fighter));
         }
-        /* the relay lets only a client that announced King of the Hill into such a room */
-        for (i = 0; i < 50 && NETPLAY_IS_HILL(qmode) && N.relay_caps < 0; i++) Sleep(100);
+        /* the relay lets only a client that announced King of the Hill into such a room; build 91: every mode waits
+         * for the CAPS answer, since a QUICK sent before it carries no pings (its room is then listed without them
+         * and the other games fall back to the age rule instead of the ping sum) */
+        for (i = 0; i < 50 && N.relay_caps < 0; i++) Sleep(100);
         /* a created fighter (fighter 99): only once the relay keeps this player's record */
         for (i = 0; i < 100 && fighter == NETPLAY_CREATED_FIGHTER && !netplay_created_available(); i++) Sleep(100);
         if (fighter == NETPLAY_CREATED_FIGHTER)

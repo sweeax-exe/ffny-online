@@ -16,6 +16,7 @@
 #include "netplay_servers.h"
 #include "recomp_settings.h"
 #include "pc_settings.h"
+#include "rts.h"
 
 /* The relays: the table in netplay_servers_rules.c (netservers_def). */
 #define k_relays(i) (*netservers_def(i))
@@ -452,6 +453,7 @@ int netservers_reconnect(const char *name)
 #define ROOMLIST_EVERY  3000    /* ms between two asks of one relay */
 #define ROOMLIST_WAIT   1500    /* how long an ask waits for its answer */
 #define ROOMLIST_FRESH  10000   /* an older answer is not used */
+#define QUICK_LISTED_S  8       /* build 91: how long a quick room waits for its own relay to list it with its pings */
 #define LISTED_MAX      30
 #define MOVE_WAIT       15000   /* a join or quick match on another relay gives up after this */
 
@@ -512,6 +514,8 @@ static void list_round(void)
         req[21] = 1;                    /* caps bit 16 (room rules): build 82 relays add each room's rules bits */
         req[22] = 4 | 16;               /* caps bit 26 (build 90, relay ping_sum.go): then each room's player's pings;
                                          * bit 28 (build 91): to the relays beyond the first three too */
+        if (rts_access()) req[22] |= 1; /* caps bit 24 (build 91): Run the Streets rooms too, for a player who has the
+                                         * mode; the relay it is joined on checks the access itself */
         sendto(s, (const char *)req, (int)sizeof(req), 0, (const struct sockaddr *)&addr[i], sizeof(addr[i]));
         open++;
     }
@@ -924,7 +928,9 @@ int netservers_tick(int *mode)
     LeaveCriticalSection(&g_cs);
     if (!kind || netplay_state() != NETPLAY_LOBBY || !netplay_in_lobby() || cur != A.server) return 0;
     netplay_lobby_room(&r);
-    if (r.in_room || (NETPLAY_IS_HILL(A.mode) && netplay_lobby_caps() < 0)) return 0;
+    /* build 91: every move waits for the relay's CAPS answer (it comes within a round trip, or counts as none after
+     * the retries): a QUICK before it carries no pings, and the room it opens is listed without them */
+    if (r.in_room || netplay_lobby_caps() < 0) return 0;
     EnterCriticalSection(&g_cs);
     kind = A.kind;
     A.kind = 0;
@@ -1008,6 +1014,7 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
     int cur = netservers_connected(), my_age = alone_s, best = -1, best_n = 0, o, k, std_room, sum_on = 0, by_sum = 0;
     int mine[NETSERVER_COUNT] = { 0 };
     int original = netplay_original(mode);
+    int listed = 0, caps = netplay_lobby_caps();
     unsigned up = 0, scope, soon;
     enum NetServerChoice c = netservers_choice();
     ULONGLONG now;
@@ -1029,6 +1036,7 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
     if (code && R.got[cur] && now - R.got[cur] < ROOMLIST_FRESH)
         for (k = 0; k < R.count[cur]; k++)
             if (!strcmp(R.rooms[cur][k].code, code)) {
+                listed = 1;
                 my_age = R.age[cur][k] + (int)((now - R.got[cur]) / 1000);
                 /* build 90: the pings this room's relay lists for it, the numbers the other player's game reads */
                 if (R.rooms[cur][k].players == 1) {
@@ -1036,7 +1044,16 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
                     sum_on = 1;
                 }
             }
-    if (sum_on) {   /* build 91: the global pool (netservers_pool): every relay's waiting players, by ping sum */
+    /* build 91: a relay that lists pings (CAPS bit 26) has not listed this room yet (its list is asked every 3 s):
+     * wait for it, up to QUICK_LISTED_S, instead of moving by the age rule to wherever somebody waits; with the
+     * room's pings at hand the pool below picks the relay with the smallest ping sum */
+    if (code && *code && !listed && caps > 0 && ((unsigned)caps & (1u << 26)) && alone_s < QUICK_LISTED_S) {
+        LeaveCriticalSection(&g_cs);
+        return -1;
+    }
+    /* Run the Streets rooms hold up to four and are joined while they wait: the age rule below (the younger room's
+     * player moves to the older room), not the pool of pairs */
+    if (sum_on && mode != NETPLAY_MODE_RTS) {   /* build 91: the global pool (netservers_pool): every relay's waiting players, by ping sum */
         static NetQuickSeat seats[QUICK_POOL_MAX];
         int partner[QUICK_POOL_MAX], where[QUICK_POOL_MAX], n = 0, me = -1, known = 0, j;
         for (j = 0; j < NETSERVER_COUNT; j++) known |= mine[j] > 0;

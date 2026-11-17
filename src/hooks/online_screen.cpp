@@ -2602,7 +2602,7 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
         S.rts_setup_sel = 0;
         break;
     case 1:
-        if (!relay_ok) { say("This server does not run Run the Streets yet: pick another one with X in the online menu."); break; }
+        if (!relay_ok) { say("Run the Streets is not running on the server right now. Try again later."); break; }
         S.last_quick = NETPLAY_MODE_RTS;
         S.last_quick_max = NETPLAY_RTS_SLOTS;
         S.auto_moves = 0;
@@ -2614,7 +2614,7 @@ void draw_rts(ImDrawList *dl, const Frame &f, const Pad &pad)
         S.page = HUB;
         break;
     case 2: {   // build 87: through CREATE A ROOM's settings, with the time limit and the KO target
-        if (!relay_ok) { say("This server does not run Run the Streets yet: pick another one with X in the online menu."); break; }
+        if (!relay_ok) { say("Run the Streets is not running on the server right now. Try again later."); break; }
         rts_room_settings(S.settings, map.fe_id);
         S.settings_edit = false;
         S.settings_sel = 1;     // TIME LIMIT
