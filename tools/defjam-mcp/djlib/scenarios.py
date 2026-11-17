@@ -1902,6 +1902,14 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             timeout += int(maintenance) + 5
         s.relay(relay_port, rollback=(rollback != "off"), extra=relay_extra + _rb_relay_extra(rollback, rollback_modes))
         rot_relay_log = os.path.join(s.dir, "relay%d.err" % (len(s.relays) - 1))
+        # DJ_EXTRA_RELAYS (build 91, tests): more local relays of the relay table, "name:port[:lag ms]" separated by
+        # spaces (e.g. "sa:27912 dfw:27913:40"): each runs with the first relay's flags and its -relay-name; the
+        # copies reach them with --env RECOMP_NETPLAY_SERVER=auto and RECOMP_NETPLAY_SERVER_<NAME>=127.0.0.1:<port>
+        for spec in os.environ.get("DJ_EXTRA_RELAYS", "").split():
+            rname, rport, rlag = (spec.split(":") + ["", ""])[:3]
+            s.relay(int(rport), rollback=(rollback != "off"),
+                    extra=relay_extra + _rb_relay_extra(rollback, rollback_modes) + ["-relay-name", rname] +
+                          (["-test-lag", "%dms" % int(rlag)] if rlag else []))
         before = {}
         koth = mode == "koth"
         draft = bool(ranked) and "draft" in ranked

@@ -100,7 +100,7 @@ def test_relays_trailer_caps_bit_28():
     """Build 91: CAPS bit 28 carries the pings to the relays beyond the first three; QUICK and RANKED add the
     trailer only to a relay that answered it, and ROOMLIST asks for it with the same bit."""
     assert re.search(r'#define CAPS_RELAYS\s+268435456u', NETPLAY_C)
-    assert 'CAPS_PINGSUM | CAPS_RELAYS |' in NETPLAY_C
+    assert 'CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS |' in NETPLAY_C     # build 90's bit 27 between them
     assert NETPLAY_C.count('if (relay_has(CAPS_RELAYS))') == 2
     assert 'req[22] = 4 | 16;' in SERVERS_C
     assert 'netservers_get_more_pings(b + p, n - p, count, &pings[0][0])' in SERVERS_C
