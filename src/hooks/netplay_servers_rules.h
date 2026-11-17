@@ -57,6 +57,16 @@ unsigned netservers_scope(enum NetServerChoice c, int cur, int search_s, unsigne
  * QUICK_LAST_S (its player cannot come). */
 int netservers_should_move(int my_relay, int my_age, int their_relay, int their_age);
 
+/* Build 90, the relay by ping sum (server relay/ping_sum.go, owner 2026-11-17): the same two quick rooms, each
+ * with one player, when both rooms' relays listed their player's pings to every relay (mine, theirs: ms by
+ * relay index, 0 unknown). The two play on the relay with the smaller sum of their pings (a tie: the lower
+ * worse ping): 1 this player moves to their relay, 0 it stays (the other player comes). Both games work it out
+ * from the same listed numbers, so they agree. -1 when the sum does not decide: a ping unknown, the same
+ * relay, a full tie, or the other player has not come although it could have (its room QUICK_ALL_S +
+ * QUICK_SUM_WAIT_S old and this one listed QUICK_SUM_WAIT_S): then netservers_should_move decides. */
+#define QUICK_SUM_WAIT_S 12
+int netservers_sum_move(int my_relay, int my_age, const int *mine, int their_relay, int their_age, const int *theirs);
+
 /* ---- what players are shown (build 84) ---------------------------------------------------------
  * Players never see our relays' host or port: status lines say "the US East server". */
 

@@ -358,6 +358,10 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                  * with the players' numbers, START (WATCH, WATCHLATE) after the skins with the match's
                                  * numbers; the relay keeps one only where every member announced this bit and has the
                                  * room's content print (server docs/unlimited-fighters-online.md) */
+#define CAPS_PINGSUM  67108864u /* 1 << 26 (build 90), both ways: QUICK ends with this PC's pings to the three relays
+                                 * (u16 each, after the search's choice), and ROOMLIST lists each quick room's (server
+                                 * relay/ping_sum.go): two players meeting across relays play on the one with the
+                                 * smaller sum of their pings (netservers_sum_move) */
 /* build 86: a community fighter number (1000 and up; not the select grid's MORE cell) */
 static int is_number(int fighter) { return fighter >= FB_FIRST_LOGICAL && fighter != FB_MORE_ID; }
 /* Build 86: a community fighter beyond the places (fighter_banks.h, 1000 and up) on the wire: READY's byte is its
@@ -4720,7 +4724,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
-                              CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP | CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                              CAPS_PINGSUM | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
+                              CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -5669,12 +5674,24 @@ int netplay_spectating(void)
 
 void netplay_lobby_quick(int mode, int max)
 {
-    int most = room_max(mode), n, original = netplay_original(mode);
-    uint8_t b[5] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > most ? most : max) };
+    int most = room_max(mode), n, original = netplay_original(mode), i;
+    uint8_t b[11] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > most ? most : max) };
     n = 2 + put_ping(b + 2);
     if (relay_has(CAPS_ORIGINAL)) {     /* build 86: the search's choice after the ping (unknown: 0xFFFF) */
         if (n == 2) { b[2] = b[3] = 0xFF; n = 4; }
         b[n++] = (uint8_t)(original ? 1 : 0);
+        if (relay_has(CAPS_PINGSUM)) {  /* build 90: the pings to the three relays (0 unknown), listed with the room */
+            NetServerInfo sv[NETSERVER_COUNT];
+            int got = netservers_get(sv, NETSERVER_COUNT);
+            for (i = 0; i < 3; i++) {
+                int ms = i < got && sv[i].state == NETSERVER_UP && sv[i].ping_ms > 0 ? sv[i].ping_ms : 0;
+                if (ms > 0xFFFF) ms = 0xFFFF;
+                b[n++] = (uint8_t)ms;
+                b[n++] = (uint8_t)(ms >> 8);
+            }
+            fprintf(stderr, "[NETPLAY] quick match: pings eu %d, na %d, sg %d ms\n", b[n - 6] | b[n - 5] << 8,
+                    b[n - 4] | b[n - 3] << 8, b[n - 2] | b[n - 1] << 8);
+        }
     }
     fprintf(stderr, "[NETPLAY] quick match: mode %d, %s%s\n", mode, original ? "original fighters only" : "all fighters",
             relay_has(CAPS_ORIGINAL) ? "" : " (the relay takes no choice)");
