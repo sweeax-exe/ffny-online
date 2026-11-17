@@ -46,6 +46,13 @@ int rts_project(const RtsView *v, const float p[3], float *nx, float *ny);
  * it always goes to the edge. Returns 1 when it was moved (the point is off the screen). */
 int rts_clamp_to_box(float *x, float *y, float x0, float y0, float x1, float y1, int behind);
 
+/* Build 88, the minimap: a world point (wx, wz) seen from the local fighter (lx, lz) on a square radar of half size
+ * `half` (menu units) turned so the camera's forward (fx, fz on x/z, any length) points up; `scale` menu units per
+ * world unit. *mx right, *my down from the radar's middle. Returns 1 when the point lay beyond the rim and was put on
+ * it (along the line from the middle). */
+int rts_minimap_point(float fx, float fz, float lx, float lz, float wx, float wz, float scale, float half,
+                      float *mx, float *my);
+
 /* A chat bubble's opacity `age_ms` after its line arrived: up within 150 ms, full until 4.2 s, gone at 5 s. */
 #define RTS_BUBBLE_MS 5000
 float rts_bubble_alpha(unsigned age_ms);

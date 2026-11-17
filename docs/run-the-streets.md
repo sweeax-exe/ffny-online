@@ -133,6 +133,32 @@ CPU fighters keep the game's targeting. While engaged or locked a chevron hangs 
 white outline: engaged; `rts_social_ui.inc`). `[openworld] free_roam` (on), `roam_seconds` (3), `roam_speed`
 (100 %; `sub_001CAC40`'s speed argument while free); online always on, 3 s, 100 %. Log: `[OWROAM]`.
 
+## CPU fighters that stop fighting (build 88)
+
+On the big map two CPUs that target each other could stand face to face, idle or blocking (states 1/2), for the rest
+of a round; only a hit from someone else woke them (the game takes the attacker as the target on a hit). The game
+changes a target only when it is down (`sub_001C9610`) or on the target buttons (`sub_001C99B0`). `cpu_idle_step`
+(openworld.c): a CPU that stays within 6 units of one place in states 1/2 for 240 steps (4 s) takes the nearest
+other standing fighter as its target (`+0x00`). The count is in the Big Arena state (`cpu_ax/az/still`), so it is
+saved, loaded and checksummed. Log: `[BIGARENA] step N: CPU slot S stood still 4 s ...: target A -> B`.
+
+## Nameplates and the minimap (build 88)
+
+Overlay only (`rts_social_ui.inc`, from the view `rts_social.c` copies each frame; nothing reaches the fight):
+
+- **Nameplates:** the room name over every other fighter's head (CPUs: "CPU"), small, fading out from 30 to 40 m
+  from the camera's target; not over a fighter with a chat bubble; your own only with `nameplate_self`.
+- **Minimap:** a rounded square at the picture's right, below the HUD's top right bar and score; centred on your
+  fighter, up = the camera's forward (`rts_minimap_point`). The map's walls come from the collision planes (every
+  upright plane's two farthest corners, copied once per fight: `rts_social_walls`); humans are dots in their slot's
+  colour with their name (8 letters), CPUs small grey dots, fighters beyond the range small arrows on the rim, the
+  speaker by a player who talks; you are an arrow along your facing.
+- `[openworld] nameplates` (on), `nameplate_self` (off), `minimap` (on), `minimap_range` (70 m, 30..150).
+- **A real map image later:** the pack would carry a top-down picture (e.g. `minimap.png`, north up, 1024 px) and
+  its world rectangle (`"minimap": {"image": "minimap.png", "x0": .., "z0": .., "x1": .., "z1": ..}` in
+  bigarena.json), rendered by the map generator / Studio from the same scene; the minimap would draw it under the
+  dots, turned and scaled with the same `rts_minimap_point`.
+
 ## Test switches
 
 | Env | Effect |

@@ -25,6 +25,8 @@ typedef struct RtsSocialView {
     float pos[4][3];        /* the fighters' positions (feet) */
     uint32_t present;       /* fighter slots in the fight (bit per slot) */
     int local;              /* this PC's fighter, -1 none (a spectator or a watcher: the camera's target hears) */
+    uint32_t cpu;           /* build 88: the CPU fighters among them (record +0x937 bit 0) */
+    float yaw[4];           /* build 88: their facings (+0x54, degrees; forward is (sin, cos) on x/z) */
     int roam_mode;          /* the local fighter's free roam mode (OW_ROAM_*; free when free roam is off) */
     int lock_target;        /* its target while engaged or locked (the lock marker), -1 none */
     unsigned long long at_ms;   /* GetTickCount64 of the copy */
@@ -34,6 +36,10 @@ typedef struct RtsSocialView {
 void rts_social_camera(void);
 /* The last copy; 0 when none is fresh (no Run the Streets fight on screen). Any thread. */
 int rts_social_view(RtsSocialView *out);
+/* Build 88, the minimap: the map's walls as x/z segments (x0, z0, x1, z1), copied once per fight from the
+ * collision planes (every upright plane's two farthest corners). Returns how many (up to max); 0 none yet. */
+int rts_social_walls(float (*seg)[4], int max);
+
 /* 1 while a Run the Streets fight (or a test's Big Arena one) runs: the rules for voice and the overlays. */
 int rts_social_on(void);
 

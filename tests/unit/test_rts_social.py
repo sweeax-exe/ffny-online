@@ -42,6 +42,13 @@ int main(void)
     { float p[3] = { 0.0f, 60.0f, 0.0f }; k = rts_project(&v, p, &nx, &ny); printf("proj|up|%d|%.3f|%.3f\n", k, nx, ny); }
     { float p[3] = { 30.0f, 16.0f, 400.0f }; k = rts_project(&v, p, &nx, &ny); printf("proj|behind|%d|%.3f|%.3f\n", k, nx, ny); }
     { RtsView bad = v; bad.fov_deg = 0.0f; float p[3] = { 0, 0, 0 }; printf("proj|bad|%d\n", rts_project(&bad, p, &nx, &ny)); }
+    {   /* build 88 minimap: forward -z (stock), a point 100 east and 50 north at scale 0.2 lands right and up;
+         * forward +x turns it; 1000 east is clamped to the rim of a 40 half square */
+        float mx, my; int mr;
+        mr = rts_minimap_point(0, -1, 0, 0, 100, -50, 0.2f, 40, &mx, &my); printf("mm|stock|%d|%.1f|%.1f\n", mr, mx, my);
+        mr = rts_minimap_point(1, 0, 0, 0, 100, -50, 0.2f, 40, &mx, &my); printf("mm|east|%d|%.1f|%.1f\n", mr, mx, my);
+        mr = rts_minimap_point(0, -1, 10, 10, 1010, 10, 0.2f, 40, &mx, &my); printf("mm|rim|%d|%.1f|%.1f\n", mr, mx, my);
+    }
     x = 900; y = 240; k = rts_clamp_to_box(&x, &y, 0, 0, 640, 480, 0); printf("clamp|right|%d|%.1f|%.1f\n", k, x, y);
     x = 320; y = 200; k = rts_clamp_to_box(&x, &y, 0, 0, 640, 480, 0); printf("clamp|inside|%d|%.1f|%.1f\n", k, x, y);
     x = 320; y = 200; k = rts_clamp_to_box(&x, &y, 0, 0, 640, 480, 1); printf("clamp|behind|%d|%.1f|%.1f\n", k, x, y);
@@ -231,3 +238,12 @@ def test_window_messages_reach_the_fight_chat():
     dock = read('src/hooks/rts_social_ui.inc')
     assert 'if (rts_dock_live()) return RTS_CHAT_DOCK;' in dock
     assert 'ImGui::IsKeyPressed(ImGuiKey_Enter, false)' in dock
+
+
+def test_minimap_point(out):
+    # the stock camera looks north (-z): east is right, north is up (negative y)
+    assert [float(x) for x in out[('mm', 'stock')]] == [0, 20.0, -10.0]
+    # looking east (+x): the point 100 ahead is up, 50 north is to the left
+    assert [float(x) for x in out[('mm', 'east')]] == [0, -10.0, -20.0]
+    # 1000 east of the fighter: on the right rim
+    assert [float(x) for x in out[('mm', 'rim')]] == [1, 40.0, 0.0]

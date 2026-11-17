@@ -107,6 +107,53 @@ static void cam_log(const RtsSocialView *v)
             (double)v->fov_deg, (double)v->aspect, s, (double)fx, (double)fy, (double)hx, (double)hy);
 }
 
+/* The minimap's walls: the collision planes (0x3BF1B8 base, 0x3BF1C0 count, 0x48 bytes each: four x/y/z corners at
+ * +0x04, the normal at +0x34; the .cli layout of ffnystudio/collision.py), each upright one as the segment between
+ * its two corners farthest apart on x/z. Copied on the game thread when the planes change; the render thread reads
+ * the count last written (the segments before it are complete). Reading only. */
+#define WALLS_MAX 512
+static float s_walls[WALLS_MAX][4];
+static volatile LONG s_walls_n;
+static uint32_t s_walls_base, s_walls_count;
+
+static void walls_copy(void)
+{
+    uint32_t base = MEM32(0x003BF1B8u), n = MEM32(0x003BF1C0u), i;
+    int k = 0, a, b;
+    if (base == s_walls_base && n == s_walls_count) return;
+    s_walls_base = base;
+    s_walls_count = n;
+    InterlockedExchange(&s_walls_n, 0);
+    if (!base || !n || n > 100000u) return;
+    for (i = 0; i < n && k < WALLS_MAX; i++) {
+        uint32_t p = base + i * 0x48u;
+        float best = -1.0f;
+        int ba = 0, bb = 1;
+        if (fabsf(MEMF(p + 0x38u)) >= 0.7f) continue;      /* a floor or a ceiling */
+        for (a = 0; a < 4; a++)
+            for (b = a + 1; b < 4; b++) {
+                float dx = MEMF(p + 4u + 12u * (uint32_t)a) - MEMF(p + 4u + 12u * (uint32_t)b);
+                float dz = MEMF(p + 12u + 12u * (uint32_t)a) - MEMF(p + 12u + 12u * (uint32_t)b);
+                if (dx * dx + dz * dz > best) { best = dx * dx + dz * dz; ba = a; bb = b; }
+            }
+        if (!(best > 1.0f && best < 1e10f)) continue;
+        s_walls[k][0] = MEMF(p + 4u + 12u * (uint32_t)ba);
+        s_walls[k][1] = MEMF(p + 12u + 12u * (uint32_t)ba);
+        s_walls[k][2] = MEMF(p + 4u + 12u * (uint32_t)bb);
+        s_walls[k][3] = MEMF(p + 12u + 12u * (uint32_t)bb);
+        k++;
+    }
+    InterlockedExchange(&s_walls_n, k);
+}
+
+int rts_social_walls(float (*seg)[4], int max)
+{
+    int n = (int)s_walls_n, i;
+    if (n > max) n = max;
+    for (i = 0; i < n; i++) memcpy(seg[i], s_walls[i], sizeof seg[i]);
+    return n;
+}
+
 void rts_social_camera(void)
 {
     RtsSocialView *v;
@@ -135,7 +182,10 @@ void rts_social_camera(void)
         v->pos[s][0] = MEMF(r + 0x44u);
         v->pos[s][1] = MEMF(r + 0x48u);
         v->pos[s][2] = MEMF(r + 0x4Cu);
+        v->yaw[s] = MEMF(r + 0x54u);
+        if (MEM8(r + 0x937u) & 1u) v->cpu |= 1u << s;
     }
+    walls_copy();
     v->local = netplay_local_slot();
     if (v->local < 0 && !netplay_active()) v->local = 0;     /* offline: pad 0's fighter */
     if (v->local >= 4 || (v->local >= 0 && !(v->present & (1u << v->local)))) v->local = -1;

@@ -112,3 +112,21 @@ float rts_bubble_alpha(unsigned age_ms)
     if (age_ms > RTS_BUBBLE_MS - 800u) return (float)(RTS_BUBBLE_MS - age_ms) / 800.0f;
     return 1.0f;
 }
+
+int rts_minimap_point(float fx, float fz, float lx, float lz, float wx, float wz, float scale, float half,
+                      float *mx, float *my)
+{
+    float l = sqrtf(fx * fx + fz * fz), px = wx - lx, pz = wz - lz, right, up, m;
+    if (!(l > 1e-6f)) { fx = 0.0f; fz = -1.0f; l = 1.0f; }    /* the stock view: forward is -z */
+    fx /= l;
+    fz /= l;
+    right = px * -fz + pz * fx;                 /* the camera's right on x/z is (-fz, fx) */
+    up = px * fx + pz * fz;
+    *mx = right * scale;
+    *my = -up * scale;
+    m = fabsf(*mx) > fabsf(*my) ? fabsf(*mx) : fabsf(*my);
+    if (m <= half) return 0;
+    *mx *= half / m;
+    *my *= half / m;
+    return 1;
+}

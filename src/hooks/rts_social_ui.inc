@@ -249,6 +249,145 @@ float rts_bubble(ImDrawList *dl, const Frame &f, float ax, float ay, const RtsBu
 
 void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, const std::vector<RtsBubble> &lines, uint32_t talking);
 
+// ---- build 88: nameplates over the heads and the minimap ---------------------------------------------------------
+// Drawing only, from the view the game thread copied (rts_social.c): nothing reaches a fight's input or checksums.
+// [openworld] nameplates (on), nameplate_self (off), minimap (on), minimap_range (70 m).
+struct RtsOverlayCfg { bool plates = true, plate_self = false, map = true; float range_m = 70.0f; };
+RtsOverlayCfg rts_overlay_cfg()
+{
+    static RtsOverlayCfg c;
+    static unsigned long long at;
+    unsigned long long now = GetTickCount64();
+    if (!at || now - at > 2000) {           // the settings page may change them mid-fight
+        at = now;
+        c.plates = recomp_settings_get("openworld", "nameplates", 1) != 0;
+        c.plate_self = recomp_settings_get("openworld", "nameplate_self", 0) != 0;
+        c.map = recomp_settings_get("openworld", "minimap", 1) != 0;
+        c.range_m = (float)recomp_settings_get("openworld", "minimap_range", 70);
+    }
+    return c;
+}
+
+const ImU32 k_rts_slot_col[4] = { IM_COL32(235, 64, 64, 255), IM_COL32(70, 150, 255, 255), IM_COL32(90, 210, 90, 255),
+                                  IM_COL32(245, 215, 60, 255) };
+
+// A fighter's name for the overlays: CPU, the room's name online (the START's, netplay_match_info), else P1..P4.
+std::string rts_fighter_name(const RtsSocialView &v, int s, size_t max_chars = 24)
+{
+    std::string n;
+    if ((v.cpu >> s) & 1u) return "CPU";
+    NetVersus nv;
+    if (!gallery_on() && netplay_match_info(&nv) && s < nv.count && !nv.cpu[s] && nv.name[s][0]) n = nv.name[s];
+    else if (gallery_on()) { static const char *const k[4] = { "sweeax", "SaltySk", "Lil Schmoo", "P4" }; n = k[s]; }
+    else n = "P" + std::to_string(s + 1);
+    if (n.size() > max_chars) n = n.substr(0, max_chars);
+    return n;
+}
+
+// The nameplate over fighter s: small, fading from 30 m to gone at 40 m from the camera's target. Not while that
+// fighter has a bubble (the bubble names it), not for this PC's own fighter unless nameplate_self.
+void rts_nameplate(ImDrawList *dl, const Frame &f, const RtsView &rv, const RtsSocialView &v, int s, float px, float py,
+                   float pw, float ph)
+{
+    float dx = v.pos[s][0] - v.at[0], dz = v.pos[s][2] - v.at[2], m = sqrtf(dx * dx + dz * dz) / RTS_UNITS_PER_M;
+    float a = m <= 30.0f ? 1.0f : m >= 40.0f ? 0.0f : (40.0f - m) / 10.0f;
+    if (a <= 0.02f) return;
+    float p[3] = { v.pos[s][0], v.pos[s][1] + RTS_HEAD + 2.0f, v.pos[s][2] }, nx, ny;
+    if (rts_project(&rv, p, &nx, &ny) != 1 || nx < -1.0f || nx > 1.0f || ny < -1.0f || ny > 1.0f) return;
+    float sx = px + (nx * 0.5f + 0.5f) * pw, sy = py + (0.5f - ny * 0.5f) * ph;
+    float ax = (sx - f.o.x) / f.sx, ay = (sy - f.o.y) / f.sy;
+    bool cpu = (v.cpu >> s) & 1u;
+    std::string n = rts_fighter_name(v, s);
+    float w = text_width(f, g_hand, 9.0f, n.c_str()) + 8;
+    rect(dl, f, ax - w / 2, ay - 12, w, 11, with_alpha(IM_COL32(0, 0, 0, 255), 0.45f * a), 3);
+    if (!cpu) rect(dl, f, ax - w / 2, ay - 2, w, 1.2f, with_alpha(k_rts_slot_col[s], 0.9f * a), 0);
+    text(dl, f, g_hand, 9.0f, ax, ay - 12, with_alpha(cpu ? IM_COL32(190, 190, 190, 255) : CREAM, a), n.c_str(), CENTER, 0.6f);
+}
+
+// The minimap: a rounded square at the picture's right, below the HUD's top right bar and its score, centred on this PC's fighter and
+// turned so up is the camera's forward (the controls' up). The map's walls (rts_social_walls), every fighter as a dot
+// (humans in their slot's colour with their name, CPUs small and grey), this PC's own as an arrow along its facing,
+// fighters beyond the range on the rim as small arrows, the speaker by a player who talks.
+void rts_minimap(ImDrawList *dl, const Frame &f, const RtsSocialView &v, float right, float top, uint32_t talking)
+{
+    RtsOverlayCfg c = rts_overlay_cfg();
+    if (!c.map) return;
+    const float half = 48.0f;
+    float cx = right - half - 6, cy = top + half;
+    float x0 = cx - half, y0 = cy - half;
+    int me = v.local >= 0 && (v.present & (1u << v.local)) ? v.local : -1;
+    float lx = me >= 0 ? v.pos[me][0] : v.at[0], lz = me >= 0 ? v.pos[me][2] : v.at[2];
+    float fx = v.at[0] - v.eye[0], fz = v.at[2] - v.eye[2];
+    float scale = half / ((gallery_on() ? 25.0f : c.range_m) * RTS_UNITS_PER_M);
+    rect(dl, f, x0, y0, half * 2, half * 2, IM_COL32(8, 8, 12, 190), 9);
+    dl->PushClipRect(f.p(x0 + 1, y0 + 1), f.p(x0 + half * 2 - 1, y0 + half * 2 - 1), true);
+    static float walls[512][4];
+    int nw = gallery_on() ? 0 : rts_social_walls(walls, 512);
+    if (gallery_on()) {     // the gallery's sample block: four buildings around a crossing
+        static const float g[][4] = { { -300, -300, -60, -300 }, { -60, -300, -60, -60 }, { -60, -60, -300, -60 },
+                                      { 60, -300, 300, -300 }, { 60, -300, 60, -60 }, { 60, -60, 300, -60 },
+                                      { -300, 60, -60, 60 }, { -60, 60, -60, 300 }, { 60, 60, 300, 60 },
+                                      { 60, 60, 60, 300 } };
+        nw = (int)(sizeof g / sizeof g[0]);
+        memcpy(walls, g, sizeof g);
+    }
+    for (int i = 0; i < nw; i++) {
+        float ax, ay, bx, by;
+        rts_minimap_point(fx, fz, lx, lz, walls[i][0], walls[i][1], scale, 1e6f, &ax, &ay);
+        rts_minimap_point(fx, fz, lx, lz, walls[i][2], walls[i][3], scale, 1e6f, &bx, &by);
+        if ((fabsf(ax) > half * 3 && fabsf(bx) > half * 3) || (fabsf(ay) > half * 3 && fabsf(by) > half * 3)) continue;
+        dl->AddLine(f.p(cx + ax, cy + ay), f.p(cx + bx, cy + by), IM_COL32(175, 175, 190, 200), std::max(1.0f, 1.1f * f.s()));
+    }
+    dl->PopClipRect();
+    dl->AddRect(f.p(x0, y0), f.p(x0 + half * 2, y0 + half * 2), IM_COL32(255, 255, 255, 70), 9 * f.s(), 0,
+                std::max(1.0f, 1.0f * f.s()));
+    for (int pass = 0; pass < 2; pass++)        // CPUs first, the humans over them
+        for (int s = 0; s < 4; s++) {
+            if (!(v.present & (1u << s)) || s == me) continue;
+            bool cpu = (v.cpu >> s) & 1u;
+            if ((pass == 0) != cpu) continue;
+            float mx, my;
+            int rim = rts_minimap_point(fx, fz, lx, lz, v.pos[s][0], v.pos[s][2], scale, half - 3, &mx, &my);
+            ImU32 col = cpu ? IM_COL32(150, 150, 150, 230) : k_rts_slot_col[s];
+            if (rim) {
+                float l = sqrtf(mx * mx + my * my), ux = mx / l, uy = my / l, tx = cx + mx, ty = cy + my;
+                ImVec2 tri[3] = { f.p(tx + ux * 3.5f, ty + uy * 3.5f), f.p(tx - uy * 2.6f - ux * 2, ty + ux * 2.6f - uy * 2),
+                                  f.p(tx + uy * 2.6f - ux * 2, ty - ux * 2.6f - uy * 2) };
+                dl->AddConvexPolyFilled(tri, 3, col);
+            } else {
+                dl->AddCircleFilled(f.p(cx + mx, cy + my), (cpu ? 1.7f : 2.6f) * f.s(), col, 10);
+                if (!cpu) dl->AddCircle(f.p(cx + mx, cy + my), 2.6f * f.s(), IM_COL32(0, 0, 0, 200), 10, 0.8f * f.s());
+            }
+            if (!cpu) {
+                std::string n = rts_fighter_name(v, s, 8);
+                float tx = cx + mx + 4, ty = cy + my - 5;
+                if (tx + text_width(f, g_hand, 7.5f, n.c_str()) > x0 + half * 2 + 30) tx = cx + mx - 4 - text_width(f, g_hand, 7.5f, n.c_str());
+                text(dl, f, g_hand, 7.5f, tx, ty, with_alpha(CREAM, 0.95f), n.c_str(), LEFT, 0.6f);
+                if ((talking >> s) & 1u) rts_speaker(dl, f, cx + mx, cy + my - 8, 3.6f, 1.0f);
+            }
+        }
+    {   // this PC's fighter: an arrow along its facing
+        float ux = 0, uy = -1;
+        if (me >= 0) {
+            float r = v.yaw[me] * 0.0174532925f, ax, ay;
+            rts_minimap_point(fx, fz, 0, 0, sinf(r), cosf(r), 1.0f, 1e6f, &ax, &ay);
+            float l = sqrtf(ax * ax + ay * ay);
+            if (l > 1e-4f) { ux = ax / l; uy = ay / l; }
+        }
+        ImVec2 tri[3] = { f.p(cx + ux * 5, cy + uy * 5), f.p(cx - ux * 3.5f - uy * 3.5f, cy - uy * 3.5f + ux * 3.5f),
+                          f.p(cx - ux * 3.5f + uy * 3.5f, cy - uy * 3.5f - ux * 3.5f) };
+        dl->AddConvexPolyFilled(tri, 3, me >= 0 ? k_rts_slot_col[me] : WHITE);
+        dl->AddPolyline(tri, 3, IM_COL32(255, 255, 255, 230), ImDrawFlags_Closed, std::max(1.0f, 0.9f * f.s()));
+        if (me >= 0 && ((talking >> me) & 1u)) rts_speaker(dl, f, cx + 7, cy - 7, 3.6f, 1.0f);
+    }
+    static bool logged;
+    if (!logged && !gallery_on()) {
+        logged = true;
+        fprintf(stderr, "[RTSMAP] minimap on: %d wall segments, range %.0f m, at %.0f,%.0f (menu units)\n", nw,
+                (double)c.range_m, (double)cx, (double)cy);
+    }
+}
+
 // The bubbles and speaker icons; returns false when nothing is to be drawn.
 bool rts_world_draw_impl(ImDrawList *dl, ImVec2 display, bool draw)
 {
@@ -267,7 +406,8 @@ bool rts_world_draw_impl(ImDrawList *dl, ImVec2 display, bool draw)
     }
     std::vector<RtsBubble> lines = rts_bubbles(v);
     uint32_t talking = rts_talking(v);
-    if (lines.empty() && !talking && v.lock_target < 0) return false;
+    if (lines.empty() && !talking && v.lock_target < 0 && !rts_overlay_cfg().plates && !rts_overlay_cfg().map)
+        return false;
     if (!draw) return true;
     rts_world_paint(dl, display, v, lines, talking);
     return true;
@@ -328,6 +468,18 @@ void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, con
             }
             fprintf(stderr, "%s\n", line);
         }
+    }
+    {   // build 88: nameplates (not over a fighter with a bubble now) and the minimap
+        RtsOverlayCfg oc = rts_overlay_cfg();
+        if (oc.plates)
+            for (int oi = 0; oi < 4; oi++) {
+                int s = order[oi];
+                bool bubble = false;
+                for (auto &b : lines) if (b.fighter == s) bubble = true;
+                if (!(v.present & (1u << s)) || bubble || (s == v.local && !oc.plate_self)) continue;
+                rts_nameplate(dl, f, rv, v, s, px, py, pw, ph);
+            }
+        rts_minimap(dl, f, v, hi_x + 8, lo_y + 104, talking);     // below the HUD's top right bar and score
     }
     // Free roam: the lock marker, a chevron pointing down over the local fighter's target (solid red when locked
     // on purpose, a thin white outline while just engaged); under the bubbles
@@ -925,6 +1077,8 @@ void rts_gallery_page(ImDrawList *dl, ImVec2 display)
         memcpy(v.pos, pos, sizeof pos);
         v.present = 0xF;
         v.local = 0;
+        v.cpu = 1u << 3;                    // build 88: fighter 3 is a CPU (grey on the minimap, "CPU" plate)
+        v.yaw[0] = 200.0f;
         v.roam_mode = OW_ROAM_LOCKED;      // free roam's lock marker over fighter 1
         v.lock_target = 1;
         unsigned long long now = GetTickCount64();

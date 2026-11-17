@@ -255,6 +255,14 @@ static RecompSetting g_display_settings[] = {
     { "openworld", "blazin", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_OW_BLAZIN", 0,
       "Big Arena: BLAZIN' moves. Off for now: a BLAZIN' on a map built with FFNY Studio crashes the game after the "
       "fight (being fixed)." },
+    { "openworld", "nameplates", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OW_NAMEPLATES", 0,
+      "Run the Streets: the players' names over the fighters' heads (CPUs as CPU), fading out beyond 30 m." },
+    { "openworld", "nameplate_self", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_OW_NAMEPLATE_SELF", 0,
+      "Run the Streets: your own name over your fighter too." },
+    { "openworld", "minimap", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OW_MINIMAP", 0,
+      "Run the Streets: the minimap in the top right (the streets' walls, every fighter, up is where the camera looks)." },
+    { "openworld", "minimap_range", RECOMP_SETTING_INT, 70, 30, 150, NULL, "RECOMP_OW_MINIMAP_RANGE", 0,
+      "Run the Streets: how far the minimap reaches, in metres from your fighter to its edge." },
     { "openworld", "free_roam", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OW_FREE_ROAM", 0,
       "Run the Streets / Big Arena: out of combat your fighter walks freely and faces where it goes; a fight button "
       "next to someone, a hit, or White/Black (or a right-stick flick) to lock on brings the fight stance back. "
