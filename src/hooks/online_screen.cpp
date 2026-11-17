@@ -940,6 +940,7 @@ struct State {
     bool rts_setup = false;         // build 87: VS CPU's set-up (CPU fighters, TIME LIMIT, KO TARGET) is open
     int rts_setup_sel = 0;
     int hub_sel = 0, rooms_sel = 0, settings_sel = 0, fighter_sel = 0, fighter_top = 0, vote_sel = 0, voice_sel = 0;
+    bool p2p_ask = false;           // VOICE: DIRECT CONNECTION turned on, its IP notice waits for A (draw_voice)
     int quick_mode = 0;             // index into online_modes
     int stats_page = 0;             // MY STATS: the leaderboard page
     NetRoomSettings settings;
@@ -4754,7 +4755,28 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         for (int i = 0; i < r.player_count && n_others < NETPLAY_ROOM_SLOTS; i++)
             if (r.players[i].slot != r.you) others[n_others++] = i;
     static const char *const pads[] = { "OFF", "BACK", "LEFT STICK CLICK", "RIGHT STICK CLICK", "D-PAD UP", "D-PAD DOWN" };
-    const int fixed = 6, rows = fixed + n_others + 1;           // the settings, QUICK CHAT LINES, the players, BACK
+    // the settings, QUICK CHAT LINES, DIRECT CONNECTION (P2P, build 90), the players, BACK
+    const int fixed = 7, rows = fixed + n_others + 1;
+    int p2p = recomp_settings_get("online", "p2p_direct", 0);
+    if (S.p2p_ask) {
+        // turning the direct connection on: the notice first (docs/research/p2p-optin.md); A turns it on
+        page_title(dl, f, "VOICE CHAT");
+        door_panel(dl, f);
+        door_text(dl, f, &tex("ui/online_icon.png"), "P2P", "YOUR IP ADDRESS IS SHOWN",
+                  "The other player's game gets your IP address, and you get theirs: someone could use it to attack your connection (DDoS). Used in 1v1 fights only when both players turn it on.");
+        text(dl, f, g_hand, 15, 185, 200, ORANGE, "Turn on the direct connection?", CENTER, 0.8f, 270);
+        float hx = 54, hy = 398;
+        hx += hint(dl, f, hx, hy, "a", "TURN ON");
+        hint(dl, f, hx, hy, "b", "CANCEL");
+        if (pad.a) {
+            recomp_settings_set("online", "p2p_direct", 1);
+            S.p2p_ask = false;
+            say("Direct connection on: used from your next 1v1 match when the other player has it on too.");
+        } else if (pad.b) {
+            S.p2p_ask = false;
+        }
+        return;
+    }
     if (S.voice_sel >= rows) S.voice_sel = rows - 1;
     if (pad.up) S.voice_sel = (S.voice_sel + rows - 1) % rows;
     if (pad.down) S.voice_sel = (S.voice_sel + 1) % rows;
@@ -4770,6 +4792,10 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         case 3: recomp_settings_set("online", "voice_auto_level", agc ? 0 : 1); break;
         case 4: recomp_settings_set("online", "voice_pad", (vpad + step + 6) % 6); break;
         case 5: break;      // QUICK CHAT LINES: A opens its page
+        case 6:             // DIRECT CONNECTION: on asks first (the IP notice), off at once
+            if (p2p) recomp_settings_set("online", "p2p_direct", 0);
+            else S.p2p_ask = true;
+            break;
         default:
             if (S.voice_sel - fixed < n_others) {
                 int slot = r.players[others[S.voice_sel - fixed]].slot;
@@ -4781,6 +4807,7 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         mic = recomp_settings_get("online", "voice_mic_volume", 100);
         agc = recomp_settings_get("online", "voice_auto_level", 1);
         vpad = recomp_settings_get("online", "voice_pad", 0);
+        p2p = recomp_settings_get("online", "p2p_direct", 0);
     }
 
     page_title(dl, f, "VOICE CHAT");
@@ -4818,6 +4845,9 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         } else if (i == 5) {
             snprintf(label, sizeof(label), "QUICK CHAT");
             snprintf(value, sizeof(value), "THE EIGHT LINES");
+        } else if (i == 6) {
+            snprintf(label, sizeof(label), "DIRECT CONNECTION (P2P), 1V1");
+            snprintf(value, sizeof(value), p2p ? "ON  (WHEN BOTH ALLOW IT)" : "OFF  (THROUGH THE SERVER)");
         } else {
             const NetRoomPlayer &p = r.players[others[i - fixed]];
             int pv = voice_player_volume(p.slot);
@@ -4851,6 +4881,11 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
                                                        : "Your microphone's level shows here in a room.");
     }
     if (pad.a && S.voice_sel == 5) { S.page = QUICK; return; }
+    if (pad.a && S.voice_sel == 6) {     // A toggles DIRECT CONNECTION too (on: the notice first)
+        if (p2p) recomp_settings_set("online", "p2p_direct", 0);
+        else S.p2p_ask = true;
+        return;
+    }
     if ((pad.a && S.voice_sel == rows - 1) || pad.b) S.page = HUB;
 }
 
@@ -5264,7 +5299,7 @@ void gallery_step()
                                          "players-all",
                                          // build 33: the grid at Eric Sermon, O.E, Santos and Teck
                                          "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "vote", "hill",
-                                         "up", "watch", "room-voice", "match",
+                                         "up", "watch", "room-voice", "voice-p2p", "match",
                                          // build 67: the CPU level (CREATE A ROOM's row, the room's line)
                                          "create-cpu", "room-cpu",
                                          // build 68: room rules (CREATE A ROOM's rows, the room's line and its ping
@@ -5513,6 +5548,7 @@ void gallery_step()
         if (locker_gallery(p)) return;
         if (ranked_gallery(p)) return;
     }
+    S.p2p_ask = false;      // only the voice-p2p page shows the direct connection's notice
     if (p == "connecting") { G.state = NETPLAY_CONNECTING; G.in_lobby = false; }
     else if (p == "offline") { G.state = NETPLAY_FAILED; G.in_lobby = false; }
     else if (p == "hub") { S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; }
@@ -5981,7 +6017,8 @@ void gallery_step()
         G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 10);
         snprintf(G.room.settings.name, sizeof(G.room.settings.name), "BXK v RHR");
         crew_sample(p, G.room);
-    } else if (p == "room-voice") { S.page = VOICE; S.voice_sel = 6; G.room = sample_room(0, 4, 4); }
+    } else if (p == "room-voice") { S.page = VOICE; S.voice_sel = 7; G.room = sample_room(0, 4, 4); }
+    else if (p == "voice-p2p") { S.page = VOICE; S.voice_sel = 6; S.p2p_ask = true; }
     else if (p == "match") { G.state = NETPLAY_CONNECTED; G.room = sample_room(0, 2, 2); G.room.phase = 2; G.versus.count = 0; }
     else if (p.compare(0, 6, "versus") == 0) {
         G.state = NETPLAY_CONNECTED;

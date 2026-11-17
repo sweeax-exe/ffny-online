@@ -258,6 +258,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "input_delay", "Input delay (steps)"},
         {"online", "rollback", "Rollback netcode (beta)"},
         {"online", "crossplay_android", "Play with Android players"},
+        {"online", "p2p_direct", "Direct connection (P2P) in 1v1 fights"},
         {"gameplay", "offline_countdown", "Start countdown in offline fights"},
         {"online", "voice", "Voice chat"},
         {"online", "voice_key", "Push-to-talk key"},
@@ -892,6 +893,38 @@ static void crossplay_setting()
     settings_group("online", { "crossplay_android" });
     ImGui::TextDisabled("Off by default. When on, you can be matched with players of the Android port once a "
                         "build is cleared for cross-play. Ranked never mixes platforms.");
+}
+
+// Build 90: the direct connection (P2P, docs/research/p2p-optin.md), the player's own opt-in, off by default.
+// Turning it on shows the IP notice first and needs "Turn on"; off is at once.
+static void p2p_setting()
+{
+    RecompSetting *s = find("online", "p2p_direct");
+    if (!s) return;
+    static bool ask;
+    bool locked = s->source == RECOMP_SETTING_FROM_ENV, v = (locked ? s->value : s->stored) != 0;
+    if (locked) ImGui::BeginDisabled();
+    if (ImGui::Checkbox(friendly("online", "p2p_direct"), &v)) {
+        if (v) ask = true;
+        else recomp_settings_set("online", "p2p_direct", 0);
+    }
+    if (locked) ImGui::EndDisabled();
+    ImGui::TextDisabled("Off by default. Used only when the other player has it on too. The other player's game then "
+                        "sees your IP address.");
+    if (ask) ImGui::OpenPopup("Turn on the direct connection?");
+    if (ImGui::BeginPopupModal("Turn on the direct connection?", &ask, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30);
+        ImGui::TextUnformatted("A direct connection sends the fight's inputs straight between your PC and the other player's, which can be faster than through the server. The other player's game then gets your IP address (and you get theirs). Someone could use it to attack your internet connection (a DDoS), so only turn it on when you accept that. It is used only in 1v1 fights and only when the other player has it on too; if the direct path fails, the fight goes on through the server.");
+        ImGui::PopTextWrapPos();
+        if (ImGui::Button("Turn on")) {
+            recomp_settings_set("online", "p2p_direct", 1);
+            ask = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) { ask = false; ImGui::CloseCurrentPopup(); }
+        ImGui::EndPopup();
+    }
 }
 
 // ---- window size ----------------------------------------------------------------------------------------
@@ -1921,6 +1954,7 @@ static void page_online(UiMode mode)
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });
     crossplay_setting();
+    p2p_setting();
     ImGui::Spacing();
     ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.1f);
     ImGui::TextColored(k_gold, "Online play is in the game: choose ONLINE in the main menu.");
@@ -2848,6 +2882,7 @@ static void page_basics()
         ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
     }
     crossplay_setting();
+    p2p_setting();
     ImGui::SeparatorText("Gameplay");
     offline_countdown_setting();
     ImGui::SeparatorText("HD textures");

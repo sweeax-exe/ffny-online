@@ -108,6 +108,7 @@ The plan built from these is in [docs/widescreen](../widescreen/README.md), whic
 - [macOS and Linux port survey](macos-linux-port-survey.md)
 - [Deterministic math for cross-platform lockstep](deterministic-math.md): which floating point differs between hosts, the fixed libm layer and its x86-64/arm64 proof
 - [Cross-play with Android: the PC player's opt-in](crossplay-optin.md): the setting, the CAPS bit and the relay pairing rule (design)
+- [Direct connection (P2P), opt-in](p2p-optin.md): the relay as rendezvous, a second direct copy of the inputs, the IP notice, switches and tests (design, build 90)
 
 ## Performance
 

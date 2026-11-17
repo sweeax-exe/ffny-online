@@ -147,6 +147,7 @@ Tests only: `RECOMP_TEST_PERFECT=1` makes every round with a winner a perfect, a
 | Key | Default | Meaning |
 |---|---|---|
 | `crossplay_android` | `false` | Build 80: lets quick match, rooms and King of the Hill pair you with players of the community Android port (by contatg), only in builds that FFNY Online has cleared for cross-play (the relay's switch). Off: you only meet PC players. Ranked never mixes platforms. Sent to the relay as CAPS bit 21 when you go online; takes effect the next time you go online. Launcher: Online, "Play with Android players". |
+| `p2p_direct` | `false` | Build 90: direct connection (P2P) in 1v1 online fights, used only when the other player has it on too and the relay allows it (CAPS bit 27, its `p2p-allowed` switch). The fight's inputs then also go straight between the two PCs; the relay still carries everything, so a failed direct path changes nothing but a short line. The other player's game gets your IP address (DDoS risk); turning it on asks first. Read at each match. Env `RECOMP_P2P_DIRECT`. Launcher: Online, "Direct connection (P2P) in 1v1 fights"; in the game: online menu, VOICE CHAT. `docs/research/p2p-optin.md`. |
 
 ## [gamepad]
 
