@@ -368,6 +368,10 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
         ImGui::SetCursorScreenPos(ImVec2(lx, y));
         ImGui::Dummy(ImVec2(1, 1));
     }
+    // community content is "always on" only while it is in offline play too; with the switch off it is online only
+    const bool comm_off = recomp_settings_get("content", "community_offline", 1) == 0;
+    const char *k_always = comm_off ? "ONLINE ONLY" : "ALWAYS ON";
+    const ImVec4 k_always_ink = comm_off ? k_gold : k_green;
     int community = 0, mine = 0;
     for (int i = 0; i < count; i++) (packs[i].local ? mine : community)++;
     if (community == 0) {
@@ -413,13 +417,14 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
                         k_gold);
             char line[400];
             snprintf(line, sizeof line, "%s  \xC2\xB7  v%s  \xC2\xB7  %.1f MB%s%s",
-                     ncontent == nm ? "always on, part of online matching" :
-                     ncontent ? "new content always on, the rest your choice" : "your choice per mod",
+                     ncontent == nm ? (comm_off ? "off for offline play, on for online matching" : "always on, part of online matching") :
+                     ncontent ? (comm_off ? "new content off for offline play, the rest your choice"
+                                          : "new content always on, the rest your choice") : "your choice per mod",
                      p.version, (double)bytes / 1048576.0, p.authors[0] ? "  \xC2\xB7  by " : "", p.authors);
             ld->AddText(ImGui::GetFont(), 13 * s, ImVec2(ra.x + 18 * s, ra.y + 36 * s), col(ImVec4(0.80f, 0.80f, 0.82f, 1)), line);
             ld->PopClipRect();
             if (ncontent == nm)
-                ld->AddText(bold_font(), 14 * s, ImVec2(rb.x - 114 * s, ra.y + 29 * s), col(k_green), "ALWAYS ON");
+                ld->AddText(bold_font(), 14 * s, ImVec2(rb.x - (comm_off ? 128 : 114) * s, ra.y + 29 * s), col(k_always_ink), k_always);
             // its mods: name and type; a replacement (a language, a look) keeps its own switch
             float iy = ra.y + 64 * s;
             for (int m = 0; m < nm; m++) {
@@ -445,7 +450,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
                                      on ? GLASS_RED : GLASS_PLAIN, bold_font(), 13 * s, !busy))
                         toggle(q, on);
                 } else if (ncontent != nm) {
-                    ld->AddText(bold_font(), 12 * s, ImVec2(rb.x - 104 * s, iy + 8 * s), col(k_green), "ALWAYS ON");
+                    ld->AddText(bold_font(), 12 * s, ImVec2(rb.x - (comm_off ? 114 : 104) * s, iy + 8 * s), col(k_always_ink), k_always);
                 }
                 iy += row_h;
             }
@@ -468,7 +473,8 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
         ld->PopClipRect();
         char line[400];
         snprintf(line, sizeof line, "%s  \xC2\xB7  %s  \xC2\xB7  v%s  \xC2\xB7  %.1f MB%s%s", (p.skin ? "Skin" : content_type_label(p.type)),
-                 content ? "always on, part of online matching" : "your choice", p.version, (double)p.bytes / 1048576.0,
+                 content ? (comm_off ? "off for offline play, on for online matching" : "always on, part of online matching")
+                         : "your choice", p.version, (double)p.bytes / 1048576.0,
                  p.authors[0] ? "  \xC2\xB7  by " : "", p.authors);
         ld->PushClipRect(ra, ImVec2(rb.x - 150 * s, rb.y), true);
         ld->AddText(ImGui::GetFont(), 13 * s, ImVec2(ra.x + 18 * s, ra.y + 34 * s), col(ImVec4(0.80f, 0.80f, 0.82f, 1)), line);
@@ -488,7 +494,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
         snprintf(id, sizeof id, "##content_switch_%s", p.id);
         ImVec2 ba(rb.x - 136 * s, ra.y + 20 * s);
         if (content) {
-            ld->AddText(bold_font(), 14 * s, ImVec2(ba.x + 22 * s, ba.y + 9 * s), col(k_green), "ALWAYS ON");
+            ld->AddText(bold_font(), 14 * s, ImVec2(ba.x + (comm_off ? 8 : 22) * s, ba.y + 9 * s), col(k_always_ink), k_always);
         } else if (glass_button(id, on ? "On" : "Off", ba, ImVec2(118 * s, 36 * s), s, on ? GLASS_RED : GLASS_PLAIN,
                                 bold_font(), 14.5f * s, !busy)) {
             toggle(p, on);

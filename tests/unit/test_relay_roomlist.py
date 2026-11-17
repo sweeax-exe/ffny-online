@@ -88,7 +88,7 @@ def test_staged_search_rule_and_gallery():
     assert c_define(RULES_H, 'QUICK_ALL_S') == 30
     assert c_define(RULES_H, 'QUICK_LAST_S') == 40
     assert 'if (their_age > my_age + 2 || (their_age >= my_age - 2 && my_relay > their_relay)) return 1;' in RULES_C
-    assert 'if (netservers_should_move(cur, my_age, o, age)) n += x->players;' in SERVERS_C
+    assert '} else if (netservers_should_move(cur, my_age, o, age)) {' in SERVERS_C     # build 90: after the ping-sum rule
     assert 'scope = netservers_scope(c, cur, search_s, up);' in SERVERS_C
     # the screens and the test thread both run it, for every choice but a custom address
     assert 'netservers_quick_move(S.last_quick, search_s, alone_s, r.code, &waiting, &ping, &scope)' in SCREEN
