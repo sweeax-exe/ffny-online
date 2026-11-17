@@ -3,6 +3,14 @@
 with a test account, never the live service and never a player's save.
 
     python tools/defjam-mcp/dj.py lock run -- python scripts/test-cloud-saves.py --server <server repo> [--out DIR]
+        [--real-save DIR]
+
+A game-made profile for --real-save (checked 2026-11-17: profile "AAA" went up, came back into an empty root and
+the game listed it, "0% of Story completed"): the harness's intro route with virtual pads, keeping its save:
+
+    DEFJAM_HARNESS_SNAPSHOT_SAVE=<DIR> python tools/defjam-mcp/dj.py lock run -- python scripts/harness.py run intro
+        --env RECOMP_SKIP_INTRO=1 --env RECOMP_INPUT_HOST=1 --env RECOMP_INPUT_IGNORE_FOCUS=1 --env RECOMP_PAD_HOST=1
+        --env RECOMP_INPUT_NO_PADS=1 --env RECOMP_PAD_SCRIPT_VIRTUAL=1
 
 Builds the account service from the private server repository (relay/cmd/accounts; --accounts-exe takes a built
 one instead) and starts it on 127.0.0.1 with -test-accounts and -cloud-saves-dir in the run folder. Then it starts
