@@ -542,6 +542,15 @@ gets, after the listed pings, the count once and E u16 pings per listed room. A 
 keeps those it knows. The relay tells the matchmaker which relays each queued game knows, so a ranked set never
 moves a build before 91 to a relay it does not know (South America, Miami); those relays run with `-min-build 91`.
 
+### The global quick-match pool (build 91)
+
+Players never pick a relay. The hub connects to the one with the lowest ping; the room list and the players
+list show every relay's. A quick match reads every relay's ROOMLIST (with the listed pings, so every relay needs
+`relay-by-ping-sum` or `-ping-sum`) and pairs the one-player quick rooms of the same fighter choice
+(`netservers_pool`, `src/hooks/netplay_servers_rules.c`): smallest ping sum first, on the relay with the smallest
+sum whose worse ping is within the limit of the longer wait (120 ms; 180 from 10 s; 250 from 20 s; any from 40 s).
+Both players go to that relay and QUICK there. Ranked play is one pool already (the account service's matchmaker).
+
 ## Who is online without a session (all servers)
 
 Since build 47 the PLAYERS ONLINE page lists every relay's players when the player chose **All
