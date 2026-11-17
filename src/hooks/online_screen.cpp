@@ -1994,7 +1994,6 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
         bool all = k == ALL_ROW;
         const NetServerInfo *si = k && !all ? &s[k - 1] : nullptr;
         const char *title = k == 0 ? "AUTOMATIC" : all ? "ALL SERVERS" : si->name;
-        text(dl, f, g_title, 21, x + 14, y + 3, sel ? CREAM : with_alpha(GREY, 0.9f), upper(title).c_str(), LEFT, 1.5f);
         // right: the ping, large, in its colour, with its bars (OFFLINE in red for a relay that did not answer)
         char big[32] = "", sub[96] = "";
         ImU32 tone = GREY;
@@ -2032,6 +2031,14 @@ void draw_servers(ImDrawList *dl, const Frame &f, const Pad &pad)
         float bx = x + w - (bars ? 30 : 8);
         if (bars) ping_bars(dl, f, bx + 6, y + 6, 14, ms);
         text(dl, f, g_title, 17, bx - (bars ? 4 : 0), y + 3, sel ? tone : with_alpha(tone, 0.75f), big, RIGHT, 1.2f);
+        {   // the name, left of the ping: smaller where it would run into it ("ASIA (SINGAPORE)" next to "168 MS"); the
+            // widths are in canvas units, so this holds at every resolution and with a stretched picture
+            std::string name = upper(title);
+            float room = bx - (bars ? 4 : 0) - text_width(f, g_title, 17, big) - 12 - (x + 14);
+            float size = std::max(12.0f, fit_size(f, g_title, 21, name.c_str(), room));
+            text(dl, f, g_title, size, x + 14, y + 3 + (21 - size) * 0.5f, sel ? CREAM : with_alpha(GREY, 0.9f), name.c_str(), LEFT,
+                 1.5f * size / 21);
+        }
         text(dl, f, g_hand, 13, x + 16, y + 24, sel ? ORANGE : with_alpha(ORANGE, 0.6f), sub, LEFT, 1.0f);
         // the tags: the player's choice, and where the hub is now (with All: its relay, on that relay's row)
         float tx = x + 16;
