@@ -99,6 +99,8 @@ the direct ones, so the direct path is the shorter one as on the internet):
 | lockstep, only copy 0 on | copy 0: WAIT for 10 s, then "the other player has it off"; copy 1: "off in this game's settings"; the relay exchanged nothing; 10 checksums equal |
 | rollback d4, lag 60, cut 8 s into the fight on copy 0, 2 x 30 s fights | ~490 entries first direct, then lost after 1016 ms on both copies, the toast, the rest through the relay; 70 checksums equal, KO in both |
 | lockstep d7, lag 60, cut on copy 1 | the same; "fight waits: 0 of 100 ms or more mid-fight"; 70 checksums equal |
+| the same rollback cut run after the move to CAPS bit 27 (relay answers `09DFE697`) | ~481 entries first direct, then the relay; 70 checksums equal |
+| unit tests (`-m "not slow"`) | 1840 passed, 43 skipped |
 | gallery (180 pages) | the VOICE CHAT row and the notice page (`voice-p2p`) render; no faults |
 
 ## 5. Not in this build
