@@ -626,6 +626,65 @@ bool write_state(const fs::path &file, const SyncState &s)
     return !ec;
 }
 
+// ---- this PC's label ----
+
+std::string clean_label(const std::string &text)
+{
+    std::string out;
+    for (unsigned char c : text) {
+        if (out.size() >= 24) break;
+        if (isalnum(c) || c == ' ' || c == '.' || c == '-' || c == '_') {
+            if (c == ' ' && (out.empty() || out.back() == ' ')) continue;
+            out.push_back((char)c);
+        }
+    }
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+}
+
+std::string new_label(uint32_t random)
+{
+    static const char k[] = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";     // no 0/O, 1/I
+    std::string out = "PC ";
+    for (int i = 0; i < 4; i++) {
+        out.push_back(k[random % 32]);
+        random /= 32;
+    }
+    return out;
+}
+
+std::string read_label(const fs::path &file)
+{
+    std::ifstream in(file);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.compare(0, 6, "label=")) {
+            std::string l = clean_label(line.substr(6));
+            if (l == line.substr(6)) return l;
+        }
+    }
+    return "";
+}
+
+bool write_label(const fs::path &file, const std::string &label)
+{
+    std::string l = clean_label(label);
+    if (l.empty()) return false;
+    fs::path tmp = file;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        if (!out) return false;
+        out << "# FFNY Online cloud saves: this PC's name in your cloud's list (rename it on Saves, Cloud)\nlabel=" << l
+            << "\n";
+        if (!out) return false;
+    }
+    std::error_code ec;
+    fs::rename(tmp, file, ec);
+    return !ec;
+}
+
 // ---- what to do ----
 
 Decision decide(const std::string &local, bool local_profiles, const std::string &base, const std::string &cloud)

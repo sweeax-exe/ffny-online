@@ -78,7 +78,7 @@ Options file, 64 KiB each at most), as one zip with a content hash; never the pa
   launcher skipped, the waiting process sends it before it ends). Nothing goes when the saves did not change
   (the hash), when there is no profile, or with `[cloud] saves = 0` (*Keep my saves in the cloud* on the page).
 - **Versions:** the service keeps the newest 5 per account. The **CLOUD** view beside **BACKUPS** lists them
-  (when, the PC's name, profiles, size); **Restore** fetches one, checks it again (the zip, every name and
+  (when, the PC's label, profiles, size; the label is a random one each PC makes once, such as *PC 7K2F*, kept in <data folder>/cloud-pc.txt and renamable there with **Rename**, never the Windows computer name); **Restore** fetches one, checks it again (the zip, every name and
   file kind, the hash) and asks, listing per profile what changes. It keeps the cloud version as a backup
   (*From your cloud saves*) and then restores it as Restore does, so the saves before it are a backup too
   (*Before a restore*). Profiles put aside in the cloud come into `save/aside` where that folder is free; the

@@ -88,6 +88,13 @@ int main(int argc, char **argv) {
         std::cout << "status=" << text_field(text, "status") << "\n";
         return 0;
     }
+    if (cmd == "label") {
+        std::cout << "[" << clean_label(argv[2]) << "]\n";
+        std::cout << new_label((uint32_t)strtoul(argv[3], nullptr, 10)) << "\n";
+        bool ok = write_label(fs::u8path(argv[4]), argv[2]);
+        std::cout << ok << " [" << read_label(fs::u8path(argv[4])) << "]\n";
+        return 0;
+    }
     if (cmd == "state") {
         SyncState s; s.account = argv[3]; s.hash = arg(argv[4]); s.version = argv[5]; s.when = 1763380800;
         bool ok = write_state(fs::u8path(argv[2]), s);
@@ -378,3 +385,16 @@ def test_listing_and_state(tool, tmp_path):
     assert 'status=conflict' in run(tool, 'listing', tmp_path / 'up.txt')
     assert run(tool, 'state', tmp_path / 'cloud-saves.txt', '12', h1, 'v9').strip() == '1 12 %s v9 1763380800' % h1
     assert run(tool, 'state', tmp_path / 'cloud-saves.txt', '12', '-', '').split()[:2] == ['1', '12']
+
+
+def test_pc_label(tool, tmp_path):
+    """The PC's name in the cloud's list: a random label, cleaned like the service cleans it; never the computer name."""
+    out = run(tool, 'label', '  Masa\'s  "Gaming" PC <3 !! and much more text ', 12345, tmp_path / 'cloud-pc.txt').splitlines()
+    assert out[0] == '[Masas Gaming PC 3 and mu]'
+    assert out[1].startswith('PC ') and len(out[1]) == 7 and not set(out[1][3:]) & set('01OI')
+    assert out[2] == '1 [Masas Gaming PC 3 and mu]'
+    assert 'label=Masas Gaming PC 3 and mu' in (tmp_path / 'cloud-pc.txt').read_text()
+    labels = {run(tool, 'label', 'x', n, tmp_path / 'l.txt').splitlines()[1] for n in (0, 1, 31, 32, 99999, 2 ** 31 + 5)}
+    assert len(labels) == 6
+    out = run(tool, 'label', '!!!', 1, tmp_path / 'empty.txt').splitlines()
+    assert out[0] == '[]' and out[2] == '0 []'          # nothing usable: not written

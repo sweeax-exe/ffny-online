@@ -7,7 +7,7 @@ with a test account, never the live service and never a player's save.
 Builds the account service from the private server repository (relay/cmd/accounts; --accounts-exe takes a built
 one instead) and starts it on 127.0.0.1 with -test-accounts and -cloud-saves-dir in the run folder. Then it starts
 build/win-x64-release/defjam_recomp.exe as the launcher several times (RECOMP_ACCOUNT_SERVER and
-RECOMP_ACCOUNT_TEST_TOKEN sign it in to that service, RECOMP_CLOUD_PC names the PC, RECOMP_WINDOW_SHOT keeps the
+RECOMP_ACCOUNT_TEST_TOKEN sign it in to that service; each PC makes its own random label, RECOMP_WINDOW_SHOT keeps the
 window's own picture): PC A uploads at start; PC B, empty, is offered the cloud save and restores it; both change
 and B meets a conflict and keeps both; A sees newer saves, looks at the restore confirm and restores; the setting
 off sends nothing; Delete my cloud saves empties the cloud. Each step prints one JSON line; receipts.json sums them
@@ -186,6 +186,10 @@ def main():
             faults.append(name)
         print(json.dumps(r), flush=True)
 
+    def label(data):
+        f = data / 'cloud-pc.txt'
+        return next((l[6:] for l in f.read_text().splitlines() if l.startswith('label=')), '') if f.is_file() else ''
+
     def slow(spec):
         """Frame numbers times SLOW: the requests to the service run beside the frames."""
         return ';'.join('%d:%s' % (int(s.split(':', 1)[0]) * SLOW, s.split(':', 1)[1]) for s in spec.split(';') if s)
@@ -198,7 +202,7 @@ def main():
         e.update(SAFE)
         e.update(DEFJAM_DATA=str(data), DEFJAM_LOG_DIR=str(data / 'logs'), RECOMP_SETTINGS=str(data / 'settings.ini'),
                  RECOMP_ACCOUNT_SERVER='127.0.0.1:%d' % svc.port, RECOMP_ACCOUNT_TEST_TOKEN=svc.token,
-                 RECOMP_NETPLAY_NAME='Cloud Tester', RECOMP_CLOUD_PC=pc,
+                 RECOMP_NETPLAY_NAME='Cloud Tester',
                  # the one-time notices (the cloud question among them) without the 8 s wait for the update check
                  RECOMP_TEST_NOTICE='cloud',
                  RECOMP_WINDOW_SHOT=str(shot), RECOMP_WINDOW_SHOT_FRAME=str(frame))
@@ -233,7 +237,8 @@ def main():
     # 1. PC A: the first start uploads
     text, png = launcher(A, 'PC-A', '01-a-home-upload')
     v = svc.versions()
-    step('A uploads at start', png and v and len(v) == 1 and v[0][7] == 'PC-A' and v[0][5] == '3' and
+    step('A uploads at start', png and v and len(v) == 1 and re.fullmatch(r'PC [2-9A-HJ-NP-Z]{4}', label(A)) and
+         v[0][7] == label(A) and v[0][5] == '3' and
          '[CLOUD] check: 0 cloud version(s)' in text and 'HTTP 201' in text, png, v)
     text, png = launcher(A, 'PC-A', '02-a-cloud-in-sync', page='saves-cloud', frame=120)
     step('A in sync, the cloud view', png and ': in-sync' in text, png)
@@ -261,11 +266,13 @@ def main():
     step('B: a conflict is asked', png and 'start-up question: conflict' in text and len(svc.versions()) == 2, png)
     b_mine = save_tree(B / 'save')
     time.sleep(UPLOAD_GAP)
+    text, png = launcher(B, 'PC-B', '06b-b-rename', page='saves-cloud', steps='40:cloud:;60:cloud-name:Living room', frame=100)
+    step('B renames its PC label', png and label(B) == 'Living room' and label(A) != label(B), png, label(B))
     text, png = launcher(B, 'PC-B', '07-b-kept-both', prompt='120:keep', frame=220)
     v = svc.versions()
     kept = [d for n, r, d in backups(B) if r == 'cloud']
     newest_cloud_backup = save_tree(kept[0]) if kept else {}
-    step('B keeps both', v and len(v) == 3 and v[0][7] == 'PC-B' and save_tree(B / 'save') == b_mine and
+    step('B keeps both', v and len(v) == 3 and v[0][7] == 'Living room' and save_tree(B / 'save') == b_mine and
          newest_cloud_backup == {k: h for k, h in a_second.items()}, png, [x[0] for x in v or []])
 
     # 4. A: the cloud is newer: asked; on the Saves page Restore lists what changes and restores after OK
@@ -292,7 +299,7 @@ def main():
     # 6. On again: the change goes up; then Delete my cloud saves (asks, then empties the cloud)
     text, png = launcher(A, 'PC-A', '13-a-delete-confirm', page='saves-cloud', steps='20:cloud-on;90:cloud-delete', frame=140)
     v = svc.versions()
-    step('on again uploads; delete asks', png and v and len(v) == 4 and v[0][7] == 'PC-A', png)
+    step('on again uploads; delete asks', png and v and len(v) == 4 and v[0][7] == label(A), png)
     text, png = launcher(A, 'PC-A', '14-a-deleted', page='saves-cloud', steps='60:cloud-delete;90:cloud-delete-ok', frame=160)
     step('delete my cloud saves', png and svc.versions() == [] and (A / 'save' / 'UserData').is_dir(), png)
     status, _ = svc.get('/api/saves/v1')
@@ -307,7 +314,7 @@ def main():
         time.sleep(UPLOAD_GAP)
         text, png = launcher(C, 'PC-C', '15-c-real-upload')
         v = svc.versions()
-        step('C uploads a game-made profile', v and len(v) == 1 and v[0][7] == 'PC-C', png, v)
+        step('C uploads a game-made profile', v and len(v) == 1 and v[0][7] == label(C), png, v)
         text, png = launcher(D, 'PC-D', '16-d-real-restored', prompt='120:restore', frame=200)
         step('D restores it', save_tree(D / 'save') == save_tree(C / 'save') and 'answered: restore (done)' in text, png,
              'boot it: python tools/defjam-mcp/dj.py scenario boot --goto story --fixture ' + str(D))

@@ -105,6 +105,16 @@ struct SyncState
 SyncState read_state(const fs::path &file);
 bool write_state(const fs::path &file, const SyncState &state);
 
+// ---- this PC's label: <data>/cloud-pc.txt ----
+// What the cloud's list says a version came from. Never the Windows computer name (it often holds a real
+// name): a short random label made once ("PC 7K2F"), which the player can rename on the CLOUD view.
+// clean_label keeps letters, digits, space, dot, dash and underscore, 24 at most, trimmed ("" when nothing is
+// left); the service keeps the same characters (cloudPC).
+std::string clean_label(const std::string &text);
+std::string new_label(uint32_t random);         // "PC " and 4 of 23456789ABCDEFGHJKLMNPQRSTUVWXYZ
+std::string read_label(const fs::path &file);   // "" none or not usable
+bool write_label(const fs::path &file, const std::string &label);
+
 // ---- what to do ----
 enum class Decision {
     NOTHING,        // nothing to send and nothing to offer

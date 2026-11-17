@@ -26,7 +26,8 @@
 // version and then asks, listing what it changes; Sync now; Delete my cloud saves (asks); the setting. The
 // launcher's start-up question (a new PC, newer cloud saves, a conflict) is cloud_start_prompt. Test steps:
 // cloud (the CLOUD view), cloud-sync, cloud-restore:<row>, cloud-restore-ok, cloud-off, cloud-on, cloud-delete,
-// cloud-delete-ok; RECOMP_LAUNCHER_PAGE=saves-cloud opens the page on it; RECOMP_TEST_CLOUD_PROMPT=
+// cloud-delete-ok, cloud-name:<label> (this PC's name in the list: a random label made once, never the Windows
+// computer name; Rename on the view); RECOMP_LAUNCHER_PAGE=saves-cloud opens the page on it; RECOMP_TEST_CLOUD_PROMPT=
 // "<frame>:restore|restore-ok|keep|later" answers the start-up question.
 
 #include "pc_launcher_saves.h"
@@ -63,6 +64,8 @@ struct SavesPage
     // Cloud saves: the CLOUD view, a Restore waiting for its fetch, the two confirms
     bool cloud_tab = false, cloud_fetching = false, open_cloud_restore = false, open_cloud_delete = false;
     bool want_cloud_restore_ok = false, want_cloud_delete_ok = false, cloud_delete_off = false;
+    bool renaming = false;                          // this PC's label in the cloud's list, being renamed
+    char label_text[32] = "";
 };
 SavesPage g_sp;
 
@@ -328,6 +331,29 @@ void saves_cloud_view(float w, float h, float s)
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("While you are signed in: your saves go up when the game closes (the newest 5 are kept), "
                           "and a new PC offers them. See Privacy.");
+    // this PC's name in the list: a random label made once, never the Windows computer name; renamable
+    if (!g_sp.renaming) {
+        std::string label = pccloud::pc_label();
+        ImGui::TextColored(ImVec4(1, 1, 1, 0.7f), "This PC is \"%s\" in the list.", label.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Rename")) {
+            snprintf(g_sp.label_text, sizeof(g_sp.label_text), "%s", label.c_str());
+            g_sp.renaming = true;
+        }
+    } else {
+        ImGui::SetNextItemWidth(rw * 0.5f);
+        bool enter = ImGui::InputText("##pc_label", g_sp.label_text, sizeof(g_sp.label_text),
+                                      ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Save") || enter) {
+            std::string why;
+            bool ok = pccloud::set_pc_label(g_sp.label_text, &why);
+            saves_say(why, ok ? 1 : 2);
+            if (ok) g_sp.renaming = false;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Cancel")) g_sp.renaming = false;
+    }
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + rw);
     std::string line = !st.busy.empty() ? st.busy + "..." : st.line;
     ImVec4 c = st.phase == pccloud::Phase::FAILED ? k_gold
@@ -502,6 +528,10 @@ void saves_test_steps()
             g_sp.open_cloud_delete = true;
         } else if (s.action == "cloud-delete-ok") {
             g_sp.want_cloud_delete_ok = true;
+        } else if (s.action == "cloud-name") {
+            std::string why;
+            bool ok = pccloud::set_pc_label(s.arg, &why);
+            saves_say(why, ok ? 1 : 2);
         }
     }
 }

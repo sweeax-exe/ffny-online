@@ -18,6 +18,7 @@ extern "C" {
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <random>
 #include <thread>
 
 #if defined(_WIN32)
@@ -53,17 +54,20 @@ void set(Phase phase, const std::string &line, const std::string &busy = "")
     g_status.busy = busy;
 }
 
+cloud::fs::path label_file() { return cloud::fs::u8path(pcui::folder_path(pcui::Folder::Data)) / "cloud-pc.txt"; }
+
+// This PC's label in the cloud's list: never the Windows computer name (it often holds a real name), but a
+// short random one made once and kept in the data folder ("PC 7K2F"); the player can rename it.
 std::string pc_name()
 {
-    const char *t = getenv("RECOMP_CLOUD_PC");      // tests: two "PCs" on one machine
-    if (t && *t) return t;
-#if defined(_WIN32)
-    char name[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD n = sizeof(name);
-    if (GetComputerNameA(name, &n)) return std::string(name, n);
-#endif
-    const char *e = getenv("COMPUTERNAME");
-    return e ? e : "";
+    static std::mutex m;
+    std::lock_guard<std::mutex> lock(m);
+    std::string l = cloud::read_label(label_file());
+    if (!l.empty()) return l;
+    std::random_device rd;
+    l = cloud::new_label((uint32_t)rd());
+    cloud::write_label(label_file(), l);
+    return l;
 }
 
 // The service's error line of a text answer, or a plain one for the status.
@@ -309,6 +313,24 @@ Status status()
 }
 
 bool enabled() { return recomp_settings_get("cloud", "saves", 1) != 0; }
+
+std::string pc_label() { return pc_name(); }
+
+bool set_pc_label(const std::string &text, std::string *why)
+{
+    std::string l = cloud::clean_label(text);
+    if (l.empty()) {
+        if (why) *why = "A PC name needs letters or digits (space, dot, dash and underscore too, 24 at most).";
+        return false;
+    }
+    if (!cloud::write_label(label_file(), l)) {
+        if (why) *why = "The name could not be saved in the data folder.";
+        return false;
+    }
+    log_line("this PC is now \"%s\" in the cloud's list", l);
+    if (why) *why = "This PC is \"" + l + "\" in your cloud's list from the next upload on.";
+    return true;
+}
 
 void set_enabled(bool on)
 {

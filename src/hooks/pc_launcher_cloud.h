@@ -11,9 +11,9 @@
 // restore always backs up the PC's saves first; "Keep this PC's saves" keeps the cloud's newest as a local
 // backup before this PC's go up, so both are kept. Nothing is restored or overwritten without the player.
 //
-// Tests: RECOMP_ACCOUNT_SERVER + RECOMP_ACCOUNT_TEST_TOKEN (a local account service), RECOMP_CLOUD_PC names the
-// PC, RECOMP_TEST_SAVES steps cloud, cloud-sync, cloud-restore:<row>, cloud-restore-ok, cloud-keep, cloud-off,
-// cloud-on, cloud-delete, cloud-delete-ok (pc_launcher_saves.inc), RECOMP_LAUNCHER_PAGE=saves-cloud.
+// Tests: RECOMP_ACCOUNT_SERVER + RECOMP_ACCOUNT_TEST_TOKEN (a local account service), RECOMP_TEST_SAVES steps
+// cloud, cloud-sync, cloud-restore:<row>, cloud-restore-ok, cloud-off, cloud-on, cloud-delete, cloud-delete-ok,
+// cloud-name:<label> (pc_launcher_saves.inc), RECOMP_LAUNCHER_PAGE=saves-cloud.
 #pragma once
 #include "cloud_saves.h"
 
@@ -48,6 +48,10 @@ Status status();
 
 bool enabled();
 void set_enabled(bool on);
+// This PC's label in the cloud's list (<data>/cloud-pc.txt, made once at random, "PC 7K2F"; never the Windows
+// computer name) and its rename on the CLOUD view. *why: for the player.
+std::string pc_label();
+bool set_pc_label(const std::string &text, std::string *why);
 
 // The start check (once per run) and Sync now: list, hash, decide; UPLOAD goes up. In the background.
 void check(bool from_start);
