@@ -111,5 +111,5 @@ def test_hub_wiring():
     assert '!(S.page == FIGHTERS && S.fsearch_on)' in screen
     fighters = screen.split('void draw_fighters(', 1)[1].split('// ---- the room ----', 1)[0]
     assert 'S.fsearch_on && pad.keys' in fighters and 'fighter_name_matches' in fighters
-    assert 'fighter_letter_jump' in fighters and 'pad.lt || pad.rt' in fighters
+    # build 90: LT/RT switch CHOOSE FIGHTER's tabs (test_fighter_tabs_native.py); the letter jump stays tested above
     assert "const_cast<Pad &>(pad).b = false" in fighters

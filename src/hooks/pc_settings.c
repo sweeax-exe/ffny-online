@@ -93,6 +93,9 @@ static RecompSetting g_display_settings[] = {
     { "online", "fighter_skin", RECOMP_SETTING_INT, 0, 0, 15, NULL, NULL, 0,
       "The community skin of that fighter you play online (0 its own look, 1.. its skins in the catalogue's order; "
       "build 85); chosen in the room's CHOOSE A LOOK window." },
+    { "online", "fighter_tab", RECOMP_SETTING_INT, 0, 0, 2, NULL, NULL, 0,
+      "The tab CHOOSE FIGHTER opens on: 0 FFNY (the game's fighters), 1 Community, 2 Created (your Story-mode "
+      "fighters); the last one you chose (build 90). LT/RT switch tabs." },
     { "online", "created", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Which of your Story-mode fighters you play online when you pick a created fighter: its save, as "
       "user ID folder/name; chosen in the room. Empty: the newest.", "" },

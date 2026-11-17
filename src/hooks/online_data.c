@@ -85,13 +85,20 @@ static int field(const char *from, const char *to, const char *tag, char *out, i
     return 1;
 }
 
+/* fighter.xml's style codes ("Doc (MAR)") and their names, in the order CHOOSE FIGHTER's style filter offers them */
+static const char *const k_styles[][2] = {
+    { "STF", "Street fighting" },
+    { "KIC", "Kickboxing" },
+    { "MAR", "Martial arts" },
+    { "WRE", "Wrestling" },
+    { "SUB", "Submissions" },
+};
+#define STYLE_COUNT ((int)(sizeof(k_styles) / sizeof(k_styles[0])))
+
 static const char *style_name(const char *code)
 {
-    if (!strcmp(code, "STF")) return "Street fighting";
-    if (!strcmp(code, "MAR")) return "Martial arts";
-    if (!strcmp(code, "KIC")) return "Kickboxing";
-    if (!strcmp(code, "WRE")) return "Wrestling";
-    if (!strcmp(code, "SUB")) return "Submissions";
+    int i;
+    for (i = 0; i < STYLE_COUNT; i++) if (!strcmp(code, k_styles[i][0])) return k_styles[i][1];
     return NULL;
 }
 
@@ -234,6 +241,31 @@ static void load(void)
 #endif
 
 int online_fighters(const OnlineFighter **out) { load(); *out = g_fighters; return g_fighter_count; }
+
+/* Build 90: the styles the dump's fighters have (a style no offered fighter has is left out) */
+int online_styles(const char *const **out)
+{
+    static const char *list[STYLE_COUNT];
+    static int count = -1;
+    if (count < 0) {
+        int i, k, n = 0;
+        load();
+        for (i = 0; i < STYLE_COUNT; i++)
+            for (k = 0; k < g_fighter_count; k++)
+                if (g_fighters[k].style == k_styles[i][1]) { list[n++] = k_styles[i][1]; break; }
+        count = n;
+    }
+    *out = list;
+    return count;
+}
+
+const char *online_fighter_style(int id)
+{
+    int k;
+    load();
+    for (k = 0; k < g_fighter_count; k++) if (g_fighters[k].id == id) return g_fighters[k].style;
+    return "";
+}
 
 /* The new fighters of the database the game reads (new_fighters.c: Character rows with a front-end ID of
  * a new fighter's place, a content pack's), named by their row and styled as their template. Kept apart from

@@ -46,6 +46,10 @@ typedef struct OnlineMode {
 int online_fighters(const OnlineFighter **out);
 int online_venues(const OnlineVenue **out);
 int online_modes(const OnlineMode **out);
+/* Build 90: the fighting styles the dump's fighters have ("Street fighting", ...; fighter.xml's codes), in the order
+ * CHOOSE FIGHTER's style filter cycles them, and one stock fighter's style by Battle-mode ID ("" if none or unknown). */
+int online_styles(const char *const **out);
+const char *online_fighter_style(int id);
 
 /* The new fighters (their places, new_fighter_places.h; content packs; new_fighters.h): offered in the hub's fighter
  * list, never as CPU places, random picks or in drafts. */
