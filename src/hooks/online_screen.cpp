@@ -3374,11 +3374,24 @@ bool community_numbers_here(const NetRoom &r)
     if (ranked_room(r, &ri) || tset_room(r, &t) || crew_room(r, &cb)) return false;
     return (r.settings.fighter_rules & (NETPLAY_RULES_NO_CREATED | NETPLAY_RULES_STANDARD)) == 0;
 }
+int fighter_style_bits(int id);     // below
 const std::vector<OnlineFighter> &grid_fighters()
 {
     static std::vector<OnlineFighter> list;
     static std::vector<std::string> styles;
+    static std::map<int, std::string> row_styles;     // build 90: a fighter's styles from its row ("A / B")
     list = roster();
+    for (OnlineFighter &o : list) {
+        int bits = fighter_style_bits(o.id);
+        if (bits <= 0) continue;
+        auto it = row_styles.find(o.id);
+        if (it == row_styles.end()) {
+            char names[96];
+            online_style_names(bits, names, sizeof(names));
+            it = row_styles.emplace(o.id, std::string(names)).first;
+        }
+        o.style = it->second.c_str();
+    }
     NetRoom r;
     lobby_room(&r);
     // build 86: a room for original fighters only (STANDARD ONLY) shows no community fighters at all
@@ -3419,7 +3432,8 @@ const std::vector<OnlineFighter> &grid_fighters()
             OnlineFighter o{};
             o.id = e->id;
             snprintf(o.name, sizeof(o.name), "%s", e->name);
-            const char *tpl = online_fighter_style(online_fighter_id(e->template_fe_id));
+            char tpl[96];
+            online_style_names(fighter_style_bits(e->id), tpl, sizeof(tpl));
             shelf_styles[k] = *tpl ? "COMMUNITY: " + upper(tpl) : std::string("COMMUNITY FIGHTER");
             o.style = shelf_styles[k].c_str();
             list.push_back(o);
@@ -3481,15 +3495,26 @@ int grid_tab(const std::vector<OnlineFighter> &list, int i)
 
 // A card's fighting style from the game data: a stock fighter's and a new fighter's place's (its template's) from
 // fighter.xml, a community fighter by number its template's, a created fighter its own (two styles).
-std::string grid_style(const std::vector<OnlineFighter> &list, int i, const std::vector<CpCard> &cards)
+// A fighter can have more than one style (Character row word 18, the select screen's; 2 of the 75 stock fighters
+// have two): a card matches the filter when any of its styles is the filter's.
+int fighter_style_bits(int id)
+{
+    if (id >= FB_FIRST_LOGICAL && id != FB_MORE_ID) {   // a community fighter by number: its own row, else its template's
+        const FighterBanksEntry *e = fighter_banks_find(id);
+        if (!e) return -1;
+        int own = (int)(e->words[18] & 0x1Fu);
+        return own ? own : new_fighters_style_bits(online_fighter_id(e->template_fe_id));
+    }
+    return new_fighters_style_bits(id);
+}
+bool grid_style_matches(const std::vector<OnlineFighter> &list, int i, const std::vector<CpCard> &cards, const char *filter)
 {
     int cp = i < (int)g_grid_cp.size() ? g_grid_cp[i] : -1, id = list[i].id;
-    if (cp >= 0) return cp < (int)cards.size() ? cards[cp].style : std::string();
-    if (id >= FB_FIRST_LOGICAL && id != FB_MORE_ID) {
-        const FighterBanksEntry *e = fighter_banks_find(id);
-        return e ? online_fighter_style(online_fighter_id(e->template_fe_id)) : "";
-    }
-    return list[i].style ? list[i].style : "";
+    if (cp >= 0)        // a created fighter: its archetype's styles ("KICKBOXING / STREETFIGHTING")
+        return cp < (int)cards.size() && fighter_style_matches(cards[cp].style.c_str(), filter);
+    int bits = fighter_style_bits(id);
+    if (bits > 0) return (bits & online_style_bit(filter)) != 0;
+    return fighter_style_matches(list[i].style ? list[i].style : "", filter);     // no row: fighter.xml's one style
 }
 
 // "Original fighters only" where this pick counts: the room's STANDARD ONLY, else the search's choice (ranked, or
@@ -3576,12 +3601,28 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     if (S.fstyle > style_count) S.fstyle = 0;
     if (pad.y && style_count > 0) { S.fstyle = fighter_style_next(S.fstyle, style_count); S.fighter_top = 0; }
     const char *filter = S.fstyle > 0 ? styles[S.fstyle - 1] : nullptr;
+    {   // once per session: what each tab holds, and the FFNY fighters per style (any of a fighter's styles counts)
+        static bool logged;
+        if (!logged) {
+            logged = true;
+            const auto &cards = cp_cards();
+            fprintf(stderr, "[FIGHTERS] tabs: FFNY %d, COMMUNITY %d%s, CREATED %d; FFNY per style:", counts[FTAB_FFNY],
+                    counts[FTAB_COMMUNITY], offered[FTAB_COMMUNITY] ? "" : " (not offered)", counts[FTAB_CREATED]);
+            for (int k = 0; k < style_count; k++) {
+                int c = 0;
+                for (int i = 0; i < n; i++)
+                    if (list[i].id != FIGHTER_RANDOM && grid_tab(list, i) == FTAB_FFNY && grid_style_matches(list, i, cards, styles[k])) c++;
+                fprintf(stderr, " %s %d", styles[k], c);
+            }
+            fprintf(stderr, "\n");
+        }
+    }
     std::vector<char> keep(n, 1);
     if (filter) {
         const auto &cards = cp_cards();
         for (int i = 0; i < n; i++)     // MORE stays: the community window has every community fighter
             keep[i] = list[i].id == FIGHTER_RANDOM || list[i].id == FB_MORE_ID ||
-                      fighter_style_matches(grid_style(list, i, cards).c_str(), filter);
+                      grid_style_matches(list, i, cards, filter);
     }
     // the tab's cards of that style, and RANDOM where it has two or more to draw from (not MORE, not a fighter by
     // number, none the room's rules leave out)

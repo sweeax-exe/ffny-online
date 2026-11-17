@@ -80,8 +80,14 @@ def test_styles_come_from_the_game_data():
     styles = data.split('int online_styles(', 1)[1].split('\n}\n', 1)[0]
     assert 'g_fighters[k].style == k_styles[i][1]' in styles     # only the styles the dump's fighters have
     screen = src('src/hooks/online_screen.cpp')
-    style = screen.split('std::string grid_style(', 1)[1].split('\n}\n', 1)[0]
-    assert 'cards[cp].style' in style and 'e->template_fe_id' in style and 'list[i].style' in style
+    # any of a fighter's styles counts: its row's style bits (word 18), a created fighter's archetype styles
+    bits = screen.split('int fighter_style_bits(int id)\n{', 1)[1].split('\n}\n', 1)[0]
+    assert 'e->words[18]' in bits and 'new_fighters_style_bits(' in bits and 'e->template_fe_id' in bits
+    style = screen.split('bool grid_style_matches(', 1)[1].split('\n}\n', 1)[0]
+    assert 'cards[cp].style' in style and '(bits & online_style_bit(filter)) != 0' in style
+    nf = src('src/hooks/new_fighters.c')
+    assert '#define W_STYLE_BITS 18' in nf and 'g_style_bits[fe] = (int)(rd32(d + row + 4 * W_STYLE_BITS) & 0x1Fu)' in nf
+    assert 'k_style_bit[] = { 1, 0, 2, 3, 4 }' in data      # STF B, KIC K, MAR M, WRE W, SUB S
     assert 'Kickboxing' not in style and 'fighter_letter_jump' not in screen.split('void draw_fighters(', 1)[1]
 
 

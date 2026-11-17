@@ -94,6 +94,8 @@ static const char *const k_styles[][2] = {
     { "SUB", "Submissions" },
 };
 #define STYLE_COUNT ((int)(sizeof(k_styles) / sizeof(k_styles[0])))
+/* each one's bit in a Character row's style bits (word 18; new_fighters_style_bits), in k_styles' order */
+static const int k_style_bit[] = { 1, 0, 2, 3, 4 };
 
 static const char *style_name(const char *code)
 {
@@ -257,6 +259,23 @@ int online_styles(const char *const **out)
     }
     *out = list;
     return count;
+}
+
+unsigned online_style_bit(const char *style)
+{
+    int i;
+    for (i = 0; i < STYLE_COUNT; i++) if (style && !strcmp(style, k_styles[i][1])) return 1u << k_style_bit[i];
+    return 0;
+}
+
+int online_style_names(int bits, char *out, int size)
+{
+    int i, n = 0;
+    if (size > 0) out[0] = 0;
+    for (i = 0; i < STYLE_COUNT && size > 0; i++)
+        if (bits >= 0 && (bits >> k_style_bit[i] & 1))
+            n += snprintf(out + n, (size_t)(size - n > 0 ? size - n : 0), "%s%s", n ? " / " : "", k_styles[i][1]);
+    return n < size ? n : size - 1;
 }
 
 const char *online_fighter_style(int id)

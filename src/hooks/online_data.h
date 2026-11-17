@@ -50,6 +50,10 @@ int online_modes(const OnlineMode **out);
  * CHOOSE FIGHTER's style filter cycles them, and one stock fighter's style by Battle-mode ID ("" if none or unknown). */
 int online_styles(const char *const **out);
 const char *online_fighter_style(int id);
+/* A style's bit in a Character row's style bits (new_fighters_style_bits; 0 for an unknown name), and the names of
+ * the styles set in `bits` ("Street fighting / Kickboxing"); returns the text's length. */
+unsigned online_style_bit(const char *style);
+int online_style_names(int bits, char *out, int size);
 
 /* The new fighters (their places, new_fighter_places.h; content packs; new_fighters.h): offered in the hub's fighter
  * list, never as CPU places, random picks or in drafts. */

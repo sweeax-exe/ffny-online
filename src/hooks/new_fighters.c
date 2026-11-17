@@ -41,6 +41,7 @@ FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c
 #define W_CORE_ID 10
 #define W_GAMEPLAY 11
 #define W_MAIN 13
+#define W_STYLE_BITS 18     /* the select screen's styles: bit 0 K, 1 B, 2 M, 3 W, 4 S */
 
 static NewFighter g_new[NEW_FIGHTER_MAX];
 static uint32_t g_words[NEW_FIGHTER_MAX][ROW_WORDS];    /* its words (stats, style bits) */
@@ -48,6 +49,7 @@ static FighterGameplay g_gp[NEW_FIGHTER_MAX];           /* its own gameplay, whe
 static int g_gp_ok[NEW_FIGHTER_MAX];
 static int g_new_count = -1;
 static unsigned char g_new_row[256];                   /* Character rows (the id's low bits) of new fighters */
+static int g_style_bits[256];                           /* build 90: per feID its row's style bits, -1 none */
 
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 
@@ -74,6 +76,7 @@ static void load(void)
     int overridden = 0;
     g_new_count = 0;
     memset(g_new_row, 0, sizeof(g_new_row));
+    for (i = 0; i < 256; i++) g_style_bits[i] = -1;
     f = netplay_open_fight_file("assets\\djv2.sod", &overridden);
     if (!f) return;
     fseek(f, 0, SEEK_END);
@@ -103,6 +106,9 @@ static void load(void)
                 if (row + 4 * ROW_WORDS > size) continue;
                 fe = rd32(d + row + 4 * W_FE_ID);
                 core = rd32(d + row + 4 * W_CORE_ID);
+                /* the fighter's own cell (word 13 = 1) wins over an outfit row with the same feID */
+                if (fe < 256 && (g_style_bits[fe] < 0 || rd32(d + row + 4 * W_MAIN) == 1))
+                    g_style_bits[fe] = (int)(rd32(d + row + 4 * W_STYLE_BITS) & 0x1Fu);
                 if (new_fighter_is_place((int)fe) && fighter_banks_index((int)fe) >= 0 &&
                     !strncmp(sod_string(d, size, rd32(d + row)), "FFNYBank", 8)) {
                     if (r < sizeof(g_new_row)) g_new_row[r] = 1;  /* not a stock fighter: out of the Unlock shop too */
@@ -465,6 +471,12 @@ int new_fighters_list(const NewFighter **out)
     if (g_new_count < 0) load();
     if (out) *out = g_new;
     return g_new_count;
+}
+
+int new_fighters_style_bits(int fe_id)
+{
+    if (g_new_count < 0) load();
+    return fe_id >= 0 && fe_id < 256 ? g_style_bits[fe_id] : -1;
 }
 
 int new_fighter_row(uint32_t row)
