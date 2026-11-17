@@ -631,6 +631,22 @@ refuses a second live hub session from one PC, for builds that skip that.
   relay logs who and where (names, anonymised ids, builds), no verdict.
 - Sessions that never send `PC` (builds before 46, local test copies) are never refused.
 
+## Direct connection (P2P, build 90)
+
+Opt-in, CAPS bit 27 (`1 << 27`) both ways: the client can do it; the relay's switch (`p2p-allowed` in its
+updates folder) is on. The relay keeps forwarding every DATA; it only exchanges endpoints.
+
+| Message | Direction | Body |
+|---|---|---|
+| `P2P` 0x3A | client -> server | token 8, u32 START seed, 16 zero bytes (34 bytes in all, so the answer is never larger) |
+| `P2P` 0x3A | server -> client | u32 seed, u8 status: 0 NO, 1 OK, 2 WAIT; with OK: u8 the other player's room slot, 4 bytes IPv4, u16 port, 8 bytes match key |
+| `DIRECT` 0x3B | game <-> game | the match key 8, u8 kind (1 PROBE: u32 seq, u32 clock ms; 2 ACK: the probe's 8 bytes; 3 DATA: a `P_STEPS` or `P_LIVEPAD` payload) |
+
+A game sends `P2P` only after a START of exactly two players, only while its player has `[online] p2p_direct`
+on. OK comes only when both players of that START asked for the same seed; until then WAIT. NO: switch off,
+not 1v1, a spectator, another seed, the other game lacks bit 27, an address that is not IPv4. `DIRECT` never
+reaches the relay. Design and fallback: `docs/research/p2p-optin.md`.
+
 ## Server operation
 
 The relay is one static binary (`server/relay`, Go). `relay -listen :27777` serves; it logs

@@ -135,6 +135,11 @@ static RecompSetting g_display_settings[] = {
       "Let quick match, rooms and King of the Hill pair you with players of the community Android port "
       "(by contatg) in builds that FFNY Online has tested for cross-play. Off: you only meet PC players. "
       "Ranked never mixes platforms. Takes effect the next time you go online." },
+    { "online", "p2p_direct", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_P2P_DIRECT", 0,
+      "Direct connection (P2P) in 1v1 online fights, used only when the other player has it on too: the fight's "
+      "inputs also go straight between the two PCs, which can be faster than through the server. The other player's "
+      "game then gets your IP address (and you theirs), which someone could use to attack your connection (DDoS). "
+      "Off by default. If the direct path fails, the fight goes on through the server. Applies from the next match." },
     { "online", "original_fighters", RECOMP_SETTING_INT, 0, 0, 536870911, NULL, NULL, 0,
       "Kept by the game: where you chose \"Original fighters only\" instead of \"All fighters (community too)\" "
       "when you start a search (Quick Match per match type, King of the Hill, FFA rotation, Ranked), so the same "

@@ -53,6 +53,7 @@
 #include "test_observations.h"
 #include "netplay_servers.h"
 #include "netplay_check.h"
+#include "netplay_p2p.h"
 #include "anticheat.h"
 #include "created_fighter.h"
 #include "pc_input.h"
@@ -373,6 +374,9 @@ static int unl_template(int number)
     return e && e->template_fe_id >= 0 && e->template_fe_id < 0xFF ? e->template_fe_id : 55;
 }
 
+#define CAPS_DIRECT   NETP2P_CAP /* 1 << 27 (build 90), both ways: this game can take a direct connection (P2P) to the other
+                                 * player of a 1v1 match; the relay: its switch (p2p-allowed) is on. Announced always: the
+                                 * consent is per match, T_P2P is sent only while [online] p2p_direct is on (netplay_p2p.h) */
 /* build 86: CAPS_UNLIMITED unless a test plays an older game (RECOMP_TEST_NO_UNLIMITED) */
 #define CAPS_UNLIMITED_OPT (getenv("RECOMP_TEST_NO_UNLIMITED") ? 0u : CAPS_UNLIMITED)
 #define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
@@ -1517,6 +1521,191 @@ static int header(uint8_t *b, uint8_t type)
     return 6;
 }
 
+/* ---- direct connection (P2P, opt-in; netplay_p2p.h, docs/research/p2p-optin.md) ---------------
+ * The relay carries every fight packet as before. When both players of a 1v1 match have [online] p2p_direct on
+ * and the relay offers it (CAPS_DIRECT), each game asks the relay for the other's endpoint (T_P2P), punches through
+ * with probes, and once a probe is answered sends its P_STEPS and P_LIVEPAD a second time, directly. The receiver
+ * keeps whichever copy is first; nothing else changes (the delay, the checksums, spectators, voice). The direct
+ * path lost: a short line, and the relay's copies, which never stopped, carry the fight. */
+#define P2P_ASK_TRIES 25        /* T_P2P every RETRY_MS: 10 s for the other player's game to ask too */
+#define P2P_PUNCH_MS  6000      /* probes this long without an answered one: no direct path */
+#define P2P_PROBE_MS  100       /* probes while punching */
+#define P2P_KEEP_MS   250       /* once up: the keepalive (it measures the round trip too) */
+#define P2P_LOST_MS   1000      /* nothing on the direct path this long: down (the relay's copies carry on) */
+enum { P2P_OFF, P2P_ASKING, P2P_PUNCHING, P2P_UP, P2P_DOWN, P2P_GAVE_UP };
+static struct {
+    volatile LONG phase;
+    uint32_t seed;              /* the START it belongs to */
+    int tries, peer_slot, rtt_ms, cut_ms, cut;
+    ULONGLONG asked, began, last_probe, last_rx, up_at, steps_at;   /* steps_at: the first direct P_STEPS */
+    struct sockaddr_in peer;
+    uint8_t key[NETP2P_KEY_LEN];
+    uint32_t probe_seq;
+    unsigned sent, got, first_direct, first_relay, downs;
+} P;
+static int g_rx_direct;         /* net thread: on_data's packet came on the direct path */
+static void on_data(int from, const uint8_t *p, int len);
+static void send_raw(const uint8_t *b, int len);
+static int p2p_setting(void) { return recomp_settings_get("online", "p2p_direct", 0) != 0; }
+
+static void p2p_end(const char *why)
+{
+    LONG was = P.phase;
+    if (was == P2P_OFF) return;
+    InterlockedExchange(&P.phase, P2P_OFF);
+    if (was >= P2P_PUNCHING)
+        fprintf(stderr, "[NETPLAY] direct connection closed (%s): %u packets sent direct, %u came direct; the other "
+                "player's inputs came first on the direct path %u times, through the relay %u times; lost %u time(s)\n",
+                why, P.sent, P.got, P.first_direct, P.first_relay, P.downs);
+}
+
+/* START (under g_cs): a 1v1 match this PC plays asks for the direct path when the player allows it. */
+static void p2p_on_start(int pos, int count, int watching)
+{
+    const char *cut = getenv("RECOMP_TEST_P2P_CUT_MS");
+    p2p_end("a new match");
+    memset(&P, 0, sizeof(P));
+    if (!N.lobby || watching || pos < 0 || count != 2 || N.relay_caps <= 0 || !((unsigned)N.relay_caps & CAPS_DIRECT))
+        return;
+    if (!p2p_setting()) {
+        fprintf(stderr, "[NETPLAY] direct connection: off in this game's settings; the match goes through the server\n");
+        return;
+    }
+    P.seed = N.start_seed;
+    P.cut_ms = cut ? atoi(cut) : 0;     /* tests: the direct path cut (both ways) this long after the first direct P_STEPS */
+    InterlockedExchange(&P.phase, P2P_ASKING);
+    fprintf(stderr, "[NETPLAY] direct connection: allowed here; asking whether the other player allows it too\n");
+}
+
+static void p2p_send(int kind, const uint8_t *body, int n)
+{
+    uint8_t b[1200];
+    int len = netp2p_packet(b, (int)sizeof(b), P.key, kind, body, n);
+    if (len && !P.cut && N.sock != INVALID_SOCKET) {
+        sendto(N.sock, (const char *)b, len, 0, (const struct sockaddr *)&P.peer, (int)sizeof(P.peer));
+        if (kind == NETP2P_DATA) P.sent++;
+    }
+}
+
+/* send_data: the payloads that also go direct, while the direct path is up */
+static void p2p_send_data(const uint8_t *payload, int len)
+{
+    if (P.phase == P2P_UP && len > 0 && netp2p_direct_payload(payload[0]) && N.match_live && N.start_seed == P.seed)
+        p2p_send(NETP2P_DATA, payload, len);
+}
+
+/* The relay's T_P2P answer (net thread). */
+static void p2p_on_answer(const uint8_t *b, int len)
+{
+    NetP2PAnswer a;
+    if (P.phase != P2P_ASKING || !netp2p_answer(b, len, &a) || a.seed != P.seed) return;
+    if (a.status == NETP2P_WAIT) {
+        if (P.tries == 1) fprintf(stderr, "[NETPLAY] direct connection: waiting for the other player's game (its player must allow it too)\n");
+        return;
+    }
+    if (a.status != NETP2P_OK) {
+        fprintf(stderr, "[NETPLAY] direct connection: not for this match (the server's answer); through the server\n");
+        InterlockedExchange(&P.phase, P2P_GAVE_UP);
+        return;
+    }
+    memset(&P.peer, 0, sizeof(P.peer));
+    P.peer.sin_family = AF_INET;
+    memcpy(&P.peer.sin_addr, a.ip, 4);
+    P.peer.sin_port = htons(a.port);
+    memcpy(P.key, a.key, sizeof(P.key));
+    P.peer_slot = a.slot;
+    P.began = GetTickCount64();
+    P.last_probe = P.last_rx = 0;
+    InterlockedExchange(&P.phase, P2P_PUNCHING);
+    /* the address itself is not logged: logs go into F9 reports */
+    fprintf(stderr, "[NETPLAY] direct connection: both players allow it; reaching the other player's game directly\n");
+}
+
+/* A T_DIRECT datagram (net thread): only with this match's key. */
+static void p2p_on_packet(const uint8_t *b, int len)
+{
+    int kind, n;
+    const uint8_t *body;
+    ULONGLONG now = GetTickCount64();
+    if (P.phase < P2P_PUNCHING || P.phase == P2P_GAVE_UP || P.cut) return;
+    if (!netp2p_parse(b, len, P.key, &kind, &body, &n)) return;
+    P.last_rx = now;
+    P.got++;
+    if (kind == NETP2P_PROBE && n >= 8) {
+        p2p_send(NETP2P_ACK, body, 8);
+    } else if (kind == NETP2P_ACK && n >= 8) {
+        uint32_t sent = get32(body + 4);
+        P.rtt_ms = (int)((uint32_t)now - sent);
+        if (P.phase == P2P_PUNCHING) {
+            P.up_at = now;
+            InterlockedExchange(&P.phase, P2P_UP);
+            fprintf(stderr, "[NETPLAY] direct connection up after %u ms (round trip %d ms); the server still carries "
+                    "a copy of every packet\n", (unsigned)(now - P.began), P.rtt_ms);
+        } else if (P.phase == P2P_DOWN) {
+            InterlockedExchange(&P.phase, P2P_UP);
+            fprintf(stderr, "[NETPLAY] direct connection back (round trip %d ms)\n", P.rtt_ms);
+        }
+    } else if (kind == NETP2P_DATA && n >= 1 && netp2p_direct_payload(body[0]) && N.match_live &&
+               N.start_seed == P.seed && P.peer_slot >= 0 && P.peer_slot < ROOMSLOTS) {
+        int from = N.pos_of_slot[P.peer_slot];
+        if (from >= 0 && from < MAXP && from != N.pos) {
+            if (body[0] == P_STEPS && !P.steps_at) P.steps_at = now;
+            g_rx_direct = 1;
+            on_data(from, body, n);
+            g_rx_direct = 0;
+        }
+    }
+}
+
+/* Every pass of the network thread. */
+static void p2p_tick(ULONGLONG now)
+{
+    LONG phase = P.phase;
+    if (phase == P2P_OFF) return;
+    if (!N.match_live || N.start_seed != P.seed || N.state == NETPLAY_FAILED) {
+        p2p_end("the match is over");
+        return;
+    }
+    if (phase == P2P_GAVE_UP) return;
+    if (phase == P2P_ASKING) {
+        if (now - P.asked >= RETRY_MS) {
+            P.asked = now;
+            if (P.tries++ >= P2P_ASK_TRIES) {
+                fprintf(stderr, "[NETPLAY] direct connection: the other player has it off (or an older game); the "
+                        "match goes through the server\n");
+                InterlockedExchange(&P.phase, P2P_GAVE_UP);
+            } else if (N.have_token) {
+                uint8_t b[NETP2P_ASK_LEN];
+                send_raw(b, netp2p_ask(b, N.token, P.seed));
+            }
+        }
+        return;
+    }
+    if (P.cut_ms > 0 && !P.cut && P.steps_at && now - P.steps_at >= (ULONGLONG)P.cut_ms) {
+        P.cut = 1;
+        fprintf(stderr, "[NETPLAY] tests: the direct path is cut here now (both ways)\n");
+    }
+    if (now - P.last_probe >= (phase == P2P_PUNCHING ? P2P_PROBE_MS : P2P_KEEP_MS)) {
+        uint8_t body[8];
+        put32(body, ++P.probe_seq);
+        put32(body + 4, (uint32_t)now);
+        P.last_probe = now;
+        p2p_send(NETP2P_PROBE, body, 8);
+    }
+    if (phase == P2P_PUNCHING && now - P.began > P2P_PUNCH_MS) {
+        fprintf(stderr, "[NETPLAY] direct connection: no direct path between the two PCs (a router or firewall in "
+                "the way); the match goes through the server\n");
+        InterlockedExchange(&P.phase, P2P_GAVE_UP);
+    } else if (phase == P2P_UP && now - P.last_rx > P2P_LOST_MS) {
+        P.downs++;
+        InterlockedExchange(&P.phase, P2P_DOWN);
+        fprintf(stderr, "[NETPLAY] direct connection lost (nothing for %u ms); the relay's copies carry the fight (so far "
+                "the other player's inputs came first direct %u times, through the relay %u times)\n",
+                (unsigned)(now - P.last_rx), P.first_direct, P.first_relay);
+        toast(4000, "Direct connection lost: the fight goes on through the server.");
+    }
+}
+
 static void send_raw(const uint8_t *b, int len)
 {
     if (N.sock != INVALID_SOCKET)
@@ -1569,6 +1758,7 @@ static void send_data(const uint8_t *payload, int len)
     memcpy(b + n, N.token, 8); n += 8;
     memcpy(b + n, payload, (size_t)len); n += len;
     send_raw(b, n);
+    p2p_send_data(payload, len);    /* the direct path too, while it is up (P2P) */
 }
 
 /* A hub request: header, token, then `body`. Repeated every RETRY_MS until the server answers
@@ -2306,6 +2496,10 @@ static void store_steps(int from, const uint8_t *p, int len)
         uint32_t s = last - (uint32_t)(count - 1 - i);
         uint32_t k = s % RING;
         if (s == 0) continue;
+        if (N.in_tag[from][k] != s + 1 && P.phase >= P2P_PUNCHING) {     /* P2P: which path brought it first */
+            if (g_rx_direct) P.first_direct++;
+            else P.first_relay++;
+        }
         memcpy(N.in[from][k], p + 9 + i * ENTRY, ENTRY);
         N.in_tag[from][k] = s + 1;
         N.in_match[from][k] = match;
@@ -4040,6 +4234,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.start_this_play = 1;
     N.start_tick = GetTickCount64();
     N.load_done = N.load_hinted = 0;
+    p2p_on_start(pos, count, watching);     /* the direct connection, when both players allow it */
     N.report_m = m;
     for (i = 0; i < MAXP; i++) {
         N.report_names[i][0] = 0;
@@ -4320,6 +4515,9 @@ static void on_packet(const uint8_t *b, int len)
             if (N.lobby && !N.match_live && NETPLAY_IS_HILL(N.roomv.settings.mode)) break;
             on_data(from, b + 7, len - 7);
         }
+        break;
+    case NETP2P_T_ASK:     /* the direct connection: the other player's endpoint (P2P) */
+        if (N.lobby) p2p_on_answer(b, len);
         break;
     case T_CAPS:
         if (N.lobby && len >= 10) {
@@ -4724,7 +4922,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 memcpy(cb + n, N.token, 8); n += 8;
                 put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
-                              CAPS_PINGSUM | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
+                              CAPS_PINGSUM | CAPS_DIRECT | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
                               CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
@@ -4892,6 +5090,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
         if (N.lobby && N.match_live && !N.match_seen && now - N.last_rtt_sent >= 100)
             send_rtt();
         if (N.lobby) spec_late_tick();
+        p2p_tick(now);     /* the direct connection (P2P) */
         /* The room is playing but this PC never got its START: a VOTE makes the server send it again.
          * In a King of the Hill room only a fighter has a START to get (the HILL says who fights). */
         if (N.lobby && N.roomv.in_room && N.roomv.phase == 2 && !N.start_this_play && !N.over_pending &&
@@ -4925,6 +5124,10 @@ static DWORD WINAPI net_thread(LPVOID unused)
             FD_ZERO(&rd);
             FD_SET(N.sock, &rd);
             got = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(N.sock, (char *)b, sizeof(b), 0) : 0;
+        }
+        if (got >= 6 && b[5] == NETP2P_T_DIRECT) {     /* the direct connection's own packets (P2P), key-checked */
+            p2p_on_packet(b, got);
+            got = 0;
         }
         if (got > 0 && lag_ms > 0) {        /* tests: hold every arriving packet for a while */
             if (lag_n < LAG_QUEUE) {
@@ -5086,6 +5289,11 @@ static int start(const char *server, const char *name, int creating, const char 
         u_long nonblocking = 1;
         ioctlsocket(N.sock, FIONBIO, &nonblocking);
     }
+    {   /* P2P: an ICMP "port unreachable" for a direct probe must not turn the socket's next recv into an error */
+        BOOL reset = FALSE;
+        DWORD ret = 0;
+        WSAIoctl(N.sock, _WSAIOW(IOC_VENDOR, 12) /* SIO_UDP_CONNRESET */, &reset, sizeof(reset), NULL, 0, &ret, NULL, NULL);
+    }
     N.stop = 0;
     N.hello_sent = 0;
     InterlockedExchange(&N.state, NETPLAY_CONNECTING);
@@ -5121,6 +5329,7 @@ void netplay_stop(void)
         CloseHandle(N.thread);
         N.thread = NULL;
     }
+    p2p_end("offline");
     if (N.sock != INVALID_SOCKET) { closesocket(N.sock); N.sock = INVALID_SOCKET; }
     N.have_token = 0;
     N.lobby = 0;
