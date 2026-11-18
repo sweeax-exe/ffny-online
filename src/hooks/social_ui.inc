@@ -98,6 +98,7 @@ struct Chat {
     long long picker_crew = 0;
     std::string picker_tag, picker_name;
     int picker_sel = 0, ladder_sel = 0;
+    ListNav ladder_nav, online_nav;     // build 96: fast scrolling (list_nav.h)
     bool confirm_decline = false;
     bool menu_crew = false;
     std::string menu_role, crew_new_name;
@@ -520,7 +521,7 @@ bool back_is_ptt() { return recomp_settings_get("online", "voice_pad", 0) == 1; 
 
 // ---- the input of the chat window ----
 
-struct ChatKeys { bool up, down, left, right, a, b, x, y, lb, rb, lt, rt, start, enter, esc, bksp, del, home, end_; };
+struct ChatKeys { bool up, down, left, right, a, b, x, y, lb, rb, lt, rt, start, enter, esc, bksp, del, home, end_, live; };    // live: read from the keys this frame (list_nav.h may read them too)
 
 ChatKeys chat_keys(bool typing)
 {
@@ -552,6 +553,7 @@ ChatKeys chat_keys(bool typing)
     k.del = any({ ImGuiKey_Delete }, true);
     k.home = any({ ImGuiKey_Home }, false);
     k.end_ = any({ ImGuiKey_End }, false);
+    k.live = true;
     return k;
 }
 
@@ -1179,9 +1181,15 @@ void draw_crew_ladder(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     int n = (int)v.ladder.size();
     if (!v.ladder_loaded) text(dl, f, g_body, 10, tx + tw / 2, ly + 70, DIM, "Loading the ladder...", CENTER, 0);
     else if (!n) text(dl, f, g_body, 10, tx + tw / 2, ly + 70, DIM, "No crews yet.", CENTER, 0);
-    if (k.up) C.ladder_sel = std::max(0, C.ladder_sel - 1);
-    if (k.down) C.ladder_sel = std::min(std::max(0, n - 1), C.ladder_sel + 1);
     const int shown = 7;
+    {   // build 96 (list_nav.h): held up/down speeds up, LT/RT a page (LB/RB, PgUp/PgDn: the tabs)
+        ListNavKeys nk;
+        nk.keys = k.live;
+        nk.letters = false;             // W/S may type in a tab; they still step once a press
+        nk.page_keys = false;
+        int delta = list_nav_delta(C.ladder_nav, k.up, k.down, nk, shown);
+        if (delta) C.ladder_sel = list_nav_move(C.ladder_sel, std::max(1, n), delta, 0);
+    }
     int first = std::max(0, std::min(n - shown, C.ladder_sel - shown + 2));
     bool officer = v.crew_role == "boss" || v.crew_role == "lieutenant";
     for (int i = first; i < n && i < first + shown; i++) {
@@ -1818,8 +1826,14 @@ void draw_online(ImDrawList *dl, const Frame &f, const ChatKeys &k)
                 logged.c_str());
     }
     int &sel = C.sel[TAB_ONLINE];
-    if (k.up) sel--;
-    if (k.down) sel++;
+    {   // build 96 (list_nav.h): held up/down speeds up, LT/RT a page (LB/RB, PgUp/PgDn: the tabs; the wheel scrolls)
+        ListNavKeys nk;
+        nk.keys = k.live;
+        nk.letters = false;             // W/S may type in a tab; they still step once a press
+        nk.page_keys = false;
+        int delta = list_nav_delta(C.online_nav, k.up, k.down, nk, 10);
+        if (delta) sel = list_nav_move(sel, std::max(1, (int)rows.size()), delta, 0);
+    }
     sel = rows.empty() ? 0 : std::max(0, std::min(sel, (int)rows.size() - 1));
     // the head: how many, on every server
     char head[64];

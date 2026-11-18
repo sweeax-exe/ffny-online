@@ -58,6 +58,7 @@
 #include "updater.h"
 #include "social.h"
 #include "fight_hud.h"
+#include "list_nav.h"           // build 96: fast scrolling in long lists
 #include "openworld.h"
 #include "rts_social.h"
 #include "rts_social_rules.h"
