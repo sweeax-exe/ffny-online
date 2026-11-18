@@ -2,7 +2,8 @@ name: Source release
 
 on:
   push:
-    # FFNY Online's builds (v0.7.2-remaster.N) are released by scripts/publish-update.ps1.
+    # FFNY Online's builds (v<version>-remaster.N) are released by scripts/publish-update.ps1, which
+    # publishes the windows-setup-assets artifact of the CI run of the release commit on main.
     tags: ['v*', '!v*-remaster.*']
 
 permissions:

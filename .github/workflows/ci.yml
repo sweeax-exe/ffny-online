@@ -2,7 +2,8 @@ name: CI
 # Runs WITHOUT any game data. Validates: repo hygiene, Python tooling, and that the
 # pinned xboxrecomp runtime libraries build on Windows.
 on:
-  push: { branches: [main] }
+  # ci/** branches run the full CI without a pull request (CI fixes, release dry runs).
+  push: { branches: [main, 'ci/**'] }
   pull_request:
   workflow_call:
 
@@ -68,11 +69,20 @@ jobs:
           name: windows-updater-test-reports
           path: build/setup-unit-results.xml
           if-no-files-found: warn
+      # FFNY Online's releases ship exactly this artifact: scripts/publish-update.ps1 downloads it from
+      # the run of the release commit and checks its provenance (docs/releasing.md, "FFNY Online builds").
       - uses: actions/upload-artifact@v4
+        id: windows-setup-upload
         with:
           name: windows-setup-assets
           path: build/setup-assets/*
           if-no-files-found: error
+      # SignPath code signing goes here once the SignPath Foundation project is approved:
+      # windows-setup-assets (this run's artifact, by id) -> SignPath signing request
+      # (signpath/github-action-submit-signing-request, artifact-configuration for the setup .exe,
+      # wait-for-completion) -> a signed artifact (for example windows-setup-signed) with the .sha256
+      # and provenance rewritten for the signed bytes. Only on pushes to main; the API token comes
+      # from a repository secret, never from this file.
 
   macos-setup:
     name: Game-free macOS setup

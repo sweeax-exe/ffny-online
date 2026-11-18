@@ -943,3 +943,23 @@ def test_a_cmake_cache_with_another_compiler_is_stale(tmp_path):
     assert not engine.stale_compiler_cache(cache, old)
     cache.write_text('CMAKE_BUILD_TYPE:STRING=Release\n')
     assert not engine.stale_compiler_cache(cache, new)
+
+
+def test_wizard_release_interface_maps_onto_the_bundled_version(tmp_path, capsys):
+    """The macOS and Linux wizards pass upstream's release-picker arguments; this engine installs only
+    the version it carries, checks the operation against the folder and refuses another release."""
+    folder = payload(tmp_path)
+    listing = tmp_path / 'releases.json'
+    assert engine.main(['--payload', str(folder), '--list-releases', '--releases-file', str(listing)]) == 0
+    assert json.loads(listing.read_text()) == {'bundled': '0.4.1', 'releases': []}
+    app, data = tmp_path / 'app', tmp_path / 'data'
+    assert engine.main(['--payload', str(folder), '--install-dir', str(app), '--data-dir', str(data),
+                        '--release', 'v9.9.9']) == 2
+    assert engine.main(['--payload', str(folder), '--install-dir', str(app), '--data-dir', str(data),
+                        '--operation', 'update', '--bundled-only']) == 2
+    assert not app.exists()
+    app.mkdir()
+    engine.write_json(app / 'installed.json', {'schema': 1, 'data': str(data), 'version': '0.4.1'})
+    assert engine.main(['--payload', str(folder), '--install-dir', str(app), '--data-dir', str(data),
+                        '--operation', 'install', '--dump', str(tmp_path / 'dump'), '--bundled-only']) == 2
+    assert 'already installed' in capsys.readouterr().err

@@ -141,6 +141,39 @@ for behavior and remaining acceptance gates.
 The fork URL and exact gitlink make dependency source
 and license notices available without game data.
 
+## FFNY Online builds
+
+FFNY Online's numbered builds (`v<version>-remaster.N`, the number in `config/remaster-version.txt`)
+are not tagged through the Source release workflow; `scripts/publish-update.ps1` publishes them.
+Players get exactly the Windows setup that CI built from the public source, so a code-signing service
+that signs only CI-built binaries (SignPath Foundation) can sign it:
+
+1. Raise `config/remaster-version.txt` and commit on `main` (clean checkout).
+2. `publish-update.ps1 -Notes "..."` pushes HEAD to `ffny/main` if it is not there yet. The push
+   starts CI; the script waits (`-CiTimeoutMinutes`, default 120) for the CI run of exactly HEAD on
+   `main` and stops unless the whole run is green. A docs-only commit skips the setup build and has
+   no artifact; publish a commit that changes code or config.
+3. It downloads that run's `windows-setup-assets` artifact (setup, `.sha256`, `.provenance.json`)
+   to `build/ci-setup/<run id>/` and checks: `source_commit` is HEAD, `toolkit_commit` is the
+   gitlink, `platform` is `windows-x64`, not a development payload, `version` and the file name
+   match `CMakeLists.txt`, and the setup's SHA-256 equals the `.sha256` file and
+   `installer_sha256`. CI builds it with the same `scripts/build-setup.ps1` (Release, production
+   payload) as a local build, so the payload's source and toolkit are the same.
+4. It writes and signs `latest.json` with the update key, as before, uploads to the servers and
+   makes the GitHub release with the setup, its `.sha256` and its provenance.
+
+Flags: `-NoUpload` (fetch, verify and sign only), `-NoGitHub` (no GitHub release). With either one the
+script pushes nothing, so HEAD must already be on the branch; both together are a dry run; `-Branch ci/<name>` tests the
+flow against a `ci/**` branch, whose pushes also run CI. `-LocalBuild` is the emergency path: it
+builds the setup on the publishing PC, prints a warning, pushes at the end as the old flow did, and
+its setup is not one SignPath would sign. Say so in the build's notes.
+
+SignPath signing (pending): a step in the `windows-setup` CI job will send the
+`windows-setup-assets` artifact to SignPath and upload the signed setup as its own artifact, with
+the checksum and provenance of the signed bytes; `publish-update.ps1` then downloads that artifact
+and also checks its Authenticode signature. Both places carry a placeholder comment. The API token
+will be a repository secret; none is in this repository.
+
 ## CI coverage
 
 CI runs project tests on Ubuntu, native save compatibility and toolkit CPU tests
