@@ -1177,8 +1177,10 @@ class Manager:
         Called with the runtime lock held, after the composition of everything."""
         try:
             own = [p for p in self.local_packs() if p['composed'] and p['id'] not in off]
+            # portraits=False: <data>/online-art is the full composition's (an empty own set removed every
+            # community fighter's hub portrait and skin picture, builds 90-91)
             result = content_compose.compose(self.data, self.game, own, root=self.root / self.OWN_DIR,
-                                             log=lambda text: None)
+                                             log=lambda text: None, portraits=False)
             if own:
                 self.progress('Your own packs ready for offline play without community content: %d applied'
                               % len(result['applied']))

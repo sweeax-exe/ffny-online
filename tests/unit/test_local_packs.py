@@ -91,7 +91,7 @@ def test_compose_takes_own_packs_that_are_on(tmp_path, monkeypatch):
     monkeypatch.delenv('RECOMP_SETTINGS', raising=False)
     seen = {}
 
-    def compose(data_, game, packs, root=None, log=None, reserved=()):
+    def compose(data_, game, packs, root=None, log=None, reserved=(), portraits=True):
         seen['ids'] = [p['id'] for p in packs]
         return {'applied': [], 'skipped': [], 'files': [], 'unchanged': True}
     monkeypatch.setattr(mods.content_compose, 'compose', compose)
@@ -179,7 +179,7 @@ def test_compose_moves_an_own_fighter_and_keeps_the_new_place(tmp_path, monkeypa
     manager = mods.Manager(data)
     seen = {}
 
-    def compose(d, game, packs, root=None, log=print, reserved=()):
+    def compose(d, game, packs, root=None, log=print, reserved=(), portraits=True):
         mods.content_compose.settle_places(packs, reserved, log)
         seen['packs'] = packs
         return {'applied': [p['id'] for p in packs], 'skipped': [], 'files': [], 'unchanged': False}
@@ -202,12 +202,14 @@ def test_compose_also_builds_the_own_packs_alone_for_offline_play_without_commun
     monkeypatch.delenv('RECOMP_SETTINGS', raising=False)
     calls = []
 
-    def compose(data_, game, packs, root=None, log=None, reserved=()):
-        calls.append((Path(root).name, [p['id'] for p in packs]))
+    def compose(data_, game, packs, root=None, log=None, reserved=(), portraits=True):
+        calls.append((Path(root).name, [p['id'] for p in packs], portraits))
         return {'applied': [], 'skipped': [], 'files': [], 'unchanged': True}
     monkeypatch.setattr(mods.content_compose, 'compose', compose)
     manager = mods.Manager(data)
     monkeypatch.setattr(manager, 'composed_packs', lambda: [dict(id='community-fighter', version='1', content_sha256='x',
                                                                   kind='content', order=1, folder=data)])
     manager.compose()
-    assert calls == [('mod-manager', ['community-fighter', 'my-on']), ('own-packs', ['my-on'])]
+    # the own-packs pass leaves <data>/online-art alone (builds 90-91: its empty set removed every community
+    # fighter's hub portrait and skin picture the full pass had just drawn)
+    assert calls == [('mod-manager', ['community-fighter', 'my-on'], True), ('own-packs', ['my-on'], False)]
