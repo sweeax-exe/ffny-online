@@ -247,10 +247,55 @@ void fighter_skins_start_game_done(uint32_t gd)
 static volatile LONG g_window_req;
 static int g_window_slot, g_window_fe;
 
+/* The Team screen (chsTeam4): Controller.ControllerSelect(thumb, pad, fe + 1, position), one a player (a community
+ * fighter's already as its bank, fighter_bank_hooks.c). With the fourth the game rewrites the four set-up entries in
+ * position order (sub_00055A20), so slot = position from then on: the looks follow their players there. */
+static struct { int pos, src; } g_picks[4];
+static int g_pick_n;
+
+static void team_pick(const char *text)
+{
+    int thumb, pad, fe, pos, k, src = -1, used = 0, fe2[4], skin2[4];
+    if (sscanf(text + 28, " %d , %d , %d , %d )%n", &thumb, &pad, &fe, &pos, &used) != 4 || !used) return;
+    fe--;
+    if (thumb == -1) { if (g_pick_n > 0) g_pick_n--; return; }
+    if (thumb < 0) { g_pick_n = 0; return; }
+    if (g_pick_n >= 4) g_pick_n = 0;
+    /* the pick's set-up slot: its own thumb if that slot holds the fighter, else the first other one not taken */
+    if (thumb <= 3 && g_slot_fe[thumb] == fe) src = thumb;
+    for (k = 0; src < 0 && k < 4; k++) {
+        int j;
+        if (g_slot_fe[k] != fe) continue;
+        for (j = 0; j < g_pick_n && g_picks[j].src != k; j++) {}
+        if (j == g_pick_n) src = k;
+    }
+    g_picks[g_pick_n].pos = pos;
+    g_picks[g_pick_n].src = src;
+    if (++g_pick_n < 4) return;
+    g_pick_n = 0;
+    for (k = 0; k < 4; k++) fe2[k] = -1, skin2[k] = 0;
+    for (k = 0; k < 4; k++) {
+        int p = g_picks[k].pos, s = g_picks[k].src;
+        if (p < 0 || p > 3) continue;
+        if (s >= 0) fe2[p] = g_slot_fe[s], skin2[p] = g_slot_skin[s];
+    }
+    for (k = 0; k < 4; k++) {
+        if (skin2[k] != g_slot_skin[k] || fe2[k] != g_slot_fe[k])
+            fprintf(stderr, "[SKINS] team order: slot %d now feID %d, skin %d\n", k, fe2[k], skin2[k]);
+        g_slot_fe[k] = fe2[k];
+        g_slot_skin[k] = skin2[k];
+    }
+}
+
 void fighter_skins_after_funccall(const char *text)
 {
     int slot, pad, fe, outfit;
+    if (!strncmp(text, "Controller.ControllerSelect(", 28)) {
+        team_pick(text);
+        return;
+    }
     if (strncmp(text, "Controller.ControllerSetup(", 27)) return;
+    if (!strncmp(text, "Controller.ControllerSetup(-1,", 30)) g_pick_n = 0;
     if (sscanf(text + 27, "%d,%d,%d,%d", &slot, &pad, &fe, &outfit) != 4) return;
     if (slot < 0) {
         fighter_skins_clear_slots();

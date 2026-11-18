@@ -39,7 +39,7 @@ void fighter_banks_online_lineup(int on)
  * community fighters (fighter_banks_online_lineup). */
 static int locked(void) { return ffny_online_locked() && !g_online_lineup; }
 
-/* RECOMP_BANKS_OFF=answers,movies (tests): leave that part out. */
+/* RECOMP_BANKS_OFF=answers,movies,select (tests): leave that part out. */
 static int part_off(const char *part)
 {
     const char *e = getenv("RECOMP_BANKS_OFF");
@@ -135,6 +135,69 @@ const FighterBanksEntry *fighter_banks_for_fe(int fe_id)
     return fe_id >= FB_FIRST_LOGICAL ? fighter_banks_find(fe_id) : NULL;
 }
 
+/* The Team screen's picks (chsTeam4): Controller.ControllerSelect(thumb, pad, id + 1, position), one a player.
+ * With the fourth the game rewrites the four set-up entries in position order (sub_00055A20), each from its
+ * pick's fighter byte (the argument - 1), and copies the outfit of the set-up entry with the same pad and fighter.
+ * The screen sends the fighter's own ID: a community fighter (1000 and up) reached the game as itself, a fighter
+ * byte without a database row, and the match load crashed in the attack-parts walk (sub_001BBC10, report
+ * 20261118-194257.340-ed71de: 1008 in an offline 2 vs 2). The pick gets the bank its player's set-up bound
+ * instead: the bank row reads as its fighter whatever slot it ends in (fighter_banks_record), so the bindings stay
+ * as they are, and the game's own pad-and-fighter match still finds the set-up entry. */
+static int g_pick_n;                    /* the picks so far, as the game counts them (undo -1, clear -2) */
+static int g_pick_bank[FB_BANKS];       /* the bank each pick took */
+
+static int select_bank(int thumb, int id)
+{
+    int s, k, used;
+    /* candidates: a bank bound to this fighter (MORE: to any, the window chose), the pick's own slot first */
+    for (k = -1; k < FB_BANKS; k++) {
+        s = k < 0 ? thumb : k;
+        if (s < 0 || s >= FB_BANKS || g_bound[s] < 0) continue;
+        if (id != FB_MORE_ID && g_fb[g_bound[s]].id != id) continue;
+        for (used = 0; used < g_pick_n && used < FB_BANKS && g_pick_bank[used] != s; used++) {}
+        if (k >= 0 && used < g_pick_n) continue;     /* a mirror's other bank is taken by an earlier pick */
+        return s;
+    }
+    return -1;
+}
+
+static int before_select(const char *command, char *out, size_t out_size)
+{
+    int thumb, pad, id, pos, s, replacement, used = 0;
+    const FighterBanksEntry *e;
+    if (part_off("select")) return 0;              /* RECOMP_BANKS_OFF=select: the picks as the screen sent them */
+    if (sscanf(command + 28, " %d , %d , %d , %d )%n", &thumb, &pad, &id, &pos, &used) != 4 || !used)
+        return 0;                                  /* not the form */
+    (void)pad;
+    id--;                                          /* the screen sends ID + 1 */
+    if (thumb == -1) { if (g_pick_n > 0) g_pick_n--; return 0; }      /* undo the last */
+    if (thumb < 0) { g_pick_n = 0; return 0; }                        /* clear all */
+    if (g_pick_n >= FB_BANKS) g_pick_n = 0;
+    if (id < FB_FIRST_LOGICAL || !fighter_banks_ready()) {
+        g_pick_bank[g_pick_n++] = -1;
+        if (g_pick_n == FB_BANKS) g_pick_n = 0;
+        if (id < FB_FIRST_LOGICAL) return 0;
+        replacement = 55;
+        fprintf(stderr, "[BANKS] team pick %d (position %d): no community fighter %d here; it plays Doc\n", thumb,
+                pos, id);
+        return fighter_banks_rewrite_select(command, replacement, out, out_size, NULL, NULL, NULL, NULL);
+    }
+    s = locked() ? -1 : select_bank(thumb, id);
+    e = id == FB_MORE_ID ? NULL : fighter_banks_find(id);
+    if (s >= 0) {
+        replacement = FB_FIRST_BANK + s;
+        fprintf(stderr, "[BANKS] team pick %d (position %d): community fighter %d \"%s\" as bank %d\n", thumb, pos,
+                id, g_fb[g_bound[s]].name, replacement);
+    } else {
+        replacement = e ? e->template_fe_id : 55;
+        fprintf(stderr, "[BANKS] team pick %d (position %d): community fighter %d has no bound bank%s; it plays "
+                "feID %d\n", thumb, pos, id, locked() ? " (online)" : "", replacement);
+    }
+    g_pick_bank[g_pick_n++] = s;
+    if (g_pick_n == FB_BANKS) g_pick_n = 0;        /* the game rewrote the entries and starts again */
+    return fighter_banks_rewrite_select(command, replacement, out, out_size, NULL, NULL, NULL, NULL);
+}
+
 int fighter_banks_before_call(const char *command, char *out, size_t out_size)
 {
     int slot = -1, id = -1, idx, replacement;
@@ -142,7 +205,9 @@ int fighter_banks_before_call(const char *command, char *out, size_t out_size)
     /* the select list is built from the rows themselves: a bound bank must not come out as its fighter there
      * (until the next command, or fighter_banks_call_done) */
     g_listing = !strcmp(command, "Game.ResetFighterList()");
+    if (!strncmp(command, "Controller.ControllerSelect(", 28)) return before_select(command, out, out_size);
     if (strncmp(command, "Controller.ControllerSetup(", 27)) return 0;
+    if (!strncmp(command, "Controller.ControllerSetup(-1,", 30)) g_pick_n = 0;   /* a new set-up: no picks yet */
     fighter_banks_rewrite_setup(command, -1, out, out_size, &slot, &id);
     if (slot < 0 || slot >= FB_BANKS) return 0;
     if (id < FB_FIRST_LOGICAL) {

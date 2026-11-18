@@ -126,6 +126,27 @@ int fighter_banks_rewrite_setup(const char *command, int replacement, char *out,
     return 1;
 }
 
+int fighter_banks_rewrite_select(const char *command, int replacement, char *out, size_t out_size, int *thumb,
+                                 int *pad, int *id, int *pos)
+{
+    static const char head[] = "Controller.ControllerSelect(";
+    int t, p, plus, at, used = 0;
+    if (thumb) *thumb = -1;
+    if (pad) *pad = -1;
+    if (id) *id = -1;
+    if (pos) *pos = -1;
+    if (!command || strncmp(command, head, sizeof head - 1)) return 0;
+    if (sscanf(command + sizeof head - 1, " %d , %d , %d , %d )%n", &t, &p, &plus, &at, &used) != 4 || !used)
+        return 0;
+    if (thumb) *thumb = t;
+    if (pad) *pad = p;
+    if (id) *id = plus - 1;     /* the screen sends the fighter's ID + 1 */
+    if (pos) *pos = at;
+    if (t < 0 || plus - 1 < FB_FIRST_LOGICAL || replacement < 0) return 0;
+    snprintf(out, out_size, "%s%d,%d,%d,%d)", head, t, p, replacement + 1, at);
+    return 1;
+}
+
 /* Picture families of a fighter (setup/ffnycontent/newfighter.py PICTURE_FAMILIES): the name's prefix and whether
  * its number is the front-end ID + 1. */
 static const struct { const char *prefix; int plus; } k_families[] = {
