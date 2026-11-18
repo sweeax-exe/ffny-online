@@ -283,6 +283,7 @@ void fh_tags(ImDrawList *dl, ImVec2 display)
         if (slot < (int)FH.test_names.size()) name = FH.test_names[slot].c_str();
         else if (FH.match_live && slot < FH.match.count && !FH.match.cpu[slot]) name = FH.match.name[slot];
         if (!name || !*name || !(FH.view.active & (1u << slot))) continue;
+        name = textfold_display(name);      // build 94: fancy-font names as their plain letters
         FightTag t;
         char shown[64];
         if (!fight_tag_place(&pic, fighters, slot, &t) || !fight_tag_text(name, 24, shown, sizeof(shown))) continue;

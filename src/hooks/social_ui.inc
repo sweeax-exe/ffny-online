@@ -500,7 +500,7 @@ std::string friend_state(const social::Friend &fr, ImU32 *col)
 float text_height(const Frame &f, ImFont *font, float size, const char *s, float wrap)
 {
     font = font_or_default(font);
-    return font->CalcTextSizeA(size * f.s(), FLT_MAX, wrap * f.sx, s).y / f.sy;
+    return font->CalcTextSizeA(size * f.s(), FLT_MAX, wrap * f.sx, textfold_display(s)).y / f.sy;
 }
 
 // A grey plate with a word on it (ENTER, L2, START), then its meaning, as the hints write it.

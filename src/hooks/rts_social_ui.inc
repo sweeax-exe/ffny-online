@@ -730,8 +730,8 @@ std::vector<DockLine> rts_dock_lines(int tab, int max)
 {
     std::vector<DockLine> out;
     if (g_rts_gallery_tab >= 0) {
-        static const char *const room[][2] = { { "Rex", "who's by the park?" }, { "You", "north side, come get it" },
-                                               { "Nia", "GG" }, { "", "Kaze left the room." }, { "Rex", "rematch at the docks after this" } };
+        static const char *const room[][2] = { { getenv("RECOMP_TEST_FANCY_NAMES") ? fancy_sample_name(1) : "Rex", "who's by the park?" }, { "You", "north side, come get it" },
+                                               { getenv("RECOMP_TEST_FANCY_NAMES") ? fancy_sample_name(3) : "Nia", "GG" }, { "", "Kaze left the room." }, { getenv("RECOMP_TEST_FANCY_NAMES") ? fancy_sample_name(0) : "Rex", "rematch at the docks after this" } };
         static const char *const glob[][2] = { { "Sol", "anyone up for KOTH on EU?" }, { "Oz", "new map is huge lol" },
                                                { "You", "running the streets rn" }, { "Tia", "Knox and Jam park is the spot" },
                                                { "Vic", "lf crew, msg me" } };

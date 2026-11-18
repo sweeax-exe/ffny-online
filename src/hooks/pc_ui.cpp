@@ -36,6 +36,7 @@
 #include <vector>
 #include <map>
 #include "pc_ui_model.h"
+#include "text_fold.h"
 #include "pc_mods.h"
 #include "pc_ui_theme.h"
 #include "pc_ui_actions.h"
@@ -1840,8 +1841,8 @@ static void page_account()
     account_text(text, sizeof(text));
     float w = ImGui::GetFontSize() * 11;
     if (state == ACCOUNT_IN) {
-        if (account_has_discord()) ImGui::TextColored(k_gold, "Signed in with Discord: %s", text);
-        else ImGui::TextColored(k_gold, "Signed in without Discord: %s", text);
+        if (account_has_discord()) ImGui::TextColored(k_gold, "Signed in with Discord: %s", textfold_display(text, TEXTFOLD_WIDE));
+        else ImGui::TextColored(k_gold, "Signed in without Discord: %s", textfold_display(text, TEXTFOLD_WIDE));
         if (ImGui::Button("Sign out", ImVec2(w * 0.7f, 0))) account_sign_out();
         ImGui::SameLine();
         if (account_has_password() || account_password_offered(nullptr, nullptr, 0)) {
@@ -1950,7 +1951,7 @@ static void page_online(UiMode mode)
         char shown[32];
         if (account_game_name(shown, sizeof(shown)))
             ImGui::TextDisabled(account_has_discord() ? "Online you appear as %s, from your Discord account."
-                                                      : "Online you appear as %s, your FFNY name.", shown);
+                                                      : "Online you appear as %s, your FFNY name.", textfold_display(shown, TEXTFOLD_WIDE));
     }
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });
