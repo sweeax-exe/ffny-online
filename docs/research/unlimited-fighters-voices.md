@@ -48,4 +48,20 @@ not composed at all.
 
 ## 3. Runs
 
-(see the PR description for the run table)
+Real packs from the live catalogue (`index-v5.json`, synced 2026-11-18 into a local data folder: 29 packs, JB = 1000
+on template 24, KANE = 1001 on template 50, both with own lines), composed by this branch's launcher code. "Heard":
+the game's mixed output (`RECOMP_APU_PCM`) cross-correlated in 100 ms chunks with the pack's clip (as in
+`new-fighter-voice.md`); a clip that plays gives chunks that agree on one start at peaks near 0.9.
+
+| Run (logs/dj/...) | What | Result |
+|---|---|---|
+| `20261118-102612-offline` | JB (slot 0) vs CPU KANE | `own voice as 064 (the template's was 037)`, `065 (... 017)`; **JB's own intro heard** at 38.5 s (12/13 chunks, 0.89); the template intros 037/017 not (1 chunk) [V] |
+| `20261118-103247-offline` | KANE (slot 0) vs CPU Doc | **KANE's own intro heard** at 38.4 s (14/22, 0.85); 017 not [V] |
+| `20261118-103525-offline` | control, stock Doc vs CPU | Doc's intro heard (16/34, 0.85); in this flow a slot-1 intro and the winner's extro are not heard for stock fighters either, so the win lines were checked by the loader asking for `extro\064.asf` (run `-102208`) only [V/I] |
+| `20261118-104626-offline` | place fighter CJ v2 (116, voice 056) vs CPU JB | place path unchanged: `own voice 056`, CJ's intro heard (13/31, 0.78); JB `own voice as 065` [V] |
+| `20261118-103708-online` | 2 copies, lockstep, JB vs KANE, 3 matches (2 rematches) | both copies `064`/`065`, directory at the same address; **30 checksums equal**; a rematch runs no new speech set-up, the voices stay [V] |
+| `20261118-104020-online` | 2 copies, **rollback**, KANE vs JB, 2 matches | both copies `064` = KANE, `065` = JB each match; **30 checksums equal** [V] |
+| `20261118-104337-online` | KOTH, 3 copies, JB / KANE / Doc, 3 matches (watcher copy 2) | each match rebinds: JB-KANE, JB-Doc (Doc keeps 025), JB-KANE; the watcher sets the same voices; **50 checksums equal** [V] |
+
+Open [U]: the in-fight lines (taunts, Blazin shout, crowd) of a bank voice were not caught in a capture (the CPU fights
+do not taunt in 13 s); they come from the same records as the streams.
