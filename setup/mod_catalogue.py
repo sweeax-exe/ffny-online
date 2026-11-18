@@ -64,6 +64,11 @@ SKIN_TEMPLATES = frozenset(i for i in range(0, 98) if i not in (80, 81, 82, 83, 
 # pack, its content hash or its signature, so the account service edits it without a new version.
 CREDITS_MAX = 300
 CREDITS_MAX_LINES = 6
+# Build 96: CHARACTER GROUPS ("character": the character a community fighter is a version of, "version_name": the
+# version's name in the game's picker, "" its name; index-v7.json only: launchers of builds 94 and 95 read
+# index-v6.json, which leaves them out, and would refuse the keys). One line each, at most 40 characters; only a new
+# fighter carries them, and version_name only with a character. The game shows a group as one card.
+CHARACTER_MAX = 40
 # a mod that is one item of a pack of several mods ("Pack (N mods)"): the pack's id and title, always together
 # (index-v3.json only: launchers of build 79 read index-v2.json, which leaves bundle items out, and would refuse
 # the keys). The launcher installs and removes a pack's mods as one unit.
@@ -91,6 +96,12 @@ def ffny_mod(mod):
                 and type(mod.get('rts_map', False)) is bool and 'bundle' not in mod, 'Invalid official map')
     if 'credits' in mod:
         credits(mod['credits'])
+    if 'character' in mod or 'version_name' in mod:
+        require(mod.get('type') == 'new-fighter' and 'character' in mod and mod.get('fighter_mode') != 'skin',
+                'Invalid character group')
+        for key in ('character', 'version_name'):
+            if key in mod:
+                character_line(mod[key])
     if 'language' in mod:
         require(isinstance(mod['language'], str) and re.fullmatch(r'[a-z]{2,3}(-[A-Za-z0-9]{2,8})?', mod['language']),
                 'Invalid language code')
@@ -108,6 +119,12 @@ def credits(value):
             and len(value.split(chr(10))) <= CREDITS_MAX_LINES
             and not any(ord(c) < 32 and c != chr(10) for c in value) and chr(127) not in value,
             'Invalid credits')
+
+
+def character_line(value):
+    """A character or version name: one line of 1..CHARACTER_MAX characters, no control characters."""
+    require(isinstance(value, str) and value.strip() and len(value) <= CHARACTER_MAX
+            and not any(ord(c) < 32 for c in value) and chr(127) not in value, 'Invalid character group')
 
 
 def ffny_version(row):
@@ -164,7 +181,7 @@ def positive(value):
 
 def validate_mod(mod):
     fields(mod, 'id name description authors class licence homepage versions revoked_versions',
-           'kind type order language fighter_fe_id fighter_mode skin_of bundle bundle_name rts_map venue_fe_id credits')
+           'kind type order language fighter_fe_id fighter_mode skin_of bundle bundle_name rts_map venue_fe_id credits character version_name')
     ffny_mod(mod)
     slug(mod['id'])
     for key in ('name', 'description', 'licence'):

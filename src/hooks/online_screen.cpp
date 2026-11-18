@@ -41,6 +41,7 @@
 #include "imgui_internal.h"      // GetKeyData: the quick-chat wheel reads the sticks
 #include "online_screen.h"
 #include "text_fold.h"          // build 94: fancy-font names and chat text drawn as plain letters
+#include "char_groups.h"        // build 96: character groups (one card a group, the version window)
 #include "netplay.h"
 #include "netplay_servers.h"
 #include "netplay_delay_rules.h"
@@ -991,6 +992,11 @@ struct State {
     bool unl_open = false;
     int unl_sel = 0;
     ULONGLONG unl_opened = 0;
+    // build 96: the version window of a character group (char_groups_ui.inc): open, which group, its choice, since when
+    bool grp_open = false;
+    std::string grp_key;
+    int grp_sel = 0;
+    ULONGLONG grp_opened = 0;
     uint32_t watch_hidden = 0;      // King of the Hill: the fight whose watching screen B closed
     unsigned long long give_up_at = 0, lb_since = 0;    // King of the Hill: LB gave up the spot; LB held since
     bool lb_long_done = false;      // the long LB press has acted
@@ -3565,6 +3571,24 @@ const std::vector<OnlineFighter> &grid_fighters()
             list.push_back(o);
             g_grid_cp.push_back(-1);
         }
+        {   // build 96: a character group whose versions are numbered and none on the shelf still gets its card
+            const CharGroupFighter *all = nullptr;
+            int gn = char_groups_fighters(&all);
+            std::vector<std::string> have;
+            for (const OnlineFighter &o : list)
+                if (const CharGroupFighter *g = char_groups_find(o.id)) have.push_back(g->key);
+            for (int k = 0; k < gn; k++) {
+                const FighterBanksEntry *e = all[k].fe_id >= FB_FIRST_LOGICAL ? fighter_banks_find(all[k].fe_id) : nullptr;
+                if (!e || std::find(have.begin(), have.end(), std::string(all[k].key)) != have.end()) continue;
+                have.push_back(all[k].key);
+                OnlineFighter o{};
+                o.id = e->id;
+                snprintf(o.name, sizeof(o.name), "%s", e->name);
+                o.style = "COMMUNITY FIGHTER";
+                list.push_back(o);
+                g_grid_cp.push_back(-1);
+            }
+        }
         if (fighter_banks_count() > m) {
             OnlineFighter more{};
             more.id = FB_MORE_ID;
@@ -3607,6 +3631,7 @@ int grid_pos(const std::vector<OnlineFighter> &list, int fighter)
 
 #include "skins_ui.inc"
 #include "community_ui.inc"
+#include "char_groups_ui.inc"
 
 // ---- build 90: CHOOSE FIGHTER's tabs and style filter (fighter_tabs.h) ----
 
@@ -3669,7 +3694,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
 {
     // build 85: while the skin window is open the grid takes no input (the window does, below)
     Pad idle = {};
-    const Pad &pad = S.skin_open || S.unl_open ? idle : pad_in;
+    const Pad &pad = S.skin_open || S.unl_open || S.grp_open ? idle : pad_in;
     const auto &list = grid_fighters();
     int n = (int)list.size();
     const int cols = 7, rows = 4;
@@ -3698,6 +3723,55 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     NetRoom rules_room;
     lobby_room(&rules_room);
     auto blocked = [&](int i) { return list[i].id != FIGHTER_RANDOM && fighter_blocked(rules_room, list[i].id); };
+    // build 96: character groups (char_groups_ui.inc): the group each card stands for ("" none), for groups of two or
+    // more versions here; the group's first card is the one shown, the others are hidden (RANDOM still draws them)
+    bool numbers_here = community_numbers_here(rules_room);
+    std::vector<std::string> gkey(n);
+    std::map<std::string, CharGroupHere> groups;
+    std::map<std::string, int> gfirst;
+    for (int i = 0; i < n; i++) {
+        if (list[i].id == FIGHTER_RANDOM || list[i].id == FB_MORE_ID || (i < (int)g_grid_cp.size() && g_grid_cp[i] >= 0)) continue;
+        const CharGroupFighter *g = char_groups_find(list[i].id);
+        if (!g) continue;
+        auto it = groups.find(g->key);
+        if (it == groups.end()) it = groups.emplace(g->key, char_group_here(g->key, list, numbers_here)).first;
+        if (it->second.members.size() < 2) continue;
+        gkey[i] = g->key;
+        if (!gfirst.count(g->key)) gfirst[g->key] = i;
+    }
+    auto hidden = [&](int i) { return i >= 0 && i < n && !gkey[i].empty() && gfirst[gkey[i]] != i; };
+    auto card_blocked = [&](int i) {     // a group's card: when every version is left out
+        if (gkey[i].empty()) return blocked(i);
+        for (const CharGroupFighter *m : groups[gkey[i]].members) if (!fighter_blocked(rules_room, m->fe_id)) return false;
+        return true;
+    };
+    std::map<std::string, int> gface;   // each group's card picture: its member shown (char_group_face_of)
+    auto card_fe = [&](int i) {
+        if (gkey[i].empty()) return list[i].id;
+        auto f = gface.find(gkey[i]);
+        if (f == gface.end()) f = gface.emplace(gkey[i], char_group_face_of(groups[gkey[i]])).first;
+        const CharGroupHere &g = groups[gkey[i]];
+        return f->second >= 0 && f->second < (int)g.members.size() ? g.members[f->second]->fe_id : list[i].id;
+    };
+    auto card_picture = [&](int i, float x, float y, float w, float h, ImU32 tint) {   // a group: the next version with
+        if (gkey[i].empty()) return portrait(dl, f, list[i].id, x, y, w, h, tint);        // a picture when its own has none
+        const CharGroupHere &g = groups[gkey[i]];
+        int face = card_fe(i), at = 0;
+        for (size_t k = 0; k < g.members.size(); k++) if (g.members[k]->fe_id == face) at = (int)k;
+        for (size_t k = 0; k < g.members.size(); k++)
+            if (portrait(dl, f, g.members[(at + k) % g.members.size()]->fe_id, x, y, w, h, tint)) return true;
+        return false;
+    };
+    auto group_matches = [&](int i) {    // the name search: the fighter's name, its group's or a version's
+        if (fighter_name_matches(list[i].name, S.fsearch.c_str())) return true;
+        if (gkey[i].empty()) return false;
+        const CharGroupHere &g = groups[gkey[i]];
+        if (fighter_name_matches(g.name.c_str(), S.fsearch.c_str())) return true;
+        for (const CharGroupFighter *m : g.members) if (fighter_name_matches(char_group_label(m), S.fsearch.c_str())) return true;
+        return false;
+    };
+    if (hidden(S.fighter_sel)) S.fighter_sel = gfirst[gkey[S.fighter_sel]];    // a version picked before: its group's card
+    for (int t = 0; t < FTAB_COUNT; t++) if (hidden(S.ftab_sel[t])) S.ftab_sel[t] = gfirst[gkey[S.ftab_sel[t]]];
     // build 90: the tabs (players' idea): FFNY, COMMUNITY, CREATED, each offered when it has cards; COMMUNITY not
     // where only original fighters count. LT/RT (Z/C) switch, the last one chosen is remembered ([online] fighter_tab).
     bool originals = grid_originals_only(rules_room);
@@ -3752,11 +3826,12 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     }
     // the tab's cards of that style, and RANDOM where it has two or more to draw from (not MORE, not a fighter by
     // number, none the room's rules leave out)
-    std::vector<int> base;
+    std::vector<int> base, pool;    // build 96: pool every version (RANDOM draws among them), base one card a group
     int drawable = 0;
     for (int i = 0; i < n; i++)
         if (list[i].id != FIGHTER_RANDOM && keep[i] && grid_tab(list, i) == tab) {
-            base.push_back(i);
+            pool.push_back(i);
+            if (!hidden(i)) base.push_back(i);
             if (!blocked(i) && list[i].id < FB_FIRST_LOGICAL) drawable++;
         }
     if (list[n - 1].id == FIGHTER_RANDOM && drawable > 1) base.push_back(n - 1);
@@ -3765,9 +3840,10 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     std::vector<int> vis;
     if (searching) {
         for (int i = 0; i < n; i++)
-            if (list[i].id != FIGHTER_RANDOM && keep[i] && offered[grid_tab(list, i)] &&
-                fighter_name_matches(list[i].name, S.fsearch.c_str()))
-                vis.push_back(i);
+            if (list[i].id != FIGHTER_RANDOM && keep[i] && offered[grid_tab(list, i)] && group_matches(i)) {
+                int shown = gkey[i].empty() ? i : gfirst[gkey[i]];      // build 96: a group's card once
+                if (std::find(vis.begin(), vis.end(), shown) == vis.end()) vis.push_back(shown);
+            }
     } else {
         vis = base;
     }
@@ -3844,9 +3920,15 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     int cur_cp = S.fighter_sel < (int)g_grid_cp.size() ? g_grid_cp[S.fighter_sel] : -1;
     // the chosen fighter, large, with name and style
     glass(dl, f, 36, 74, 180, 308);
+    // build 96: a character group's card: its version shown, the group's name and how many versions
+    const std::string &cur_key = gkey[S.fighter_sel];
+    const char *cur_name = cur_key.empty() ? cur.name : groups[cur_key].name.c_str();
+    char cur_versions[48];
+    snprintf(cur_versions, sizeof cur_versions, "%d VERSIONS: A TO CHOOSE", cur_key.empty() ? 0 : (int)groups[cur_key].members.size());
+    const char *cur_style = cur_key.empty() ? cur.style : cur_versions;
     if (cur.id == FIGHTER_RANDOM || cur.id == FB_MORE_ID) random_card(dl, f, 46, 84, 160, 240, true, 110);
-    else if (!portrait(dl, f, cur.id, 46, 84, 160, 240))
-        text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), cur.name, CENTER, 1.4f, 150);
+    else if (!card_picture(S.fighter_sel, 46, 84, 160, 240, IM_COL32_WHITE))
+        text(dl, f, g_title, 26, 126, 180, with_alpha(CREAM, 0.6f), cur_name, CENTER, 1.4f, 150);
     S.fighters_cp = cur_cp;
     if (cur_cp >= 0) {      // a created fighter: which Story save it comes from, and its user ID under an online name
         const auto &cards = cp_cards();
@@ -3864,14 +3946,14 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         }
     }
     {
-        float size = fit_size(f, g_hand, 22, cur.name, 168);
-        text(dl, f, g_hand, size, 126, 330 + (22 - size) * 0.5f, ORANGE, cur.name, CENTER, 1.2f);
+        float size = fit_size(f, g_hand, 22, cur_name, 168);
+        text(dl, f, g_hand, size, 126, 330 + (22 - size) * 0.5f, ORANGE, cur_name, CENTER, 1.2f);
     }
-    if (blocked(S.fighter_sel)) {   // on the big portrait's foot
+    if (card_blocked(S.fighter_sel)) {   // on the big portrait's foot
         rect(dl, f, 46, 300, 160, 22, with_alpha(RED, 0.9f), 4);
         text(dl, f, g_title, 11, 126, 304, WHITE, "NOT ALLOWED IN THIS ROOM", CENTER, 0.6f);
     }
-    text(dl, f, g_title, 13, 126, 356, WHITE, cur.style, CENTER, 0, 170);
+    text(dl, f, g_title, 13, 126, 356, cur_key.empty() ? WHITE : ORANGE, cur_style, CENTER, 0, 170);
     // the grid
     glass(dl, f, gx - 8, gy - 8, cols * (cw + 4) + 12, rows * (ch + 6) + 26);
     for (int r = 0; r < rows; r++)
@@ -3890,8 +3972,15 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
                 rect(dl, f, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32(56, 14, 20, 255) : IM_COL32(24, 10, 12, 255), 3);
                 text(dl, f, g_title, 20, x + cw / 2, y + ch / 2 - 16, sel ? ORANGE : with_alpha(ORANGE, 0.6f), "+", CENTER, 1.2f);
                 text(dl, f, g_title, 9, x + cw / 2, y + ch - 14, sel ? WHITE : GREY, "MORE", CENTER, 0.6f);
-            } else if (!portrait(dl, f, list[i].id, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32_WHITE : IM_COL32(150, 150, 150, 255)))
-                text(dl, f, g_body, 9, x + 3, y + 30, GREY, list[i].name, LEFT, 0, cw - 4);
+            } else if (!card_picture(i, x + 1, y + 1, cw - 2, ch - 2, sel ? IM_COL32_WHITE : IM_COL32(150, 150, 150, 255)))
+                text(dl, f, g_body, 9, x + 3, y + 30, GREY, gkey[i].empty() ? list[i].name : groups[gkey[i]].name.c_str(), LEFT, 0, cw - 4);
+            if (!gkey[i].empty()) {     // build 96: a character group: its name on a band, how many versions
+                const CharGroupHere &g = groups[gkey[i]];
+                float size = fit_size(f, g_title, 9, upper(g.name.c_str()).c_str(), cw - 6);
+                rect(dl, f, x + 1, y + ch - 15, cw - 2, 14, sel ? IM_COL32(120, 12, 26, 240) : IM_COL32(60, 8, 14, 220));
+                text(dl, f, g_title, size, x + cw / 2, y + ch - 14 + (9 - size) * 0.5f, WHITE, upper(g.name.c_str()).c_str(), CENTER, 0.6f);
+                versions_badge(dl, f, x, y + ch - 29, cw, (int)g.members.size(), sel);
+            }
             if (list[i].id == NETPLAY_CREATED_FIGHTER) {     // the fighter's name on an orange band
                 float tw = text_width(f, g_title, 9, list[i].name);
                 float size = tw > cw - 6 ? 9 * (cw - 6) / tw : 9;
@@ -3914,7 +4003,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
                 }
                 text(dl, f, g_title, 8, x + cw / 2, y + 3, with_alpha(ORANGE, sel ? 1.0f : 0.7f), "YOURS", CENTER, 0.6f);
             }
-            if (blocked(i)) {   // left out by the room's FIGHTER RULES: dimmed, a red band
+            if (card_blocked(i)) {   // left out by the room's FIGHTER RULES: dimmed, a red band
                 // build 82: a new fighter in a STANDARD ONLY room says why (community content is off)
                 bool off = ONLINE_NEW_FIGHTER(list[i].id) && standard_only(rules_room.settings.fighter_rules);
                 rect(dl, f, x + 1, y + 1, cw - 2, ch - 2, IM_COL32(0, 0, 0, 170), 3);
@@ -3942,7 +4031,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             text(dl, f, g_title, 10, gx, sy + 2, GREY, "TAB: SEARCH BY NAME    Z / C: TABS    R: STYLE", LEFT, 0.6f);
         }
     }
-    if (pad.a && blocked(S.fighter_sel)) {
+    if (pad.a && card_blocked(S.fighter_sel)) {
         if (ONLINE_NEW_FIGHTER(cur.id) && standard_only(rules_room.settings.fighter_rules))
             say("This room is STANDARD ONLY: community fighters are off here. Pick another fighter.");
         else say("This room's FIGHTER RULES leave " + std::string(cur.name) + " out: pick another fighter.");
@@ -3953,7 +4042,8 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         S.random_pick = cur.id == FIGHTER_RANDOM;
         if (S.random_pick) {    // RANDOM is the last card: one of the others the room's rules allow
             std::vector<int> allowed;      // build 90: of the cards shown (this tab, this style)
-            for (int i : vis) if (list[i].id != FIGHTER_RANDOM && !blocked(i) && list[i].id < FB_FIRST_LOGICAL) allowed.push_back(i);
+            for (int i : searching ? vis : pool)     // build 96: every version of a group, not one card a group
+                if (list[i].id != FIGHTER_RANDOM && !blocked(i) && list[i].id < FB_FIRST_LOGICAL) allowed.push_back(i);
             pick = allowed.empty() ? online_random_below(n - 1) : allowed[online_random_below((int)allowed.size())];
         }
         int pick_cp = pick < (int)g_grid_cp.size() ? g_grid_cp[pick] : -1;
@@ -3962,7 +4052,21 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         // build 86: no skins in a room for original fighters only, nor in a ranked search for them
         bool no_skins = (rules_room.in_room && standard_only(rules_room.settings.fighter_rules)) ||
                         (S.ranked_pick && search_original(NETPLAY_ORIGINAL_RANKED));
-        if (!S.random_pick && list[pick].id == FB_MORE_ID) {
+        if (!S.random_pick && !gkey[pick].empty()) {
+            // build 96: a character group: the version window, on the version picked last of it (a search: the
+            // first version whose name matches)
+            const CharGroupHere &g = groups[gkey[pick]];
+            S.grp_open = true;
+            S.grp_key = gkey[pick];
+            S.grp_sel = std::max(0, char_group_face_of(g));
+            if (!S.fsearch.empty() && !fighter_name_matches(g.name.c_str(), S.fsearch.c_str()))
+                for (size_t k = 0; k < g.members.size(); k++)
+                    if (fighter_name_matches(char_group_label(g.members[k]), S.fsearch.c_str())) { S.grp_sel = (int)k; break; }
+            S.grp_opened = GetTickCount64();
+            { Pad none = {}; group_test_keys(none, true); }
+            fprintf(stderr, "[GROUPS] hub: \"%s\" has %d versions: the version window, on %d\n", g.name.c_str(),
+                    (int)g.members.size(), S.grp_sel);
+        } else if (!S.random_pick && list[pick].id == FB_MORE_ID) {
             // build 86: MORE: the community window, on the fighter last picked from it (else the first)
             S.unl_open = true;
             S.unl_sel = 0;
@@ -4010,6 +4114,30 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             fprintf(stderr, "[BANKS] hub: community fighter %d \"%s\" picked\n", e->id, e->name);
         }
         if (r) S.unl_open = false;
+        if (r) const_cast<Pad &>(pad_in).b = false;     // B closed the window, not the page
+    }
+    if (S.grp_open) {      // build 96: a character group's version window (char_groups_ui.inc)
+        static const CharGroupHere none_here;
+        auto it = groups.find(S.grp_key);
+        const CharGroupHere &g = it != groups.end() ? it->second : none_here;
+        int r = char_group_window(dl, f, GetTickCount64() - S.grp_opened > 250 ? pad_in : idle, g, &S.grp_sel,
+                                  [&](int fe) { return fighter_blocked(rules_room, fe); });
+        if (r == 1) {
+            const CharGroupFighter *m = g.members[S.grp_sel];
+            if (fighter_blocked(rules_room, m->fe_id)) {
+                say("This room's FIGHTER RULES leave " + std::string(char_group_label(m)) + " out: pick another version.");
+                r = 0;
+            } else {
+                *chosen = true;
+                *fighter = m->fe_id;
+                char_groups_remember(g.key.c_str(), m->id);
+                if (m->fe_id >= FB_FIRST_LOGICAL) new_fighters_shelf_played(m->fe_id);     // on the shelf from now on
+                else pc_content_picked_fighter(m->fe_id);                                  // its NEW badge goes
+                fprintf(stderr, "[GROUPS] hub: \"%s\" version %d \"%s\" (fighter %d) picked\n", g.name.c_str(), S.grp_sel,
+                        char_group_label(m), m->fe_id);
+            }
+        }
+        if (r) S.grp_open = false;
         if (r) const_cast<Pad &>(pad_in).b = false;     // B closed the window, not the page
     }
     // BACK from a ranked search's pick goes back to the mode chooser, not to the online menu (a player
@@ -5681,6 +5809,7 @@ void gallery_step()
                                          // build 90: CHOOSE FIGHTER's tabs and style filter (COMMUNITY with an override
                                          // of community fighters; KICKBOXING on FFNY; CREATED, and CREATED with
                                          // WRESTLING; Quick Match for original fighters only: COMMUNITY not offered)
+                                         "fighters-groups", "fighters-groups-window", "fighters-groups-search",  // build 96
                                          "fighters-tab-community", "fighters-style", "fighters-tab-created",
                                          "fighters-tab-created-style", "fighters-tab-original",
                                          // build 83: the last content sync failed (RECOMP_TEST_CONTENT_SYNC=<reason>), and the
@@ -6147,6 +6276,33 @@ void gallery_step()
                 }
                 break;
             }
+    }
+    else if (p == "fighters-groups" || p == "fighters-groups-window" || p == "fighters-groups-search") {
+        // build 96: character groups (char_groups_ui.inc): the COMMUNITY tab with one card a group, the version window
+        // open on the largest group, the name search finding a version (RECOMP_TEST_FIGHTER_SEARCH, else "noir")
+        S.page = FIGHTERS;
+        S.ftab = FTAB_COMMUNITY;
+        S.fighter_top = 0;
+        S.fighter_sel = -1;
+        S.grp_open = false;
+        const auto &list = grid_fighters();
+        size_t best = 0;
+        for (int i = 0; i < (int)list.size(); i++) {
+            const CharGroupFighter *g = char_groups_find(list[i].id);
+            if (!g) continue;
+            CharGroupHere h = char_group_here(g->key, list, community_numbers_here(G.room));
+            if (h.members.size() > best) { best = h.members.size(); S.fighter_sel = i; S.grp_key = g->key; }
+        }
+        if (p == "fighters-groups-window" && best >= 2) {
+            S.grp_open = true;
+            S.grp_sel = 1;
+            S.grp_opened = GetTickCount64();
+        }
+        if (p == "fighters-groups-search") {
+            const char *q = getenv("RECOMP_TEST_FIGHTER_SEARCH");
+            S.fsearch_on = true;
+            S.fsearch = q && *q ? q : "noir";
+        }
     }
     else if (p == "room-community") {   // build 86: two players with community fighters, their portraits by number
         S.page = HUB;
