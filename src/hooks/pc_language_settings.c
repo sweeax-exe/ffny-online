@@ -39,7 +39,8 @@ size_t pc_language_settings(RecompSetting *out, size_t max)
         "Online always needs it on: the game then offers a restart with it, for that session only.");
     /* Build 90: "Turn all mods off" (mods_master_logic.h): the state to bring back; empty when the switch was not used. */
     ADD("content", "mods_backup", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
-        "What was on before the launcher's Turn all mods off (the game writes it; empty: not used).");
+        "What was on before the launcher's Turn all mods off (builds 90 to 93; build 94 keeps it in "
+        "mod-manager/mods-backup.txt, and this stays empty).");
 #undef ADD
     return n;
 }

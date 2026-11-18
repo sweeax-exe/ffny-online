@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define PC_CONTENT_MAX 64
+#define PC_CONTENT_MAX 512     /* was 64 (build 93): a player's own roster of several hundred packs was cut off */
 
 typedef struct PcContentPack {
     char id[96];
@@ -81,6 +81,18 @@ int pc_content_pack_file(const char *id, const char *name, char *out, int size);
  * content packs cannot be off. */
 int pc_content_is_off(const char *id);
 void pc_content_set_off(const char *id, int off);
+/* Build 94: the player's own packs' switches are not limited by the 1023 characters of a setting: the ids switched off
+ * are kept in <data>/mod-manager/own-off.txt (a pack in the old [content] off list counts as off too).
+ * set_off: 1 when it was saved. off_csv: the ids, comma-separated; the length, -1 when it does not fit in size.
+ * off_put: replaces the whole list (comma-separated); 1 when saved. */
+int pc_content_own_is_off(const char *id);
+int pc_content_own_set_off(const char *id, int off);
+int pc_content_own_off_csv(char *out, int size);
+int pc_content_own_off_put(const char *csv);
+/* A small state file of the launcher (<data>/mod-manager/<name>) read or written whole: the bytes read (0 missing,
+ * -1 larger than size - 1); write: atomic, 1 when saved, empty text removes the file. */
+int pc_content_state_read(const char *name, char *out, int size);
+int pc_content_state_write(const char *name, const char *text);
 
 /* The online content fingerprint: FNV-1a over "id\0version\0content_sha256\n" of every installed
  * pack of kind "content", in catalogue order; 0 with none (rooms then match as before). A composed
