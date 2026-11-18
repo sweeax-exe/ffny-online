@@ -48,7 +48,8 @@ in a run or checked in code, **[U]** open.
   shelf cells: a mirror match cannot be picked on the select screen, as for stock fighters. Mirror works by
   automatch (and later by room/rematch paths) [V].
 * A bank plays its fighter's template voice (the voice follows the coreID). An own voice would need a voice number
-  per bank whose files come from the bound fighter (an archive-member redirect, phase 3B) [U].
+  per bank whose files come from the bound fighter (an archive-member redirect, phase 3B) [U]. Done in phase 3B:
+  `unlimited-fighters-voices.md`.
 * Recently played is per session; nothing is saved (as for place fighters).
 
 ## Tests

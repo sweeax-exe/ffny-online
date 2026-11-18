@@ -43,6 +43,115 @@ MODEL_MAX = 15
 ROW_NAME_MAX = 19               # ResetFighterList copies a row name into 32 bytes at +4 with tier/feID at +0x18
 
 
+# -- own voices (phase 3B) --------------------------------------------------------------------------------------
+#
+# A voice number names a fighter's eight speech files (``fightervoice.py``), and the speech code addresses at most
+# 200 of them (its bank flags, 0x33EA78[voice < 500 ? voice : voice - 400]), so a logical fighter cannot have a
+# number of its own. Each bank has one: bank s speaks as voice 064 + s (``fightervoice.voice_number`` of 124 + s,
+# the own voice of the place a bank row holds, so no place fighter has it). The speech archive holds
+#
+#   * the bank voices' eight entries (``bank_voice_placeholders``): short silence, never played as they are;
+#   * per logical fighter with an own voice (``logical_voice_files``) its files under its ID: a ``.dat`` per bank,
+#     the two streams, and its ``.hdr`` four times, once per bank voice (a header names its voice number), e.g.
+#     ``speech\Taunts\Def_Jam_Characters\L1000_065.hdr``, ``...\L1000.dat``, ``speech\streams\intro\L1000.asf``.
+#
+# At a match's speech set-up the game points a bound bank's eight directory entries (the archive's directory the
+# game keeps in memory) at its fighter's files and gives the slot the bank's voice (src/hooks/new_fighters.c,
+# fighter_voice.h). Audio only; the result depends only on the packs and the dump (the content print).
+
+LOGICAL_VOICE_PREFIX = "L"
+
+
+def bank_voice(bank_fe_id):
+    """The voice number bank ``bank_fe_id`` (124..127) speaks with when its fighter has an own voice (064..067)."""
+    from . import fightervoice
+    if bank_fe_id not in BANKS:
+        raise FighterError("%r is not a bank" % (bank_fe_id,))
+    return fightervoice.voice_number(bank_fe_id)
+
+
+def logical_entry(entry, fe_id):
+    """The archive entry a logical fighter ``fe_id``'s own file has for the bank voice ``entry`` names (one of
+    ``fightervoice.voice_entries(bank voice)``): a ``.hdr`` keeps the bank voice in its name, the others do not."""
+    head, _, leaf = entry.rpartition("\\")
+    stem, _, ext = leaf.partition(".")
+    if ext == "hdr":
+        return "%s\\%s%d_%s.hdr" % (head, LOGICAL_VOICE_PREFIX, fe_id, stem)
+    return "%s\\%s%d.%s" % (head, LOGICAL_VOICE_PREFIX, fe_id, ext)
+
+
+def logical_entries(fe_id):
+    """Every entry of logical fighter ``fe_id``'s own voice: 12 headers, 3 banks, 2 streams (17)."""
+    from . import fightervoice
+    out = []
+    for bank in BANKS:
+        for e in fightervoice.voice_entries(bank_voice(bank)):
+            name = logical_entry(e, fe_id)
+            if name not in out:
+                out.append(name)
+    return out
+
+
+def logical_voice_files(current, names, template_fe_id, template_speech, fe_id, lines, read):
+    """The files of logical fighter ``fe_id``'s own voice: [(entry, bytes)] to add to the speech archive (see
+    above). Built as a place fighter's own voice would be at the first bank's number (``fightervoice.voice_files``),
+    then put under the fighter's ID; the headers once per bank voice. Raises ``fightervoice.VoiceError``."""
+    from . import fightervoice
+    if not is_logical(fe_id):
+        raise fightervoice.VoiceError("%r is not a community fighter beyond the places" % (fe_id,))
+    have = {n.replace("/", "\\").lower() for n in names()}
+    taken = [e for e in logical_entries(fe_id) if e.lower() in have]
+    if taken:
+        raise fightervoice.VoiceError("%s is in the speech archive already" % taken[0])
+    first = bank_voice(BANKS[0])
+    # the bank voices' own entries are not looked at here: a place fighter cannot have them, and the placeholders
+    # go in after every pack (bank_voice_placeholders)
+    files = fightervoice.voice_files(current, lambda: [n for n in names() if n.lower() not in
+                                                       {e.lower() for e in fightervoice.voice_entries(first)}],
+                                     template_fe_id, template_speech, BANKS[0], lines, read)
+    out = []
+    for entry, data in files:
+        if entry.endswith(".hdr"):
+            for bank in BANKS:
+                v = bank_voice(bank)
+                h = bytearray(data)
+                struct.pack_into("<H", h, 2, v)
+                out.append((logical_entry(entry.replace("%03d.hdr" % first, "%03d.hdr" % v), fe_id), bytes(h)))
+        else:
+            out.append((logical_entry(entry, fe_id), data))
+    return out
+
+
+def has_logical_voice(names, fe_id):
+    """Whether a speech archive with entries ``names`` holds every own-voice file of logical fighter ``fe_id``."""
+    have = {n.replace("/", "\\").lower() for n in names}
+    return all(e.lower() in have for e in logical_entries(fe_id))
+
+
+def bank_voice_placeholders(current, names):
+    """The bank voices' entries the speech archive lacks: [(entry, bytes)], silence in the layout of voice
+    ``fightervoice.LAYOUT_VOICE`` (the game points them at a fighter's files before it reads them)."""
+    from . import fightervoice
+    have = {n.replace("/", "\\").lower() for n in names()}
+    out = []
+    for fe in BANKS:
+        v = bank_voice(fe)
+        for bank in fightervoice.BANKS:
+            hname = fightervoice.bank_entry(bank, v, "hdr")
+            dname = fightervoice.bank_entry(bank, v, "dat")
+            if hname.lower() in have and dname.lower() in have:
+                continue
+            hdr = current(fightervoice.bank_entry(bank, fightervoice.LAYOUT_VOICE, "hdr"))
+            count = fightervoice.parse_hdr(hdr)["count"]
+            h, d = fightervoice.build_bank(hdr, bank, v, [fightervoice.silence_clip()] * count)
+            out += [(n, b) for n, b in ((hname, h), (dname, d)) if n.lower() not in have]
+        for kind in ("intro", "extro"):
+            name = fightervoice.stream_entry(kind, v)
+            if name.lower() not in have:
+                out.append((name, fightervoice.silence_clip(stream=True)))
+    return out
+
+
 def fnv1a(blob):
     """FNV-1a 32 (the game checks the side file against the database it reads with it)."""
     h = 0x811C9DC5
