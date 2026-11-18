@@ -59,14 +59,33 @@ static std::wstring quote(const std::wstring& text) {
     return result + L"\"";
 }
 
+std::vector<std::wstring> blockedAdvice;
+
+#ifndef DEFJAM_LAUNCHER_ONLY
+static void nativeLogIfReady(const std::string& message) { nativeLog(message); }
+#else
+static void nativeLogIfReady(const std::string&) {}
+#endif
+
 HANDLE spawn(const fs::path& executable, const std::vector<std::wstring>& args, const fs::path& cwd) {
     std::wstring command = quote(executable.wstring());
     for (const auto& arg : args) command += L" " + quote(arg);
     STARTUPINFOW si{sizeof(si)};
     PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW, nullptr, cwd.empty() ? nullptr : cwd.c_str(), &si, &pi))
-        throw std::runtime_error("Could not start a setup tool (Windows error " + std::to_string(GetLastError()) + ")");
+    DWORD error = ERROR_SUCCESS;
+    // FFNY_TEST_SPAWN_ERROR=<n> (test hook): fail as if CreateProcess returned that Windows error.
+    wchar_t hook[16];
+    if (GetEnvironmentVariableW(L"FFNY_TEST_SPAWN_ERROR", hook, 16) > 0) error = (DWORD)_wtoi(hook);
+    else if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
+                             CREATE_NO_WINDOW, nullptr, cwd.empty() ? nullptr : cwd.c_str(), &si, &pi))
+        error = GetLastError();
+    if (error != ERROR_SUCCESS) {
+        auto problem = describeToolStartFailure(error, executable.wstring());
+        nativeLogIfReady("Could not start " + narrow(executable.wstring()) + " (Windows error " + std::to_string(error) + ")"
+                         + (problem.blocked ? ": blocked by Windows security or antivirus" : ""));
+        if (problem.blocked) blockedAdvice = problem.advice;
+        throw std::runtime_error(narrow(problem.message));
+    }
     CloseHandle(pi.hThread);
     return pi.hProcess;
 }

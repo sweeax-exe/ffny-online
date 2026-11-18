@@ -901,8 +901,11 @@ void drawFailed() {
                              : st.exitCode == 3 && !st.prereq && !st.update ? L"\u2022 Setup can add the missing Windows parts: select Turn on and try again (Windows asks for permission)."
                              : st.exitCode == 3 ? L"\u2022 Install the parts named above, then select Try again."
                              : L"\u2022 Select Try again: setup continues where it stopped.";
-        y += text(first, item, x, y, w, cream(0.85f)) + 10;
-        rich({{L"\u2022 Still stuck? ", cream(0.85f)}, {L"Ask in our Discord", GOLD, L_DISCORD - 1000},
+        if (!blockedAdvice.empty() && st.exitCode == 4) {
+            for (const auto& line : blockedAdvice) y += text(line, item, x, y, w, cream(0.85f)) + 6;
+            y += 4;
+        } else y += text(first, item, x, y, w, cream(0.85f)) + 10;
+        if (blockedAdvice.empty() || st.exitCode != 4) rich({{L"\u2022 Still stuck? ", cream(0.85f)}, {L"Ask in our Discord", GOLD, L_DISCORD - 1000},
               {L" and attach the log file (Open log file).", cream(0.85f)}}, item, x, y, w);
     }
     float by = 544 - 44;
@@ -1692,13 +1695,21 @@ bool sampleState(const std::wstring& name) {
         if (logPath.empty()) logPath = L"C:\\Users\\Player\\AppData\\Local\\DefJamSetup\\logs\\{5C1D7E0A-2B9F-4C51-9E7A-0D3F6B8A1C24}.log";
         return true;
     }
+    if (name == L"failed-blocked") {
+        // Smart App Control (4551): what the failure screen shows when Windows refuses a setup tool.
+        auto problem = describeToolStartFailure(4551, L"C:\\Users\\Player\\AppData\\Local\\DefJamSetup\\{5C1D7E0A}\\payload\\python\\python.exe");
+        st.screen = S_FAILED; st.plan = samplePlan(true); st.exitCode = 4; st.prereq = false;
+        st.failure = problem.message; blockedAdvice = problem.advice;
+        if (logPath.empty()) logPath = L"C:\\Users\\Player\\AppData\\Local\\DefJamSetup\\logs\\{5C1D7E0A-2B9F-4C51-9E7A-0D3F6B8A1C24}.log";
+        return true;
+    }
     if (name == L"wine") { st.screen = S_WINE; return true; }
     return false;
 }
 
 const wchar_t* SNAPSHOT_STATES[] = {L"game", L"game-searching", L"game-empty", L"game-several", L"checking", L"recognized",
     L"wrong-pal", L"wrong-pal-found", L"wrong-ps2", L"wrong-gamecube", L"wrong-generic", L"folder", L"folder-checking",
-    L"folder-problem", L"installing", L"installing-details", L"cancel-confirm", L"done", L"failed", L"cancelled", L"wine"};
+    L"folder-problem", L"installing", L"installing-details", L"cancel-confirm", L"done", L"failed", L"failed-blocked", L"cancelled", L"wine"};
 
 HWND createWindow(HINSTANCE instance, bool visible) {
     WNDCLASSW wc{}; wc.lpfnWndProc = windowProc; wc.hInstance = instance;
