@@ -998,7 +998,7 @@ def unchanged(root, state, key, data, game):
             and all((out / LANG_DIR / i).joinpath(*PurePosixPath(f).parts).is_file() for i, f in files['lang']))
 
 
-def compose(data, game, packs, off=None, root=None, log=print, languages=None, today=None, reserved=()):
+def compose(data, game, packs, off=None, root=None, log=print, languages=None, today=None, reserved=(), portraits=True):
     """Compose ``packs`` ([{id, version, content_sha256, kind, order, folder, fighter_fe_id, reviewed, bundle,
     bundle_name}], every synced pack with an install.json; ``fighter_fe_id`` the catalogue's place of a new
     fighter, ``reviewed`` the catalogue's review date of the version (``new_packs``; ``today``: the UTC date it
@@ -1027,10 +1027,11 @@ def compose(data, game, packs, off=None, root=None, log=print, languages=None, t
     if unchanged(root, state, key, data, game):
         ids = set(state['applied'])
         screens = Bases(data, game)
-        hub_portraits(data, [p for p in chosen if p['id'] in ids],
-                      lambda entry: screens.read(newfighter.SCREENS_ARCHIVE, entry), state.get('hub', []))
-        skin_portraits(data, [p for p in chosen if p['id'] in ids],
-                       lambda entry: screens.read(newfighter.SCREENS_ARCHIVE, entry), missing_only=True)
+        if portraits:
+            hub_portraits(data, [p for p in chosen if p['id'] in ids],
+                          lambda entry: screens.read(newfighter.SCREENS_ARCHIVE, entry), state.get('hub', []))
+            skin_portraits(data, [p for p in chosen if p['id'] in ids],
+                           lambda entry: screens.read(newfighter.SCREENS_ARCHIVE, entry), missing_only=True)
         return {'applied': state['applied'], 'skipped': [tuple(s) for s in state.get('skipped', [])],
                 'files': state.get('files', []), 'lang_files': [tuple(x) for x in state.get('lang_files', [])],
                 'lang_skipped': [tuple(s) for s in state.get('lang_skipped', [])], 'unchanged': True}
@@ -1060,8 +1061,12 @@ def compose(data, game, packs, off=None, root=None, log=print, languages=None, t
         swap(root, new)
     else:
         remove_output(root)
-    hub = hub_portraits(data, applied, lambda entry: work.current(newfighter.SCREENS_ARCHIVE, entry))
-    skin_portraits(data, applied, lambda entry: work.current(newfighter.SCREENS_ARCHIVE, entry))
+    # portraits=False: a second composition into another root (mods.py compose_own, the player's own packs alone)
+    # shares <data>/online-art with the full one, so it must leave the full one's pictures alone
+    hub = []
+    if portraits:
+        hub = hub_portraits(data, applied, lambda entry: work.current(newfighter.SCREENS_ARCHIVE, entry))
+        skin_portraits(data, applied, lambda entry: work.current(newfighter.SCREENS_ARCHIVE, entry))
     state = {'schema': SCHEMA, 'key': key, 'bases': bases.seen, 'applied': [p['id'] for p in applied],
              'skipped': skipped, 'files': files, 'lang_files': lang_files, 'lang_skipped': lang_skipped, 'hub': hub,
              'set': set_hash(applied, switched) if applied else ''}
