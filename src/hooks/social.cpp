@@ -1866,6 +1866,15 @@ extern "C" long long social_battle_ready(char *region, int size)
     return b.id;
 }
 
+extern "C" int social_player_muted(const char *name, unsigned account)
+{
+    std::lock_guard<std::mutex> lk(g_mu);
+    for (auto *list : { &g_v.muted, &g_v.blocked })
+        for (auto &r : *list)
+            if ((account && r.id == (long long)account) || (name && *name && r.name == name)) return 1;
+    return 0;
+}
+
 extern "C" void social_set_typing(int on)
 {
     g_typing_until = on ? GetTickCount64() + 200 : 0;
@@ -1883,6 +1892,7 @@ extern "C" void social_shutdown(void) {}
 extern "C" int social_enabled(void) { return 0; }
 extern "C" void social_set_typing(int on) { (void)on; }
 extern "C" int social_typing(void) { return 0; }
+extern "C" int social_player_muted(const char *name, unsigned account) { (void)name; (void)account; return 0; }
 extern "C" long long social_battle_ready(char *region, int size) { (void)region; (void)size; return 0; }
 namespace social {
 void crew_challenge(long long, const std::string &, int) {}

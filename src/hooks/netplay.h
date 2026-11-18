@@ -534,6 +534,8 @@ int netplay_countdown_active(void);  /* this fight has the start countdown (onli
 int netplay_voice_room(void);
 void netplay_send_voice(const uint8_t *payload, int len);
 int netplay_room_name(int slot, char *out, int size);
+/* The account behind a room slot (0 unknown: it has not written a line in this room yet, or the slot has another player). */
+unsigned netplay_room_account(int slot);
 
 /* Created fighters (created_fighter.c, docs/research/created-fighter-online.md). The fighter id a
  * player sends to play the fighter they made in Story mode. */

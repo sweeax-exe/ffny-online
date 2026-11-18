@@ -30,6 +30,9 @@ int social_typing(void);
 /* Crew battles (stage 3): this account's crew battle that can be joined now (accepted or live, this
  * crew in it), its id, else 0; region gets the relay region it runs on ("eu", "us-east", "us-west"). */
 long long social_battle_ready(char *region, int size);
+/* 1 when this account muted or blocked that player in the social features (the service keeps both lists, so it
+ * holds across sessions): by account when known, else by name. Voice and room text hide them (voice.c). */
+int social_player_muted(const char *name, unsigned account);
 
 #ifdef __cplusplus
 }

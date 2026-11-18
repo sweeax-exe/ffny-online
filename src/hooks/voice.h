@@ -22,9 +22,13 @@ int voice_overlay(char *out, int size);
 /* The microphone's level after the gains, 0..1, for the settings' meter; -1 while it is closed. */
 float voice_mic_meter(void);
 
-/* One room member's volume in percent (0 mutes them, up to 200), by relay slot; for this room only. */
+/* One room member's volume in percent (0 mutes them, up to 200), by relay slot. The slot only says who: the setting
+ * belongs to that player (their account, else their name) for the whole game session, in any room, and the chat
+ * window's MUTE IN ROOM sets the same thing (voice_mute.h). 0 also when this account muted or blocked them in the
+ * social features (voice_player_social_muted tells those apart). */
 int voice_player_volume(int slot);
 void voice_set_player_volume(int slot, int percent);
+int voice_player_social_muted(int slot);
 
 /* Run the Streets' speaker icons (rts_social_ui.inc): room slot `slot` was heard in the last 300 ms; this PC sends. */
 int voice_talking(int slot);

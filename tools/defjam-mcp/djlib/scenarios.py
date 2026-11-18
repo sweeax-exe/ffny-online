@@ -880,6 +880,71 @@ def room_chat(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_
     return r
 
 
+# ---- mute (build 92): voice and text of a muted player stop, and stay stopped ---------------------------------
+
+def mute(timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots=False, extra_env=None, via="voice",
+         matches=2, rollback="off"):
+    """Two copies in a quick match with accounts (-social); both send the voice test tone all along and write a line
+    in the room. Copy 0 mutes copy 1 early, copy 1 mutes nobody (the control). via "voice": the VOICE CHAT page's
+    call (RECOMP_TEST_VOICE_MUTE, slot 1 to 0 %); via "chat": the chat window's MUTE IN ROOM
+    (RECOMP_TEST_SOCIAL_UI mute=Copy 1, the name; copy 1's first line then teaches its account). Each copy logs
+    each second, per room slot, the loudest sample that came in and the loudest that went to the speakers after the
+    mutes ("[VOICE] level slot N: in A out B"). Checks: copy 0 hears copy 1 at out 0 with in > 0, in the room, in match 1
+    and in match 2 (the mute holds across matches); copy 1 hears copy 0 at out > 0 all along; and copy 1's room
+    lines are hidden on copy 0 (chat via) or its voice only is muted (voice via: the text check is then left out)."""
+    copy_env = {
+        0: {"RECOMP_VOICE_TEST_TONE": "1", "RECOMP_VOICE_LEVELS": "1", "RECOMP_TEST_ROOM_CHAT": "room:1:hello from copy 0"},
+        1: {"RECOMP_VOICE_TEST_TONE": "1", "RECOMP_VOICE_LEVELS": "1", "RECOMP_TEST_ROOM_CHAT": "room:1:hello from copy 1;room:6:and again"},
+    }
+    if via == "chat":
+        # what the chat window's MUTE IN ROOM does, by account once copy 1's first line has named it (the window itself
+        # comes up only between a quick match's fights; scenario social presses it, and checks the hidden lines)
+        copy_env[0]["RECOMP_TEST_VOICE_MUTE_NAME"] = "1:Copy 1"
+    else:
+        copy_env[0]["RECOMP_TEST_VOICE_MUTE"] = "0.5:1:0"
+    r = online(matches=matches, social=True, timeout=timeout, relay_port=relay_port, lock_timeout=lock_timeout, log=log,
+               keep_roots=keep_roots, extra_env=extra_env, copy_env=copy_env, rollback=rollback)
+    texts = {}
+    for i, p in enumerate(r.get("logs", [])):
+        path = p if os.path.isabs(p) else os.path.join(machine.REPO, p)
+        texts[i] = logparse.read_text(path) if os.path.isfile(path) else ""
+
+    def levels(i, slot):
+        """[(line index, in, out)] of the copy's level lines for that slot."""
+        out = []
+        for k, l in enumerate(texts.get(i, "").splitlines()):
+            m = re.search(r"\[VOICE\] level slot %d: in (\d+) out (\d+)" % slot, l)
+            if m:
+                out.append((k, int(m.group(1)), int(m.group(2))))
+        return out
+
+    def marks(i, mark):
+        return [k for k, l in enumerate(texts.get(i, "").splitlines()) if mark in l]
+    l0, l1 = levels(0, 1), levels(1, 0)
+    starts = marks(0, '"event":"match_start"')
+    muted_at = (marks(0, "Copy 1 muted by account") or marks(0, "0 % (muted)"))[:1]
+    # the first level line after the mute covers the second the mute came in (part of it before): left out
+    after_mute = [x for x in l0 if muted_at and x[0] > muted_at[0]][1:]
+    in_fight = lambda x, n: len(starts) > n and starts[n] < x[0] < (starts[n + 1] if len(starts) > n + 1 else 10 ** 9)
+    in_m1 = [x for x in after_mute if in_fight(x, 0)]
+    in_m2 = [x for x in after_mute if in_fight(x, 1)]
+    in_room = [x for x in after_mute if not starts or x[0] < starts[0] or (len(starts) > 1 and x[0] < starts[1] and not in_fight(x, 0))]
+    checks = {
+        "muted_logged": bool(muted_at),
+        "heard_after_mute": bool(after_mute),
+        "muted_out_zero": bool(after_mute) and all(x[2] == 0 for x in after_mute),
+        "muted_in_nonzero": bool(after_mute) and all(x[1] > 0 for x in after_mute),
+        "muted_out_zero_in_room": bool(in_room) and all(x[2] == 0 for x in in_room),
+        "muted_out_zero_match1": bool(in_m1) and all(x[2] == 0 for x in in_m1),
+        "muted_out_zero_match2": matches < 2 or (bool(in_m2) and all(x[2] == 0 for x in in_m2)),
+        "control_still_hears": bool(l1) and all(x[2] > 0 for x in l1 if x[1] > 0),
+    }
+    r["mute"] = {"via": via, "checks": checks, "levels_copy0_slot1": [x[1:] for x in l0][-12:],
+                 "levels_copy1_slot0": [x[1:] for x in l1][-6:]}
+    r["ok"] = bool(r.get("ok")) and all(checks.values())
+    return r
+
+
 # ---- crew battles (social stage 3) ----------------------------------------------------------------
 
 # Copies 0 and 1 are Bronx Kings [BXK] (copy 0 the Boss), copies 2 and 3 Red Hook Riders [RHR] (copy 2 the
@@ -1734,8 +1799,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
            rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None,
            linger=None, reports=False, fighter_rules=None, max_ping=None, banned_tier=None, room_menu=None,
-           results_leave=None, hill_pick=None, hill_idle=None, password=False):
-    """password (sign-in without Discord): a local account service with -password; copy N makes the account PwCopyN
+           results_leave=None, hill_pick=None, hill_idle=None, password=False, social=False):
+    """social (build 92): a local account service with -social and test accounts "Copy N" (not ranked): the relay knows the
+    copies' accounts (their room chat lines carry them) and the chat window's lists are on; copy_env can drive the chat
+    window (RECOMP_TEST_SOCIAL_UI) and the room chat (RECOMP_TEST_ROOM_CHAT). See mute().
+    password (sign-in without Discord): a local account service with -password; copy N makes the account PwCopyN
     with a username and password through its own sign-in code (RECOMP_TEST_PASSWORD; copy 1 signs in to an account
     made over HTTP first, so both create and sign-in run), and the room's matches are reported as those accounts.
     The result's `password` says what the service's file holds afterwards (the accounts, no Discord ids, Argon2id
@@ -1866,12 +1934,14 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
                                                       "User-Agent": "FFNY-Online-Launcher/1"})
                 urllib.request.urlopen(req, timeout=10).read()
             result["params"]["password"] = True
-        if ranked or reports:
+        if ranked or reports or social:
             acc_port = relay_port + 100
-            tokens = s.accounts(acc_port, ["Copy %d" % i for i in range(players)])
+            tokens = s.accounts(acc_port, ["Copy %d" % i for i in range(players)], extra=["-social"] if social else [])
             relay_extra += ["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)]
             if ranked:
                 result["params"]["ranked"] = ranked
+            elif social:
+                result["params"]["social"] = True
             else:
                 result["params"]["reports"] = True
         maint_timer = None
@@ -1979,7 +2049,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             if rematch:
                 env["RECOMP_PAD_SCRIPT"] = harness().build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
                                                                        rematch_tail(matches, p2))
-            if reports and not ranked:
+            if (reports or social) and not ranked:
                 env.update({"RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % (relay_port + 100),
                             "RECOMP_ACCOUNT_TEST_TOKEN": tokens["Copy %d" % i]})
             if password:
