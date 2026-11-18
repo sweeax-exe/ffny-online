@@ -42,6 +42,14 @@ bool draw_skin_window(ImVec2 display);
  * the paged list; the overlay holds the game's input and draws it until it returns true (a fighter taken or B). */
 bool take_community_window_request();
 bool draw_community_window(ImVec2 display);
+/* Towers (towers_ui.inc, towers.h): back on a menu after a floor's fight, take_towers_request() is true once; the
+ * overlay then holds the game's input and draws draw_towers_window (the climb to the next floor, or the run's end)
+ * until it returns true. towers_card_wanted() once a frame with the overlay closed: the next floor's card over the
+ * load, drawn by draw_towers_card (no input). */
+bool take_towers_request();
+bool draw_towers_window(ImVec2 display);
+bool towers_card_wanted();
+void draw_towers_card(ImDrawList *dl, ImVec2 display);
 bool exit_chip_at(float x, float y);
 bool take_exit_test_request();
 void exit_prompt_begin();

@@ -215,3 +215,15 @@ def test_generator_is_splitmix32(out):
     s, y = mix(s)
     assert row(out, 'gen') == [str(x), str(y), str(s)]
 
+
+def test_the_game_side_is_wired():
+    ow = (HOOKS / 'openworld.c').read_text(encoding='utf-8')
+    assert 'towers_match_start();' in ow and 'towers_step();' in ow and 'towers_health_change();' in ow
+    am = (HOOKS / 'automatch.c').read_text(encoding='utf-8')
+    assert 'towers_on_funccall(text);' in am and 'towers_rematch_request()' in am
+    ui = (HOOKS / 'pc_ui.cpp').read_text(encoding='utf-8')
+    assert 'take_towers_request' in ui and 'towers_card_wanted' in ui
+    hub = (HOOKS / 'online_screen.cpp').read_text(encoding='utf-8')
+    assert '#include "towers_ui.inc"' in hub and 'HUB_TOWERS' in hub
+    towers = (HOOKS / 'towers.c').read_text(encoding='utf-8')
+    assert 'netplay_active()' in towers      # never online
