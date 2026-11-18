@@ -236,19 +236,44 @@ NEW_FIGHTER_PLACES = tuple(range(100, 128)) + (5, 15, 29, 37, 39, 42, 49, 53, 63
                                                96, 97)
 
 
+FIRST_LOGICAL = 1000    # setup/ffnycontent/newfighter.py: community fighters beyond the places, by number
+
+
 def keep_new_fighters(old, new):
-    """The community new fighters' hub portraits (fighters/<place>.png, the places of setup/ffnycontent/newfighter.py
-    PLACES: 100..127 and 20 low IDs no stock fighter has) are not from the dump: the launcher's
-    composer (setup/content_compose.py) draws them from the packs' own art, so a rebuild carries them over from
-    the folder it replaces. Returns the IDs kept."""
+    """The community new fighters' hub portraits (fighters/<id>.png: the places of setup/ffnycontent/newfighter.py
+    PLACES, 100..127 and 20 low IDs no stock fighter has, and the numbered fighters beyond them, 1000 and up) are
+    not from the dump: the launcher's composer (setup/content_compose.py) draws them from the packs' own art, so
+    a rebuild carries them over from the folder it replaces (an update re-runs this script; without it every
+    community portrait was gone until the next composition drew it again). Returns the IDs kept."""
     import shutil
     kept = []
-    for place in NEW_FIGHTER_PLACES:
-        picture = Path(old) / "fighters" / ("%d.png" % place)
-        if picture.is_file() and not picture.is_symlink():
+    source = Path(old) / "fighters"
+    if not source.is_dir():
+        return kept
+    for picture in sorted((p for p in source.glob("*.png") if p.stem.isdigit()), key=lambda p: int(p.stem)):
+        if picture.is_symlink() or not picture.is_file():
+            continue
+        fid = int(picture.stem)
+        if fid in NEW_FIGHTER_PLACES or fid >= FIRST_LOGICAL:
             (Path(new) / "fighters").mkdir(parents=True, exist_ok=True)
             shutil.copyfile(picture, Path(new) / "fighters" / picture.name)
-            kept.append(place)
+            kept.append(fid)
+    return kept
+
+
+def keep_skin_pictures(old, new):
+    """skins/<pack id>.png, the picture of each applied community skin, is the composer's too (see
+    keep_new_fighters), and nothing here writes the folder: a rebuild carries it over whole. Returns the names kept."""
+    import shutil
+    kept = []
+    source = Path(old) / "skins"
+    if not source.is_dir():
+        return kept
+    for picture in sorted(source.glob("*.png")):
+        if picture.is_file() and not picture.is_symlink():
+            (Path(new) / "skins").mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(picture, Path(new) / "skins" / picture.name)
+            kept.append(picture.name)
     return kept
 
 
@@ -341,6 +366,7 @@ def build(data, out):
     if out.exists():
         import shutil
         keep_new_fighters(out, tmp)
+        keep_skin_pictures(out, tmp)
         shutil.rmtree(out)
     tmp.rename(out)
     return manifest
