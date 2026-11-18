@@ -121,6 +121,7 @@ int netplay_match_locked(void) { return 0; }
 int netplay_voice_room(void) { return 0; }
 void netplay_send_voice(const uint8_t *p, int n) { (void)p; (void)n; }
 int netplay_room_name(int s, char *o, int n) { (void)s; if (n > 0) o[0] = 0; return 0; }
+unsigned netplay_room_account(int s) { (void)s; return 0; }
 int netplay_created_record(int p, uint8_t *o) { (void)p; (void)o; return 0; }
 int netplay_slot_created(int s, char *n, int ns, const char **st) { (void)s; if (ns > 0) n[0] = 0; if (st) *st = ""; return 0; }
 int netplay_created_available(void) { return 0; }
@@ -222,6 +223,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 
 #include "input_host.h"
 #include "voice.h"
+#include "voice_mute.h"
 
 #ifndef DEFJAM_VERSION
 #define DEFJAM_VERSION "dev"
@@ -532,6 +534,8 @@ static struct {
     int chat_n;
     unsigned chat_seq;
     char chat_room[7];              /* the room the lines are from */
+    unsigned slot_acct[ROOMSLOTS];  /* the account behind a room slot, from its chat lines (voice mutes, voice_mute.h) */
+    char slot_acct_name[ROOMSLOTS][33];
     int chat_ident;                 /* -1 not asked, -2 fetching a ticket, -3 IDENT being sent, else IDENT_* */
     int chat_mute_min;
     uint8_t chat_ticket[TICKET_LEN];
@@ -5466,6 +5470,8 @@ static void chat_room_check(void)
     snprintf(N.chat_room, sizeof(N.chat_room), "%s", N.roomv.code);
     N.chat_n = 0;
     N.chat_out_n = 0;
+    memset(N.slot_acct, 0, sizeof(N.slot_acct));
+    memset(N.slot_acct_name, 0, sizeof(N.slot_acct_name));
 }
 
 static void chat_add(int slot, unsigned account, int flags, const char *name, int nl, const char *text, int tl)
@@ -5489,6 +5495,13 @@ static void chat_add(int slot, unsigned account, int flags, const char *name, in
         if ((unsigned char)name[i] >= 0x20 && name[i] != 0x7F) l->name[o++] = name[i];
     for (i = o = 0; i < tl && o < (int)sizeof(l->text) - 1; i++)
         if ((unsigned char)text[i] >= 0x20 && text[i] != 0x7F) l->text[o++] = text[i];
+    if (!l->system && account) {    /* who sits in this slot, and what their name is: a muted player is muted by account */
+        vmute_learn(l->name, account);
+        if (slot >= 0 && slot < ROOMSLOTS && !l->spectator) {
+            N.slot_acct[slot] = account;
+            snprintf(N.slot_acct_name[slot], sizeof(N.slot_acct_name[slot]), "%s", l->name);
+        }
+    }
     /* an earlier line: not new (no fight overlay, no unread), and its time is not known */
     l->at = l->history ? 0 : GetTickCount64();
     l->unix_at = l->history ? 0 : (long long)time(NULL);
@@ -7502,6 +7515,23 @@ int netplay_room_name(int slot, char *out, int size)
         }
     LeaveCriticalSection(&g_cs);
     return found;
+}
+
+/* The account behind a room slot: known once that player has written a line in this room (the relay names the
+ * account on it), and only while the slot's player is still the one who wrote it (a slot is handed to the next
+ * player who joins); 0 otherwise. */
+unsigned netplay_room_account(int slot)
+{
+    unsigned account = 0;
+    int i;
+    if (slot < 0 || slot >= ROOMSLOTS) return 0;
+    EnterCriticalSection(&g_cs);
+    if (N.slot_acct[slot] && !strcmp(N.chat_room, N.roomv.code))
+        for (i = 0; i < N.roomv.player_count; i++)
+            if (N.roomv.players[i].slot == slot && !strncmp(N.roomv.players[i].name, N.slot_acct_name[slot], 24))
+                account = N.slot_acct[slot];
+    LeaveCriticalSection(&g_cs);
+    return account;
 }
 
 /* ---- the game's hooks ------------------------------------------------------------ */

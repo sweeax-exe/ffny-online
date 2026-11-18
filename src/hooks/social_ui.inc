@@ -75,8 +75,7 @@ struct Chat {
     int popup_frame = -1;           // the keyboard or the menu opened in this frame: its press is not theirs
     // ROOM (stage 2b): the room's chat through the relay (netplay.c), the last line seen, local mutes
     unsigned room_seen = 0;
-    std::vector<std::string> room_muted;        // by name (the room's list names players by name)
-    std::vector<unsigned> room_muted_ids;       // by account, when the relay named one
+    // the mutes themselves are voice_mute.h's: one list for voice and text, by account or name, for the session
     bool menu_room = false;                     // the player menu opened from the ROOM tab
     unsigned menu_account = 0;
     // REPORT (stage 2c): the line the menu was opened on, and the lines before it (room lines only
@@ -309,8 +308,7 @@ bool room_only() { return !social_enabled(); }
 bool room_muted(const NetChatLine &l)
 {
     if (l.system || l.mine) return false;
-    for (auto &n : C.room_muted) if (n == l.name) return true;
-    for (unsigned id : C.room_muted_ids) if (id && id == l.account) return true;
+    if (vmute_is_muted(l.name, l.account)) return true;        // MUTE IN ROOM, or 0 % on the VOICE CHAT page
     if (l.account && !room_only()) {    // muted or blocked in the social features too
         for (auto &m : C.v.muted) if (m.id == (long long)l.account) return true;
         for (auto &b : C.v.blocked) if (b.id == (long long)l.account) return true;
@@ -331,23 +329,16 @@ long long room_account_of(const std::string &name)
     return 0;
 }
 
+// Mute or unmute a player for voice and text together (voice_mute.h): by account when it is known, and by name.
 void room_mute(const std::string &name, unsigned account, bool on)
 {
-    auto &ns = C.room_muted;
-    auto &is = C.room_muted_ids;
-    ns.erase(std::remove(ns.begin(), ns.end(), name), ns.end());
-    if (account) is.erase(std::remove(is.begin(), is.end(), account), is.end());
-    if (on) {
-        ns.push_back(name);
-        if (account) is.push_back(account);
-    }
+    vmute_mute(name.c_str(), account, on);
     fprintf(stderr, "[SOCIAL-UI] room chat: %s %s\n", on ? "muted" : "unmuted", name.c_str());
 }
 
 bool room_name_muted(const std::string &name)
 {
-    for (auto &n : C.room_muted) if (n == name) return true;
-    return false;
+    return vmute_is_muted(name.c_str(), 0) || social_player_muted(name.c_str(), 0);
 }
 
 // The room's lines as the chat's lines (oldest first); *last: the newest one's seq.
@@ -1523,7 +1514,7 @@ void draw_room_tab(ImDrawList *dl, const Frame &f, const ChatKeys &k, const NetR
         }
         y += 17;
     }
-    text(dl, f, g_body, 8.5f, PX + 12, PY + PH - 34, DIM, room_only() ? "Pick a name: mute in this room." :
+    text(dl, f, g_body, 8.5f, PX + 12, PY + PH - 34, DIM, room_only() ? "Pick a name: mute their voice and chat." :
          "Pick a name: add friend or mute.", LEFT, 0, lw - 24);
 
     // the room's chat, newest at the bottom, the name and time above each line as the design has it
@@ -2192,8 +2183,7 @@ void draw_player_menu(ImDrawList *dl, const Frame &f, const ChatKeys &k)
     for (auto &b : C.v.blocked) blocked |= C.menu_id && b.id == C.menu_id;
     for (auto &o : C.v.out) asked |= C.menu_id ? o.id == C.menu_id : o.name == C.menu_name;
     if (C.menu_room) {      // the ROOM tab: hide this player's room lines on this PC
-        bool rm = room_name_muted(C.menu_name);
-        for (unsigned id : C.room_muted_ids) rm |= C.menu_account && id == C.menu_account;
+        bool rm = vmute_is_muted(C.menu_name.c_str(), C.menu_account);
         items.push_back({ rm ? "UNMUTE IN ROOM" : "MUTE IN ROOM", rm ? 5 : 4 });
     }
     if (!room_only() && !self) {
@@ -2797,7 +2787,7 @@ void chat_test_step()
     } else if (what == "text") {
         ImGui::GetIO().AddInputCharactersUTF8(arg.c_str());
     } else if (what == "mute" || what == "unmute") {    // the ROOM tab's MUTE IN ROOM on that player
-        room_mute(arg, 0, what == "mute");
+        room_mute(arg, room_only() ? 0 : (unsigned)room_account_of(arg), what == "mute");     // as the ROOM tab does
     } else if (what == "crewcreate") {              // the keyboard's name, NEXT, its tag, CREATE
         C.open = true;
         C.tab = TAB_CREW;

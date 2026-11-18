@@ -27,6 +27,7 @@
 #include "social.h"
 #include "rts_social.h"
 #include "rts_social_rules.h"
+#include "voice_mute.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -115,7 +116,11 @@ static ULONGLONG s_heard[SLOTS];                /* when a packet from the slot l
 static uint16_t s_seq_in[SLOTS];
 static int s_seq_seen[SLOTS];
 static volatile LONG s_sending;                 /* this PC sends right now */
-static int s_player_vol[SLOTS] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 };  /* per room slot, this room only */
+/* What each room slot plays at, in percent (0 muted): worked out from who sits in the slot now (their name, their
+ * account when the relay named it) against the session's mutes (voice_mute.h) and the social mute/block lists, so a
+ * mute follows the player, not the slot: into the next room, after a rejoin, onto another relay. Kept for the audio
+ * thread; refreshed on every block for the slots that are talking. */
+static int s_slot_pct[SLOTS] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 };
 static int s_mic_failed, s_out_failed;
 static INIT_ONCE s_once = INIT_ONCE_STATIC_INIT;
 static const WAVEFORMATEX k_format = { WAVE_FORMAT_PCM, 1, RATE, RATE * 2, 2, 16, 0 };
@@ -123,6 +128,10 @@ static const WAVEFORMATEX k_format = { WAVE_FORMAT_PCM, 1, RATE, RATE * 2, 2, 16
  * direction between their fighter and this PC's (proximity voice); elsewhere mono, exactly as before. */
 static const WAVEFORMATEX k_format_stereo = { WAVE_FORMAT_PCM, 2, RATE, RATE * 4, 4, 16, 0 };
 static int s_stereo;
+/* tests (RECOMP_VOICE_LEVELS, or the test tone): each second, per room slot, the loudest sample that came in and the
+ * loudest that went to the speakers after the mutes and volumes (a muted talker: 0 out, the same in) */
+static int s_lvl_in[SLOTS], s_lvl_out[SLOTS];
+static ULONGLONG s_lvl_at;
 static float s_prox_l[SLOTS], s_prox_r[SLOTS];  /* the last block's channel gains, ramped from to avoid clicks */
 
 /* "T", "V", "F5", "Mouse4", "Tab", "CapsLock", "LAlt" ...: the key as a Windows virtual-key code, 0 if unknown */
@@ -203,7 +212,6 @@ static void close_all(void)
     memset(s_rd, 0, sizeof(s_rd));
     memset(s_wr, 0, sizeof(s_wr));
     memset(s_seq_seen, 0, sizeof(s_seq_seen));
-    for (i = 0; i < SLOTS; i++) s_player_vol[i] = 100;      /* a new room starts with everyone at 100 % */
     ReleaseSRWLockExclusive(&s_lock);
 }
 
@@ -236,20 +244,73 @@ static int open_playback(void)
 /* every free output block: the talkers' next 20 ms, mixed (silence when nobody talks). In stereo (Run the Streets)
  * each talker goes in at their proximity gain and pan (rts_social_voice: 1 and the middle outside its fights), ramped
  * across the block from the last one's, so a talker walking away fades without steps. */
+/* who sits in a room slot: its name in the room's list and, once they wrote a line, their account */
+static int slot_who(int slot, char *name, int size, unsigned *account)
+{
+    name[0] = 0;
+    *account = 0;
+    if (!netplay_room_name(slot, name, size)) return 0;
+    *account = netplay_room_account(slot);
+    vmute_learn(name, *account);        /* a player muted by name is muted by account from now on */
+    return 1;
+}
+
+static int slot_percent(int slot)
+{
+    char name[25];
+    unsigned account;
+    int pct;
+    if (!slot_who(slot, name, sizeof(name), &account)) return 100;
+    pct = vmute_percent(name, account);
+    if (pct && social_player_muted(name, account)) pct = 0;     /* muted or blocked in the social features */
+    return pct;
+}
+
+static void log_levels(void)
+{
+    static int on = -1;
+    ULONGLONG now = GetTickCount64();
+    int k;
+    if (on < 0) on = getenv("RECOMP_VOICE_LEVELS") != NULL || getenv("RECOMP_VOICE_TEST_TONE") != NULL;
+    if (!on || now - s_lvl_at < 1000) return;
+    s_lvl_at = now;
+    for (k = 0; k < SLOTS; k++) {
+        if (!s_lvl_in[k] && !s_lvl_out[k]) continue;
+        fprintf(stderr, "[VOICE] level slot %d: in %d out %d\n", k, s_lvl_in[k], s_lvl_out[k]);
+        s_lvl_in[k] = s_lvl_out[k] = 0;
+    }
+}
+
 static void feed_speakers(void)
 {
     float gain = (float)recomp_settings_get("online", "voice_volume", 100) / 100.0f;
+    ULONGLONG now = GetTickCount64();
     int b, i, k;
+    log_levels();
     for (b = 0; b < OUT_BUFS; b++) {
         float mix[MIX * 2];
         if (!(s_ohdr[b].dwFlags & WHDR_DONE)) continue;
         memset(mix, 0, sizeof(mix));
+        for (k = 0; k < SLOTS; k++)         /* before the ring's lock: this takes the netplay and social locks */
+            if (s_wr[k] != s_rd[k] || (s_heard[k] && now - s_heard[k] < 2000)) s_slot_pct[k] = slot_percent(k);
         AcquireSRWLockExclusive(&s_lock);
         for (k = 0; k < SLOTS; k++) {
             unsigned have = s_wr[k] - s_rd[k], n = have < MIX ? have : MIX;
-            float pv = (float)s_player_vol[k] / 100.0f;
+            float pv = (float)s_slot_pct[k] / 100.0f;
+            if (!s_slot_pct[k]) {           /* muted: what they say is thrown away, not queued for later */
+                for (i = 0; i < (int)have; i++)     /* (the level log still sees what came in) */
+                    if (abs(s_ring[k][(s_rd[k] + (unsigned)i) % RING]) > s_lvl_in[k]) s_lvl_in[k] = abs(s_ring[k][(s_rd[k] + (unsigned)i) % RING]);
+                s_rd[k] = s_wr[k];
+                continue;
+            }
             if (!s_stereo) {
-                for (i = 0; i < (int)n; i++) mix[i] += s_ring[k][(s_rd[k] + (unsigned)i) % RING] * pv;
+                for (i = 0; i < (int)n; i++) {
+                    int raw = s_ring[k][(s_rd[k] + (unsigned)i) % RING];
+                    float v = raw * pv;
+                    mix[i] += v;
+                    if (abs(raw) > s_lvl_in[k]) s_lvl_in[k] = abs(raw);
+                    if ((int)fabsf(v * gain) > s_lvl_out[k]) s_lvl_out[k] = (int)fabsf(v * gain);
+                }
             } else {
                 float pg = 1.0f, pan = 0.0f, l, r, l0 = s_prox_l[k], r0 = s_prox_r[k];
                 if (n) rts_social_voice(k, &pg, &pan);
@@ -260,6 +321,8 @@ static void feed_speakers(void)
                     float t = (float)(i + 1) / (float)MIX, v = s_ring[k][(s_rd[k] + (unsigned)i) % RING] * pv;
                     mix[2 * i] += v * (l0 + (l - l0) * t);
                     mix[2 * i + 1] += v * (r0 + (r - r0) * t);
+                    if (abs(s_ring[k][(s_rd[k] + (unsigned)i) % RING]) > s_lvl_in[k]) s_lvl_in[k] = abs(s_ring[k][(s_rd[k] + (unsigned)i) % RING]);
+                    if ((int)fabsf(v * gain * (l0 > r0 ? l0 : r0)) > s_lvl_out[k]) s_lvl_out[k] = (int)fabsf(v * gain * (l0 > r0 ? l0 : r0));
                 }
                 s_prox_l[k] = l;
                 s_prox_r[k] = r;
@@ -403,12 +466,24 @@ static void level(int16_t *pcm, float *gain)
 
 float voice_mic_meter(void) { return s_in ? (float)s_meter / 1000.0f : -1.0f; }
 
-int voice_player_volume(int slot) { return slot >= 0 && slot < SLOTS ? s_player_vol[slot] : 100; }
+int voice_player_volume(int slot) { return slot >= 0 && slot < SLOTS ? slot_percent(slot) : 100; }
 
 void voice_set_player_volume(int slot, int percent)
 {
-    if (slot < 0 || slot >= SLOTS) return;
-    s_player_vol[slot] = percent < 0 ? 0 : percent > 200 ? 200 : percent;
+    char name[25];
+    unsigned account;
+    if (slot < 0 || slot >= SLOTS || !slot_who(slot, name, sizeof(name), &account)) return;
+    vmute_set(name, account, percent);      /* by the player, kept for the session */
+    s_slot_pct[slot] = slot_percent(slot);
+    fprintf(stderr, "[VOICE] %s (slot %d%s): %d %%%s\n", name, slot, account ? ", account known" : "", vmute_percent(name, account),
+            vmute_percent(name, account) ? "" : " (muted)");
+}
+
+int voice_player_social_muted(int slot)
+{
+    char name[25];
+    unsigned account;
+    return slot >= 0 && slot < SLOTS && slot_who(slot, name, sizeof(name), &account) && social_player_muted(name, account);
 }
 
 static DWORD WINAPI voice_thread(LPVOID unused)
@@ -438,13 +513,50 @@ static DWORD WINAPI voice_thread(LPVOID unused)
             continue;
         }
         if (s_open && s_stereo != rts_social_voice_stereo()) {     /* into or out of a Run the Streets room */
-            int keep[SLOTS];                                        /* the same room: its volumes stay */
-            memcpy(keep, s_player_vol, sizeof keep);
-            close_all();
-            memcpy(s_player_vol, keep, sizeof keep);
+            close_all();                                            /* the mutes are the session's: they stay */
             continue;
         }
         if (!s_open && !open_playback()) continue;
+        {   /* tests: RECOMP_TEST_VOICE_MUTE=SECONDS:SLOT:PERCENT, once the slot has a player, that long after the voice came up
+             * (the VOICE CHAT page's own call); a chat window's MUTE IN ROOM is RECOMP_TEST_SOCIAL_UI's mute=NAME */
+            static ULONGLONG up_at;
+            static int done;
+            const char *e = getenv("RECOMP_TEST_VOICE_MUTE");
+            if (!up_at) up_at = GetTickCount64();
+            if (e && !done && GetTickCount64() - up_at >= (ULONGLONG)(atof(e) * 1000.0)) {
+                const char *c = strchr(e, ':');
+                const char *d = c ? strchr(c + 1, ':') : NULL;
+                int slot = c ? atoi(c + 1) : -1, pct = d ? atoi(d + 1) : 0;
+                char who[25];
+                if (c && netplay_room_name(slot, who, sizeof(who))) {
+                    voice_set_player_volume(slot, pct);
+                    done = voice_player_volume(slot) == pct;
+                }
+            }
+        }
+        {   /* tests: RECOMP_TEST_VOICE_MUTE_NAME=SECONDS:NAME, what the chat window's MUTE IN ROOM does (voice_mute.h, by account
+             * once the player has written a line, else by name), once the player's account is known; the chat window itself only
+             * comes up between a quick match's fights, so the scenario cannot press it in the room */
+            static ULONGLONG up_at;
+            static int done;
+            const char *e = getenv("RECOMP_TEST_VOICE_MUTE_NAME");
+            if (!up_at) up_at = GetTickCount64();
+            if (e && !done && GetTickCount64() - up_at >= (ULONGLONG)(atof(e) * 1000.0) && strchr(e, ':')) {
+                const char *want = strchr(e, ':') + 1;
+                int k;
+                for (k = 0; k < SLOTS; k++) {
+                    char who[25];
+                    unsigned account;
+                    if (!netplay_room_name(k, who, sizeof(who)) || strcmp(who, want)) continue;
+                    account = netplay_room_account(k);
+                    if (!account) break;        /* their first line is not in yet: the account comes with it */
+                    vmute_mute(who, account, 1);
+                    fprintf(stderr, "[VOICE] test: %s muted by account %u (slot %d)\n", who, account, k);
+                    done = 1;
+                    break;
+                }
+            }
+        }
         feed_speakers();
         if (netplay_listen_only()) {    /* spectator mode: it hears the room, it never talks (a hill's watchers do) */
             if (s_in) close_mic();
@@ -501,7 +613,7 @@ static BOOL CALLBACK start_once(PINIT_ONCE once, PVOID param, PVOID *ctx)
 
 int voice_talking(int slot)
 {
-    if (slot < 0 || slot >= SLOTS || !s_open || !s_heard[slot]) return 0;
+    if (slot < 0 || slot >= SLOTS || !s_open || !s_heard[slot] || !s_slot_pct[slot]) return 0;
     return GetTickCount64() - s_heard[slot] <= TALK_MS;
 }
 
@@ -517,7 +629,7 @@ int voice_overlay(char *out, int size)
     if (s_sending) used += snprintf(out + used, (size_t)(size - used), "MIC ON");
     for (i = 0; i < SLOTS && used < size - 1; i++) {
         char name[25];
-        if (!s_heard[i] || now - s_heard[i] > TALK_MS) continue;
+        if (!s_heard[i] || now - s_heard[i] > TALK_MS || !s_slot_pct[i]) continue;     /* a muted player is not listed */
         if (!netplay_room_name(i, name, sizeof(name))) snprintf(name, sizeof(name), "Player %d", i + 1);
         used += snprintf(out + used, (size_t)(size - used), "%s%s", used ? (n ? ", " : "   Talking: ") : "Talking: ", name);
         n++;
@@ -531,6 +643,7 @@ void voice_on_packet(int slot, const uint8_t *p, int len) { (void)slot; (void)p;
 int voice_overlay(char *out, int size) { (void)out; (void)size; return 0; }
 float voice_mic_meter(void) { return -1.0f; }
 int voice_player_volume(int slot) { (void)slot; return 100; }
+int voice_player_social_muted(int slot) { (void)slot; return 0; }
 void voice_set_player_volume(int slot, int percent) { (void)slot; (void)percent; }
 int voice_talking(int slot) { (void)slot; return 0; }
 int voice_sending(void) { return 0; }

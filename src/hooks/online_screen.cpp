@@ -45,6 +45,7 @@
 #include "netplay_delay_rules.h"
 #include "created_fighter.h"
 #include "voice.h"
+#include "voice_mute.h"
 #include "account.h"
 #include "online_data.h"
 #include "pc_settings.h"
@@ -4793,6 +4794,8 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         }
         if (ranked) ranked_card(dl, f, ri, p.slot, p.name, x, y, w, 270);
         else if (p.slot == r.host) text(dl, f, g_title, 10, x + 6, y + 6, ORANGE, "HOST", LEFT, 1.0f);
+        if (p.slot != r.you && voice_player_volume(p.slot) == 0)      // a player this PC muted (voice and chat): RB opens VOICE CHAT
+            text(dl, f, g_title, 10, x + w - 6, y + 6, RED, "MUTED", RIGHT, 1.0f);
         {   // the player's ping to the server, when it is known (builds from 30 report it)
             int ms = room_ping(p.slot);
             if (ms >= 0) {
@@ -5068,7 +5071,7 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
         } else {
             const NetRoomPlayer &p = r.players[others[i - fixed]];
             int pv = voice_player_volume(p.slot);
-            snprintf(label, sizeof(label), "PLAYER");
+            snprintf(label, sizeof(label), voice_player_social_muted(p.slot) ? "PLAYER  (MUTED OR BLOCKED IN SOCIAL)" : "PLAYER  (A: MUTE)");
             snprintf(value, sizeof(value), pv ? "%s  %d %%" : "%s  MUTED", p.name, pv);
         }
         if (row_h < 30) {   // compact: the value alone, on one line
@@ -5086,7 +5089,8 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     door_panel(dl, f);
     door_text(dl, f, &tex("ui/online_icon.png"), "VOICE CHAT", "TALK IN ROOMS AND FIGHTS",
               "Everyone in your room hears you. Hold the key, or the controller button you pick here, to talk. "
-              "Turn a player to 0 to mute them.");
+              "Press A on a player to mute them (A again lifts it): their voice and their chat lines stop, in fights too, "
+              "and it holds in any room until you close the game.");
     // the microphone's level, under the rows
     float meter = voice_mic_meter(), my = 80 + rows * row_step + 6;
     if (meter >= 0.0f) {
@@ -5101,6 +5105,11 @@ void draw_voice(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     if (pad.a && S.voice_sel == 6) {     // A toggles DIRECT CONNECTION too (on: the notice first)
         if (p2p) recomp_settings_set("online", "p2p_direct", 0);
         else S.p2p_ask = true;
+        return;
+    }
+    if (pad.a && S.voice_sel >= fixed && S.voice_sel - fixed < n_others) {    // A on a player: mute, or lift it
+        int slot = r.players[others[S.voice_sel - fixed]].slot;
+        voice_set_player_volume(slot, voice_player_volume(slot) ? 0 : 100);
         return;
     }
     if ((pad.a && S.voice_sel == rows - 1) || pad.b) S.page = HUB;

@@ -23,6 +23,9 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario roomchat [--out logs/social-2b]   (room chat through the relay: two
            copies and a spectator talk in the room; the spectator's line during the fight shows on the fighters;
            the spectator's quick-chat wheel in the fight reaches them, a fighter's stays shut)
+    python tools/defjam-mcp/dj.py scenario mute [--via voice|chat] [--matches 2]   (build 92: two copies with accounts and the voice
+           test tone; copy 0 mutes copy 1; its voice level at the speakers must be 0 in the room and in every match,
+           copy 1's hearing of copy 0 unchanged; --via chat: the chat window's MUTE IN ROOM, also hides the lines)
     python tools/defjam-mcp/dj.py scenario crewbattle [--out logs/crew-battles]   (crew battles: a local account
            service and relay, four copies in two crews of two; challenge, accept, the battle, rating and ladder)
     python tools/defjam-mcp/dj.py scenario turf [--off] [--out logs/turf-e2e]   (Turf War: a local account service
@@ -102,6 +105,9 @@ def cmd_scenario(a):
     elif a.kind == "roomchat":
         r = scenarios.room_chat(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out,
                                 rollback=a.rollback, **common)
+    elif a.kind == "mute":
+        r = scenarios.mute(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, via=a.via, matches=a.matches,
+                           rollback=a.rollback, **common)
     elif a.kind == "crewbattle":
         r = scenarios.crew_battle(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out,
                                   fast_ko=a.fast_ko, rollback=a.rollback, rollback_modes=a.rollback_modes, **common)
@@ -221,7 +227,8 @@ def main(argv=None):
 
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
-                                              "crewbattle", "turf", "tset", "socialonline"])
+                                              "crewbattle", "turf", "tset", "socialonline", "mute"])
+    sc.add_argument("--via", default="voice", choices=["voice", "chat"], help="mute: the VOICE CHAT page's call, or the chat window's MUTE IN ROOM")
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")
     sc.add_argument("--stress", action="store_true", help="social: more accounts with emoji, Arabic, combining-mark "
                     "and very long names and lines in every tab")
