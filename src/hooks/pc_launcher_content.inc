@@ -164,8 +164,7 @@ static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, floa
         PcContentPack &p = packs[i];
         if (!p.local) continue;
         bool on = !pc_content_is_off(p.id);
-        float credits_h = credits_height(p.credits, inner - 14 * s - 150 * s - 18 * s, s);
-        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 76 * s + credits_h);
+        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 76 * s);
         ld->AddRectFilled(ra, rb, col(k_white, on ? 0.05f : 0.025f), 12 * s);
         ld->AddRect(ra, rb, col(k_white, 0.06f), 12 * s);
         ImVec4 ink = on ? k_white : ImVec4(1, 1, 1, 0.55f);
@@ -486,7 +485,8 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
         }
         bool content = !strcmp(p.kind, "content");
         bool on = content || !pc_content_is_off(p.id);
-        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 76 * s);
+        float credits_h = credits_height(p.credits, inner - 14 * s - 150 * s - 18 * s, s);
+        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 76 * s + credits_h);
         ld->AddRectFilled(ra, rb, col(k_white, on ? 0.05f : 0.025f), 12 * s);
         ld->AddRect(ra, rb, col(k_white, 0.06f), 12 * s);
         ImVec4 ink = on ? k_white : ImVec4(1, 1, 1, 0.55f);
