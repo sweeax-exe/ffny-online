@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include "tool_blocked.h"
 
 namespace fs = std::filesystem;
 
@@ -24,6 +25,8 @@ void prepareSession(const std::vector<std::wstring>& args = {});
 void unpack();                                   // verifies and unpacks the embedded payload into `payload`
 HANDLE startEngine(std::vector<std::wstring> args);
 bool runningUnderWine();
+// Set by spawn() when Windows or an antivirus blocked a tool: the wizard's failure screen shows its advice.
+extern std::vector<std::wstring> blockedAdvice;
 
 // unzip.cpp: a ZIP (stored or deflated entries, no ZIP64, no encryption) unpacked into `destination`
 // in this process, every entry's CRC-32 checked. Throws std::runtime_error with a plain message.
