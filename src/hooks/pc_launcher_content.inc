@@ -150,6 +150,8 @@ static void own_packs_switch(const PcContentPack *packs, int count, bool off, bo
 // local=1). Each has a switch. One that adds or changes more than textures (clothing, venues, fighters, props)
 // works offline only: while one is on the game refuses online (PC_CONTENT_LOCAL_LINE), so a line here says so,
 // with one button that turns those off. Returns the y below the section.
+static bool content_test_step(const char *want, bool busy);      // tests (below): RECOMP_TEST_CONTENT
+
 template <typename Toggle>
 static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, float lx, float y, float inner, float s,
                            bool busy, Toggle &toggle)
@@ -174,7 +176,8 @@ static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, floa
         ld->AddRect(ra, rb, col(k_white, 0.12f), 12 * s);
         ld->AddText(ImGui::GetFont(), 13.5f * s, ImVec2(ra.x + 16 * s, ra.y + 17 * s), col(k_white, 0.85f), line);
         if (glass_button("##content_mine_all_on", "Turn all on", ImVec2(rb.x - 176 * s, ra.y + 9 * s), ImVec2(160 * s, 34 * s), s,
-                         GLASS_PLAIN, bold_font(), 14 * s, !busy)) {
+                         GLASS_PLAIN, bold_font(), 14 * s, !busy) ||
+            content_test_step("allon", busy)) {
             own_packs_switch(packs, count, false, false);
             PcContentPack none{};
             snprintf(none.id, sizeof none.id, "%s", "-");
@@ -324,7 +327,7 @@ static bool mods_master_press(const std::string &local_ids)
 }
 
 // Tests: RECOMP_TEST_CONTENT="<frame>:<step>;..." runs steps in order once the Content page is open and no job is
-// running: master (presses the master switch's button) and report (one [CONTENT-TEST] line: the community setting,
+// running: master (presses the master switch's button), allon (MY PACKS' "Turn all on") and report (one [CONTENT-TEST] line: the community setting,
 // how many own packs are on, whether a backup is kept, the helper's last status line).
 static bool content_test_step(const char *want, bool busy)
 {

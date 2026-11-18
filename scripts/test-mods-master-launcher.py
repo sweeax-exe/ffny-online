@@ -16,6 +16,7 @@ and RECOMP_TEST_CONTENT, which presses the master button the way a click does (s
 3. the same with half of the packs switched off before the first press: they stay off after "back on" (exactly as it was)
 4. all off, backup deleted (an older build, a lost file): the button still brings the community content and every
    own pack back on
+5. half of the packs off, then MY PACKS' "Turn all on" (the step "allon"): every own pack on
 After each press the launcher composes again (setup/mods.py compose): the helper's status line is in the report. Each
 step prints one JSON line (and a picture); the exit code is the number of failed steps.
 """
@@ -166,6 +167,13 @@ def main():
     r = reports(log)
     step('no-backup-back-on', len(r) == 3 and r[0]['all_off'] == 1 and r[0]['backup'] == 0 and r[2]['own_on'] == a.packs
          and r[2]['community'] == 1 and composed(r[2]) == a.packs, exit=code, reports=r, shot=str(png))
+
+    # 5: half of them off, MY PACKS' "Turn all on": every own pack on, composed again
+    data, settings, ids = fresh('5-all-on', half)
+    code, log, png = launcher(run / '5-all-on', data, settings, 'launcher', '60:report;70:allon;80:report;90:report', 2400)
+    r = reports(log)
+    step('turn-all-on', len(r) == 3 and r[0]['own_on'] == a.packs - len(half) and r[2]['own_on'] == a.packs
+         and r[2]['community'] == 1 and composed(r[2]) == a.packs, exit=code, reports=r[:1] + r[2:], shot=str(png))
     return fails
 
 
