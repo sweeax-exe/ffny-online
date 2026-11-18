@@ -472,7 +472,7 @@ static struct {
 } R;
 
 static struct {         /* a join or quick match waiting for the hub to reach its relay */
-    int kind;           /* 0 none, 1 join, 2 quick, 3 ranked (a MOVE's reservation in code) */
+    int kind;           /* 0 none, 1 join, 2 quick, 3 ranked (a MOVE's reservation in code), 4 watch (spectate) */
     int server, mode, max;
     char code[7];
     ULONGLONG since;
@@ -639,6 +639,13 @@ static void players_round(void)
         req[6] = (uint8_t)nonce[i]; req[7] = (uint8_t)(nonce[i] >> 8); req[8] = (uint8_t)(nonce[i] >> 16);
         req[9] = (uint8_t)(nonce[i] >> 24);
         memcpy(req + 10, print, 8);     /* this build's players, as WHO names them */
+        /* build 96: the caps word after the build (an older relay took zeros only there): NETPLAY_CAP_WHO_ROOMS asks
+         * for the listed players' rooms, NETPLAY_CAP_RTS lets Run the Streets rooms be named to a player who has it */
+        {
+            uint32_t caps = NETPLAY_CAP_WHO_ROOMS | (rts_access() ? NETPLAY_CAP_RTS : 0u);
+            req[18] = (uint8_t)caps; req[19] = (uint8_t)(caps >> 8); req[20] = (uint8_t)(caps >> 16);
+            req[21] = (uint8_t)(caps >> 24);
+        }
         sendto(s, (const char *)req, (int)sizeof(req), 0, (const struct sockaddr *)&addr[i], sizeof(addr[i]));
         open++;
     }
@@ -669,6 +676,8 @@ static void players_round(void)
             at++;
         }
         if (bad) continue;
+        if (at < n && netplay_who_rooms(b + at, n - at, list, count) < 0)     /* build 96 relays: their rooms */
+            fprintf(stderr, "[SERVERS] %s: a short PLAYERLIST rooms trailer\n", P.s[who].name);
         want[who] = 0;
         open--;
         EnterCriticalSection(&g_cs);
@@ -920,7 +929,7 @@ int netservers_tick(int *mode)
     kind = A.kind;
     if (kind && GetTickCount64() - A.since > MOVE_WAIT) {
         fprintf(stderr, "[SERVERS] move: the move to %s did not reach its lobby; the %s is dropped\n",
-                P.s[A.server].name, kind == 1 ? "join" : "quick match");
+                P.s[A.server].name, kind == 1 ? "join" : kind == 4 ? "watch" : kind == 3 ? "ranked set" : "quick match");
         A.kind = 0;
         LeaveCriticalSection(&g_cs);
         return -1;
@@ -944,6 +953,12 @@ int netservers_tick(int *mode)
     } else if (kind == 3) {
         fprintf(stderr, "[SERVERS] move: ranked set %s on %s\n", A.code, P.s[A.server].name);
         netplay_lobby_ranked_again(A.code);
+    } else if (kind == 4 && !(netplay_lobby_caps() & NETPLAY_CAP_SPECTATE)) {
+        fprintf(stderr, "[SERVERS] move: %s does not take spectators; the watch is dropped\n", P.s[A.server].name);
+        return -4;
+    } else if (kind == 4) {
+        fprintf(stderr, "[SERVERS] move: watching room %s on %s\n", A.code, P.s[A.server].name);
+        netplay_lobby_spectate(A.code);
     }
     if (mode) *mode = A.mode;
     return kind;
@@ -964,7 +979,7 @@ static void move_to(int kind, int server, const char *code, int mode, int max, c
     LeaveCriticalSection(&g_cs);
     if (netservers_connected() != server) {
         fprintf(stderr, "[SERVERS] move: moving the hub to %s for a %s\n", P.s[server].name,
-                kind == 1 ? "join" : kind == 3 ? "ranked set" : "quick match");
+                kind == 1 ? "join" : kind == 3 ? "ranked set" : kind == 4 ? "watch" : "quick match");
         netservers_use(server);
         netservers_reconnect(name);
     }
@@ -975,6 +990,12 @@ void netservers_join_on(int server, const char *code, int mode, const char *name
 {
     if (server < 0 || server >= NETSERVER_COUNT) { netplay_lobby_join(code); return; }
     move_to(1, server, code, mode, 0, name);
+}
+
+void netservers_spectate_on(int server, const char *code, const char *name)
+{
+    if (server < 0 || server >= NETSERVER_COUNT) { netplay_lobby_spectate(code); return; }
+    move_to(4, server, code, 0, 0, name);
 }
 
 void netservers_quick_on(int server, int mode, int max, const char *name)

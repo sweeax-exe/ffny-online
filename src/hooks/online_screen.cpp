@@ -964,6 +964,7 @@ struct State {
     int rts_sel = 0, rts_cpus = 3;  // RUN THE STREETS: the chosen entry, the CPU fighters of VS CPU (2..3)
     bool rts_setup = false;         // build 87: VS CPU's set-up (CPU fighters, TIME LIMIT, KO TARGET) is open
     int rts_setup_sel = 0;
+    int players_sel = 0;            // build 96: the chosen row of PLAYERS ONLINE (A watches a FIGHTING one)
     int hub_sel = 0, rooms_sel = 0, settings_sel = 0, fighter_sel = 0, fighter_top = 0, vote_sel = 0, voice_sel = 0;
     bool p2p_ask = false;           // VOICE: DIRECT CONNECTION turned on, its IP notice waits for A (draw_voice)
     int quick_mode = 0;             // index into online_modes
@@ -1946,6 +1947,34 @@ bool online_count(ImDrawList *dl, const Frame &f, bool button = false)
 
 // ---- players online ----
 
+// Build 96: a FIGHTING row is watched with one press: on this relay at once, on another the hub moves there and
+// watches (netservers_spectate_on). The relay names the room only of a public match (NETPLAY_CAP_WHO_ROOMS).
+bool can_watch();
+bool player_watchable(const NetPlayer &p) { return p.state == 2 && p.room_known == 1 && p.room[0]; }
+bool g_players_watch_hint;          // the chosen row can be watched (the A WATCH hint)
+bool players_watch_hint() { return g_players_watch_hint; }
+void watch_player(const NetServerPlayer &e, int here, const NetServerInfo *sv)
+{
+    const NetPlayer &p = e.player;
+    std::string name = p.name;
+    if (p.state != 2) { say(name + (p.state == 1 ? " is in a room, not fighting right now." : " is not in a match.")); return; }
+    if (p.room_known == 2) { say(name + " is in a private match: it can't be watched."); return; }
+    if (p.room_known != 1 || !p.room[0]) { say("That server does not say where " + name + " fights yet."); return; }
+    if (NETPLAY_IS_KOTH(p.room_mode)) { say("King of the Hill rooms are watched from inside the hill."); return; }
+    if (NETPLAY_IS_FFAROT(p.room_mode)) { say("FFA rotation rooms are watched from inside the room: join the line."); return; }
+    if (!can_watch()) { say("Watching needs a newer server."); return; }
+    if (gallery_on()) { say("Watching " + name + "..."); return; }
+    if (e.server >= 0 && e.server != here && e.server < NETSERVER_COUNT) {
+        fprintf(stderr, "[ONLINE] watching %s's room %s on %s\n", p.name, p.room, sv[e.server].name);
+        netservers_spectate_on(e.server, p.room, hub_name().c_str());
+        say(std::string("Moving to ") + sv[e.server].name + " to watch " + name + "...", 6000);
+    } else {
+        fprintf(stderr, "[ONLINE] watching %s's room %s\n", p.name, p.room);
+        netplay_lobby_spectate(p.room);
+        say("Watching " + name + "... you watch from the next fight.");
+    }
+}
+
 void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     // All servers (build 47): every relay's players, each with its server's tag; otherwise the hub's
@@ -1966,6 +1995,7 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
     page_title(dl, f, "PLAYERS ONLINE");
     if (all) text(dl, f, g_hand, 14, 54, 58, ORANGE, "All servers: everyone, with their server.", LEFT, 0.8f);
     online_count(dl, f);
+    g_players_watch_hint = false;
     if (n < 0) {
         text(dl, f, g_title, 20, 320, 200, CREAM, "ASKING THE SERVER...", CENTER, 1.4f);
         return;
@@ -1977,9 +2007,22 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
     float tag_w = 0;
     if (all)
         for (int i = 0; i < NETSERVER_COUNT; i++) tag_w = std::max(tag_w, text_width(f, g_title, 9, sv[i].short_name));
+    // build 96: a chosen row (up/down, left/right between the columns); A on a FIGHTING row watches it
+    if (n > 0) {
+        int &sel = S.players_sel;
+        if (pad.up) sel = (sel + n - 1) % n;
+        if (pad.down) sel = (sel + 1) % n;
+        if (pad.left && sel >= 20) sel -= 20;
+        if (pad.right && sel + 20 < n) sel += 20;
+        if (sel >= n) sel = n - 1;
+        if (sel < 0) sel = 0;
+    }
     for (int i = 0; i < n; i++) {
         float x = i < 20 ? 52 : 330, y = 90 + (i % 20) * 15.0f, nx = x;
         const NetPlayer &p = list[i].player;
+        if (mouse_pick(f, x - 4, y, 270, 15)) S.players_sel = i;
+        if (i == S.players_sel) rect(dl, f, x - 4, y, 270, 15, IM_COL32(120, 60, 14, 120), 3);
+        if (mouse_click(f, x - 4, y, 270, 15)) const_cast<Pad &>(pad).a = true;
         int st = p.state >= 0 && p.state <= 2 ? p.state : 0;
         if (all && list[i].server >= 0 && list[i].server < NETSERVER_COUNT) {
             bool away = list[i].server != here;
@@ -1990,7 +2033,12 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
         }
         text(dl, f, g_title, 13, nx, y, WHITE, p.name, LEFT, 1.1f);
         text(dl, f, g_title, 10, x + 262, y + 2, colours[st], states[st], RIGHT, 1.0f);
+        if (st == 2 && p.room_known == 2)        // a private match: no code, no watching
+            text(dl, f, g_title, 8, x + 262 - text_width(f, g_title, 10, states[st]) - 6, y + 3, GREY, "PRIVATE", RIGHT, 1.0f);
     }
+    g_players_watch_hint = n > 0 && S.players_sel < n && player_watchable(list[S.players_sel].player) &&
+                           !NETPLAY_IS_HILL(list[S.players_sel].player.room_mode);
+    if (n > 0 && S.players_sel < n && pad.a) watch_player(list[S.players_sel], here, sv);
     if (n == 0)
         text(dl, f, g_title, 14, 320, 200, GREY, all ? "Nobody with this version on any server right now." :
              "Nobody else with this version right now.", CENTER, 1.0f);
@@ -2991,9 +3039,9 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         const NetRoomInfo &r = e.room;
         if (NETPLAY_IS_KOTH(r.mode)) say("King of the Hill rooms are watched from inside the hill.");
         else if (NETPLAY_IS_FFAROT(r.mode)) say("FFA rotation rooms are watched from inside the room: join the line.");
-        else if (e.server >= 0 && e.server != here) {   // build 91: no server choice; the hub moves there first
-            if (!gallery_on()) { netservers_use(e.server); netservers_reconnect(hub_name().c_str()); }
-            say(std::string("Moving to ") + sv[e.server].name + ", where this room is: press the button again to watch.", 6000);
+        else if (e.server >= 0 && e.server != here) {   // build 96: the hub moves there and watches in one press
+            if (!gallery_on()) netservers_spectate_on(e.server, r.code, hub_name().c_str());
+            say(std::string("Moving to ") + sv[e.server].name + " to watch " + r.name + "...", 6000);
         }
         else if (!gallery_on()) {
             netplay_lobby_spectate(r.code);
@@ -4809,6 +4857,22 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         if (const char *blurb = mode_blurb(r.settings.mode))
             text(dl, f, g_body, 12, 360, 294, WHITE, upper(blurb).c_str(), LEFT, 1.0f, 226);
     }
+    // build 96: a member who was READY and is not any more is back on the fighter select (the relay sends READY 0 with
+    // the old fighter): "CHANGING FIGHTER" on the card, or the other player takes him for gone. Kept per slot and name
+    // while the room stays in its lobby; a vote or a match (which clears every flag) starts it over.
+    static struct { char name[25]; bool was_ready; } marks[NETPLAY_ROOM_SLOTS];
+    static char marks_room[7];
+    if (strcmp(marks_room, r.code) || r.phase != 0 || NETPLAY_IS_HILL(r.settings.mode)) {
+        memset(marks, 0, sizeof(marks));
+        snprintf(marks_room, sizeof(marks_room), "%s", r.code);
+    }
+    auto changing = [&](const NetRoomPlayer &p) {
+        if (p.slot < 0 || p.slot >= NETPLAY_ROOM_SLOTS || r.phase != 0 || NETPLAY_IS_HILL(r.settings.mode)) return false;
+        auto &m = marks[p.slot];
+        if (strcmp(m.name, p.name)) { snprintf(m.name, sizeof(m.name), "%s", p.name); m.was_ready = false; }
+        if (p.ready) m.was_ready = true;
+        return !p.ready && m.was_ready && p.slot != r.you;
+    };
     for (int i = 0; i < places; i++) {
         float x = card_x(i), y = top;
         // a Team room's card is its room slot (the side), the others list the players in order
@@ -4827,10 +4891,17 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         // the server knows a fighter from the first READY; until then this PC shows its own pick
         int shown = p.fighter != 0xFF ? p.fighter : p.slot == r.you ? fighter : -1;
         bool known = shown >= 0;
+        bool picking = changing(p);     // back on the fighter select: the old pick dimmed, an orange label
         // a ranked card's portrait starts under its rank plate (the head stays: the portrait's foot is cut)
         float py = ranked ? RANK_ROOM_PORTRAIT : 4;
         if (!known || !portrait(dl, f, shown, x + 4, y + py, w - 8, (w - 8) * 1.5f + 4 - py))
             text(dl, f, g_title, 40, x + w / 2, y + 70 + (py - 4) / 2, GREY, "?", CENTER);
+        if (picking) {
+            rect(dl, f, x + 4, y + py, w - 8, (w - 8) * 1.5f + 4 - py, IM_COL32(0, 0, 0, 150), 6);
+            rect(dl, f, x + 8, y + 90, w - 16, 22, IM_COL32(120, 60, 14, 230), 5);
+            float cs = fit_size(f, g_title, 12, "CHANGING FIGHTER", w - 22);
+            text(dl, f, g_title, cs, x + w / 2, y + 94 + (12 - cs) * 0.5f, WHITE, "CHANGING FIGHTER", CENTER, 0.8f);
+        }
         {   // build 52: the rewards a player wears (outside a ranked set, whose card shows the set's rank)
             const social::Look *lk = ranked || !social_enabled() ? nullptr : look_of(room_account_of(p.name));
             ImU32 nc = look_col(lk, p.slot == r.you ? ORANGE : CREAM);
@@ -4840,7 +4911,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             if (lk && ranked_shown()) card_border(dl, f, x, y, w, 270, 10, lk->frame);     // the Locker's frame
         }
         {
-            std::string label = known ? fighter_label(shown, p.slot) : "choosing";
+            std::string label = picking ? "choosing again" : known ? fighter_label(shown, p.slot) : "choosing";
             float size = fit_size(f, g_title, 11, label.c_str(), w - 10);     // a 16-character online name
             text(dl, f, g_title, size, x + w / 2, y + 222 + (11 - size) * 0.5f, GREY, label.c_str(), CENTER, 0.6f);
         }
@@ -5709,6 +5780,10 @@ void gallery_step()
             if (getenv("RECOMP_TEST_FANCY_NAMES") && i < 10)      // build 94: fancy-font sample names (before/after shots)
                 snprintf(p.name, sizeof(p.name), "%s", fancy_sample_name(i));
             p.state = i % 3;
+            if (p.state == 2) {     // build 96: a public match to watch, every third of them private
+                p.room_known = i % 9 == 2 ? 2 : 1;
+                if (p.room_known == 1) snprintf(p.room, sizeof(p.room), "GAL%03d", i);
+            }
             G.players.push_back(p);
         }
         const OnlineFighter *main = list.empty() ? nullptr : &list[5 % list.size()];
@@ -7305,6 +7380,10 @@ bool draw_pages(ImVec2 display)
             say("Joining...");
         } else if (moved == 3) {
             say("On the set's server: joining the set...");
+        } else if (moved == 4) {
+            say("Watching... if a match is on, you watch from its next fight.");
+        } else if (moved == -4) {
+            say("That server does not take watchers yet.", 6000);
         } else if (moved < 0) {
             say("The other server did not answer in time. Try again.", 6000);
         }
@@ -7466,6 +7545,7 @@ bool draw_pages(ImVec2 display)
     } else if (S.page == PLAYERS && !room.in_room) {
         draw_players(dl, f, pad);
         float hx = 54;
+        if (players_watch_hint()) hx += hint(dl, f, hx, 420, "a", "WATCH");
         hx += hint(dl, f, hx, 420, "x", "REFRESH");
         hint(dl, f, hx, 420, "b", "BACK");
         if (pad.b) S.page = HUB;

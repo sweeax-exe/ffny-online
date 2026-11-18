@@ -630,9 +630,14 @@ void join_friend(const social::Friend &fr, bool watch)
     if (fr.room.empty()) return;
     int server = server_of_region(fr.relay), here = connected_server();
     if (watch) {
-        if (server >= 0 && server != here) { say("Watching works on your server only for now."); return; }
-        netplay_lobby_spectate(fr.room.c_str());
-        say("Watching " + fr.name + "...");
+        if (server >= 0 && server != here) {    // build 96: the hub moves to the friend's relay and watches there
+            fprintf(stderr, "[SOCIAL-UI] watching %s's room %s on %s\n", fr.name.c_str(), fr.room.c_str(), fr.relay.c_str());
+            netservers_spectate_on(server, fr.room.c_str(), hub_name().c_str());
+            say("Moving to " + region_label(fr.relay) + " to watch " + fr.name + "...", 6000);
+        } else {
+            netplay_lobby_spectate(fr.room.c_str());
+            say("Watching " + fr.name + "...");
+        }
     } else if (server < 0 || server == here) {
         fprintf(stderr, "[SOCIAL-UI] joining %s's room %s\n", fr.name.c_str(), fr.room.c_str());
         netplay_lobby_join(fr.room.c_str());
