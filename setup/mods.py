@@ -43,7 +43,10 @@ import content_compose
 # "skin_of", no place). Build 86: index-v5.json is everything plus the FFNY team's official maps (kind official-map,
 # rts_map, venue_fe_id; their versions need official-map-v1) and the community fighters beyond the places, by their
 # fighter number (1000 and up, mod_catalogue.fighter_number); index-v4.json leaves both out for launchers of build 85.
-CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v5.json'
+# Build 94: index-v6.json is index-v5.json plus each mod's creator credits ("credits", mod_catalogue.credits); build 93
+# and older refuse the key, so they keep reading index-v5.json.
+CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v6.json'
+CATALOGUE_URL_V5 = 'https://play.defjam.online/updates/content/index-v5.json'
 CATALOGUE_URL_V4 = 'https://play.defjam.online/updates/content/index-v4.json'
 CATALOGUE_URL_V3 = 'https://play.defjam.online/updates/content/index-v3.json'
 CATALOGUE_URL_V2 = 'https://play.defjam.online/updates/content/index-v2.json'
@@ -487,13 +490,14 @@ def fetch_small(url, limit):
         return data
 
 
-FALLBACK = {CATALOGUE_URL: CATALOGUE_URL_V4, CATALOGUE_URL_V4: CATALOGUE_URL_V3}
+FALLBACK = {CATALOGUE_URL: CATALOGUE_URL_V5, CATALOGUE_URL_V5: CATALOGUE_URL_V4, CATALOGUE_URL_V4: CATALOGUE_URL_V3}
 
 
 def fetch_index(url):
     """(raw, signature, url) of a catalogue index. An index the server does not have yet (404) falls back one step:
-    index-v5.json (an account service from before build 86) to index-v4.json, the same catalogue without official
-    maps; index-v4.json (before build 85) to index-v3.json, without fighters at low places. Any other failure, and
+    index-v6.json (an account service from before build 94) to index-v5.json, the same catalogue without credits;
+    index-v5.json (before build 86) to index-v4.json, without official maps; index-v4.json (before build 85) to
+    index-v3.json, without fighters at low places. Any other failure, and
     any other index (a local test catalogue), stays a failure."""
     while True:
         try:
@@ -582,6 +586,11 @@ def plain_reason(problems, skew=None):
     if text.startswith('Catalogue') or 'catalogue' in low.split(':', 1)[0]:
         return 'catalogue', text[:300]
     return 'pack', text[:300]
+
+
+def credits_line(text):
+    """The credits as one content.ini line: one credit per line in the catalogue, ' | ' between them here."""
+    return ' | '.join(' '.join(line.split()) for line in (text or '').splitlines() if line.strip())[:500]
 
 
 class Manager:
@@ -1213,6 +1222,7 @@ class Manager:
         lines = ['; FFNY Online community packs, written by setup/mods.py sync. Do not edit.',
                  '[content]', 'revision=%d' % revision]
         reviewed = self.reviewed_dates()
+        credits = self.credits_by_id()
         rows = [(r.get('order', 0), mod_id, r) for mod_id, r in self.state()['installed'].items() if r.get('synced')]
         for order, mod_id, r in sorted(rows, key=lambda x: (x[0], x[1])):
             contract.slug(mod_id)
@@ -1232,6 +1242,9 @@ class Manager:
                 lines += ['official=1', 'rts_map=%d' % bool(r.get('rts_map'))]
             # build 82: the day the team accepted this version (the hub's NEW badge) and a new venue's feID
             lines.append('reviewed=' + reviewed.get((mod_id, r.get('version')), ''))
+            # build 94: the creator's credits from the verified catalogue (index-v6.json), one line, ' | ' between;
+            # the Content page shows them. Not part of the pack: never in the content print
+            lines.append('credits=' + credits_line(credits.get(mod_id, '')))
             if (self.mods / mod_id / 'install.json').is_file():
                 lines.append('composed=1')     # pc_content.c counts it online only when content-files applied it
                 venue = new_venue_fe_id(self.mods / mod_id / 'install.json')
@@ -1315,6 +1328,16 @@ class Manager:
             ).encode('utf-8'))
         except (ValueError, OSError, KeyError, TypeError):
             pass
+
+    def credits_by_id(self):
+        """{mod id: the creator's credits} from the cached verified catalogue ({} without one, and for a catalogue
+        read as index-v5.json or older, which has none). They follow the catalogue at every sync, so a credits edit
+        by the team shows without installing the pack again."""
+        try:
+            index = self.trusted()
+        except (ValueError, OSError, KeyError, TypeError):
+            return {}
+        return {m['id']: m['credits'] for m in index['mods'] if m.get('credits')}
 
     def reviewed_dates(self):
         """{(mod id, version): the catalogue's review date} from the cached verified catalogue ({} without one)."""

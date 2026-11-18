@@ -32,6 +32,8 @@ typedef struct PcContentPack {
     char language[16];      /* language packs: the ISO 639 code */
     char content_sha256[72];
     char description[512];
+    char credits[512];      /* build 94: who made the textures, models or voices the pack uses (the creator's credits from the
+                               signed catalogue, one line, " | " between credits; "" none). Never part of the content print */
     char bundle[96];        /* one mod of a pack of several mods: the pack's id ("" for a single pack) */
     char bundle_name[160];  /* ... and its title */
     int order;              /* the catalogue's install order (1 = first) */

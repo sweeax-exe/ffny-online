@@ -26,6 +26,7 @@ struct Card {
     // the page (GET /api/gallery/{id}), once asked
     bool page_loaded = false;
     std::string description, changelog, reason, live_version;
+    std::string credits;                // build 94: who made the work the pack uses (one credit per line; "" none)
     std::vector<uint8_t> png;           // the preview's bytes until the main thread makes a texture
     ImTextureID tex = 0;
     int tex_w = 0, tex_h = 0;
@@ -191,6 +192,7 @@ static void card_from(const J &j, Card &c)
     c.title = j["title"].str(); c.author = j["author_name"].str(); c.kind = j["kind"].str();
     c.type = j["type"].str(); c.status = j["status"].str(); c.preview = j["preview_url"].str();
     c.votes = j["votes"].num(); c.my_vote = j["my_vote"].kind == J::BOOL && j["my_vote"].b;
+    c.credits = j["credits"].str();
     form_from(j, c);
 }
 
@@ -254,6 +256,7 @@ static void load_page(std::string id)
         if (c.id != id) continue;
         c.description = doc["description"].str(); c.changelog = doc["changelog"].str();
         c.reason = doc["reason"].str(); c.live_version = doc["live_version"].str();
+        c.credits = doc["credits"].str();
         c.votes = doc["votes"].num(); c.my_vote = doc["my_vote"].kind == J::BOOL && doc["my_vote"].b;
         form_from(doc, c);
         c.page_loaded = true;
@@ -436,6 +439,12 @@ static void community_view(float lx, float top, float inner, float height, float
     if (!c.description.empty()) {
         dl->AddText(ImGui::GetFont(), 13 * s, ImVec2(x, py), col(k_white, 0.85f), c.description.c_str(), nullptr, wrap);
         py += text_size(ImGui::GetFont(), 13 * s, c.description.c_str(), wrap).y + 8 * s;
+    }
+    if (!c.credits.empty()) {
+        // build 94: the creator's credits, one per line, small
+        std::string text = "Credits: " + c.credits;
+        dl->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(x, py), col(k_white, 0.6f), text.c_str(), nullptr, wrap);
+        py += text_size(ImGui::GetFont(), 12.5f * s, text.c_str(), wrap).y + 8 * s;
     }
     if (c.bundle && !c.items.empty()) {
         // the pack's mods, one line each: title and type

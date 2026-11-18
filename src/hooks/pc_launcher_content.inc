@@ -13,6 +13,28 @@
 // starts; a no-change sync takes a second or two. While it waits the button says PLAY NOW: pressed, it cancels
 // the download (the packs come at the next start) and the game starts once the sync has stopped, since an
 // install holds the lock the game takes.
+// Build 94: the creator's credits under a pack's card ("Credits: Texture by Free | Voice by Ana"), small, wrapped to
+// at most two lines; they come from the signed catalogue (content.ini credits=). credits_height is 0 when the pack
+// names none; credits_draw draws them at pos.
+static const float k_credits_line = 15.0f;
+static float credits_height(const char *credits, float wrap, float s)
+{
+    if (!credits || !credits[0]) return 0;
+    char line[560];
+    snprintf(line, sizeof line, "Credits: %s", credits);
+    float h = text_size(ImGui::GetFont(), 12 * s, line, wrap).y;
+    return (h > 2 * k_credits_line * s ? 2 * k_credits_line * s : h) + 6 * s;
+}
+static void credits_draw(ImDrawList *ld, const char *credits, ImVec2 pos, float wrap, float s)
+{
+    if (!credits || !credits[0]) return;
+    char line[560];
+    snprintf(line, sizeof line, "Credits: %s", credits);
+    ld->PushClipRect(pos, ImVec2(pos.x + wrap, pos.y + 2 * k_credits_line * s), true);
+    ld->AddText(ImGui::GetFont(), 12 * s, pos, col(k_white, 0.5f), line, nullptr, wrap);
+    ld->PopClipRect();
+}
+
 static bool g_content_synced_once;
 static bool g_content_play_waiting;
 static bool g_content_play_skip;        // PLAY NOW pressed: the sync is being cancelled
@@ -405,7 +427,8 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
                     bytes += packs[j].bytes;
                 }
             float row_h = 30 * s;
-            ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 70 * s + nm * row_h + 8 * s);
+            float credits_h = credits_height(p.credits, inner - 14 * s - 150 * s, s);
+            ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 70 * s + nm * row_h + 8 * s + credits_h);
             ld->AddRectFilled(ra, rb, col(k_white, 0.05f), 12 * s);
             ld->AddRect(ra, rb, col(k_white, 0.06f), 12 * s);
             const char *title = p.bundle_name[0] ? p.bundle_name : p.bundle;
@@ -454,6 +477,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
                 }
                 iy += row_h;
             }
+            credits_draw(ld, p.credits, ImVec2(ra.x + 18 * s, iy + 6 * s), inner - 14 * s - 150 * s, s);
             y = rb.y + 10 * s;
             ImGui::SetCursorScreenPos(ImVec2(lx, y));
             ImGui::Dummy(ImVec2(1, 1));
@@ -461,7 +485,8 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
         }
         bool content = !strcmp(p.kind, "content");
         bool on = content || !pc_content_is_off(p.id);
-        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 76 * s);
+        float credits_h = credits_height(p.credits, inner - 14 * s - 150 * s - 18 * s, s);
+        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 76 * s + credits_h);
         ld->AddRectFilled(ra, rb, col(k_white, on ? 0.05f : 0.025f), 12 * s);
         ld->AddRect(ra, rb, col(k_white, 0.06f), 12 * s);
         ImVec4 ink = on ? k_white : ImVec4(1, 1, 1, 0.55f);
@@ -490,6 +515,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
         } else if (p.description[0])
             ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 53 * s), col(k_white, 0.5f), p.description);
         ld->PopClipRect();
+        credits_draw(ld, p.credits, ImVec2(ra.x + 18 * s, ra.y + 74 * s), inner - 14 * s - 150 * s - 18 * s, s);
         char id[128];
         snprintf(id, sizeof id, "##content_switch_%s", p.id);
         ImVec2 ba(rb.x - 136 * s, ra.y + 20 * s);
@@ -499,7 +525,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
                                 bold_font(), 14.5f * s, !busy)) {
             toggle(p, on);
         }
-        y += 86 * s;
+        y += 86 * s + credits_h;
         ImGui::SetCursorScreenPos(ImVec2(lx, y));
         ImGui::Dummy(ImVec2(1, 1));
     }
