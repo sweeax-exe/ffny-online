@@ -204,6 +204,15 @@ void sub_001A8180_enter(void) { new_fighters_blazins(); }
  * are written, and from 0x3DE08 / 0x3E0AD): a new fighter's own voice number goes into its row first, so the
  * banks, the intro and the extro are its own (src/hooks/new_fighters.c, fighter_voice.h). Audio only. */
 void sub_0003DB00_enter(void) { new_fighters_voice(); }
+/* sub_0003E170 (cdecl (match set-up), returns al): the speech set-up itself. On a Rematch it writes the rows again
+ * with the stock voices and keeps the loaded banks, with no sub_0003DB00: the own voices go back in after it. */
+extern void sub_0003E170_gen(void);
+void sub_0003E170(void)
+{
+    new_fighters_voice_setup(0);
+    sub_0003E170_gen();
+    new_fighters_voice_setup(1);
+}
 /* A bank line's place in its .dat (cdecl: bank header, entry index, out offset, out size): which line of which
  * voice plays (RECOMP_SPEECH_LOG=1; always for a new fighter's own voice). */
 void sub_001393F0_enter(void) { new_fighters_speech_line(MEM32(g_esp + 4), MEM32(g_esp + 8)); }

@@ -214,3 +214,20 @@ def test_game_hook_is_wired():
     assert "fighter_voice_numbered_plan(" in src and "guest_dir(" in src
     manual = (ROOT / "src" / "recomp_manual.c").read_text(encoding="utf-8")
     assert "void sub_0003DB00_enter(void) { new_fighters_voice(); }" in manual
+
+
+def test_rematch_puts_own_voices_back():
+    """A Rematch reruns the speech set-up (sub_0003E170: the rows get the stock voices again) but keeps the loaded
+    banks and skips sub_0003DB00, so the own voices are put back after it (fix/voice-rematch)."""
+    manual = (ROOT / "src" / "recomp_manual.c").read_text(encoding="utf-8")
+    body = manual.split("void sub_0003E170(void)\n{", 1)[1].split("}", 1)[0]
+    assert "extern void sub_0003E170_gen(void);" in manual
+    order = [body.index(s) for s in ("new_fighters_voice_setup(0);", "sub_0003E170_gen();",
+                                     "new_fighters_voice_setup(1);")]
+    assert order == sorted(order)
+    src = (ROOT / "src" / "hooks" / "new_fighters.c").read_text(encoding="utf-8")
+    voice = src.split("void new_fighters_voice(void)\n{", 1)[1].split("\n}\n", 1)[0]
+    # the flag is set before any early return, so a queued set-up never gets a second pass
+    assert voice.index("g_voice_banks_queued = 1;") < voice.index("return")
+    setup = src.split("void new_fighters_voice_setup(int after)\n{", 1)[1].split("\n}\n", 1)[0]
+    assert "g_voice_banks_queued = 0;" in setup and "new_fighters_voice();" in setup
