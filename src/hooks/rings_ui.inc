@@ -410,8 +410,11 @@ void ring_card(ImDrawList *dl, const Frame &f, const RingBoard &b, const NetRing
     const float ah = 112;
     int venue = c.venue_count ? c.venues[0] : 0;
     const Tex &t = venue ? venue_tex(venue) : no_tex();
+    // the venue card's photo only (its left four fifths; the logo under it and the dark edge left out), a band of it
+    // as wide as the card: the texture is square, the band about 2.4 : 1
+    float band = 0.74f * 112.0f * f.sy / std::max(1.0f, (w - 8) * f.sx);
     if (!image(dl, f, t, x + 4, y + 4, w - 8, ah, sel ? IM_COL32(255, 255, 255, 235) : IM_COL32(170, 170, 170, 220),
-               ImVec2(0.04f, 0.10f), ImVec2(0.96f, 0.80f)))
+               ImVec2(0.04f, 0.30f - band / 2), ImVec2(0.78f, 0.30f + band / 2)))
         rect(dl, f, x + 4, y + 4, w - 8, ah, IM_COL32(60, 12, 18, 200), 8);
     dl->AddRectFilledMultiColor(f.p(x + 4, y + 44), f.p(x + w - 4, y + 4 + ah), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0),
                                 IM_COL32(0, 0, 0, 220), IM_COL32(0, 0, 0, 220));
@@ -630,9 +633,10 @@ void draw_kotr_tab(ImDrawList *dl, const Frame &f, const Pad &pad)
                                                                                ? ring_type_title(ring_type_of_id(b.types[RU.filter - 1].type.c_str()))
                                                                                : b.types[RU.filter - 1].name.c_str());
         text(dl, f, g_hand, 13, x + w / 2, 130, ORANGE, ring.c_str(), CENTER, 0.8f);
-        if (filters > 1) {      // up / down picks the ring: small arrows at the line's ends
-            text(dl, f, g_title, 9, x + 16, 133, GREY, "UP", LEFT, 0.5f);
-            text(dl, f, g_title, 9, x + w - 16, 133, GREY, "DOWN", RIGHT, 0.5f);
+        if (filters > 1) {      // up / down picks the ring: a small arrow up and down beside its name
+            float cx = x + w / 2 + text_width(f, g_hand, 13, ring.c_str()) / 2 + 12;
+            dl->AddTriangleFilled(f.p(cx, 131), f.p(cx - 4, 137), f.p(cx + 4, 137), with_alpha(ORANGE, 0.8f));
+            dl->AddTriangleFilled(f.p(cx - 4, 140), f.p(cx + 4, 140), f.p(cx, 146), with_alpha(ORANGE, 0.8f));
             if (mouse_click(f, x + w / 2 - 80, 128, 160, 18)) RU.filter = (RU.filter + 1) % filters;
         }
     }
@@ -702,15 +706,19 @@ void ring_banner(ImDrawList *dl, const Frame &f, const NetRingCard &c, float x0,
     const RingTypeBoard *t = ring_type_id(c.type) ? b.of(ring_type_id(c.type)) : nullptr;
     glass(dl, f, x0, y, x1 - x0, 20, 6, IM_COL32(40, 26, 4, 255), 0.75f);
     float x = x0 + 8;
+    // the ring's title first where the strip is wide enough (a narrow one: the page names the ring already)
     std::string title = upper(ring_title(b, c.type).c_str());
-    text(dl, f, g_title, 11, x, y + 4, GOLD, title.c_str(), LEFT, 0.8f);
-    x += text_width(f, g_title, 11, title.c_str()) + 12;
+    if (x1 - x0 >= 330) {
+        text(dl, f, g_title, 11, x, y + 4, GOLD, title.c_str(), LEFT, 0.8f);
+        x += text_width(f, g_title, 11, title.c_str()) + 12;
+    }
     if (t && t->crowned) {
-        tm_crown(dl, f.p(x, y + 3), f.s() * 0.8f, GOLD);
-        x += 20;
-        x += ring_name(dl, f, x, y + 3, 12, t->king.name, t->king.crew, CREAM, std::max(40.0f, x1 - x - 150)) + 10;
         char line[64];
         snprintf(line, sizeof(line), "x%d   BOUNTY %d", t->king.streak, t->king.bounty);
+        float lw = text_width(f, g_title, 11, line);
+        tm_crown(dl, f.p(x, y + 3), f.s() * 0.8f, GOLD);
+        x += 20;
+        ring_name(dl, f, x, y + 3, 12, t->king.name, t->king.crew, CREAM, std::max(40.0f, x1 - 8 - lw - 12 - x));
         text(dl, f, g_title, 11, x1 - 8, y + 4, GOLD, line, RIGHT, 0.8f);
     } else {
         char line[96];
