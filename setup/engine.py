@@ -1086,6 +1086,8 @@ class Engine:
         if old is None:
             return
         gen, old_gen = self.source / 'src/recomp/gen', old / 'src/recomp/gen'
+        if not gen.is_dir() or not old_gen.is_dir():
+            return      # nothing lifted to compare (a timing nicety, never a reason to stop setup)
         kept = 0
         for new in gen.iterdir():
             prev = old_gen / new.name

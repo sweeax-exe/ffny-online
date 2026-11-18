@@ -28,6 +28,7 @@ def payload(base, target, version):
     shutil.rmtree(target/'source')
     source=target/'source';(source/'scripts').mkdir(parents=True);(source/'config').mkdir()
     (source/'src/recomp/gen').mkdir(parents=True)
+    (source/'src/recomp/gen/.gitkeep').touch()  # as package-setup.py ships it
     (source/'config/dump-manifest.json').write_text('{}')
     (source/'scripts/verify-dump.py').write_text("def verify(root, manifest):\n from pathlib import Path\n return [] if (Path(root)/'default.xbe').read_bytes()==b'synthetic setup fixture' else ['wrong fixture']\n")
     (source/'scripts/pipeline.py').write_text("import sys\nfrom pathlib import Path\nPath(sys.argv[1]+'.state').write_text('verified')\n")
