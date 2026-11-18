@@ -174,6 +174,7 @@ int netplay_in_lobby(void) { return 0; }
 int netplay_lobby_address(char *o, int n) { (void)o; (void)n; return 0; }
 int netplay_rtt(void) { return -1; }
 void netplay_build_fingerprint(uint8_t o[8]) { memset(o, 0, 8); }
+int netplay_who_rooms(const uint8_t *b, int l, NetPlayer *p, int c) { (void)b; (void)l; (void)p; (void)c; return 0; }
 void netplay_data_print_reset(void) {}
 void netplay_data_print_start(void) {}
 int netplay_room_ping(int s) { (void)s; return -1; }
@@ -3262,11 +3263,13 @@ static void on_players(const uint8_t *b, int len)
     rooms |= rd8(&r) << 8;
     count = rd8(&r);
     if (count > 40) count = 40;
+    memset(list, 0, sizeof(list));
     for (i = 0; i < count && !r.bad; i++) {
         rdstr(&r, list[i].name, sizeof(list[i].name));
         list[i].state = rd8(&r);
     }
     if (r.bad) return;
+    if (r.i < r.n) netplay_who_rooms(b + r.i, r.n - r.i, list, count);     /* build 96 relays: where they are */
     EnterCriticalSection(&g_cs);
     memcpy(N.who, list, sizeof(list[0]) * (size_t)count);
     N.who_count = count;
@@ -5270,6 +5273,26 @@ static void build_fingerprint_of(uint8_t out[8], uint32_t content)
     put32(out, h1); put32(out + 4, h2);
 }
 
+int netplay_who_rooms(const uint8_t *b, int len, NetPlayer *list, int count)
+{
+    int n, k, at = 1;
+    if (len < 1) return 0;
+    n = b[0];
+    if (1 + 8 * n > len) return -1;
+    for (k = 0; k < n; k++, at += 8) {
+        int i = b[at];
+        NetPlayer *p;
+        if (i >= count) continue;
+        p = &list[i];
+        memcpy(p->room, b + at + 1, 6);
+        p->room[6] = 0;
+        p->room_mode = b[at + 7];
+        p->room_known = p->room[0] ? 1 : 2;
+        if (p->room_known == 2) p->room[0] = 0;
+    }
+    return n;
+}
+
 void netplay_build_fingerprint(uint8_t out[8])
 {
     build_fingerprint_of(out, pc_content_print());
@@ -7034,6 +7057,34 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         for (i = 0; i < 50 && N.relay_caps < 0; i++) Sleep(100);
         if (!(N.relay_caps > 0 && (N.relay_caps & CAPS_SPECTATE))) {
             fprintf(stderr, "[NETPLAY] tests: the relay does not take spectators (caps %d)\n", N.relay_caps);
+            return 0;
+        }
+        if (getenv("RECOMP_TEST_WATCH_ANY")) {
+            /* RECOMP_TEST_WATCH_ANY=1 (build 96): watch, in one go, the first room with players that the room list
+             * shows on ANOTHER relay, as WATCH (RB) in FIND A ROOM does: netservers_spectate_on moves the hub there
+             * and the SPECTATE goes out once it is in that relay's lobby (netservers_tick 4); logged either way */
+            ULONGLONG until = GetTickCount64() + 60000;
+            int started = 0, k, n, got = 0;
+            while (!N.stop && GetTickCount64() < until && !started) {
+                NetServerRoom list[32];
+                int here = netservers_connected();
+                netservers_fetch_rooms();
+                n = netservers_rooms(list, 32, NULL);
+                for (k = 0; k < n && !started; k++)
+                    if (list[k].server >= 0 && list[k].server != here && list[k].room.players > 0 &&
+                        !NETPLAY_IS_HILL(list[k].room.mode)) {
+                        fprintf(stderr, "[NETPLAY] tests: watch-any: room %s on %s (phase %d), the hub on %s\n",
+                                list[k].room.code, netservers_short(list[k].server), list[k].room.phase,
+                                netservers_short(here));
+                        netservers_spectate_on(list[k].server, list[k].room.code, name && *name ? name : "Test spectator");
+                        started = 1;
+                    }
+                Sleep(250);
+            }
+            if (!started) fprintf(stderr, "[NETPLAY] tests: watch-any: no room on another relay within 60 s\n");
+            while (started && !N.stop && (got = netservers_tick(NULL)) == 0 && netservers_moving()) Sleep(50);
+            if (started) fprintf(stderr, "[NETPLAY] tests: watch-any: tick %d, the hub on %s\n", got, netservers_short(netservers_connected()));
+            while (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF) Sleep(200);
             return 0;
         }
         while (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF) {

@@ -56,6 +56,11 @@ enum NetplayState {
 #define NETPLAY_RTS_SLOTS        4
 #define NETPLAY_IS_RTS(mode)     ((mode) == NETPLAY_MODE_RTS)
 #define NETPLAY_CAP_RTS          16777216u  /* 1 << 24, both ways (bit 23 is the standard preference, CAPS_ORIGINAL) */
+/* Build 96 (server relay/protocol_who_rooms.go), no CAPS bit: PLAYERS (WHO, sent to games of build 96 and later)
+ * and PLAYERLIST (asked with these flags in the word after its build) end with the rooms of the listed players
+ * (code, mode; a zero code: a private match), so a FIGHTING row can be watched */
+#define NETPLAY_PLAYERLIST_ROOMS 1u     /* the rooms trailer, please */
+#define NETPLAY_PLAYERLIST_RTS   2u     /* this player has Run the Streets: its rooms may be named */
 /* A room with a line (HILL): King of the Hill or FFA rotation. */
 #define NETPLAY_IS_HILL(mode)    (NETPLAY_IS_KOTH(mode) || NETPLAY_IS_FFAROT(mode))
 
@@ -112,6 +117,10 @@ typedef struct NetRoomInfo {
 typedef struct NetPlayer {
     char name[25];
     int state;                      /* 0 in the hub, 1 in a room, 2 playing */
+    /* build 96 (the who-rooms trailer): where a player in a room is. room_known 0 unknown (an older relay, or
+     * no room in the answer), 1 the public room room/room_mode, 2 a private match (no code given) */
+    int room_known, room_mode;
+    char room[7];
 } NetPlayer;
 
 typedef struct NetRoomPlayer {
@@ -320,6 +329,9 @@ int netplay_lobby_tset_joining(void);
 int netplay_lobby(const char *server, const char *name);
 void netplay_lobby_list(int mode);                      /* mode 0xFF: any */
 int netplay_lobby_rooms(NetRoomInfo *out, int max, unsigned *version);
+/* Reads the rooms trailer of PLAYERS / PLAYERLIST (build 96) into list[0..count): the number of
+ * entries, -1 a short trailer (nothing taken beyond the whole entries). */
+int netplay_who_rooms(const uint8_t *b, int len, NetPlayer *list, int count);
 void netplay_lobby_who(void);   /* asks who is online; the answer comes as netplay_lobby_players */
 /* The last answer: the players listed (up to max), how many are connected and how many rooms
  * there are; -1 before any answer. */
