@@ -26,6 +26,7 @@
 #include "created_fighter.h"
 #include "custom_music.h"
 #include "discord_presence.h"
+#include "towers.h"
 
 extern void xbox_NoteAnchorEvent(const char *text);
 
@@ -400,7 +401,7 @@ int automatch_hold_funccall(const char *text)
     created_fighter_before_funccall(text);      /* unlinks created fighters before the reward step */
     netplay_spectator_funccall(text);           /* spectator mode: the summary goes by by itself */
     netplay_results_funccall(text);             /* the results' No: the others hear it at once */
-    if (!strcmp(text, "Game.Rematch()")) return netplay_rematch_request();
+    if (!strcmp(text, "Game.Rematch()")) return towers_rematch_request() || netplay_rematch_request();
     if (g_armed || (!netplay_match_locked() && !g_running)) return 0;
     for (i = 0; i < sizeof(setup) / sizeof(setup[0]); i++)
         if (!strncmp(text, setup[i], strlen(setup[i]))) {
@@ -447,6 +448,7 @@ void automatch_on_funccall(const char *text)
     unsigned int keep = g_eax;
     if (!g_env_read) read_env();
     online_menu_on_funccall(text);
+    towers_on_funccall(text);       /* Towers: a floor's fight is over once the game is back on a menu */
     print_result(text);
     if (strstr(text, "GetScreenInfo(intMain/mainMenu.swf") || strstr(text, "GetScreenInfo(battle/cmtype"))
         netplay_note_front_end();                   /* a fight quit from its pause menu is over */
