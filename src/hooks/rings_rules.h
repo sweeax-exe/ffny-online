@@ -18,7 +18,7 @@ extern "C" {
 
 #define RINGS_TYPE      0x46    /* both ways, the header's type byte */
 #define RINGS_REQ_LEN   1200    /* the request is padded to this: the relay never answers with more bytes */
-#define RINGS_MAX       24      /* cards one relay's answer may carry (rings x channels) */
+#define RINGS_MAX       32      /* cards one relay's answer may carry (rings x channels; the relay's MaxRingsListed) */
 #define RINGS_VENUES    8
 
 /* the ring's type (RINGS `type`; the report's and the board's ids) */

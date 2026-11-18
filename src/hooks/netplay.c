@@ -7138,6 +7138,9 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         }
         /* RECOMP_NETPLAY_QUICK="mode,players", default "0,2" (One on One) */
         const char *q = getenv("RECOMP_NETPLAY_QUICK"), *listed = getenv("RECOMP_TEST_JOIN_LISTED");
+        const char *join_ring = getenv("RECOMP_TEST_JOIN_RING");
+        char ring_readied[7] = "";      /* F0 tests: the ring room this copy stepped into the line of */
+        if (join_ring && !*join_ring) join_ring = NULL;
         const char *who = name && *name ? name : "Test player";
         int qmode = 0, qmax = 2, moves = 0;
         char alone_in[7] = "";
@@ -7212,6 +7215,27 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 Sleep(250);
             }
             if (!joined) fprintf(stderr, "[NETPLAY] tests: no open room listed within %s s; joining nothing\n", listed);
+        } else if (join_ring) {
+            /* RECOMP_TEST_JOIN_RING=<s> (tests, F0): no quick match; JOIN the first ring the relays' RINGS list (the
+             * lowest ping first) as the Fight Complex's JOIN does; in the room (a ring's new member is away) READY 1
+             * below puts it in the line. Nothing is joined when no ring shows within <s> seconds. */
+            NetRing rings[16];
+            ULONGLONG until = GetTickCount64() + (ULONGLONG)atoi(join_ring) * 1000;
+            int joined = 0, k, n;
+            while (!N.stop && GetTickCount64() < until && !joined) {
+                netservers_fetch_rings(3000);
+                n = netservers_rings(rings, 16, NULL);
+                for (k = 0; k < n && !joined; k++) {
+                    if (rings[k].card.flags & RING_FLAG_FULL) continue;
+                    fprintf(stderr, "[NETPLAY] tests: joining ring %s \"%s\" (type %d, ch %d) on %s\n", rings[k].card.code,
+                            rings[k].card.name, rings[k].card.type, rings[k].card.channel, netservers_short(rings[k].server));
+                    if (rings[k].server == netservers_connected()) netplay_lobby_join(rings[k].card.code);
+                    else netservers_join_on(rings[k].server, rings[k].card.code, ring_room_mode(&rings[k].card), who);
+                    joined = 1;
+                }
+                Sleep(250);
+            }
+            if (!joined) fprintf(stderr, "[NETPLAY] tests: no ring listed within %s s; joining nothing\n", join_ring);
         } else if (!strcmp(mode, "ranked")) {
             /* RECOMP_TEST_RANKED_MODES="open" or "classic,open": the modes, the first the primary
              * (default Classic); the found set is accepted (RECOMP_TEST_RANKED_ACCEPT=0 declines) */
@@ -7359,6 +7383,12 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 int me, state = -1;
                 for (me = 0; me < r.hill.count; me++)
                     if (r.hill.line[me].slot == r.you) state = r.hill.line[me].state;
+                if (join_ring && state == NETLINE_AWAY && strcmp(ring_readied, r.code) && !N.match_live) {
+                    /* F0 tests: a ring's new member watches; READY 1 steps into the line, as the page's JOIN does */
+                    snprintf(ring_readied, sizeof(ring_readied), "%s", r.code);
+                    fprintf(stderr, "[NETPLAY] tests: in ring room %s (away); into the line with fighter %d\n", r.code, fighter);
+                    netplay_lobby_ready(1, fighter);
+                }
                 if (state != NETLINE_CALLED || N.match_live) called_at = 0;
                 else if (!called_at) {
                     called_at = GetTickCount64();
