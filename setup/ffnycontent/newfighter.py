@@ -570,9 +570,9 @@ def apply_op(files, op, fe_id, pictures=True, pack=None, new=False, logical=Fals
     taken, no such template, art of the wrong size).
 
     ``logical``: a community fighter beyond the places (``fe_id`` its logical ID, ``unlimited.py``): no Character
-    row; the edits end with ("logical", None, None, record) for ``unlimited.add_records``, and an own voice stays
-    the template's (a bank has no voice number of its own yet). ``taken_models``: models of earlier logical
-    fighters."""
+    row; the edits end with ("logical", None, None, record) for ``unlimited.add_records``, and an own voice goes
+    in under the fighter's ID (``unlimited.logical_voice_files``; the bank it is bound to speaks with it).
+    ``taken_models``: models of earlier logical fighters."""
     problems = op_problems(op, allow_fe_id=True)
     if problems:
         raise FighterError(problems[0])
@@ -593,7 +593,19 @@ def apply_op(files, op, fe_id, pictures=True, pack=None, new=False, logical=Fals
     words = gameplay_words(op["gameplay"]) if "gameplay" in op else None
     voice = (op.get("gameplay") or {}).get("voice") or {}
     if voice.get("mode") == "own" and logical:
-        voice = {}          # phase 1: a bank plays the template's voice
+        # the own voice of a fighter beyond the places: its files under its ID, played through the bank it is
+        # bound to (unlimited.py, own voices); word 21 stays the template's
+        if pack is None:
+            raise FighterError("this new fighter's own voice needs the pack's voice files")
+        from . import unlimited
+        try:
+            edits += [("add", fightervoice.SPEECH_ARCHIVE, n, data) for n, data in unlimited.logical_voice_files(
+                lambda e: files.current(fightervoice.SPEECH_ARCHIVE, e),
+                lambda: files.names(fightervoice.SPEECH_ARCHIVE), template_fe_id,
+                rows[template_fe_id]["words"][W_SPEECH], fe_id, voice["lines"], pack)]
+        except (fightervoice.VoiceError, KeyError, OSError) as e:
+            raise FighterError("voice: %s" % e)
+        voice = {}
     if voice.get("mode") == "own":
         # the own voice: its five files at N = 40 + its place index in the speech archive, and N in word 21
         if pack is None:

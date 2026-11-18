@@ -49,7 +49,7 @@ from ffnycontent import clothing, cpparts, delta, fighterart, loc, newfighter, n
 from ffnycontent import sod as sodmod
 
 SCHEMA = 1
-COMPOSER = 10                   # bump when the output for the same inputs changes (10: build 86 = banks, official maps, fighter_light)
+COMPOSER = 11                   # bump when the output for the same inputs changes (10: build 86 = banks, official maps, fighter_light; 11: own voices of fighters beyond the places)
 NEW_DAYS = 14                   # a new fighter's select thumbs carry NEW for this long after its review
 HUB_ART = ('online-art', 'fighters')    # <data>/online-art/fighters/<feID>.png: the online hub's portraits
 SKIN_ART = ('online-art', 'skins')      # <data>/online-art/skins/<pack id>.png: a skin's picture in the skin window
@@ -764,6 +764,15 @@ def finish_logical(work, applied, skipped, log):
             if name.lower() not in there:
                 work.add(newfighter.SCREENS_ARCHIVE, name, data)
                 there.add(name.lower())
+    # own voices: the banks' voice entries, which the game points at the bound fighter's files (unlimited.py)
+    speech = newfighter.fightervoice.SPEECH_ARCHIVE
+    names = files.names(speech) if work.exists(speech) else []
+    voiced = [r['id'] for r in work.logical if unlimited.has_logical_voice(names, r['id'])]
+    if voiced:
+        for name, data in unlimited.bank_voice_placeholders(lambda e: work.current(speech, e), lambda: names):
+            work.add(speech, name, data)
+        log('[compose] own voices of %d community fighters beyond the places: %s' %
+            (len(voiced), ', '.join(map(str, voiced))))
     log('[compose] %d community fighters beyond the places (banks 124..127)' % len(work.logical))
 
 

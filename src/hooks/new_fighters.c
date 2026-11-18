@@ -28,6 +28,7 @@
 #include "fighter_voice.h"
 #include "fighter_skins.h"
 #include "fighter_banks.h"
+#include "guest_window.h"
 #include "unlock_list.h"
 
 unsigned int defjam_fe_call(const char *command);                   /* recomp_manual.c */
@@ -377,31 +378,151 @@ void new_fighters_blazins(void)
 #define SPEECH_VOICE    0x10u
 
 static int g_voice_present[NEW_FIGHTER_MAX];   /* 0 unknown, 1 all files there, -1 not */
+static uint8_t *g_speech_dir;                   /* the speech archive's directory as the host file has it */
+static size_t g_speech_dir_n;
+static int g_speech_dir_state;                  /* 0 not read, 1 read, -1 none */
+static int g_speech_dir_over;
 
-static int voice_files_present(int voice)
+/* The directory of the speech archive the game opens (read once: content changes only between runs). */
+static const uint8_t *speech_dir(size_t *n)
 {
-    int idx = voice - FV_FIRST_VOICE, overridden = 0;
     FILE *f;
-    uint8_t head[16], *dir;
+    uint8_t head[16];
     uint32_t hsize;
-    if (idx < 0 || idx >= NEW_FIGHTER_MAX) return 0;
-    if (g_voice_present[idx]) return g_voice_present[idx] > 0;
-    g_voice_present[idx] = -1;
-    f = netplay_open_fight_file(FV_SPEECH_ARCHIVE, &overridden);
-    if (!f) return 0;
+    if (g_speech_dir_state) {
+        *n = g_speech_dir_n;
+        return g_speech_dir_state > 0 ? g_speech_dir : NULL;
+    }
+    g_speech_dir_state = -1;
+    *n = 0;
+    f = netplay_open_fight_file(FV_SPEECH_ARCHIVE, &g_speech_dir_over);
+    if (!f) return NULL;
     if (fread(head, 1, 16, f) == 16) {
         hsize = (uint32_t)head[12] << 24 | (uint32_t)head[13] << 16 | (uint32_t)head[14] << 8 | head[15];
-        if (hsize >= 16 && hsize < 16u * 1024 * 1024 && (dir = (uint8_t *)malloc(hsize)) != NULL) {
-            memcpy(dir, head, 16);
-            if (fread(dir + 16, 1, hsize - 16, f) == hsize - 16 && fighter_voice_entries_present(dir, hsize, voice))
-                g_voice_present[idx] = 1;
-            free(dir);
+        if (hsize >= 16 && hsize < 16u * 1024 * 1024 && (g_speech_dir = (uint8_t *)malloc(hsize)) != NULL) {
+            memcpy(g_speech_dir, head, 16);
+            if (fread(g_speech_dir + 16, 1, hsize - 16, f) == hsize - 16) {
+                g_speech_dir_n = hsize;
+                g_speech_dir_state = 1;
+            } else {
+                free(g_speech_dir);
+                g_speech_dir = NULL;
+            }
         }
     }
     fclose(f);
+    *n = g_speech_dir_n;
+    return g_speech_dir_state > 0 ? g_speech_dir : NULL;
+}
+
+static int voice_files_present(int voice)
+{
+    int idx = voice - FV_FIRST_VOICE;
+    size_t n;
+    const uint8_t *dir;
+    if (idx < 0 || idx >= NEW_FIGHTER_MAX) return 0;
+    if (g_voice_present[idx]) return g_voice_present[idx] > 0;
+    g_voice_present[idx] = -1;
+    dir = speech_dir(&n);
+    if (dir && fighter_voice_entries_present(dir, n, voice)) g_voice_present[idx] = 1;
     fprintf(stderr, "[VOICE] voice %03d: files %s in %s%s\n", voice, g_voice_present[idx] > 0 ? "all present" :
-            "missing", FV_SPEECH_ARCHIVE, overridden ? " (pack copy)" : "");
+            "missing", FV_SPEECH_ARCHIVE, g_speech_dir_over ? " (pack copy)" : "");
     return g_voice_present[idx] > 0;
+}
+
+/* ---- own voices of numbered fighters through their bank (fighter_voice.h) ----
+ *
+ * The game keeps the speech archive's directory in memory as the file has it (measured 2026-11-18: one copy, in
+ * the game's heap, byte for byte the file's; the speech and stream loaders find their entries there). A bank's
+ * voice entries are pointed at its bound fighter's files there before the banks are queued; the directory is not
+ * read by the fight's simulation, and every PC of a match binds the same fighters (START) to the same banks. */
+extern uint32_t xbox_ContiguousBlockSize(uint32_t va);
+static uint32_t g_guest_dir;                    /* the guest's copy of the directory, 0 not found yet */
+static int g_guest_dir_scans;
+
+/* Whether the guest's bytes at va are the directory, the bank voices' records aside (we change those). */
+static int guest_dir_is(uint32_t va, const uint8_t *dir, size_t n)
+{
+    static long skip[4 * FV_FILES];
+    static int nskip = -1;
+    const uint8_t *g = (const uint8_t *)XBOX_PTR(va);
+    size_t at = 0;
+    int k;
+    if (nskip < 0) {
+        char name[64];
+        int b, i;
+        nskip = 0;
+        for (b = 0; b < 4; b++)
+            for (i = 0; i < FV_FILES; i++) {
+                long p;
+                fighter_voice_entry_name(fighter_voice_bank_voice(b), i, name, sizeof name);
+                if ((p = fighter_voice_dir_find(dir, n, name, NULL, NULL)) >= 0) skip[nskip++] = p;
+            }
+        /* in file order, for the walk below */
+        for (b = 1; b < nskip; b++)
+            for (k = b; k > 0 && skip[k - 1] > skip[k]; k--) { long t = skip[k]; skip[k] = skip[k - 1]; skip[k - 1] = t; }
+    }
+    if (memcmp(g, dir, 16)) return 0;
+    for (k = 0; k <= nskip; k++) {
+        size_t end = k < nskip ? (size_t)skip[k] : n;
+        if (end > at && memcmp(g + at, dir + at, end - at)) return 0;
+        at = end + 8;
+    }
+    return 1;
+}
+
+/* The guest address of the directory: the cached one if it still holds it, else a search of the contiguous
+ * window's live blocks for it (the game reads it at start-up). 0 when it is not there. */
+static uint32_t guest_dir(const uint8_t *dir, size_t n)
+{
+    uint32_t va = GUEST_WINDOW_LO + 0x1000u, found = 0, copies = 0;
+    if (g_guest_dir && guest_dir_is(g_guest_dir, dir, n)) return g_guest_dir;
+    g_guest_dir = 0;
+    if (g_guest_dir_scans++ >= 8) return 0;     /* not a copy we can find: the template's voice */
+    while (va < GUEST_WINDOW_HI) {
+        uint32_t s = xbox_ContiguousBlockSize(va), end, p;
+        if (!s) { va += 0x1000u; continue; }
+        end = va + s;
+        if (end > GUEST_WINDOW_HI || end < va) end = GUEST_WINDOW_HI;
+        for (p = va; p + n <= end; p++) {
+            const uint8_t *h = (const uint8_t *)XBOX_PTR(p);
+            if (h[0] != 'B' || h[1] != 'I' || h[2] != 'G' || h[3] != dir[3]) continue;
+            if (guest_dir_is(p, dir, n)) {
+                if (!found) found = p;
+                copies++;
+            }
+        }
+        va = (end + 0xFFFu) & ~0xFFFu;
+    }
+    fprintf(stderr, "[VOICE] the speech archive's directory in the game's memory: %s%08X (%u cop%s, %u bytes)\n",
+            found ? "" : "not found ", found, copies, copies == 1 ? "y" : "ies", (unsigned)n);
+    return g_guest_dir = found;
+}
+
+static void put_be32(uint32_t va, uint32_t v)
+{
+    MEM8(va) = (uint8_t)(v >> 24);
+    MEM8(va + 1) = (uint8_t)(v >> 16);
+    MEM8(va + 2) = (uint8_t)(v >> 8);
+    MEM8(va + 3) = (uint8_t)v;
+}
+
+/* Bank b's voice entries pointed at numbered fighter id's own files. Returns the bank voice, or -1 (the fighter
+ * has none, or the directory is not there: the slot keeps the template's voice). */
+static int bank_voice_bind(int b, int id)
+{
+    long pos[FV_FILES];
+    uint32_t off[FV_FILES], size[FV_FILES], g;
+    size_t n;
+    const uint8_t *dir = speech_dir(&n);
+    int voice = fighter_voice_bank_voice(b), i;
+    if (!dir || voice < 0 || !fighter_voice_numbered_plan(dir, n, voice, id, pos, off, size)) return -1;
+    if (!(g = guest_dir(dir, n))) return -1;
+    for (i = 0; i < FV_FILES; i++) {
+        put_be32(g + (uint32_t)pos[i], off[i]);
+        put_be32(g + (uint32_t)pos[i] + 4, size[i]);
+    }
+    return voice;
 }
 
 /* The own voice number of new fighter fe_id when its row asks for one (word 21 = 40 + its place index), else -1. */
@@ -424,7 +545,27 @@ void new_fighters_voice(void)
     for (s = 0; s < 4; s++) {
         uint32_t row = SPEECH_ROWS + SPEECH_ROW_SIZE * (uint32_t)s, was = MEM32(row + SPEECH_VOICE);
         fe = (int)MEM8(gd + GD_FIGHTER + 5u * (uint32_t)s);
-        if (!new_fighter_is_place(fe) || MEM32(row) == 0xFFFFFFFFu) continue;
+        if (MEM32(row) == 0xFFFFFFFFu) continue;
+        if (fighter_banks_index(fe) >= 0) {
+            /* a bank: its bound numbered fighter's own voice, through the bank's voice number */
+            const FighterBanksEntry *e = fighter_banks_for_fe(fe);
+            int b = fighter_banks_index(fe);
+            if (!e || (int)MEM32(row) != e->core_id) continue;
+            voice = bank_voice_bind(b, e->id);
+            if (voice < 0) {
+                if (s_logged[s] != (uint32_t)e->id)
+                    fprintf(stderr, "[VOICE] slot %d bank %d (fighter %d %s): no own voice; the template's voice %03u\n",
+                            s, fe, e->id, e->name, was);
+                s_logged[s] = (uint32_t)e->id;
+                continue;
+            }
+            MEM32(row + SPEECH_VOICE) = (uint32_t)voice;
+            s_logged[s] = (uint32_t)e->id;
+            fprintf(stderr, "[VOICE] slot %d bank %d (fighter %d %s): own voice as %03d (the template's was %03u)\n",
+                    s, fe, e->id, e->name, voice, was);
+            continue;
+        }
+        if (!new_fighter_is_place(fe)) continue;
         voice = new_fighter_voice(fe);
         if (voice < 0 || (int)was == voice) continue;
         if ((int)MEM32(row) != new_fighter_core(fe)) {
