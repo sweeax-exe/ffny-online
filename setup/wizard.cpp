@@ -164,7 +164,7 @@ constexpr float W = 1100, H = 680;
 const wchar_t* DISCORD = L"https://discord.gg/ffnyonline";
 const wchar_t* DUMP_GUIDE = L"https://github.com/sweeax-exe/ffny-online/blob/main/docs/dump-your-disc.md";
 
-struct Answer { int token; DWORD code; std::string text; };
+struct Answer { int token; DWORD code; std::string text; std::string error; };
 
 // ---- Drawing ------------------------------------------------------------------------------------
 ID2D1Factory* d2d = nullptr;
@@ -1089,7 +1089,7 @@ void ask(std::vector<std::wstring> args, UINT message, int token) {
                 readShared(out, answer->text);
                 std::error_code e; fs::remove(out, e);
             }
-        } catch (const std::exception& ex) { nativeLog(std::string("Setup question failed: ") + ex.what()); }
+        } catch (const std::exception& ex) { answer->error = ex.what(); nativeLog(std::string("Setup question failed: ") + ex.what()); }
         PostMessageW(window, message, 0, (LPARAM)answer);
     }).detach();
 }
@@ -1586,7 +1586,17 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                 for (const auto& c : j["checks"].items) p.checks.push_back({c["id"].str(), c["text"].str(), c["fix"].str(), c["ok"].yes()});
             } else {
                 p.valid = true; p.ok = false;
-                p.checks.push_back({L"error", L"Setup couldn't check this folder", L"Choose another folder, or see the setup log.", false});
+                // The helper's own words (it writes {"error": ...} next to a non-zero exit), or why it could not start.
+                std::wstring reason;
+                if (!answer->text.empty()) { auto j = parseJson(answer->text); reason = j["error"].str(); }
+                if (reason.empty() && !answer->error.empty()) reason = utf8(answer->error);
+                std::wstring fix = L"Choose another folder, or see the setup log.";
+                if (!blockedAdvice.empty()) {
+                    fix.clear();
+                    for (const auto& line : blockedAdvice) fix += (fix.empty() ? L"" : L" ") + line;
+                }
+                p.checks.push_back({L"error", reason.empty() ? L"Setup couldn't check this folder (exit " + std::to_wstring(answer->code) + L")"
+                                                              : L"Setup couldn't check this folder: " + reason, fix, false});
             }
             st.plan = p;
             redraw();

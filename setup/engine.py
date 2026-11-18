@@ -212,7 +212,11 @@ def volume_filesystem(path):
     if not IS_WINDOWS:
         return None
     name = ctypes.create_unicode_buffer(64)
-    root = Path(path).resolve().anchor
+    try:
+        root = Path(path).resolve().anchor
+    except OSError as ex:
+        skip_drive(path, ex)
+        return None
     ok = ctypes.windll.kernel32.GetVolumeInformationW(ctypes.c_wchar_p(root), None, 0, None, None, None, name, 64)
     return name.value if ok and name.value else None
 
@@ -223,6 +227,12 @@ def validate_dump(folder, source):
     problems = module.verify(str(folder), manifest)
     if problems:
         raise SetupError('Dump verification failed: ' + '; '.join(problems), 2)
+
+
+def skip_drive(place, ex):
+    """One line on stderr (the setup log) for a drive or folder that could not be read; setup goes on without it."""
+    code = getattr(ex, 'winerror', None)
+    print(f'Skipping {place}: ' + (f'Windows error {code} ' if code else '') + f'({ex})', file=sys.stderr, flush=True)
 
 
 def nearest_existing(path):
@@ -2003,7 +2013,9 @@ def search_candidates(roots, deadline, limit=40, max_entries=60000):
                 continue
             visited.add(key)
             entries = list(os.scandir(folder))
-        except OSError:
+        except OSError as ex:
+            if getattr(ex, 'winerror', None) not in (2, 3, 5):     # not found / denied are ordinary
+                skip_drive(folder, ex)
             continue
         scanned += len(entries)
         if any(e.name.casefold() == 'default.xbe' and e.is_file() for e in entries if not e.is_symlink()):
@@ -2126,20 +2138,38 @@ def drive_free(path):
 
 
 def suggest_folder(needed):
-    """An earlier installation's folder, or <the fixed NTFS drive with the most free space>:\\Games\\FFNY Online."""
+    """An earlier installation's folder, or <the fixed NTFS drive with the most free space>:/Games/FFNY Online.
+    A drive that cannot be read (Windows error 1450 and the like) is skipped and logged."""
     places = [Path(os.environ['LOCALAPPDATA']) / 'DefJamRecompiled'] if os.environ.get('LOCALAPPDATA') else []
     drives = fixed_drives()
     places += [d / 'Games/FFNY Online' for d in drives] + [d / 'FFNY Online' for d in drives]
     for place in places:
-        if existing_install(place):
-            return place
-    usable = [d for d in drives if (volume_filesystem(d) or 'NTFS').upper() in ('NTFS', 'REFS')] or drives
-    usable.sort(key=lambda d: (drive_free(d) < needed, -drive_free(d), str(d)))
-    drive = usable[0] if usable else Path.home()
-    games = drive / 'Games'
-    folder = games / 'FFNY Online' if games.is_dir() or not games.exists() else drive / 'FFNY Online'
-    if folder.exists() and not is_ffny_folder(folder):
-        folder = folder.with_name('FFNY Online Setup')
+        try:
+            if existing_install(place):
+                return place
+        except OSError as ex:
+            skip_drive(place, ex)
+    readable = []
+    for d in drives:
+        try:
+            system = volume_filesystem(d)
+            free = shutil.disk_usage(d).free
+            (d / 'Games').exists()
+        except OSError as ex:
+            skip_drive(d, ex)
+            continue
+        readable.append((d, system, free))
+    usable = [x for x in readable if (x[1] or 'NTFS').upper() in ('NTFS', 'REFS')] or readable
+    usable.sort(key=lambda x: (x[2] < needed, -x[2], str(x[0])))
+    drive = usable[0][0] if usable else Path.home()
+    try:
+        games = drive / 'Games'
+        folder = games / 'FFNY Online' if games.is_dir() or not games.exists() else drive / 'FFNY Online'
+        if folder.exists() and not is_ffny_folder(folder):
+            folder = folder.with_name('FFNY Online Setup')
+    except OSError as ex:
+        skip_drive(drive, ex)
+        folder = Path.home() / 'FFNY Online'
     return folder
 
 
@@ -2166,6 +2196,7 @@ def plan_folder(folder=None, dump=None, hd=False):
     suggested = folder is None
     folder = suggest_folder(needed) if folder is None else Path(folder)
     folder = Path(os.path.abspath(folder))
+    nearest_existing(folder)                # the chosen path itself must be readable: a real error here is shown as it is
     adjusted = False
     if folder.name.casefold() == 'app' and (folder / 'installed.json').is_file():
         folder = folder.parent              # the app folder of an installation: the installation
@@ -2235,7 +2266,13 @@ def wizard_question(args):
         roots = [(Path(r), 3) for r in args.search_root] if args.search_root else None
         result = {'games': find_games(source, roots)}
     else:
-        result = plan_folder(args.folder, args.dump, args.hd_textures)
+        try:
+            result = plan_folder(args.folder, args.dump, args.hd_textures)
+        except (OSError, ValueError) as ex:
+            message = 'Windows could not read this folder: ' + str(ex)
+            print('Setup stopped: ' + message, file=sys.stderr, flush=True)
+            write_json(args.out, {'error': message})
+            return 4
     write_json(args.out, result)
     return 0
 

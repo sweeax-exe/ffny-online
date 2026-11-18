@@ -963,3 +963,71 @@ def test_wizard_release_interface_maps_onto_the_bundled_version(tmp_path, capsys
     assert engine.main(['--payload', str(folder), '--install-dir', str(app), '--data-dir', str(data),
                         '--operation', 'install', '--dump', str(tmp_path / 'dump'), '--bundled-only']) == 2
     assert 'already installed' in capsys.readouterr().err
+
+
+def _bad_drive_setup(tmp_path, monkeypatch, capsys):
+    good, bad = tmp_path / 'D', tmp_path / 'E'
+    good.mkdir()
+    bad.mkdir()
+    monkeypatch.setattr(engine, 'IS_WINDOWS', False)
+    monkeypatch.delenv('LOCALAPPDATA', raising=False)
+    monkeypatch.setattr(engine, 'fixed_drives', lambda: [bad, good])
+    monkeypatch.setattr(engine, 'volume_filesystem', lambda d: 'NTFS')
+    real_usage = engine.shutil.disk_usage
+
+    def usage(path):
+        if Path(path) == bad:
+            raise OSError(1450, 'Insufficient system resources exist to complete the requested service', str(bad), 1450)
+        return real_usage(path)
+
+    real_exists = Path.exists
+
+    def exists(self):
+        if bad in (self, *self.parents):
+            raise OSError(1450, 'Insufficient system resources', str(self), 1450)
+        return real_exists(self)
+
+    monkeypatch.setattr(engine.shutil, 'disk_usage', usage)
+    monkeypatch.setattr(Path, 'exists', exists)
+    return good, bad
+
+
+def test_suggest_folder_skips_a_drive_that_raises_error_1450(tmp_path, monkeypatch, capsys):
+    good, bad = _bad_drive_setup(tmp_path, monkeypatch, capsys)
+    assert engine.suggest_folder(1) == good / 'Games' / 'FFNY Online'
+    assert 'Skipping' in capsys.readouterr().err
+
+
+def test_search_skips_a_bad_drive_and_logs_it(tmp_path, monkeypatch, capsys):
+    good, bad = _bad_drive_setup(tmp_path, monkeypatch, capsys)
+    (good / 'Games').mkdir()
+    (good / 'Games' / 'default.xbe').write_bytes(b'x')
+    real_scandir = os.scandir
+
+    def scandir(path):
+        if Path(path) == bad:
+            raise OSError(1450, 'Insufficient system resources', str(bad), 1450)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', scandir)
+    import time
+    found = engine.search_candidates([(bad, 1), (good / 'Games', 1)], time.monotonic() + 5)
+    assert found == [good / 'Games']
+    assert '1450' in capsys.readouterr().err
+
+
+def test_plan_folder_for_a_chosen_folder_ignores_a_bad_other_drive(tmp_path, monkeypatch, capsys):
+    good, bad = _bad_drive_setup(tmp_path, monkeypatch, capsys)
+    plan = engine.plan_folder(good / 'Mine' / 'FFNY Online')
+    assert plan['folder'] == str(good / 'Mine' / 'FFNY Online')
+    assert any(c['id'] == 'space' for c in plan['checks'])
+    assert 'Skipping' in capsys.readouterr().err
+
+
+def test_plan_folder_on_the_bad_drive_reports_a_clear_error(tmp_path, monkeypatch, capsys):
+    good, bad = _bad_drive_setup(tmp_path, monkeypatch, capsys)
+    out = tmp_path / 'out.json'
+    args = argparse.Namespace(out=str(out), payload=str(tmp_path), source_root=None, identify=None, find_games=False,
+                              search_root=None, folder=str(bad / 'FFNY Online'), dump=None, hd_textures=False)
+    assert engine.wizard_question(args) == 4
+    assert '1450' in json.loads(out.read_text())['error']
