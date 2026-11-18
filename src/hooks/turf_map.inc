@@ -493,13 +493,14 @@ void tm_turn(ImDrawList *dl, int from, ImVec2 c, float deg)
 void tm_text(ImDrawList *dl, ImFont *font, float px, ImVec2 at, ImU32 col, const char *s, Align align = LEFT)
 {
     font = font_or_default(font);
+    s = textfold_display(s);
     if (align != LEFT) {
         float w = font->CalcTextSizeA(px, FLT_MAX, 0, s).x;
         at.x -= align == CENTER ? w / 2 : w;
     }
     dl->AddText(font, px, at, col, s);
 }
-float tm_width(ImFont *font, float px, const char *s) { return font_or_default(font)->CalcTextSizeA(px, FLT_MAX, 0, s).x; }
+float tm_width(ImFont *font, float px, const char *s) { return font_or_default(font)->CalcTextSizeA(px, FLT_MAX, 0, textfold_display(s)).x; }
 
 // ---- the small icons (pixels; `s` = pixels per design unit) ----
 

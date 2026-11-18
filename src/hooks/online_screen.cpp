@@ -40,6 +40,7 @@
 #include "rts.h"
 #include "imgui_internal.h"      // GetKeyData: the quick-chat wheel reads the sticks
 #include "online_screen.h"
+#include "text_fold.h"          // build 94: fancy-font names and chat text drawn as plain letters
 #include "netplay.h"
 #include "netplay_servers.h"
 #include "netplay_delay_rules.h"
@@ -267,6 +268,22 @@ ImFont *add_font(const char *file)
 
 ImFont *font_or_default(ImFont *f) { return f ? f : ImGui::GetFont(); }
 
+// RECOMP_TEST_FANCY_NAMES (gallery only): names and lines in "fancy fonts" for before/after shots of textfold.
+const char *fancy_sample_name(int i)
+{
+    static const char *const n[] = { "\xF0\x9D\x93\x91\xF0\x9D\x93\xB5\xF0\x9D\x93\xB2\xF0\x9D\x93\xAC\xF0\x9D\x93\xB4",   // bold script
+                                     "\xF0\x9D\x90\x81\xF0\x9D\x90\xA5\xF0\x9D\x90\xA2\xF0\x9D\x90\x9C\xF0\x9D\x90\xA4",   // bold
+                                     "\xEF\xBC\xA2\xEF\xBD\x8C\xEF\xBD\x89\xEF\xBD\x83\xEF\xBD\x8B",   // fullwidth
+                                     "\xCA\x99\xCA\x9F\xC9\xAA\xE1\xB4\x84\xE1\xB4\x8B",   // small caps
+                                     "\xE1\xB4\xAE\xE1\xB4\xB8\xE1\xB4\xB5\xE1\xB6\x9C\xE1\xB4\xB7",   // superscript
+                                     "\xE2\x92\xB7\xE2\x93\x9B\xE2\x93\x98\xE2\x93\x92\xE2\x93\x9A",   // circled
+                                     "\xF0\x9D\x95\x93\xF0\x9D\x95\x9D\xF0\x9D\x95\x9A\xF0\x9D\x95\x94\xF0\x9D\x95\x9C",   // double-struck
+                                     "\xE4\xB8\xAD\xE6\x96\x87\xE5\x90\x8D",   // CJK
+                                     "Ren\xC3\xA9" "e \xC3\x85ngstr\xC3\xB6m",   // accents stay
+                                     "xX_Plain_Xx" };   // plain
+    return n[i % 10];
+}
+
 // ---- the menu's 640x480 space in the window --------------------------------------------------
 
 struct Frame {
@@ -317,6 +334,7 @@ void text(ImDrawList *dl, const Frame &f, ImFont *font, float size, float x, flo
           Align align = LEFT, float outline = 1.2f, float wrap = 0)
 {
     font = font_or_default(font);
+    s = textfold_display(s);        // build 94: fancy-font letters drawn as their plain letters, not "?"
     float px = size * f.s();
     ImVec2 sz = font->CalcTextSizeA(px, FLT_MAX, wrap * f.sx, s);
     ImVec2 at = f.p(x, y);
@@ -334,7 +352,7 @@ void text(ImDrawList *dl, const Frame &f, ImFont *font, float size, float x, flo
 
 float text_width(const Frame &f, ImFont *font, float size, const char *s)
 {
-    return font_or_default(font)->CalcTextSizeA(size * f.s(), FLT_MAX, 0, s).x / f.sx;
+    return font_or_default(font)->CalcTextSizeA(size * f.s(), FLT_MAX, 0, textfold_display(s)).x / f.sx;
 }
 
 // The size at which `s` fits into `w` (never larger than `size`): a created fighter's online name of
@@ -5165,7 +5183,7 @@ void draw_status(ImDrawList *dl, const Frame &f)
         // accept, ..."): at 428 on the left they ran into the hints and, on two lines, the status line. There
         // they go to the right of the bottom, under the venue panel, growing upward from the foot.
         const float w = 270, size = 13;
-        float h = font_or_default(g_hand)->CalcTextSizeA(size * f.s(), FLT_MAX, w * f.sx, note).y / f.sy;
+        float h = font_or_default(g_hand)->CalcTextSizeA(size * f.s(), FLT_MAX, w * f.sx, textfold_display(note)).y / f.sy;
         float y = 470 - h;
         if (y < 414) y = 414;
         text(dl, f, g_hand, size, 606, y, r.error[0] ? RED : ORANGE, note, RIGHT, 0.8f, w);
@@ -5657,6 +5675,8 @@ void gallery_step()
         for (int i = 0; i < (int)(sizeof(who) / sizeof(who[0])); i++) {
             NetPlayer p = {};
             snprintf(p.name, sizeof(p.name), "%s", who[i]);
+            if (getenv("RECOMP_TEST_FANCY_NAMES") && i < 10)      // build 94: fancy-font sample names (before/after shots)
+                snprintf(p.name, sizeof(p.name), "%s", fancy_sample_name(i));
             p.state = i % 3;
             G.players.push_back(p);
         }
