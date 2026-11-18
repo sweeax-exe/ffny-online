@@ -15,6 +15,7 @@ the exit code is 1 on any failure.
            [--bot] [--fast-ko 600] [--turbo] [--fixture <save folder>]
     python tools/defjam-mcp/dj.py scenario boot [--goto battle|story|rewards|online|slotN|exit]
     python tools/defjam-mcp/dj.py scenario gallery [--page-ms 1500]
+    python tools/defjam-mcp/dj.py scenario towers [--content-root DIR]   (Towers T0: climb, save and quit, resume, loss)
     python tools/defjam-mcp/dj.py scenario social [--off] [--out logs/social-2a]   (the chat window: two copies,
            a local account service with -social; --off: its switch off, one copy, nothing new may show;
            the quick-chat wheel in a room and on GLOBAL, a room report with the room's code)
@@ -122,6 +123,8 @@ def cmd_scenario(a):
     elif a.kind == "social":
         r = scenarios.social(timeout=a.timeout or 300, relay_port=a.relay_port, off=a.off, extra_env=env,
                              out_dir=a.out, stress=a.stress, **common)
+    elif a.kind == "towers":
+        r = scenarios.towers(timeout=a.timeout, extra_env=env, **common)
     else:
         r = scenarios.gallery(page_ms=a.page_ms, timeout=a.timeout or 300, extra_env=env, **common)
     print(scenarios.format_result(r))
@@ -227,7 +230,7 @@ def main(argv=None):
 
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
-                                              "crewbattle", "turf", "tset", "socialonline", "mute"])
+                                              "crewbattle", "turf", "tset", "socialonline", "mute", "towers"])
     sc.add_argument("--via", default="voice", choices=["voice", "chat"], help="mute: the VOICE CHAT page's call, or the chat window's MUTE IN ROOM")
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")
     sc.add_argument("--stress", action="store_true", help="social: more accounts with emoji, Arabic, combining-mark "
