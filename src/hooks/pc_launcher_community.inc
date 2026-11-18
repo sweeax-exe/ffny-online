@@ -366,6 +366,10 @@ static void community_view(float lx, float top, float inner, float height, float
     for (int i = 0; i < (int)g_cards.size(); i++) {
         Card &c = g_cards[i];
         ImVec2 ra(lx, y), rb(lx + list_w - 14 * s, y + 64 * s);
+        {   // build 94: a card outside the list's view is not drawn (hundreds of packs)
+            float vt = ImGui::GetWindowPos().y, vb = vt + ImGui::GetWindowHeight();
+            if (rb.y < vt - 20 * s || ra.y > vb + 20 * s) { y += 72 * s; continue; }
+        }
         ImGui::SetCursorScreenPos(ra);
         char id[96];
         snprintf(id, sizeof id, "##gal_card_%d", i);

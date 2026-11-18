@@ -354,6 +354,10 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_XPLAY_OPT (recomp_settings_get("online", "crossplay_android", 0) ? CAPS_XPLAY_ANDROID : 0u) /* sent only while on */
 #define CAPS_SKINS    4194304u  /* 1 << 22 (build 85), both ways: READY's third byte is the player's skin of a stock fighter,
                                  * and START (WATCH, WATCHLATE) ends with the players' skins (src/hooks/fighter_skins.c) */
+#define CAPS_SKINSWIDE 536870912u /* 1 << 29 (build 94), both ways, only with CAPS_SKINS: the skin is a u16 LE (READY: after ready and
+                                 * fighter, the number's u32 after it; START's skins trailer: count with its top bit set, then
+                                 * (slot, u16) each) so a fighter can have up to FIGHTER_SKINS_PER (255) skins. A match plays a skin above
+                                 * FIGHTER_SKINS_WIRE_OLD (15) only when every player announced the bit (the relay drops it for all else) */
 #define CAPS_ORIGINAL 8388608u  /* 1 << 23 (build 86), both ways: QUICK ends with the search's choice (1 original fighters
                                  * only, 0 all fighters) after the ping; RANKED's flags carry NETRANK_FLAG_ORIGINAL */
 #define CAPS_UNLIMITED 33554432u /* 1 << 25 (build 86), both ways: community fighters beyond the places (fighter_banks.h).
@@ -4146,10 +4150,12 @@ static void on_start_as(const uint8_t *b, int len, int watching)
             if (r.bad || cpu > NETPLAY_CPU_EASY) return;
         }
         if (r.i < r.n) {    /* build 85: the players' skins, after the CPU level (relays answering CAPS_SKINS) */
-            int ns = rd8(&r), k;
+            int ns = rd8(&r), k, wide = (ns & 0x80) != 0;      /* build 94: the count's top bit: u16 skins */
+            ns &= 0x7F;
             for (k = 0; k < ns && !r.bad; k++) {
                 int s = rd8(&r), v = rd8(&r);
-                if (s < ROOMSLOTS && v <= FIGHTER_SKINS_PER) skin_of_slot[s] = v;
+                if (wide) v |= rd8(&r) << 8;
+                if (s < ROOMSLOTS && v <= FIGHTER_SKINS_PER && (wide || v <= FIGHTER_SKINS_WIRE_OLD)) skin_of_slot[s] = v;
             }
             if (r.bad) return;
         }
@@ -4996,7 +5002,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
                               CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
-                              CAPS_SKINS | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                              CAPS_SKINS | (getenv("RECOMP_TEST_NO_SKINSWIDE") ? 0u : CAPS_SKINSWIDE) | CAPS_RTS_POINTS | CAPS_XPLAY_OPT |
+                              CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -6293,8 +6300,9 @@ void netplay_lobby_ready_skin(int ready, int fighter, int skin)
 {
     /* build 85: the skin as a third byte, only to a relay that answered CAPS_SKINS (an older one reads two);
      * build 86: a community fighter's number after it (relays answering CAPS_UNLIMITED), its template in the byte */
-    uint8_t b[7];
-    int len = 2, number = is_number(fighter) ? fighter : 0;
+    uint8_t b[9] = { 0 };
+    int len = 2, number = is_number(fighter) ? fighter : 0, wide = 0;
+    if (skin < 0 || skin > FIGHTER_SKINS_PER) skin = 0;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     if (!number && netlineup_ready_fighter(fighter) != fighter) {
         /* build 95: never a fighter byte outside 0..254 (255 is the relay's "no fighter", which START then carried and
@@ -6307,15 +6315,21 @@ void netplay_lobby_ready_skin(int ready, int fighter, int skin)
     b[2] = (uint8_t)(skin > 0 && skin <= FIGHTER_SKINS_PER ? skin : 0);
     if (number) {
         b[1] = (uint8_t)unl_template(number);
-        b[2] = 0;
+        skin = 0;
     }
     EnterCriticalSection(&g_cs);
-    if (relay_has(CAPS_SKINS) && fighter >= 0 && fighter < 0xFF) len = 3;
+    /* build 94: with CAPS_SKINSWIDE the skin is a u16 (the number's u32 follows it); a relay without the bit takes
+     * skins up to FIGHTER_SKINS_WIRE_OLD, a higher one is sent as Default (the match then agrees on Default) */
+    wide = relay_has(CAPS_SKINS) && relay_has(CAPS_SKINSWIDE);
+    if (!wide && skin > FIGHTER_SKINS_WIRE_OLD) skin = 0;
+    b[2] = (uint8_t)skin;
+    if (wide) b[3] = (uint8_t)(skin >> 8);
+    if (relay_has(CAPS_SKINS) && fighter >= 0 && fighter < 0xFF) len = wide ? 4 : 3;
     if (number && relay_has(CAPS_UNLIMITED)) {
-        len = 7;
-        put32(b + 3, (uint32_t)number);
+        len = wide ? 8 : 7;
+        put32(b + (wide ? 4 : 3), (uint32_t)number);
     } else if (number) {
-        if (relay_has(CAPS_SKINS)) len = 3;
+        if (relay_has(CAPS_SKINS)) len = wide ? 4 : 3;
         fighter = b[1];     /* a relay without the bit: the template, as the room will show it */
     }
     if (N.roomv.in_room && NETPLAY_IS_HILL(N.roomv.settings.mode) && ((fighter >= 0 && fighter < 0xFF) || is_number(fighter))) {
@@ -6327,9 +6341,9 @@ void netplay_lobby_ready_skin(int ready, int fighter, int skin)
     LeaveCriticalSection(&g_cs);
     /* build 95: every READY, as it goes out (the fighter-255 crash of builds 93/94 had no line for its READY) */
     fprintf(stderr, "[NETPLAY] READY: ready %d, fighter byte %d, skin %d, number %d (%d bytes)\n", b[0], b[1],
-            len >= 3 ? b[2] : 0, len == 7 ? number : 0, len);
-    if (len == 3 && b[2]) fprintf(stderr, "[SKINS] READY: fighter %d, skin %d\n", fighter, b[2]);
-    if (len == 7) fprintf(stderr, "[BANKS] READY: community fighter %d (template %d)\n", number, b[1]);
+            len >= 3 ? skin : 0, (len == 7 || len == 8) ? number : 0, len);
+    if (skin && !number && len >= 3) fprintf(stderr, "[SKINS] READY: fighter %d, skin %d%s\n", fighter, skin, wide ? " (wide)" : "");
+    if (len == 7 || len == 8) fprintf(stderr, "[BANKS] READY: community fighter %d (template %d)\n", number, b[1]);
     else if (number) fprintf(stderr, "[BANKS] READY: community fighter %d plays its template %d (the relay takes no "
                              "fighter numbers)\n", number, b[1]);
     request(T_READY, b, len);

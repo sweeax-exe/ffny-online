@@ -34,6 +34,7 @@ extern BOOL (*g_xbox_game_file_redirect)(const char *relative, content_host_char
 #endif
 
 #define CONTENT_FILES_MAX 64
+#define APPLIED_MAX (320 * 1024)    /* files.ini's applied= line: up to PC_CONTENT_MAX ids of 96 characters */
 
 /* Paths in this file are UTF-8 (build 83). The narrow environment and fopen() use the ANSI code page, which
  * cannot hold a data folder whose path has letters outside it (a Cyrillic or Greek user name on a Western
@@ -148,22 +149,43 @@ static int valid_id(const char *id)
 
 /* <data>/mod-manager/content-files/files.ini (setup/content_compose.py): the packs it applied (a
  * comma-separated list) and, with files, the game-relative paths it holds. Returns 0 without one. */
+/* Build 94: one line of any length (the applied= line of files.ini lists every applied pack: 2000 skins are 200 KB).
+ * *buf / *cap are the caller's growing buffer; NULL at the end of the file. */
+static char *read_long_line(FILE *f, char **buf, size_t *cap)
+{
+    size_t n = 0;
+    int c;
+    if (!*buf) { *cap = 1200; *buf = (char *)malloc(*cap); if (!*buf) return NULL; }
+    while ((c = fgetc(f)) != EOF) {
+        if (n + 2 > *cap) {
+            char *bigger;
+            if (*cap >= (size_t)8 << 20) { while ((c = fgetc(f)) != EOF && c != '\n') {} break; }   /* absurd: cut */
+            bigger = (char *)realloc(*buf, *cap * 2);
+            if (!bigger) return NULL;
+            *buf = bigger;
+            *cap *= 2;
+        }
+        (*buf)[n++] = (char)c;
+        if (c == '\n') break;
+    }
+    (*buf)[n] = 0;
+    return n ? *buf : NULL;
+}
+
 static int read_files_ini(const char *root, char *applied, size_t applied_size,
                           char (*files)[256], int max_files, int *nfiles)
 {
-    /* The applied line is as long as the list (build 94: 1200 characters cut it at about 70 packs, and the packs
-     * after the cut counted as not applied, the community ones out of the netplay print with them). */
-    size_t line_size = applied_size + 1200;
-    char path[1024], *line;
+    char path[1024];
+    char *line = NULL;
+    size_t cap = 0;
     FILE *f;
     int in_section = 0, ok = 0;
     if (applied_size) applied[0] = 0;
     if (nfiles) *nfiles = 0;
     if (!root) return 0;
     snprintf(path, sizeof path, "%s" HOST_SEP "%s" HOST_SEP "files.ini", root, composed_dir());
-    if (!(line = (char *)malloc(line_size))) return 0;
-    if (!(f = content_fopen(path, "rb"))) { free(line); return 0; }
-    while (fgets(line, (int)line_size, f)) {
+    if (!(f = content_fopen(path, "rb"))) return 0;
+    while (read_long_line(f, &line, &cap)) {
         char *s = trim(line), *eq;
         if (*s == '[') { in_section = !strcmp(s, "[content-files]"); continue; }
         if (!in_section || !(eq = strchr(s, '='))) continue;
@@ -447,7 +469,6 @@ int pc_content_pack_file(const char *id, const char *name, char *out, int size)
     return (int)len;
 }
 
-#define APPLIED_MAX 32768
 static int list_all(PcContentPack *out, int max)
 {
     char path[1024], line[1200];
@@ -581,7 +602,9 @@ uint32_t pc_content_print(void)
 int pc_content_skins(PcContentSkin *out, int max)
 {
     PcContentPack *packs;
-    char path[1024], line[1200];
+    char path[1024];
+    char *line = NULL;
+    size_t cap = 0;
     const char *root = data_root();
     FILE *f;
     int n = 0, np, in_section = 0;
@@ -589,7 +612,7 @@ int pc_content_skins(PcContentSkin *out, int max)
     np = pc_content_list(packs, PC_CONTENT_MAX);
     snprintf(path, sizeof path, "%s" HOST_SEP "%s" HOST_SEP "files.ini", root, composed_dir());
     if (!(f = fopen(path, "rb"))) { free(packs); return 0; }
-    while (fgets(line, sizeof line, f) && n < max) {
+    while (n < max && read_long_line(f, &line, &cap)) {
         char *s = trim(line), *fields[4], *q;
         int k, i, ok = 0;
         if (*s == '[') { in_section = !strcmp(s, "[content-files]"); continue; }
@@ -618,6 +641,7 @@ int pc_content_skins(PcContentSkin *out, int max)
     }
     fclose(f);
     free(packs);
+    free(line);
     return n;
 }
 
@@ -1076,7 +1100,7 @@ static BOOL content_redirect(const char *relative, content_host_char *host_path,
 
 static void serve_composed_files(const char *root)
 {
-    static char applied[32768];
+    static char applied[APPLIED_MAX];
     int i, n = 0;
     if (!root || !read_files_ini(root, applied, sizeof applied, g_files, CONTENT_FILES_MAX, &n) || !n) return;
     snprintf(g_files_dir, sizeof g_files_dir, "%s" HOST_SEP "%s", root, composed_dir());
@@ -1159,7 +1183,8 @@ int pc_content_file(const char *game_path, char *out, int size)
 void pc_content_start(const char *root)
 {
     static PcContentPack packs[PC_CONTENT_MAX];
-    char list[4096] = "", *old;
+    static char list[32000];        /* the environment variable holds 32767 characters at most */
+    char *old;
     const char *tex_root = getenv("RECOMP_TEXTURE_ROOT");
     int n, i, o = 0, used = 0;
 #if defined(_WIN32)
@@ -1232,7 +1257,7 @@ void pc_content_start(const char *root)
     if (!used) return;
     /* beneath the player's own texture packs (later names win), in catalogue order */
     if (old && *old) {
-        char both[8192];
+        static char both[32767 + 1];
         if (snprintf(both, sizeof both, "%s;%s", list, old) >= (int)sizeof both) return;
 #if defined(_WIN32)
         _putenv_s("RECOMP_TEXTURE_PACKS", both);

@@ -1520,6 +1520,8 @@ void ping_bars(ImDrawList *dl, const Frame &f, float x, float y, float h, int ms
 // Room codes use these characters (no 0/O, 1/I), as the server makes them.
 const char CODE_CHARS[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+bool g_skin_search_on = false;      // build 94: the skin window's name search takes the letters (skins_ui.inc)
+
 Pad read_pad()
 {
     Pad p = {};
@@ -1528,7 +1530,7 @@ Pad read_pad()
         return false;
     };
     // Letter keys follow the game's keyboard layout (WASD, K/L/J/I); on the code and name pages they type.
-    bool letters = S.page != CODE && S.page != NAME && !(S.page == FIGHTERS && S.fsearch_on);
+    bool letters = S.page != CODE && S.page != NAME && !(S.page == FIGHTERS && S.fsearch_on) && !g_skin_search_on;
     auto key = [&](ImGuiKey k) { return letters ? k : ImGuiKey_None; };
     p.up = any({ ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp, ImGuiKey_UpArrow, key(ImGuiKey_W) }, true);
     p.down = any({ ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown, ImGuiKey_DownArrow, key(ImGuiKey_S) }, true);
@@ -6115,14 +6117,17 @@ void gallery_step()
         S.page = FIGHTERS;
         S.fighter_top = 0;
         const auto &list = grid_fighters();
+        const char *want_fe = getenv("RECOMP_TEST_SKIN_FE");        // build 94: the window of this fighter (a test)
         for (int i = 0; i < (int)list.size(); i++)
-            if (list[i].id >= 0 && list[i].id < 98 && fighter_skins_count(list[i].id) > 0) {
+            if (list[i].id >= 0 && list[i].id < 98 && fighter_skins_count(list[i].id) > 0 &&
+                (!want_fe || !*want_fe || list[i].id == atoi(want_fe))) {
                 S.fighter_sel = i;
                 S.fighter_top = i / 7 > 3 ? i / 7 - 3 : 0;
                 S.skin_open = true;
                 S.skin_fe = list[i].id;
                 S.skin_sel = 1;
                 S.skin_opened = GetTickCount64();
+                { Pad none = {}; skin_test_keys(none, true); }      // build 94: RECOMP_TEST_SKIN_KEYS drive it too
                 break;
             }
     }

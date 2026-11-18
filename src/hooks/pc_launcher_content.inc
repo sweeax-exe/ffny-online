@@ -643,6 +643,15 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
             ImGui::Dummy(ImVec2(1, 1));
             continue;
         }
+        {   // build 94: a card outside the list's view is only counted, not drawn (hundreds of skins)
+            float vt = ImGui::GetWindowPos().y, vb = vt + ImGui::GetWindowHeight();
+            if (y + 76 * s < vt - 20 * s || y > vb + 20 * s) {
+                y += 86 * s;
+                ImGui::SetCursorScreenPos(ImVec2(lx, y));
+                ImGui::Dummy(ImVec2(1, 1));
+                continue;
+            }
+        }
         bool content = !strcmp(p.kind, "content");
         bool on = content || !pc_content_is_off(p.id);
         float credits_h = credits_height(p.credits, inner - 14 * s - 150 * s - 18 * s, s);

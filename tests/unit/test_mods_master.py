@@ -6,6 +6,7 @@ textures, the community graphics pack, a language pack); the next press restores
 of own packs), and "back on" without a usable backup turns the community content and every own pack on.
 Native driver (MSVC); the wiring is checked in the sources.
 """
+import re
 import shutil
 import subprocess
 import sys
@@ -164,5 +165,6 @@ def test_button_is_wired_to_the_settings():
     # build 94: the own packs' switches and the backup are files; the button says what it does
     assert 'pc_content_own_off_put(' in c and 'MODS_BACKUP_FILE' in c and 'mods_back_on_default(' in c
     assert 'const bool back = c.saved || c.all_off;' in c
-    assert 'PC_CONTENT_MAX 512' in src('src/hooks/pc_content.h')
+    # build 96: 2560 (feat/skins-2048: 2048 skins besides the other packs); at least the 512 of build 94
+    assert int(re.search(r'#define PC_CONTENT_MAX (\d+)', src('src/hooks/pc_content.h')).group(1)) >= 512
     assert 'ADD("content", "mods_backup"' in src('src/hooks/pc_language_settings.c')

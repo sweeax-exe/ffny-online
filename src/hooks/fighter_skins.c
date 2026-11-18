@@ -21,8 +21,13 @@
 #endif
 
 static SRWLOCK g_lock = SRWLOCK_INIT;
-static FighterSkin g_skins[PC_SKIN_MAX];
+/* Build 94: the skins are heap arrays (up to PC_SKIN_MAX, 2048: a FighterSkin is over a kilobyte), in catalogue order,
+ * plus g_by: the same skins grouped by template and numbered, so fighter_skin_get is a lookup, not a scan. */
+static FighterSkin *g_skins;
+static int *g_by;                   /* [template feID 0..97][FIGHTER_SKINS_PER]: the g_skins position + 1, 0 none */
+static int g_by_count[98];
 static int g_count = -1;
+static int g_over;                  /* skins beyond FIGHTER_SKINS_PER of one template (not listed) */
 
 static const char *data_root(void)
 {
@@ -32,16 +37,25 @@ static const char *data_root(void)
 
 void fighter_skins_refresh(void)
 {
-    static PcContentSkin raw[PC_SKIN_MAX];
-    FighterSkin got[PC_SKIN_MAX];
-    int n = pc_content_skins(raw, PC_SKIN_MAX), i, k = 0;
+    PcContentSkin *raw = (PcContentSkin *)malloc(sizeof *raw * PC_SKIN_MAX);
+    FighterSkin *got = (FighterSkin *)malloc(sizeof *got * PC_SKIN_MAX);
+    int *by = (int *)calloc((size_t)98 * FIGHTER_SKINS_PER, sizeof *by);
+    int by_count[98], over = 0;
+    int n, i, k = 0;
     const char *root = data_root();
+    if (!raw || !got || !by) { free(raw); free(got); free(by); return; }
+    n = pc_content_skins(raw, PC_SKIN_MAX);
+    memset(by_count, 0, sizeof by_count);
     for (i = 0; i < n; i++) {
-        int j, index = 1;
+        int index;
         FILE *f;
         if (raw[i].template_fe_id < 0 || raw[i].template_fe_id >= 98) continue;
-        for (j = 0; j < k; j++) if (got[j].template_fe_id == raw[i].template_fe_id) index++;
-        if (index > FIGHTER_SKINS_PER) continue;
+        /* the skins of a template are numbered in catalogue order; one beyond FIGHTER_SKINS_PER is left out on every PC
+         * alike (the same catalogue), never listed and never named on the wire */
+        index = by_count[raw[i].template_fe_id] + 1;
+        if (index > FIGHTER_SKINS_PER) { over++; continue; }
+        by_count[raw[i].template_fe_id] = index;
+        by[raw[i].template_fe_id * FIGHTER_SKINS_PER + index - 1] = k + 1;
         memset(&got[k], 0, sizeof got[k]);
         snprintf(got[k].id, sizeof got[k].id, "%s", raw[i].id);
         got[k].template_fe_id = raw[i].template_fe_id;
@@ -57,14 +71,22 @@ void fighter_skins_refresh(void)
         k++;
     }
     AcquireSRWLockExclusive(&g_lock);
-    if (g_count != k || memcmp(g_skins, got, sizeof(got[0]) * (size_t)k)) {
-        for (i = 0; i < k; i++)
+    if (g_count != k || !g_skins || memcmp(g_skins, got, sizeof(got[0]) * (size_t)k)) {
+        for (i = 0; i < k && i < 64; i++)    /* the log lists the first 64; the rest is counted */
             fprintf(stderr, "[SKINS] skin %d of feID %d: %s \"%s\" (%s)%s\n", got[i].index, got[i].template_fe_id,
                     got[i].model, got[i].name, got[i].id, got[i].picture[0] ? "" : ", no picture");
+        fprintf(stderr, "[SKINS] %d skin(s) in all\n", k);
+        if (over) fprintf(stderr, "[SKINS] %d skin(s) beyond %d for one fighter are left out\n", over, FIGHTER_SKINS_PER);
     }
-    memcpy(g_skins, got, sizeof(got[0]) * (size_t)k);
+    free(g_skins);
+    free(g_by);
+    g_skins = got;                  /* the lock holders only read g_skins / g_by; the old ones go with the lock held */
+    g_by = by;
+    memcpy(g_by_count, by_count, sizeof g_by_count);
+    g_over = over;
     g_count = k;
     ReleaseSRWLockExclusive(&g_lock);
+    free(raw);
 }
 
 static void ensure(void)
@@ -78,24 +100,23 @@ static void ensure(void)
 
 int fighter_skins_count(int fe_id)
 {
-    int i, n = 0;
+    int n = 0;
     ensure();
     AcquireSRWLockShared(&g_lock);
-    for (i = 0; i < g_count; i++) if (g_skins[i].template_fe_id == fe_id) n++;
+    if (fe_id >= 0 && fe_id < 98) n = g_by_count[fe_id];
     ReleaseSRWLockShared(&g_lock);
     return n;
 }
 
 int fighter_skin_get(int fe_id, int index, FighterSkin *out)
 {
-    int i, found = 0;
+    int found = 0;
     ensure();
     AcquireSRWLockShared(&g_lock);
-    for (i = 0; i < g_count && !found; i++)
-        if (g_skins[i].template_fe_id == fe_id && g_skins[i].index == index) {
-            if (out) *out = g_skins[i];
-            found = 1;
-        }
+    if (fe_id >= 0 && fe_id < 98 && index >= 1 && index <= g_by_count[fe_id] && g_by && g_by[fe_id * FIGHTER_SKINS_PER + index - 1]) {
+        if (out) *out = g_skins[g_by[fe_id * FIGHTER_SKINS_PER + index - 1] - 1];
+        found = 1;
+    }
     ReleaseSRWLockShared(&g_lock);
     return found;
 }

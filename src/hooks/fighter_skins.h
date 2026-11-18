@@ -24,12 +24,14 @@
 extern "C" {
 #endif
 
-#define FIGHTER_SKINS_PER 15        /* skins of one template the window and the wire take (READY's byte: 0..15) */
+#define FIGHTER_SKINS_PER 255       /* skins of one template the window and the wire take (build 94: 1..255; before, 15) */
+#define FIGHTER_SKINS_WIRE_OLD 15   /* what a relay or game without CAPS_SKINSWIDE carries (READY's byte: 0..15): a higher
+                                     * skin is Default for the whole match unless every player has the wide wire */
 
 typedef struct FighterSkin {
     char id[96];                    /* the pack id */
     int template_fe_id;
-    int index;                      /* 1..FIGHTER_SKINS_PER */
+    int index;                      /* 1..FIGHTER_SKINS_PER (its place among the template's skins, catalogue order) */
     char model[16];                 /* V2IP_7xxA */
     char name[48];                  /* the name in the game */
     char picture[1024];             /* <data>/online-art/skins/<id>.png ("" when the pack has no body art) */
