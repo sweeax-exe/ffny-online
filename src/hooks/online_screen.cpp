@@ -6108,7 +6108,7 @@ void gallery_step()
     }
     else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
     else if (p == "stats" || p == "stats-1v1") { S.page = STATS; S.stats_page = 0; }
-    else if (p == "players") S.page = PLAYERS;
+    else if (p == "players") { S.page = PLAYERS; S.players_sel = 5; }   // build 96: a FIGHTING row chosen: A WATCH
     else if (p == "players-all") { S.page = PLAYERS; G.choice = NETCHOICE_ALL; }
     else if (p == "fighters") { S.page = FIGHTERS; S.fighter_sel = 9; S.fighter_top = 0; }
     else if (p == "fighters-skins") {   // build 85: the first fighter of the grid that has skins, its window open
@@ -6174,7 +6174,11 @@ void gallery_step()
         S.page = HUB;
         G.room = sample_room(2, 2, 2);
         G.room.players[0].ready = 0;
-        G.room.players[1].ready = G.page_ms < 200;
+        // every other visit Ben is READY, the visit after he is back on the fighter select (the card keeps the marks)
+        static int visits, last_ms = 1 << 30;
+        if (G.page_ms < last_ms) visits++;
+        last_ms = G.page_ms;
+        G.room.players[1].ready = visits % 2;
     }
     else if (p == "room-cpu") { S.page = HUB; G.room = sample_room(3, 4, 2); G.room.settings.cpu_level = NETPLAY_CPU_EASY; }
     else if (p == "room-rules") {   // FIGHTER RULES and MAX PING on the server line; one player far away: the warning
