@@ -59,6 +59,9 @@ int custom_music_want_mute(void);
 /* Next song (next_song.h): one of the player's songs is the music; its player goes on to the next in the
  * list (in mix that may be the game's own track) and says which in the note. Any thread. */
 void custom_music_skip(void);
+/* Previous song (next_song.h): play one of the player's songs now, by its path in the music folder, or the
+ * current one from its start (NULL or ""). In mix it takes the turn from the game's track. Any thread. */
+void custom_music_play(const char *rel);
 void custom_music_set_game_volume(int volume);
 void custom_music_set_in_fight(int in_fight);
 void custom_music_note(int playing);        /* the game's stream opened (1) or stopped (0) */

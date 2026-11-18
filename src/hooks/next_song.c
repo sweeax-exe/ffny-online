@@ -17,6 +17,7 @@
 
 #include "recomp/gen/recomp_types.h"
 #include "custom_music.h"
+#include "song_history.h"
 
 FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c: the copy the game reads */
 
@@ -33,10 +34,17 @@ FILE *netplay_open_fight_file(const char *name, int *overridden);   /* netplay.c
 #define PL_LOADING 0x003407B4u   /* 1, 2: a song description is loading */
 
 static volatile int s_request;
-static int s_wait;
+static volatile int s_back;         /* previous song asked (next_song_back_request) */
+static int s_wait, s_back_wait;
+static SongHistory s_hist;          /* the game thread's only */
+static int s_hist_ready;
+static unsigned long long (*s_clock)(void);
+
+void next_song_test_clock(unsigned long long (*clock)(void)) { s_clock = clock; }
 
 static unsigned long long now_ms(void)
 {
+    if (s_clock) return s_clock();
 #if defined(_WIN32)
     return GetTickCount64();
 #else
@@ -50,6 +58,23 @@ void next_song_request(const char *from)
 {
     s_request = 1;
     fprintf(stderr, "[MUSIC] next song asked (%s)\n", from ? from : "?");
+}
+
+void next_song_back_request(const char *from)
+{
+    s_back = 1;
+    fprintf(stderr, "[MUSIC] previous song asked (%s)\n", from ? from : "?");
+}
+
+/* The player's song that started last (the player thread writes, the game thread reads; two slots). */
+static char s_own[2][160];
+static volatile unsigned s_own_seq;
+
+void next_song_own_started(const char *rel)
+{
+    unsigned next = s_own_seq + 1;
+    snprintf(s_own[next & 1], sizeof s_own[0], "%s", rel ? rel : "");
+    s_own_seq = next;
 }
 
 /* ---- the note -------------------------------------------------------------------------------- */
@@ -223,36 +248,180 @@ const char *next_song_title_for(const char *entity)
 
 /* ---- the step -------------------------------------------------------------------------------- */
 
-/* Test aid: RECOMP_TEST_NEXT_SONG="40,55,70" asks for the next song that many seconds after the first
- * real step (scripted runs press no keys). */
+/* Test aid: RECOMP_TEST_NEXT_SONG="40,55,b70,b71" asks for the next song (a number) or the previous song
+ * ("b" and a number) that many seconds after the first real step (scripted runs press no keys). */
 static void test_schedule(void)
 {
     static int parsed, n, done;
     static unsigned long long t0;
     static double at[16];
+    static int back[16];
     if (!parsed) {
         const char *e = getenv("RECOMP_TEST_NEXT_SONG");
         parsed = 1;
         t0 = now_ms();
         while (e && *e && n < 16) {
-            at[n++] = atof(e) * 1000.0;
+            back[n] = *e == 'b' || *e == 'B';
+            at[n] = atof(e + back[n]) * 1000.0;
+            n++;
             e = strchr(e, ',');
             if (e) e++;
         }
     }
     if (done < n && (double)(now_ms() - t0) >= at[done]) {
+        if (back[done]) next_song_back_request("test");
+        else next_song_request("test");
         done++;
-        next_song_request("test");
     }
+}
+
+/* 0 the game's playlist plays a song now, 1 it is busy (a song ending or loading: wait), -1 none. */
+static int playlist_state(uint32_t *count_out)
+{
+    uint32_t mode = MEM32(AUDIO_MODE), count = MEM32(PL_COUNT), state = MEM32(PL_STATE), loading = MEM32(PL_LOADING);
+    *count_out = count;
+    if (!MEM8(PL_ON) || !count || count > 36 || (mode != 1 && mode != 2)) return -1;
+    if (state != 1 || loading == 1 || loading == 2) return 1;
+    return 0;
+}
+
+static void playlist_id(uint32_t i, char id[17])
+{
+    int k;
+    for (k = 0; k < 16; k++) id[k] = (char)MEM8(PL_NAMES + 16 * i + (uint32_t)k);
+    id[16] = 0;
+}
+
+/* The playlist slot of a song id, or -1. */
+static int playlist_find(const char *id, uint32_t count)
+{
+    char at[17];
+    uint32_t i;
+    for (i = 0; i < count; i++) {
+        playlist_id(i, at);
+        if (!strncmp(at, id, 16)) return (int)i;
+    }
+    return -1;
+}
+
+/* Load slot `to` as at a song's end: the machine moves the index on by one in state 2, unless "hold" is
+ * set (then the index is the one it loads). */
+static void playlist_load(uint32_t to, uint32_t count)
+{
+    MEM32(PL_INDEX) = MEM8(PL_HOLD) ? to : (to + count - 1) % count;
+    MEMF(PL_TIMER) = MEMF(PL_LENGTH) + 1.0f;
+    MEM32(PL_STATE) = 2;
+}
+
+/* What plays now goes in the history: one of the player's songs, or the game playlist's song. */
+static void observe(unsigned long long now)
+{
+    uint32_t count;
+    char id[17];
+    const char *kind = NULL, *what = NULL;
+    if (!s_hist_ready) {
+        song_hist_reset(&s_hist);
+        s_hist_ready = 1;
+    }
+    if (custom_music_want_mute()) {
+        unsigned seq = s_own_seq;
+        if (!seq) return;
+        what = s_own[seq & 1];
+        if (song_hist_played(&s_hist, SONG_HIST_OWN, what, now)) kind = "yours";
+    } else if (playlist_state(&count) == 0) {
+        playlist_id(MEM32(PL_INDEX) % count, id);
+        what = id;
+        if (song_hist_played(&s_hist, SONG_HIST_GAME, id, now)) kind = MEM32(AUDIO_MODE) == 2 ? "game, fight" : "game, menus";
+    }
+    if (kind) fprintf(stderr, "[MUSIC] song history: #%d %s (%s)\n", s_hist.n, what, kind);
+}
+
+typedef struct { int own_now; uint32_t count; } BackCtx;
+
+static int playable(void *ctx, const SongHistEntry *e)
+{
+    const BackCtx *c = (const BackCtx *)ctx;
+    if (e->kind == SONG_HIST_OWN) return custom_music_active();
+    /* a game song: while the game's music is heard, when the playlist holds it now */
+    return !c->own_now && c->count && playlist_find(e->id, c->count) >= 0;
+}
+
+static void own_note(const char *rel)
+{
+    const char *base = rel, *p;
+    char title[96];
+    for (p = rel; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    snprintf(title, sizeof title, "%s", base);
+    if ((p = strrchr(title, '.')) != NULL) title[p - title] = 0;
+    next_song_note_set(title);
+}
+
+/* The previous song (or the current one from its start), on the game thread. Returns 1 when done. */
+static int do_back(unsigned long long now)
+{
+    BackCtx c;
+    int to;
+    const SongHistEntry *e;
+    c.own_now = custom_music_want_mute();
+    c.count = 0;
+    if (!c.own_now) {
+        int st = playlist_state(&c.count);
+        if (st < 0) {
+            fprintf(stderr, "[MUSIC] previous song: no music playlist playing\n");
+            return 1;
+        }
+        if (st > 0) return 0;                       /* a song is ending or loading: wait */
+    }
+    to = song_hist_back(&s_hist, now, playable, &c);
+    e = song_hist_current(&s_hist);
+    if (to < 0) {                                   /* the song that plays, from its start */
+        if (c.own_now) {
+            custom_music_play(NULL);
+            fprintf(stderr, "[MUSIC] previous song: yours from its start\n");
+            return 1;
+        }
+        uint32_t idx = MEM32(PL_INDEX) % c.count;
+        char id[17];
+        playlist_id(idx, id);
+        playlist_load(idx, c.count);
+        fprintf(stderr, "[MUSIC] previous song: #%u %s from its start\n", idx, id);
+        next_song_note_set(next_song_title_for(id));
+        return 1;
+    }
+    if (e->kind == SONG_HIST_OWN) {
+        custom_music_play(e->id);
+        fprintf(stderr, "[MUSIC] previous song: history #%d, yours: %s\n", to + 1, e->id);
+        own_note(e->id);
+        return 1;
+    }
+    {
+        int slot = playlist_find(e->id, c.count);
+        playlist_load((uint32_t)slot, c.count);
+        fprintf(stderr, "[MUSIC] previous song: history #%d, playlist #%d %s\n", to + 1, slot, e->id);
+        next_song_note_set(next_song_title_for(e->id));
+    }
+    return 1;
 }
 
 void next_song_game_tick(int rerun)
 {
-    uint32_t mode, count, state, loading, idx, next;
+    uint32_t mode, count, idx, next;
     char id[17];
-    int k;
+    int st;
+    unsigned long long now;
     if (rerun) return;      /* never inside a rollback re-run step: the request waits */
     test_schedule();
+    now = now_ms();
+    observe(now);
+    if (s_back && !s_request) {
+        if (do_back(now) || ++s_back_wait > 300) {
+            if (s_back_wait > 300) fprintf(stderr, "[MUSIC] previous song: the music stayed busy, dropped\n");
+            s_back = 0;
+            s_back_wait = 0;
+        }
+        return;
+    }
     if (!s_request) return;
     /* One of the player's own songs is the music: its player goes on to the next in their list. */
     if (custom_music_want_mute()) {
@@ -262,16 +431,14 @@ void next_song_game_tick(int rerun)
         return;
     }
     mode = MEM32(AUDIO_MODE);
-    count = MEM32(PL_COUNT);
-    state = MEM32(PL_STATE);
-    loading = MEM32(PL_LOADING);
-    if (!MEM8(PL_ON) || !count || count > 36 || (mode != 1 && mode != 2)) {
+    st = playlist_state(&count);
+    if (st < 0) {
         s_request = 0;
         s_wait = 0;
         fprintf(stderr, "[MUSIC] next song: no music playlist playing (mode %u, %u songs)\n", mode, count);
         return;
     }
-    if (state != 1 || loading == 1 || loading == 2) {         /* a song is ending or loading: wait */
+    if (st > 0) {                                   /* a song is ending or loading: wait */
         if (++s_wait > 300) {
             s_request = 0;
             s_wait = 0;
@@ -288,8 +455,7 @@ void next_song_game_tick(int rerun)
     else MEM32(PL_INDEX) = idx;
     MEMF(PL_TIMER) = MEMF(PL_LENGTH) + 1.0f;
     MEM32(PL_STATE) = 2;
-    for (k = 0; k < 16; k++) id[k] = (char)MEM8(PL_NAMES + 16 * next + (uint32_t)k);
-    id[16] = 0;
+    playlist_id(next, id);
     fprintf(stderr, "[MUSIC] next song: playlist %u songs (%s), #%u -> #%u %s\n", count, mode == 2 ? "fight" : "menus",
             idx, next, id);
     next_song_note_set(next_song_title_for(id));

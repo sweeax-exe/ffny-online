@@ -269,6 +269,8 @@ static const char *friendly(const char *section, const char *key)
         {"online", "voice_key", "Push-to-talk key"},
         {"audio", "next_song_key", "Next song key"},
         {"audio", "next_song_pad", "Next song on the controller"},
+        {"audio", "prev_song_key", "Previous song key"},
+        {"audio", "prev_song_pad", "Previous song on the controller"},
         {"online", "voice_pad", "Push-to-talk on the controller"},
         {"online", "voice_volume", "Voices volume (%)"},
         {"online", "voice_mic_volume", "Microphone volume (%)"},
@@ -2888,8 +2890,8 @@ static void page_basics()
     ImGui::SeparatorText("Voice chat");
     settings_group("online", { "voice", "voice_key", "voice_pad" });
     ImGui::SeparatorText("Music");
-    settings_group("audio", { "next_song_key", "next_song_pad" });
-    ImGui::TextDisabled("Skips to the next song in the menus and in fights. Only you hear it, online too.");
+    settings_group("audio", { "next_song_key", "next_song_pad", "prev_song_key", "prev_song_pad" });
+    ImGui::TextDisabled("Next or previous song in the menus and in fights. Only you hear it, online too.");
     ImGui::SeparatorText("Online");
     settings_group("ui", { "button_icons" });
     discord_status_setting();
@@ -3807,6 +3809,8 @@ std::vector<Chord> g_chords;        // read and written on the drawing thread, a
 std::vector<Chord> g_mark_chords;   // [debug] mark_pad: the recorder's mark, from a pad
 std::vector<Chord> g_song_chords;   // [audio] next_song_pad (next_song.h)
 std::atomic<int> g_next_song_vk{'M'};   // [audio] next_song_key (0: none)
+std::vector<Chord> g_prev_song_chords;   // [audio] prev_song_pad
+std::atomic<int> g_prev_song_vk{'N'};   // [audio] prev_song_key (0: none)
 
 void parse_chord_list(const std::string &text, std::vector<Chord> &chords)
 {
@@ -3836,6 +3840,7 @@ void parse_chords()
     parse_chord_list(get_text("ui", "overlay_pad"), g_chords);
     parse_chord_list(get_text("debug", "mark_pad"), g_mark_chords);
     parse_chord_list(get_text("audio", "next_song_pad"), g_song_chords);
+    parse_chord_list(get_text("audio", "prev_song_pad"), g_prev_song_chords);
 }
 
 // [audio] next_song_pad: a chord acts at once, when its last button goes down, on any pad, while the
@@ -3843,7 +3848,7 @@ void parse_chords()
 // chord names it (L3+R3 is the overlay's chord).
 void next_song_pad_poll()
 {
-    if (g_song_chords.empty()) return;
+    if (g_song_chords.empty() && g_prev_song_chords.empty()) return;
     InputRaw all;
     memset(&all, 0, sizeof(all));
     for (int slot = 0; slot < 4; slot++) {
@@ -3853,16 +3858,20 @@ void next_song_pad_poll()
             if (raw.src[s] > all.src[s]) all.src[s] = raw.src[s];
     }
     bool shut = !g_open.load() && !g_note_shown.load() && !ui_capturing();
-    for (Chord &c : g_song_chords) {
-        bool held = true, names_l3 = false;
-        for (int i = 0; i < c.n; i++) {
-            held = held && all.src[c.src[i]] >= 16384;
-            names_l3 = names_l3 || c.src[i] == INPUT_SRC_LEFT_STICK_CLICK;
+    for (int back = 0; back < 2; back++)
+        for (Chord &c : back ? g_prev_song_chords : g_song_chords) {
+            bool held = true, names_l3 = false;
+            for (int i = 0; i < c.n; i++) {
+                held = held && all.src[c.src[i]] >= 16384;
+                names_l3 = names_l3 || c.src[i] == INPUT_SRC_LEFT_STICK_CLICK;
+            }
+            if (!names_l3 && all.src[INPUT_SRC_LEFT_STICK_CLICK] >= 16384) held = false;
+            if (held && !c.fired && shut) {
+                if (back) next_song_back_request("pad");
+                else next_song_request("pad");
+            }
+            c.fired = held;
         }
-        if (!names_l3 && all.src[INPUT_SRC_LEFT_STICK_CLICK] >= 16384) held = false;
-        if (held && !c.fired && shut) next_song_request("pad");
-        c.fired = held;
-    }
 }
 
 // A chord of `chords` was just completed, on any pad: one button at once, two or three held half a second.
@@ -4523,6 +4532,9 @@ extern "C" void pc_ui_apply_settings(void)
     std::string song_key = get_text("audio", "next_song_key");
     int song_vk = song_key.empty() ? 0 : xbox_InputMap_KeyFromName(song_key.c_str());
     g_next_song_vk = song_vk > 0 && song_vk != g_overlay_vk ? song_vk : 0;
+    std::string prev_key = get_text("audio", "prev_song_key");
+    int prev_vk = prev_key.empty() ? 0 : xbox_InputMap_KeyFromName(prev_key.c_str());
+    g_prev_song_vk = prev_vk > 0 && prev_vk != g_overlay_vk && prev_vk != g_next_song_vk.load() ? prev_vk : 0;
     parse_chords();
     if (g_ready) ui_apply_scale(g_window);
     ui_unlock();
@@ -4561,6 +4573,13 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
         bool typing = ui_capturing() || g_fc_typing.load() || (g_ready && ImGui::GetIO().WantTextInput);
         ui_unlock();
         if (!typing) next_song_request("key");
+    }
+    if (!note && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && g_prev_song_vk.load() &&
+        (int)wp == g_prev_song_vk.load() && (int)wp != g_overlay_vk) {
+        ui_lock();
+        bool typing = ui_capturing() || g_fc_typing.load() || (g_ready && ImGui::GetIO().WantTextInput);
+        ui_unlock();
+        if (!typing) next_song_back_request("key");
     }
     // The note offer after an online match: the Y key, unless a text field (room chat) has the keys.
     if (!note && g_offer_visible.load() && msg == WM_KEYDOWN && (int)wp == 'Y' && !(lp & (1 << 30))) {
@@ -5203,6 +5222,13 @@ extern "C" int pc_ui_sdl_event(const void *event, float window_width, float wind
         bool typing = ui_capturing() || (g_ready && ImGui::GetIO().WantTextInput);
         ui_unlock();
         if (!typing) next_song_request("key");
+    }
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && g_prev_song_vk.load() &&
+        host_posix_vk_from_scancode(e->key.scancode) == g_prev_song_vk.load()) {
+        ui_lock();
+        bool typing = ui_capturing() || (g_ready && ImGui::GetIO().WantTextInput);
+        ui_unlock();
+        if (!typing) next_song_back_request("key");
     }
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && recorder_mark_vk() &&
         host_posix_vk_from_scancode(e->key.scancode) == recorder_mark_vk() &&

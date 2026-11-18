@@ -40,6 +40,7 @@ struct RankedBoardState {
     // the page
     int mode = NETRANK_CLASSIC, offset = 0, sel = 0, top = 0;
     Page back = HUB;                    // where B goes
+    ListNav nav;                        // build 96: fast scrolling (list_nav.h)
 } RB;
 
 int mode_by_name(const std::string &s)
@@ -331,8 +332,19 @@ void draw_ranked_board(ImDrawList *dl, const Frame &f, const Pad &pad)
         const int visible = 11;
         const float y0 = 128, pitch = 24;
         int n = (int)items.size();
-        if (pad.down && n) { RB.sel = std::min(n - 1, RB.sel + 1); if (items[RB.sel].header && RB.sel + 1 < n) RB.sel++; }
-        if (pad.up && n) { RB.sel = std::max(0, RB.sel - 1); if (items[RB.sel].header) RB.sel = RB.sel > 0 ? RB.sel - 1 : RB.sel + 1; }
+        // build 96 (list_nav.h): held up/down speeds up, LT/RT or the wheel a page (LB/RB, PgUp/PgDn: the board's pages)
+        ListNavKeys nk;
+        nk.keys = pad.keys;
+        nk.page_keys = false;
+        nk.wheel = true;
+        int delta = list_nav_delta(RB.nav, pad.up, pad.down, nk, visible);
+        if (delta && n) {
+            RB.sel = list_nav_move(RB.sel, n, delta, 0);
+            if (items[RB.sel].header) {         // the header row is passed over, on in the move's direction
+                if (delta > 0) RB.sel = RB.sel + 1 < n ? RB.sel + 1 : std::max(0, RB.sel - 1);
+                else RB.sel = RB.sel > 0 ? RB.sel - 1 : std::min(n - 1, RB.sel + 1);
+            }
+        }
         if (RB.sel >= n) RB.sel = std::max(0, n - 1);
         if (RB.sel < RB.top) RB.top = RB.sel > 0 && items[RB.sel - 1].header ? RB.sel - 1 : RB.sel;
         if (RB.sel >= RB.top + visible) RB.top = RB.sel - visible + 1;

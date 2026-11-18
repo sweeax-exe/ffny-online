@@ -21,6 +21,7 @@ struct MusicPage
     std::string sel_rel;            // the chosen song, kept across re-sorts and reloads
     // the gallery's sample list and settings (no folder there)
     bool sample = false;
+    ListNav nav;                    // build 96: held up/down speeds up, LT/RT and PgUp/PgDn a page
     std::vector<musiclib::Song> songs;
     int sort = 0;
     bool shuffle = false;
@@ -116,12 +117,17 @@ void draw_music(ImDrawList *dl, const Frame &f, const Pad &pad)
             const_cast<Pad &>(pad).b = false;           // B puts the song down; it does not leave the page
         }
     } else {
-        if (pad.up) g_mp.sel = (g_mp.sel + rows - 1) % rows;
-        if (pad.down) g_mp.sel = (g_mp.sel + 1) % rows;
+        ListNavKeys nk;
+        nk.keys = pad.keys;
+        bool single = false;
+        int delta = list_nav_delta(g_mp.nav, pad.up, pad.down, nk, MUSIC_ROWS, &single);
+        if (delta) g_mp.sel = list_nav_move(g_mp.sel, rows, delta, single);
         if (g_mp.sel == 0 && (pad.left || pad.right || pad.a)) music_set_sort(sort + (pad.left ? -1 : 1));
         if (g_mp.sel == 1 && (pad.left || pad.right || pad.a)) music_set_shuffle(!shuffle);
         if (g_mp.sel >= 2 && pad.a && chosen()) g_mp.grabbed = true;
-        if (armed && chosen() && (pad.lb || pad.rb)) music_move(chosen()->rel, pad.lb ? -1 : 1);
+        // LB/RB move the song; PgUp/PgDn (part of LB/RB elsewhere) page the list here
+        bool paging = ImGui::IsKeyDown(ImGuiKey_PageUp) || ImGui::IsKeyDown(ImGuiKey_PageDown);
+        if (armed && chosen() && !paging && (pad.lb || pad.rb)) music_move(chosen()->rel, pad.lb ? -1 : 1);
     }
     g_mp.sel_rel = chosen() ? chosen()->rel : "";
     // the chosen song re-found after a move

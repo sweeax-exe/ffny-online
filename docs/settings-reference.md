@@ -94,6 +94,8 @@ line turns it on for one run. Every key here is read at start-up.
 |---|---|---|
 | `next_song_key` | `M` | Skips to the next song of the music playing now, in the menus and in fights (offline and online), with a short "Now playing: <title>" note. One of your own songs (`[music]`) goes on to the next in your list; the game's soundtrack goes on to the next song of its playlist, which holds only the songs that are on. Only your PC hears it: online matches are unaffected (the change is made between two game steps, never in a rollback re-run). Not while you type in a chat. Empty for none. Launcher: Basics, Music ("Next song key"). Test aid: `RECOMP_TEST_NEXT_SONG=40,55` asks for it that many seconds in. |
 | `next_song_pad` | *(empty)* | Controller buttons for the same, pressed together (it acts when the last one goes down), e.g. `back+right_shoulder`; alternatives separated by commas, button names as in `[gamepad]`. The game sees the presses too. Off by default. |
+| `prev_song_key` | `N` | The previous song, as on a music player: the first press plays the current song from its start; a second one within 3 seconds, or a press in a song's first 3 seconds, goes to the song that played before it (game songs and your own, the last 16; a game song not on the playlist the game has now is passed over). In the menus and in fights, offline and online; only your PC hears it. Not while you type in a chat. Empty for none. Launcher: Basics, Music ("Previous song key"). Test aid: `RECOMP_TEST_NEXT_SONG=b70` (a `b` before the number). See [custom songs](custom-songs.md). |
+| `prev_song_pad` | *(empty)* | Controller buttons for the previous song, pressed together, as for `next_song_pad`. Off by default. |
 
 ## [gameplay]
 

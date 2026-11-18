@@ -34,10 +34,28 @@ double g_fp_stack[8];
 int g_fp_top;
 uint16_t g_fp_control_word;
 
-static int own_song, skips;
+static int own_song, skips, plays;
+static char played[64] = "-";
 static const char *sod_path;
+static unsigned long long clock_now;
+static unsigned long long test_clock(void) { return clock_now; }
 int custom_music_want_mute(void) { return own_song; }
+int custom_music_active(void) { return own_song; }
 void custom_music_skip(void) { skips++; }
+void custom_music_play(const char *rel) { plays++; snprintf(played, sizeof played, "%s", rel ? rel : "(current)"); }
+
+/* The playlist machine's next frame, as the game runs it: state 2 past the length loads the next. */
+static void machine(void)
+{
+    if (MEM32(0x340398) == 2 && MEMF(0x33E790) > MEMF(0x33EC40)) {
+        if (!MEM8(0x33EC90)) MEM32(0x33EC94) = (MEM32(0x33EC94) + 1) % MEM32(0x33E9DC);
+        MEMF(0x33E790) = 0.0f;
+        MEM32(0x340398) = 1;
+    }
+}
+
+/* t: ms; one game step at that time, then the machine's frame */
+static void at(unsigned long long t) { clock_now = t; next_song_game_tick(0); machine(); }
 FILE *netplay_open_fight_file(const char *name, int *overridden) { (void)name; *overridden = 0; return sod_path ? fopen(sod_path, "rb") : NULL; }
 
 static void playlist(uint32_t count, uint32_t index, int hold)
@@ -66,6 +84,38 @@ static void show(void)
 int main(int argc, char **argv)
 {
     const char *what = argv[1];
+    next_song_test_clock(test_clock);
+    if (!strcmp(what, "back")) {            /* script: n (next) b (back) w (wait 10 s), one per second */
+        const char *c;
+        unsigned long long t = 1000;
+        playlist(5, (uint32_t)atoi(argv[3]), atoi(argv[4]));
+        at(t);
+        for (c = argv[2]; *c; c++) {
+            t += *c == 'w' ? 10000 : 1000;
+            if (*c == 'n') next_song_request("test");
+            if (*c == 'b') next_song_back_request("test");
+            at(t);
+            at(t + 16);
+            if (*c != 'w') printf("%c:%u ", *c, MEM32(0x33EC94));
+        }
+        printf("\n");
+        return 0;
+    }
+    if (!strcmp(what, "ownback")) {         /* the player's songs: back goes to their player */
+        playlist(5, 2, 0);
+        own_song = 1;
+        next_song_own_started("a.mp3");
+        at(1000);
+        next_song_own_started("b.mp3");
+        at(60000);
+        next_song_back_request("test");
+        at(90000);
+        printf("%d %s ", plays, played);
+        next_song_back_request("test");
+        at(91000);
+        printf("%d %s\n", plays, played);
+        return 0;
+    }
     if (!strcmp(what, "step")) {            /* step count index hold */
         playlist((uint32_t)atoi(argv[2]), (uint32_t)atoi(argv[3]), atoi(argv[4]));
         next_song_request("test");
@@ -147,14 +197,15 @@ def exe(tmp_path_factory):
     (folder / 'recomp/gen/recomp_types.h').write_text(STUB_TYPES)
     (folder / 'driver.c').write_text(DRIVER, encoding='utf-8')
     src = str(ROOT / 'src/hooks/next_song.c')
+    hist = str(ROOT / 'src/hooks/song_history.c')
     if os.name == 'nt':
         out = folder / 'nextsong.exe'
         cmd = [compiler, '/nologo', '/O2', '/TC', '/I' + str(folder), '/I' + str(ROOT / 'src/hooks'),
-               str(folder / 'driver.c'), src, '/Fe:' + str(out)]
+               str(folder / 'driver.c'), src, hist, '/Fe:' + str(out)]
     else:
         out = folder / 'nextsong'
         cmd = [compiler, '-O2', '-std=c11', '-D_POSIX_C_SOURCE=200809L', '-I' + str(folder),
-               '-I' + str(ROOT / 'src/hooks'), str(folder / 'driver.c'), src, '-o', str(out)]
+               '-I' + str(ROOT / 'src/hooks'), str(folder / 'driver.c'), src, hist, '-o', str(out)]
     built = subprocess.run(cmd, cwd=folder, capture_output=True, text=True)
     assert built.returncode == 0, built.stdout + built.stderr
     return out
@@ -193,6 +244,25 @@ def test_no_playlist_drops_the_request(exe):
 
 def test_own_song_goes_to_its_player(exe):
     assert run(exe, 'own').startswith('index 2 state 1 timer_past 0 skips 1')
+
+
+def test_back_restarts_then_goes_to_the_song_before(exe):
+    # from #1: next (#2), next (#3), wait, back (#3 from its start), back (#2), back (#1)
+    assert run(exe, 'back', 'nnwbbb', 1, 0).split() == ['n:2', 'n:3', 'b:3', 'b:2', 'b:1']
+
+
+def test_back_with_hold_set(exe):
+    assert run(exe, 'back', 'nnwbbb', 1, 1).split() == ['n:2', 'n:3', 'b:3', 'b:2', 'b:1']
+
+
+def test_back_early_in_a_song_goes_back_at_once(exe):
+    # a back one second into #3 plays #2; with no song before the first one, it starts again
+    assert run(exe, 'back', 'nnb', 1, 0).split() == ['n:2', 'n:3', 'b:2']
+    assert run(exe, 'back', 'wbb', 1, 0).split() == ['b:1', 'b:1']
+
+
+def test_back_from_an_own_song_goes_to_their_player(exe):
+    assert run(exe, 'ownback').split() == ['1', '(current)', '2', 'a.mp3']
 
 
 def test_note_shows_for_a_few_seconds(exe):

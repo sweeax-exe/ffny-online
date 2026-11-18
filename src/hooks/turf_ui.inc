@@ -86,6 +86,7 @@ struct TurfState {
     unsigned long long armed_at = 0;
     Page back = HUB;
     bool gallery_entry = false;     // the gallery's hub shows TURF WAR
+    ListNav season_nav;                 // build 96: fast scrolling of the standings (list_nav.h)
 } TW;
 
 const char *turf_test_file()
@@ -824,8 +825,14 @@ void draw_turf_season(ImDrawList *dl, const Frame &f, const Pad &pad, const Turf
     dl->AddLine(f.p(x + 10, 143), f.p(x + w - 10, 143), IM_COL32(255, 255, 255, 30), 1.0f);
     const int visible = 11;
     int n = (int)s.crews.size();
-    if (pad.down) TW.season_top = std::min(std::max(0, n - visible), TW.season_top + 1);
-    if (pad.up) TW.season_top = std::max(0, TW.season_top - 1);
+    {   // build 96 (list_nav.h): held up/down speeds up, LT/RT or the wheel a page (LB/RB: the tabs)
+        ListNavKeys nk;
+        nk.keys = pad.keys;
+        nk.page_keys = false;
+        nk.wheel = true;
+        int delta = list_nav_delta(TW.season_nav, pad.up, pad.down, nk, visible);
+        if (delta) TW.season_top = list_nav_move(TW.season_top, std::max(1, n - visible + 1), delta, 0);
+    }
     TW.season_top = std::max(0, std::min(TW.season_top, std::max(0, n - visible)));
     if (!s.valid) text(dl, f, g_title, 16, x + w / 2, 240, CREAM, "LOADING THE STANDINGS...", CENTER, 1.0f);
     else if (!n) {
