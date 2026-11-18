@@ -322,10 +322,14 @@ static bool content_test_step(const char *want, bool busy)
             at = end + 1;
         }
     }
+    static int last_frame = -1;
     for (auto &st : steps) {
         if (st.done) continue;
-        if (busy || ImGui::GetFrameCount() < st.frame || st.action != want) return false;
+        // not in the frame of the step before: a press starts its compose job later in that frame (content_dialog)
+        if (busy || pcui::mod_busy() || ImGui::GetFrameCount() <= last_frame || ImGui::GetFrameCount() < st.frame ||
+            st.action != want) return false;
         st.done = true;
+        last_frame = ImGui::GetFrameCount();
         fprintf(stderr, "[CONTENT-TEST] step %s\n", st.action.c_str());
         return true;
     }
