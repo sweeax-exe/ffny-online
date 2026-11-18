@@ -511,6 +511,7 @@ static struct {
     char room[7];
     char name[25], peer_name[25];
     uint8_t build[8];
+    uint32_t content;               /* build 94: the content print in build[], sent in HELLO (one reading of the packs) */
     uint8_t token[8];
     int have_token;
     int slot;                       /* this client's slot in its room */
@@ -1729,7 +1730,7 @@ static void send_hello(void)
     {   /* since build 26: the build number, so the relay can turn away builds older than the published one */
         int build = updater_local_build();
         if (build > 0) {
-            uint32_t content = pc_content_print();
+            uint32_t content = N.content;   /* build 94: the print the build field holds, not a second reading */
             put32(b + n, (uint32_t)build); n += 4;
             /* build 72: the content print after the build number, only with content packs (relays
              * before it refuse the longer HELLO; a PC without such packs sends what it sent before) */
@@ -5184,7 +5185,7 @@ static int resolve(const char *server)
 
 /* The build's fingerprint: the version, the build number and the lockstep rules. Without the number
  * (builds 21-25) every remaster build had the same one and old and new builds met in rooms. */
-void netplay_build_fingerprint(uint8_t out[8])
+static void build_fingerprint_of(uint8_t out[8], uint32_t content)
 {
     uint32_t h1 = 2166136261u, h2;
     const char *v;
@@ -5196,13 +5197,16 @@ void netplay_build_fingerprint(uint8_t out[8])
      * meets only copies like it. RECOMP_TEST_DETMATH_SAME_FP=1 (tests) lets it meet the others on
      * purpose, to measure the desync the libm difference causes. */
     if (recomp_detmath_mode() == 0 && !getenv("RECOMP_TEST_DETMATH_SAME_FP")) h2 = mix32(h2 ^ 0x444D3000u);
-    {   /* FFNY Online's community content (pc_content.c): a PC with `content` packs (new fighters,
-         * clothing, venues) only meets PCs with the same set. None: the fingerprint builds before
-         * 72 had. Replacements and language packs never count. */
-        uint32_t content = pc_content_print();
-        if (content) { h1 = mix32(h1 ^ content); h2 = mix32(h2 ^ content ^ 0x434F4E54u); }
-    }
+    /* FFNY Online's community content (pc_content.c): a PC with `content` packs (new fighters,
+     * clothing, venues) only meets PCs with the same set. None: the fingerprint builds before
+     * 72 had. Replacements and language packs never count. */
+    if (content) { h1 = mix32(h1 ^ content); h2 = mix32(h2 ^ content ^ 0x434F4E54u); }
     put32(out, h1); put32(out + 4, h2);
+}
+
+void netplay_build_fingerprint(uint8_t out[8])
+{
+    build_fingerprint_of(out, pc_content_print());
 }
 
 static int start(const char *server, const char *name, int creating, const char *room, int delay, int lobby)
@@ -5244,7 +5248,11 @@ static int start(const char *server, const char *name, int creating, const char 
         if (i != 6) { InterlockedExchange(&N.state, NETPLAY_FAILED); set_status("A room code has 6 characters."); return -1; }
     }
     N.delay = delay >= 1 && delay <= 12 ? delay : 3;
-    netplay_build_fingerprint(N.build);
+    N.content = pc_content_print();
+    build_fingerprint_of(N.build, N.content);
+    /* build 94: the print the relay pairs by (rooms, quick matches and room lists meet only the same one) */
+    fprintf(stderr, "[NETPLAY] build print %02X%02X%02X%02X%02X%02X%02X%02X (content %08X)\n", N.build[0], N.build[1],
+            N.build[2], N.build[3], N.build[4], N.build[5], N.build[6], N.build[7], (unsigned)N.content);
     N.have_token = 0;
     N.peer_name[0] = 0;
     N.rtt_ms = -1;

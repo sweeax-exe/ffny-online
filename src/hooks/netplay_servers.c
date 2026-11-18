@@ -1055,7 +1055,7 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
      * player moves to the older room), not the pool of pairs */
     if (sum_on && mode != NETPLAY_MODE_RTS) {   /* build 91: the global pool (netservers_pool): every relay's waiting players, by ping sum */
         static NetQuickSeat seats[QUICK_POOL_MAX];
-        int partner[QUICK_POOL_MAX], where[QUICK_POOL_MAX], n = 0, me = -1, known = 0, j;
+        int n = 0, me = -1, known = 0, j, mate = -1, to;
         for (j = 0; j < NETSERVER_COUNT; j++) known |= mine[j] > 0;
         for (o = 0; o < NETSERVER_COUNT && known; o++) {
             if (!(scope >> o & 1u) || !R.got[o] || now - R.got[o] >= MOVE_FRESH) continue;
@@ -1077,15 +1077,16 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
             }
         }
         if (me >= 0) {
-            netservers_pool(seats, n, partner, where);
+            /* build 94: only an answer the other game reaches too (netservers_pool_steady); near a limit step, wait */
+            to = netservers_pool_steady(seats, n, me, &mate);
             LeaveCriticalSection(&g_cs);
-            if (partner[me] < 0 || where[me] == cur) return -1;    /* nobody within the limit yet, or they come here */
+            if (to < 0 || mate < 0 || to == cur) return -1;    /* nobody within the limit yet, not steady, or they come here */
             if (waiting) *waiting = 1;
-            if (ping) *ping = sv[where[me]].ping_ms;
+            if (ping) *ping = sv[to].ping_ms;
             fprintf(stderr, "[SERVERS] quick: pool of %d, searching %d s (room age %d s) on %s; paired with %s on %s, "
-                    "playing on %s (%d ms): moving there\n", n, search_s, my_age, sv[cur].name, seats[partner[me]].code,
-                    sv[seats[partner[me]].relay].name, sv[where[me]].name, sv[where[me]].ping_ms);
-            return where[me];
+                    "playing on %s (%d ms): moving there\n", n, search_s, my_age, sv[cur].name, seats[mate].code,
+                    sv[seats[mate].relay].name, sv[to].name, sv[to].ping_ms);
+            return to;
         }
     }
     for (o = 0; o < NETSERVER_COUNT; o++) {

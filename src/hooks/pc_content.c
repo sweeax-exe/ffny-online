@@ -304,8 +304,9 @@ static int list_all(PcContentPack *out, int max)
         }
     }
     fclose(f);
-    {   /* keep only packs whose folder is there; the rest are not installed */
-        static char applied[4096];
+    {   /* keep only packs whose folder is there; the rest are not installed. Not static: any thread lists (build 94,
+         * a shared buffer emptied by another thread's read left packs "not applied" out of the netplay print) */
+        char applied[4096];
         int i, m = 0;
         read_files_ini(root, applied, sizeof applied, NULL, 0, NULL);
         for (i = 0; i < n; i++) {
@@ -334,13 +335,23 @@ int pc_content_list(PcContentPack *out, int max)
     return m;
 }
 
+/* Build 94: every caller below lists into its own buffer (malloc). These ran on several threads at once (the
+ * netplay start's build print, its network thread's HELLO, the main thread's [CONTENT] header, the online screen)
+ * and shared one static array: a list another thread was rewriting gave the build print of another content set, and
+ * the relay then kept that player apart from everyone (a quick match that opened a room beside the other player's). */
+static PcContentPack *packs_new(void)
+{
+    return (PcContentPack *)malloc(sizeof(PcContentPack) * PC_CONTENT_MAX);
+}
+
 uint32_t pc_content_print(void)
 {
-    static PcContentPack packs[PC_CONTENT_MAX];
+    PcContentPack *packs;
     const char *test = getenv("RECOMP_TEST_CONTENT_PRINT");
     uint32_t h = 2166136261u;
     int n, i, any = 0;
     if (test && *test) return (uint32_t)strtoul(test, NULL, 16);
+    if (!(packs = packs_new())) return 0;
     n = pc_content_list(packs, PC_CONTENT_MAX);
     for (i = 0; i < n; i++) {
         const char *parts[3];
@@ -360,6 +371,7 @@ uint32_t pc_content_print(void)
         }
         any = 1;
     }
+    free(packs);
     if (!any) return 0;
     return h ? h : 1;
 }
@@ -368,15 +380,15 @@ uint32_t pc_content_print(void)
 
 int pc_content_skins(PcContentSkin *out, int max)
 {
-    static PcContentPack packs[PC_CONTENT_MAX];
+    PcContentPack *packs;
     char path[1024], line[1200];
     const char *root = data_root();
     FILE *f;
     int n = 0, np, in_section = 0;
-    if (!root || max <= 0) return 0;
+    if (!root || max <= 0 || !(packs = packs_new())) return 0;
     np = pc_content_list(packs, PC_CONTENT_MAX);
     snprintf(path, sizeof path, "%s" HOST_SEP "%s" HOST_SEP "files.ini", root, composed_dir());
-    if (!(f = fopen(path, "rb"))) return 0;
+    if (!(f = fopen(path, "rb"))) { free(packs); return 0; }
     while (fgets(line, sizeof line, f) && n < max) {
         char *s = trim(line), *fields[4], *q;
         int k, i, ok = 0;
@@ -405,6 +417,7 @@ int pc_content_skins(PcContentSkin *out, int max)
         n++;
     }
     fclose(f);
+    free(packs);
     return n;
 }
 
@@ -760,11 +773,12 @@ void pc_content_picked_venue(int fe_id)
 
 int pc_content_language_blocked(const char *id)
 {
-    static PcContentPack packs[PC_CONTENT_MAX];
-    int n = pc_content_list(packs, PC_CONTENT_MAX), i;
+    PcContentPack *packs = packs_new();
+    int n = packs ? pc_content_list(packs, PC_CONTENT_MAX) : 0, i, off = 0;
     for (i = 0; i < n; i++)
-        if (!strcmp(packs[i].id, id)) return packs[i].off;
-    return 0;
+        if (!strcmp(packs[i].id, id)) { off = packs[i].off; break; }
+    free(packs);
+    return off;
 }
 
 int pc_content_offline_only(void)
@@ -775,8 +789,8 @@ int pc_content_offline_only(void)
 
 int pc_content_local_offline(char *names, int size)
 {
-    static PcContentPack packs[PC_CONTENT_MAX];
-    int n = pc_content_list(packs, PC_CONTENT_MAX), i, count = 0, o = 0;
+    PcContentPack *packs = packs_new();
+    int n = packs ? pc_content_list(packs, PC_CONTENT_MAX) : 0, i, count = 0, o = 0;
     if (names && size > 0) names[0] = 0;
     for (i = 0; i < n; i++) {
         if (!packs[i].local || packs[i].off || packs[i].online_ok) continue;
@@ -784,6 +798,7 @@ int pc_content_local_offline(char *names, int size)
             o += snprintf(names + o, (size_t)(size - o), "%s%s", count ? ", " : "", packs[i].name[0] ? packs[i].name : packs[i].id);
         count++;
     }
+    free(packs);
     return count;
 }
 

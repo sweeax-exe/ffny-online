@@ -206,6 +206,52 @@ int main(void)
         netservers_pool(list1, 2, partner, where);
         printf("same|%d|%d\n", partner[0], partner[1]);
     }
+    /* build 94: two games decide, each from its own view. Each reads its own room's age exactly and the other's a
+     * little off (-2..+2 s: the lists come from two relays at different moments); B's room may have waited a while
+     * when A's search starts. Europe player A, US East player B: within 180 ms only US East works (A moves), within
+     * 250 Europe has the smaller sum (B moves): A arriving when B's room is about 20 s old is the step case. */
+    {
+        static const int pa[NETSERVER_COUNT] = { 20, 170 }, pb[NETSERVER_COUNT] = { 200, 70 };
+        static const int eq_a[NETSERVER_COUNT] = { 30, 90, 0, 0, 60 }, eq_b[NETSERVER_COUNT] = { 90, 30, 0, 0, 60 };
+        int scen;
+        for (scen = 0; scen < 3; scen++) {
+            /* 0: the step case above; 1: equal pings both ways (simultaneous search, equal ages), a third relay
+             * (Miami) has the smallest sum; 2: both on one relay (the relay joins them, the pool never) */
+            int old_swap = 0, new_bad = 0, latest = -1, never = 0, ea, eb, t, d;
+            for (d = 0; d <= 30; d++)       /* B's room waited d s when A's search starts */
+            for (ea = -2; ea <= 2; ea++)
+                for (eb = -2; eb <= 2; eb++) {
+                    int decided = -1;
+                    for (t = 0; t <= 60 && decided < 0; t++) {
+                        NetQuickSeat va[2], vb[2];
+                        int partner[2], where[2], k, oa, ob, na, nb, mate, ra, rb;
+                        for (k = 0; k < 2; k++) { memset(&va[k], 0, sizeof(va[k])); memset(&vb[k], 0, sizeof(vb[k])); }
+                        ra = 0; rb = scen == 2 ? 0 : 1;
+                        va[0].relay = vb[0].relay = ra; va[1].relay = vb[1].relay = rb;
+                        memcpy(va[0].pings, scen == 0 ? pa : eq_a, sizeof(pa));
+                        memcpy(va[1].pings, scen == 0 ? pb : eq_b, sizeof(pb));
+                        memcpy(vb[0].pings, va[0].pings, sizeof(pa)); memcpy(vb[1].pings, va[1].pings, sizeof(pb));
+                        snprintf(va[0].code, sizeof(va[0].code), "AAAAAA"); snprintf(va[1].code, sizeof(va[1].code), "BBBBBB");
+                        memcpy(vb[0].code, va[0].code, sizeof(va[0].code)); memcpy(vb[1].code, va[1].code, sizeof(va[1].code));
+                        va[0].age = t; va[1].age = t + d + ea < 0 ? 0 : t + d + ea;     /* A's view */
+                        vb[1].age = t + d; vb[0].age = t + eb < 0 ? 0 : t + eb;         /* B's view */
+                        netservers_pool(va, 2, partner, where);
+                        oa = partner[0] >= 0 ? where[0] : -1;
+                        netservers_pool(vb, 2, partner, where);
+                        ob = partner[1] >= 0 ? where[1] : -1;
+                        old_swap += oa == rb && ob == ra && ra != rb;
+                        na = netservers_pool_steady(va, 2, 0, &mate);
+                        nb = netservers_pool_steady(vb, 2, 1, &mate);
+                        if (na >= 0 && na != ra && nb >= 0 && nb != rb && na != nb) new_bad++;   /* both go, apart */
+                        if (na == rb && nb == ra && ra != rb) new_bad++;
+                        if ((na >= 0 && na != ra) || (nb >= 0 && nb != rb)) decided = t;
+                    }
+                    if (decided < 0) never++;
+                    else if (decided > latest) latest = decided;
+                }
+            printf("views|%d|%d|%d|%d|%d\n", scen, old_swap, new_bad, latest, never);
+        }
+    }
     return 0;
 }
 '''
@@ -361,6 +407,23 @@ def test_pool_near_relay_and_same_answer_in_any_order(rows):
     assert by(rows, 'order1') == [['1', '0', str(DFW)]]
     assert by(rows, 'order2') == [['1', '2', str(DFW)]]
     assert by(rows, 'same') == [['-1', '-1']]
+
+
+def test_two_games_with_skewed_views_never_swap(rows):
+    """Build 94: each game reads the other's room age from another relay's list, up to 2 s off. Near a limit step
+    the pool alone could send each player to the other's relay at once (a swap: two new rooms, the waits back to
+    0); netservers_pool_steady waits inside the slack, so the two never move apart, and they still meet."""
+    views = {int(r[0]): tuple(map(int, r[1:])) for r in by(rows, 'views')}
+    old_swap, new_bad, latest, never = views[0]
+    assert old_swap > 0           # the case is real with the plain pool
+    assert new_bad == 0 and never == 0
+    assert latest <= 10 + 2 + 3   # the 180 ms step, the skew and the slack
+    # equal pings both ways (a simultaneous search: equal ages): both go to Miami, the smallest sum, at once
+    old_swap, new_bad, latest, never = views[1]
+    assert (old_swap, new_bad, latest, never) == (0, 0, 0, 0)
+    # both on one relay: the pool never pairs them (the relay's QUICK puts them in one room)
+    old_swap, new_bad, latest, never = views[2]
+    assert (old_swap, new_bad, latest, never) == (0, 0, -1, 31 * 25)
 
 
 def test_exactly_one_of_two_waiting_players_moves(rows):

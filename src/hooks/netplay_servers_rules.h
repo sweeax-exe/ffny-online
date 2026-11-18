@@ -147,6 +147,13 @@ int netservers_pair_relay(const NetQuickSeat *a, const NetQuickSeat *b, int limi
 /* The pool's pairs: partner[i] (-1 unpaired) and relay[i] (where seat i plays, -1 unpaired) for every seat. Two
  * seats on the same relay are never paired (the relay joins them itself). n at most QUICK_POOL_MAX. */
 void netservers_pool(const NetQuickSeat *seats, int n, int *partner, int *relay);
+/* Build 94: seat `me`'s relay (*partner_out its partner, -1 none) only when the pool gives the same answer with every
+ * wait QUICK_POOL_SLACK_S shorter and longer; -2 while it does not (wait for the next list), -1 unpaired. The two
+ * games read each other's room age from different relays' lists at different moments, a second or two apart: near
+ * a limit step (10, 20, 40 s) one could pair on its own relay while the other, a limit further, picks the first
+ * one's relay, and both moved at once and swapped (new rooms, waits back to 0). Inside the slack both wait. */
+#define QUICK_POOL_SLACK_S 3
+int netservers_pool_steady(const NetQuickSeat *seats, int n, int me, int *partner_out);
 
 /* ---- what players are shown (build 84) ---------------------------------------------------------
  * Players never see our relays' host or port: status lines say "the US East server". */

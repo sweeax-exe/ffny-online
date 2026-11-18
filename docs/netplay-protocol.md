@@ -551,6 +551,15 @@ list show every relay's. A quick match reads every relay's ROOMLIST (with the li
 sum whose worse ping is within the limit of the longer wait (120 ms; 180 from 10 s; 250 from 20 s; any from 40 s).
 Both players go to that relay and QUICK there. Ranked play is one pool already (the account service's matchmaker).
 
+Build 94: a game moves only on an answer the other game reaches too (`netservers_pool_steady`): the same pair and
+relay with every wait 3 s shorter and longer. Each game reads the other's room age from another relay's list, a
+second or two apart; near a limit step one could pick its own relay while the other, one limit further, picked the
+first one's, and both moved and swapped. Inside the slack both wait for the next list. Two quick rooms on one
+relay are always the relay's to join (QUICK), never the pool's; the relay keeps rooms of another build print apart,
+and logs `quick: ... have another build print (kept apart)` when that hits games of one build number and content
+print (build 93's two-copy test: the build print hashed a content list another thread was rewriting at start-up;
+`pc_content_print` now lists into its own buffer, and the game logs `[NETPLAY] build print ...` per session).
+
 ## Who is online without a session (all servers)
 
 Since build 47 the PLAYERS ONLINE page lists every relay's players when the player chose **All

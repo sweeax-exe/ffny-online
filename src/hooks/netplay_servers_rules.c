@@ -258,7 +258,8 @@ static void pair_codes(const NetQuickSeat *a, const NetQuickSeat *b, const char 
     if (strcmp(a->code, b->code) <= 0) { *lo = a->code; *hi = b->code; } else { *lo = b->code; *hi = a->code; }
 }
 
-void netservers_pool(const NetQuickSeat *seats, int n, int *partner, int *relay)
+/* the pool with every wait `shift` seconds longer (0 at least): netservers_pool_steady's views */
+static void pool_at(const NetQuickSeat *seats, int n, int *partner, int *relay, int shift)
 {
     int i, j;
     if (n > QUICK_POOL_MAX) n = QUICK_POOL_MAX;
@@ -272,7 +273,8 @@ void netservers_pool(const NetQuickSeat *seats, int n, int *partner, int *relay)
                 int s, w, r, age;
                 const char *lo, *hi;
                 if (partner[j] >= 0 || seats[i].relay == seats[j].relay) continue;
-                age = seats[i].age > seats[j].age ? seats[i].age : seats[j].age;
+                age = (seats[i].age > seats[j].age ? seats[i].age : seats[j].age) + shift;
+                if (age < 0) age = 0;
                 r = netservers_pair_relay(&seats[i], &seats[j], netservers_pool_limit(age), &s, &w);
                 if (r < 0) continue;
                 pair_codes(&seats[i], &seats[j], &lo, &hi);
@@ -286,6 +288,24 @@ void netservers_pool(const NetQuickSeat *seats, int n, int *partner, int *relay)
         partner[bi] = bj; partner[bj] = bi;
         relay[bi] = relay[bj] = br;
     }
+}
+
+void netservers_pool(const NetQuickSeat *seats, int n, int *partner, int *relay)
+{
+    pool_at(seats, n, partner, relay, 0);
+}
+
+int netservers_pool_steady(const NetQuickSeat *seats, int n, int me, int *partner_out)
+{
+    int partner[3][QUICK_POOL_MAX], relay[3][QUICK_POOL_MAX], k;
+    if (partner_out) *partner_out = -1;
+    if (n > QUICK_POOL_MAX) n = QUICK_POOL_MAX;
+    if (me < 0 || me >= n) return -1;
+    for (k = 0; k < 3; k++) pool_at(seats, n, partner[k], relay[k], (k - 1) * QUICK_POOL_SLACK_S);
+    for (k = 0; k < 3; k += 2)
+        if (partner[k][me] != partner[1][me] || relay[k][me] != relay[1][me]) return -2;
+    if (partner_out) *partner_out = partner[1][me];
+    return relay[1][me];
 }
 
 int netservers_should_move(int my_relay, int my_age, int their_relay, int their_age)
