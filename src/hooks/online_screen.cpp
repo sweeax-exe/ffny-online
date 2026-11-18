@@ -2414,19 +2414,34 @@ std::string rts_time_text(int rules)
 std::string rts_kos_text(int rules)
 {
     int t, k;
+    if (ow_rules_rts_points(rules)) return "None: the most points win";
     ow_rules_rts_decode(rules, &t, &k);
     return "First to " + std::to_string(ow_rules_rts_kos(k)) + " knockouts";
 }
-// step the time limit (row 0) or the KO target (row 1) of a rules byte; the time limit wraps (none after 15), the
-// KO target stops at its ends
+// build 95: the round mode, Knockouts (the KO target) or Points (no knockouts out of the round, the clock ends it)
+std::string rts_mode_text(int rules)
+{
+    return ow_rules_rts_points(rules) ? "Points: no knockouts, back up at once" : "Knockouts: first to the KO target";
+}
+// step the time limit (row 0), the KO target (row 1) or the round mode (row 2) of a rules byte; the time limit wraps
+// (none after 15, but never none in the Points mode), the KO target stops at its ends (Points has none)
 int rts_rules_step(int rules, int which, int step)
 {
-    int t, k;
+    int t, k, points = ow_rules_rts_points(rules);
     ow_rules_rts_decode(rules, &t, &k);
-    if (which == 0) t = (t + step + OW_RTS_TIMES) % OW_RTS_TIMES;
-    else k = std::max(0, std::min(OW_RTS_KOS - 1, k + step));
-    return ow_rules_rts_encode(t, k);
+    if (which == 0) {
+        int n = points ? OW_RTS_TIMES - 1 : OW_RTS_TIMES;
+        t = (t + step + n) % n;
+    } else if (which == 1) {
+        if (!points) k = std::max(0, std::min(OW_RTS_KOS - 1, k + step));
+    } else {
+        points = !points;
+        if (points && t == OW_RTS_TIME_NONE) t = OW_RTS_DEFAULT_TIME;
+    }
+    return ow_rules_rts_encode_mode(t, k, points);
 }
+// the Points round mode may be chosen: offline always, in a room when the relay keeps it (NETPLAY_CAP_RTS_POINTS)
+bool rts_points_offered() { return gallery_on() || netplay_relay_rts_points(); }
 std::string rts_rules_tag(int rules)
 {
     char b[48];
@@ -2438,8 +2453,8 @@ std::string rts_rules_tag(int rules)
 // row with the stick or the D-pad left/right; B back to the page.
 void draw_rts_setup(ImDrawList *dl, const Frame &f, const Pad &pad, bool have_map)
 {
-    static const char *const labels[] = { "CPU FIGHTERS", "TIME LIMIT", "KO TARGET", "" };
-    const int rows = 4;
+    static const char *const labels[] = { "CPU FIGHTERS", "ROUND MODE", "TIME LIMIT", "KO TARGET", "" };
+    const int rows = 5;     // build 95: ROUND MODE (Knockouts or Points)
     int rules = gallery_on() ? G.rts_rules : rts_offline_rules();
     page_title(dl, f, "VS CPU");
     text(dl, f, g_hand, 15, 54, 66, ORANGE, "RUN THE STREETS, OFFLINE", LEFT, 0.8f);
@@ -2449,8 +2464,9 @@ void draw_rts_setup(ImDrawList *dl, const Frame &f, const Pad &pad, bool have_ma
     if (step) {
         switch (S.rts_setup_sel) {
         case 0: S.rts_cpus = std::max(2, std::min(3, S.rts_cpus + step)); break;
-        case 1: case 2: {
-            int nr = rts_rules_step(rules, S.rts_setup_sel - 1, step);
+        case 1: case 2: case 3: {
+            static const int which[] = { 0, 2, 0, 1 };
+            int nr = rts_rules_step(rules, which[S.rts_setup_sel], step);
             if (gallery_on()) G.rts_rules = nr;
             else rts_offline_set_rules(nr);
             rules = nr;
@@ -2459,20 +2475,21 @@ void draw_rts_setup(ImDrawList *dl, const Frame &f, const Pad &pad, bool have_ma
         }
     }
     for (int i = 0; i < rows; i++) {
-        float x = 50, y = 96 + i * 54.0f, w = 270, h = 44;
+        float x = 50, y = 96 + i * 50.0f, w = 270, h = 42;
         if (mouse_pick(f, x, y, w, h)) S.rts_setup_sel = i;
         bool sel = S.rts_setup_sel == i;
         glass(dl, f, x, y, w, h, 7, sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255), sel ? 0.78f : 0.6f);
         if (sel) selector(dl, f, x, y, w, h);
-        if (i == 3) {
+        if (i == 4) {
             text(dl, f, g_title, 20, x + w / 2, y + h / 2 - 11, sel ? CREAM : GREY, "CHOOSE FIGHTER", CENTER);
             if (mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;
             continue;
         }
         text(dl, f, g_title, 12, x + 12, y + 4, GREY, labels[i]);
-        std::string value = i == 0 ? std::to_string(S.rts_cpus) + " CPU fighters" : i == 1 ? rts_time_text(rules) : rts_kos_text(rules);
-        text(dl, f, g_title, 17, x + 12, y + 19, sel ? WHITE : GREY, value.c_str());
-        if (sel) {
+        std::string value = i == 0 ? std::to_string(S.rts_cpus) + " CPU fighters" : i == 1 ? rts_mode_text(rules)
+                          : i == 2 ? rts_time_text(rules) : rts_kos_text(rules);
+        text(dl, f, g_title, 17, x + 12, y + 18, sel ? WHITE : GREY, value.c_str());
+        if (sel && !(i == 3 && ow_rules_rts_points(rules))) {
             text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER);
             text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER);
         }
@@ -2487,14 +2504,18 @@ void draw_rts_setup(ImDrawList *dl, const Frame &f, const Pad &pad, bool have_ma
                         (secs > 0 ? ", or the most when the " + std::to_string(secs / 60) +
                                         " minutes are up. The clock is on the score plate."
                                   : ". No time limit: the KO target ends it.");
+        if (ow_rules_rts_points(rules))
+            d = "You and " + std::to_string(S.rts_cpus) + " CPU fighters on the block. Nobody is out: a knockout is a "
+                "point and the fighter is back up at once. The most points when the " + std::to_string(secs / 60) +
+                " minutes are up wins.";
         door_text(dl, f, &tex("ui/online_icon.png"), "VS CPU", rts_rules_tag(rules).c_str(), d.c_str());
     }
     float hx = 54;
-    hx += hint(dl, f, hx, 392, "a", S.rts_setup_sel == 3 ? "CHOOSE FIGHTER" : "NEXT");
+    hx += hint(dl, f, hx, 392, "a", S.rts_setup_sel == 4 ? "CHOOSE FIGHTER" : "NEXT");
     hint(dl, f, hx, 392, "b", "BACK");
     if (pad.b) { S.rts_setup = false; return; }
     if (!pad.a) return;
-    if (S.rts_setup_sel < 3) { S.rts_setup_sel++; return; }
+    if (S.rts_setup_sel < 4) { S.rts_setup_sel++; return; }
     if (!have_map) { say("Run the Streets has no map on this PC yet: start the game from the launcher to get it."); return; }
     S.rts_pick = true;
     S.ranked_pick = false;
@@ -3181,9 +3202,10 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
 {
     // the rows; a King of the Hill room has one more, how each fight's venue is chosen
     enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN, R_CPU, R_RULES, R_PING, R_CONTENT, R_RTS_TIME,
-               R_RTS_KOS };
+               R_RTS_KOS, R_RTS_MODE };
     static const char *const labels[] = { "MODE", "VENUE OF EACH FIGHT", "PLAYERS", "VENUES", "LISTED", "", "CPU LEVEL",
-                                          "FIGHTER RULES", "MAX PING", "COMMUNITY CONTENT", "TIME LIMIT", "KO TARGET" };
+                                          "FIGHTER RULES", "MAX PING", "COMMUNITY CONTENT", "TIME LIMIT", "KO TARGET",
+                                          "ROUND MODE" };
     NetRoomSettings &s = S.settings;
     bool was_koth = NETPLAY_IS_KOTH(s.mode), was_rot = NETPLAY_IS_FFAROT(s.mode), rts = NETPLAY_IS_RTS(s.mode);
     // the host cannot turn a room into the other kind (the relay refuses it); a Run the Streets room stays one
@@ -3193,9 +3215,11 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     // relay plays its map) and no community content switch (the map is official content)
     std::vector<int> rows_of = rts ? std::vector<int>{ R_MODE, R_RTS_TIME, R_RTS_KOS, R_PLAYERS, R_LISTED, R_OPEN }
                                    : std::vector<int>{ R_MODE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN };
+    // build 95: the round mode (Knockouts or Points) before the time limit, on relays that keep it
+    if (rts && rts_points_offered()) rows_of.insert(rows_of.begin() + 1, R_RTS_MODE);
     if (was_koth) rows_of.insert(rows_of.begin() + 1, R_VENUE_CHOICE);
     // build 67: how strong the CPU fighters are that fill a 3-Way's or Free for All's free places
-    if (cpu_level_offered(s.mode)) rows_of.insert(rows_of.begin() + (rts ? 4 : 2), R_CPU);
+    if (cpu_level_offered(s.mode)) rows_of.insert(rows_of.begin() + (rts ? (rts_points_offered() ? 5 : 4) : 2), R_CPU);
     // build 68: which fighters may be picked, and the highest ping a joining player may have (before LISTED)
     if (rules_offered()) rows_of.insert(rows_of.end() - 2, { R_RULES, R_PING });
     // build 82: community content (new fighters, new venues) on or off for this room, when this PC has some
@@ -3260,9 +3284,11 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         }
         case R_RTS_TIME: s.rounds = rts_rules_step(s.rounds, 0, step); break;   // 5, 10, 15 minutes, none
         case R_RTS_KOS: s.rounds = rts_rules_step(s.rounds, 1, step); break;    // first to 5, 10, 20
+        case R_RTS_MODE: s.rounds = rts_rules_step(s.rounds, 2, step); break;   // Knockouts, Points
         }
     }
     if (rts && !ow_rules_rts_valid(s.rounds)) s.rounds = 0;
+    if (rts && !rts_points_offered() && ow_rules_rts_points(s.rounds)) s.rounds = 0;   // a relay without it
     if (!NETPLAY_CPU_FILL(s.mode)) s.cpu_level = NETPLAY_CPU_HARD;     // no CPU fighters: the default
     m = online_mode(s.mode);
     if (s.max > most_of(s.mode)) s.max = most_of(s.mode);
@@ -3272,7 +3298,8 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         was_koth = NETPLAY_IS_KOTH(s.mode);
     }
     bool koth = NETPLAY_IS_KOTH(s.mode), rot = NETPLAY_IS_FFAROT(s.mode);
-    float row_step = rows >= 9 ? 33 : rows >= 7 ? 37 : rows >= 6 ? 46 : 54, row_h = rows >= 9 ? 31 : rows >= 7 ? 34 : rows >= 6 ? 40 : 44;   // up to 9 rows above the hints
+    float row_step = rows >= 10 ? 29 : rows >= 9 ? 33 : rows >= 7 ? 37 : rows >= 6 ? 46 : 54,
+          row_h = rows >= 10 ? 27 : rows >= 9 ? 31 : rows >= 7 ? 34 : rows >= 6 ? 40 : 44;   // up to 10 rows above the hints
 
     page_title(dl, f, S.settings_edit ? "ROOM SETTINGS" : "CREATE A ROOM");
     text(dl, f, g_hand, 15, 54, 66, ORANGE, s.name, LEFT, 0.8f);
@@ -3311,11 +3338,12 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_CONTENT: value = content_text(s.fighter_rules); break;
         case R_RTS_TIME: value = rts_time_text(s.rounds); break;
         case R_RTS_KOS: value = rts_kos_text(s.rounds); break;
+        case R_RTS_MODE: value = rts_mode_text(s.rounds); break;
         }
-        text(dl, f, g_title, row_h < 34 ? 15 : 17, x + 12, y + (row_h < 34 ? 14 : row_h < 40 ? 16 : 19), sel ? WHITE : GREY, value.c_str());
+        text(dl, f, g_title, row_h < 30 ? 14 : row_h < 34 ? 15 : 17, x + 12, y + (row_h < 30 ? 12 : row_h < 34 ? 14 : row_h < 40 ? 16 : 19), sel ? WHITE : GREY, value.c_str());
         // a fixed row (a special match's venue and players) has nothing to step through
         bool fixed = (fixed_venue(s.mode) && (row == R_POOL || row == R_PLAYERS)) || (is_team(s.mode) && row == R_PLAYERS) ||
-                     (rts && row == R_MODE);
+                     (rts && row == R_MODE) || (row == R_RTS_KOS && ow_rules_rts_points(s.rounds));
         if (sel && !fixed) { text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER); }
     }
     // the door: the mode's logo (King of the Hill: its rules), then the venues filling the panel
@@ -3328,6 +3356,9 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         std::string d = "UP TO FOUR LOOSE ON THE BLOCK, FREE PLACES GO TO CPU FIGHTERS. KNOCKED OUT? BACK ON A STREET CORNER "
                         "IN THREE SECONDS. FIRST TO " + std::to_string(ow_rules_rts_kos(k)) + " KNOCKOUTS WINS" +
                         (secs > 0 ? ", OR THE MOST WHEN THE " + std::to_string(secs / 60) + " MINUTES ARE UP." : ". NO TIME LIMIT.");
+        if (ow_rules_rts_points(s.rounds))
+            d = "UP TO FOUR LOOSE ON THE BLOCK, FREE PLACES GO TO CPU FIGHTERS. POINTS: NOBODY IS OUT, A KNOCKOUT IS A POINT "
+                "AND THE FIGHTER IS BACK UP AT ONCE. THE MOST POINTS WHEN THE " + std::to_string(secs / 60) + " MINUTES ARE UP WINS.";
         text(dl, f, g_title, 24, 463 + dx, 92, CREAM, "RUN THE STREETS", CENTER, 1.6f);
         text(dl, f, g_hand, 13, 463 + dx, 120, ORANGE, rts_rules_tag(s.rounds).c_str(), CENTER, 1.0f);
         text(dl, f, g_body, 12, 362 + dx, 138, WHITE, d.c_str(), LEFT, 1.0f, 202);

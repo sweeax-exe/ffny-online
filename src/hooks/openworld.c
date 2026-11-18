@@ -376,7 +376,7 @@ typedef struct {
     uint8_t rules;                  /* the rules byte (ow_rules_rts_*), 0 the defaults */
     uint8_t end_kind;               /* END_SCORE, END_TIME; 0 not over */
     uint8_t unlimited;              /* no time limit: time_limit_steps is the safety end */
-    uint8_t pad2;
+    uint8_t points;                 /* build 95: the Points round mode (OW_RTS_POINTS in rules): no KO target, back at once */
     uint32_t end_step;              /* the step the end came at */
     /* free roam (ow_roam_input): a human fighter out of combat walks free and faces where it goes */
     uint8_t roam_on, roam_pad[3];
@@ -411,6 +411,18 @@ uint32_t ow_state_hash(void)
     if (!BA.on) return 0;
     for (i = 0; i < sizeof BA; i++) h = (h ^ p[i]) * 16777619u;
     return h ? h : 1;
+}
+
+/* Build 95, the Points round mode: no KO target (only the clock ends the round, the most points win), and a
+ * knocked-out fighter is back on its feet where it fell after OW_RTS_POINTS_BACK steps (ba_revive without a spawn
+ * point: full health, the respawn protection). From the rules byte alone, so the same on every PC. */
+static void ba_points_rules(void)
+{
+    BA.points = (uint8_t)(ow_rules_rts_points(BA.rules) ? 1 : 0);
+    if (!BA.points) return;
+    BA.score_limit = 0;
+    BA.respawn_steps = (uint16_t)OW_RTS_POINTS_BACK;
+    BA.unlimited = 0;
 }
 
 static int ba_env_on(const char *name)
@@ -463,6 +475,7 @@ void ow_match_start(void)
         BA.respawn_steps = 180;
         BA.time_limit_steps = (uint32_t)ow_rules_rts_limit_steps(BA.rules);
         BA.unlimited = t == OW_RTS_TIME_NONE;
+        ba_points_rules();
     } else if (rts) {               /* VS CPU: the page's choice (rts.c); tests may shorten the clock */
         int t, k, test_secs = env_int("RECOMP_RTS_TEST_SECONDS", 0);
         BA.rules = (uint8_t)rts_offline_rules();
@@ -471,6 +484,7 @@ void ow_match_start(void)
         BA.respawn_steps = 180;
         BA.time_limit_steps = (uint32_t)ow_rules_rts_limit_steps(BA.rules);
         BA.unlimited = t == OW_RTS_TIME_NONE;
+        ba_points_rules();
         if (test_secs > 0 && !ffny_online_locked()) {
             BA.time_limit_steps = 60u * (uint32_t)test_secs;
             fprintf(stderr, "[RTS] RECOMP_RTS_TEST_SECONDS (tests): the clock ends after %d s\n", test_secs);
@@ -510,6 +524,7 @@ void ow_match_start(void)
         fprintf(stderr, "[RTS] Run the Streets fight%s on %s (feID %d): %d spawn points (hash %08X)\n",
                 online ? " (online)" : "", m.code[0] ? m.code : "?", m.fe_id, SP.n, BA.spawn_hash);
     }
+    if (BA.points) fprintf(stderr, "[BIGARENA] Points round mode: no KO target, a knockout scores and the fighter is up again after %u steps\n", BA.respawn_steps);
     fprintf(stderr, "[BIGARENA] on: first to %u knockouts, back after %u steps, time limit %u steps%s, camera %s, "
             "BLAZIN' %s, free roam %s (after %u calm steps, speed %u%%)%s\n", BA.score_limit, BA.respawn_steps,
             BA.time_limit_steps, BA.unlimited ? " (no time limit: the safety end)" : "", k_ba_camera[BAcfg.camera % 3],
@@ -726,7 +741,7 @@ static void bigarena_step(void)
     for (s = 0; s < 4; s++)
         if ((pres & (1u << s)) && BA.down[s] && BA.step - BA.down_at[s] >= BA.respawn_steps &&
             (MEM16(rec(s) + 0x932u) & ENDED))
-            ba_revive(s, 1);
+            ba_revive(s, !BA.points);       /* Points: up again where it fell; else at a spawn point */
     cpu_idle_step(pres);
 }
 
@@ -1064,6 +1079,7 @@ int ow_hud_view(OwHudView *out)
     if (!BA.on) return 0;
     out->on = 1;
     out->score_limit = BA.score_limit;
+    out->points = BA.points;
     out->present = ba_present();
     for (s = 0; s < 4; s++) {
         out->score[s] = BA.score[s];
@@ -1163,6 +1179,37 @@ static void followcam_init(void)
 
 static float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 
+/* Build 95: this PC's camera options in Run the Streets ([openworld] camera_distance near / normal / far and fov,
+ * the horizontal field of view in degrees, 0 the game's own). Host memory and the render camera only: the fight
+ * never reads them, so PCs with other choices keep equal checksums. Read every 2 s (the settings page may change
+ * them mid-fight). */
+static struct { unsigned long long at; float dist_scale; int fov; } CAMcfg = { 0, 1.0f, 0 };
+static int s_cam_live;      /* the follow camera set this frame's render camera (ow_camera) */
+static void camcfg_read(void)
+{
+    unsigned long long now = GetTickCount64();
+    int d, fov;
+    if (CAMcfg.at && now - CAMcfg.at < 2000u) return;
+    CAMcfg.at = now;
+    d = recomp_settings_get("openworld", "camera_distance", 1);
+    CAMcfg.dist_scale = d == 0 ? 0.72f : d == 2 ? 1.4f : 1.0f;
+    fov = recomp_settings_get("openworld", "fov", 0);
+    CAMcfg.fov = fov <= 0 ? 0 : fov < 30 ? 30 : fov > 110 ? 110 : fov;
+}
+
+#define VIEWS_OW 0x002FB148u    /* the view list; slot 4 is the scene's (sub_000443D0), its viewport at +0x34 */
+int ow_render_fov(uint32_t vp, float *fov)
+{
+    uint32_t view;
+    if (!s_cam_live || !BA.on || !BA.rts) return 0;
+    camcfg_read();
+    if (CAMcfg.fov <= 0) return 0;
+    view = MEM32(VIEWS_OW + 4u * 4u);
+    if (vp && (view < 0x10000u || MEM32(view + 0x34u) != vp)) return 0;
+    *fov = (float)CAMcfg.fov;
+    return 1;
+}
+
 /* Big Arena's camera setting ([openworld] camera: stock, follow (default), behind) when no RECOMP_OW_FOLLOWCAM test
  * switch says otherwise: the follow camera runs in a Big Arena fight only, and only while the fight's own steps run
  * (match state 5 or 8): the intro, the special-move camera of a BLAZIN' (state 7), the knockout and the results keep
@@ -1176,6 +1223,11 @@ static int followcam_wanted(void)
         C.behind = BAcfg.camera == 2;
         C.dist = C.behind ? 90.0f : 140.0f;
         C.height = C.behind ? 45.0f : 90.0f;
+        if (BA.rts) {       /* build 95: near / normal / far */
+            camcfg_read();
+            C.dist *= CAMcfg.dist_scale;
+            C.height *= CAMcfg.dist_scale;
+        }
         C.slot = 0;
     }
     st = MEM32(MATCH_STATE);
@@ -1189,10 +1241,21 @@ void ow_camera(void (*gen)(void))
     uint32_t r;
     float at[3], eye[3];
     gen();
+    s_cam_live = 0;
     if (!followcam_wanted()) { rts_social_camera(); return; }
     slot = netplay_local_slot();
     if (slot < 0 || slot > 3) slot = C.slot;
     if (!present(slot)) { rts_social_camera(); return; }
+    s_cam_live = 1;
+    {
+        static int logged_fov = -1;
+        float lf;
+        if (ow_render_fov(0, &lf) && (int)lf != logged_fov) {
+            logged_fov = (int)lf;
+            fprintf(stderr, "[OWCAM] Run the Streets field of view %d (render camera only), distance x%.2f\n", logged_fov,
+                    (double)CAMcfg.dist_scale);
+        }
+    }
     r = rec(slot);
     at[0] = MEMF(r + 0x44u); at[1] = MEMF(r + 0x48u) + 16.0f; at[2] = MEMF(r + 0x4Cu);
     if (!netplay_rerunning()) {         /* host smoothing: only once per real step */
