@@ -129,7 +129,7 @@ def test_room_slots_are_apart_from_match_fighters():
     assert re.search(r'pos_of_slot\[ROOMSLOTS\]', NETPLAY_C)
     assert re.search(r'b\[6\] < ROOMSLOTS \? N\.pos_of_slot\[b\[6\]\]', NETPLAY_C)
     assert re.search(r'#define SLOTS\s+NETPLAY_ROOM_SLOTS', VOICE_C)
-    init = re.search(r's_player_vol\[SLOTS\] = \{([^}]*)\}', VOICE_C).group(1)
+    init = re.search(r's_slot_pct\[SLOTS\] = \{([^}]*)\}', VOICE_C).group(1)
     assert init.count('100') == c_define(NETPLAY_H, 'NETPLAY_ROOM_SLOTS')
 
 
