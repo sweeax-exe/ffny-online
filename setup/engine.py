@@ -2271,13 +2271,42 @@ def main(argv=None):
     parser.add_argument('--log')
     parser.add_argument('--status-file')
     parser.add_argument('--cancel-file')
+    # The macOS and Linux wizards (upstream's) speak the release-picker interface. FFNY Online's setup
+    # installs only the version it carries (the game's launcher updates it), so these map onto that:
+    # an operation is checked against the installation, --bundled-only is what always happens, the
+    # release list holds the bundled version alone and --release is refused.
+    parser.add_argument('--operation', choices=['auto', 'install', 'repair', 'update', 'downgrade', 'rebuild'],
+                        default='auto', help='install needs an empty folder; the others an existing installation')
+    parser.add_argument('--bundled-only', action='store_true', help='Install the version this setup carries (always)')
+    parser.add_argument('--release', help=argparse.SUPPRESS)
+    parser.add_argument('--list-releases', action='store_true', help='Wizard: the versions this setup can install')
+    parser.add_argument('--releases-file', help='Wizard: write --list-releases there instead of stdout')
     args = parser.parse_args(argv)
     engine = None
     try:
         if args.identify or args.find_games or args.plan_folder:
             return wizard_question(args)
+        if args.list_releases:
+            listing = {'bundled': verify_payload(Path(args.payload))['version'], 'releases': []}
+            if args.releases_file:
+                write_json(Path(args.releases_file), listing)
+            else:
+                print(json.dumps(listing))
+            return 0
+        if args.release:
+            raise SetupError('This setup installs the version it carries; the game updates itself from its launcher', 2)
         if not args.install_dir:
             raise SetupError('--install-dir is required', 2)
+        receipt_path = Path(args.install_dir) / 'installed.json'
+        if args.operation == 'install' and receipt_path.is_file():
+            raise SetupError('This location is already installed; choose Repair or Update', 2)
+        if args.operation not in ('auto', 'install') and not args.uninstall:
+            if not receipt_path.is_file():
+                raise SetupError('Choose an existing installation for this operation', 2)
+            if not args.data_dir:
+                args.data_dir = json.loads(receipt_path.read_text(encoding='utf-8'))['data']
+            if not args.dump:
+                args.reuse_extracted = True     # the game files this installation already extracted
         if args.uninstall:
             verify_payload(Path(args.payload))
             uninstall(args.install_dir)

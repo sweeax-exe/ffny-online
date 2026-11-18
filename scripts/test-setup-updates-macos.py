@@ -79,37 +79,19 @@ def main():
         lines=marker.read_text().splitlines();assert lines==[expected,str(data),receipt['source']],lines
         reports.append(dict(case=label,version=expected,exit_code=result.returncode,seconds=round(time.time()-started,2),actual_launcher=lines,source=receipt['source']))
         (work/'results.json').write_text(json.dumps(dict(**metadata,results=reports),indent=2))
-    assert len({r['source'] for r in reports})==5,'Every attempt must be isolated'
-    # Faults run through the real engine, signed app staging and receipt publication.
-    for point in ('prepared', 'launcher', 'receipt-json'):
-        before=json.loads((app/'installed.json').read_text())
-        worker=work/('fault-'+point+'.py')
-        worker.write_text("import importlib.util,os,sys\nspec=importlib.util.spec_from_file_location('engine',sys.argv[1]);e=importlib.util.module_from_spec(spec);spec.loader.exec_module(e)\ne.transaction.HOOK=lambda name:os._exit(91) if name==sys.argv[2] else None\nsys.exit(e.main(sys.argv[3:]))\n")
-        command=[a/'python/bin/python3','-B',worker,a/'engine/engine.py',point,'--payload',a,'--operation','rebuild','--install-dir',app,'--data-dir',data,'--no-shortcuts']
-        with (work/('fault-'+point+'.out')).open('w') as out:
-            stopped=subprocess.run(list(map(str,command)),stdout=out,stderr=subprocess.STDOUT)
-        assert stopped.returncode==91 and (app/'.setup-transaction').exists()
-        recovery="import importlib.util,sys;spec=importlib.util.spec_from_file_location('engine',sys.argv[1]);e=importlib.util.module_from_spec(spec);spec.loader.exec_module(e);e.transaction.Activation(sys.argv[2],sys.argv[3]).recover()"
-        subprocess.run(list(map(str,[a/'python/bin/python3','-B','-c',recovery,a/'engine/engine.py',app,data])),check=True)
-        assert json.loads((app/'installed.json').read_text())==before
-        for name,sha in sentinels.items():assert hashlib.sha256((data/name).read_bytes()).hexdigest()==sha
-        subprocess.run([app/'Def Jam Recompiled.app/Contents/MacOS/DefJamLauncher'],check=True)
-        assert (data/'launcher-marker.txt').read_text().splitlines()==['0.8.0',str(data),before['source']]
-        reports.append(dict(case='hard-exit-'+point,recovered=True,exit_code=91,actual_source=before['source']))
-    # Exercise a real parent→selected-engine handoff with the target's bundled Python.
-    spec=importlib.util.spec_from_file_location('selected_releases',args.payload/'engine/releases.py')
-    release_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(release_module)
-    for label,package,op in [('selected-update',b,'update'),('selected-downgrade',a,'downgrade')]:
-        chosen=argparse.Namespace(install_dir=str(app),data_dir=str(data),dump=None,operation=op,toolchain='auto',
-                                 log=str(work/(label+'.log')),status_file=None,cancel_file=None,no_shortcuts=True)
-        code=release_module.run_selected(chosen,'macos-arm64',package,lambda:None)
-        assert code==0
-        receipt=json.loads((app/'installed.json').read_text());expected=json.loads((package/'manifest.json').read_text())['version']
-        assert receipt['version']==expected
-        for name,sha in sentinels.items():assert hashlib.sha256((data/name).read_bytes()).hexdigest()==sha
-        subprocess.run([app/'Def Jam Recompiled.app/Contents/MacOS/DefJamLauncher'],check=True)
-        lines=(data/'launcher-marker.txt').read_text().splitlines();assert lines==[expected,str(data),receipt['source']]
-        reports.append(dict(case=label,version=expected,exit_code=code,actual_launcher=lines,source=receipt['source']))
+    # FFNY Online's engine keeps one folder per version (a repeat of the same version resumes it) and has
+    # no activation journal or release handoff: upstream's fault-injection and selected-engine cases test
+    # code this fork does not carry (see UPSTREAM_UPDATER_SKIP in tests/unit/test_setup_updates.py).
+    assert len({r['source'] for r in reports})==2,'One folder per version'
+    # A first installation into an installed folder, and an update of nothing, are refused.
+    for label,argv_extra,install_dir in [('install-over-existing',['--operation','install','--dump',dump],app),
+                                         ('update-without-install',['--operation','update'],work/'empty-app')]:
+        argv=[a/'python/bin/python3','-B',a/'engine/engine.py','--payload',a,'--bundled-only','--install-dir',install_dir,'--data-dir',data,'--no-shortcuts',*argv_extra]
+        with (work/(label+'.out')).open('w') as out:
+            refused=subprocess.run(list(map(str,argv)),stdout=out,stderr=subprocess.STDOUT)
+        assert refused.returncode==2,(label,refused.returncode)
+        for name,sha in sentinels.items():assert hashlib.sha256((data/name).read_bytes()).hexdigest()==sha,name
+        reports.append(dict(case=label,refused=True,exit_code=refused.returncode))
     (work/'results.json').write_text(json.dumps(dict(**metadata,results=reports),indent=2))
     print(json.dumps(reports,indent=2))
 
