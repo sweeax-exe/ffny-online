@@ -422,6 +422,8 @@ int netplay_fighter_loadable(int fighter)
                                  * consent is per match, T_P2P is sent only while [online] p2p_direct is on (netplay_p2p.h) */
 /* build 86: CAPS_UNLIMITED unless a test plays an older game (RECOMP_TEST_NO_UNLIMITED) */
 #define CAPS_UNLIMITED_OPT (getenv("RECOMP_TEST_NO_UNLIMITED") ? 0u : CAPS_UNLIMITED)
+/* build 96: CAPS_SKINSWIDE unless a test plays a game without it (RECOMP_TEST_NO_SKINSWIDE) */
+#define CAPS_SKINSWIDE_OPT (getenv("RECOMP_TEST_NO_SKINSWIDE") ? 0u : CAPS_SKINSWIDE)
 
 /* The CAPS word this client announces in T_CAPS (its put32 there lists the same bits; F0: RINGS carries it, so a
  * relay lists the rings this game can join) */
@@ -430,7 +432,7 @@ uint32_t netplay_client_caps(void)
     return CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
            CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
            CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
-           CAPS_SKINS | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED;
+           CAPS_SKINS | CAPS_SKINSWIDE_OPT | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED;
 }
 #define CP_WAIT_MS   10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
@@ -5026,8 +5028,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
                               CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
-                              CAPS_SKINS | (getenv("RECOMP_TEST_NO_SKINSWIDE") ? 0u : CAPS_SKINSWIDE) | CAPS_RTS_POINTS | CAPS_XPLAY_OPT |
-                              CAPS_HILL_CREATED); n += 4;
+                              CAPS_SKINS | CAPS_SKINSWIDE_OPT | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
