@@ -63,6 +63,10 @@ static void scene_lens(float *fov, float *aspect)
     } else {
         *aspect = WS_DESIGN_ASPECT;
     }
+    {   /* build 95: [openworld] fov replaces it, as ws_view_params does */
+        float of;
+        if (vp >= 0x10000u && ow_render_fov(vp, &of)) f = of > ws_fov_cap() ? ws_fov_cap() : of;
+    }
     *fov = f;
     if (s_lens_logged < 6 && fabsf(f - s_lens_last) > 0.5f) {
         s_lens_logged++;

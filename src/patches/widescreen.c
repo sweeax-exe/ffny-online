@@ -17,6 +17,7 @@
 #include "recomp_settings.h"
 #include "d3d8_present.h"
 #include "hooks/recorder.h"
+#include "hooks/openworld.h"
 
 static float g_aspect;          /* 0 = off */
 static float g_k = 1.0f;
@@ -288,6 +289,12 @@ void ws_view_params(uint32_t vp, uint32_t mode, uint32_t pfov, uint32_t pasp, ui
         }
         MEMF(py) = y;
         MEMF(ph) = h;
+    }
+    /* build 95: Run the Streets' own field of view ([openworld] fov) for the scene, while its follow camera runs:
+     * the projection only, never the fight's camera state */
+    if (full && mode != 1) {
+        float of;
+        if (ow_render_fov(vp, &of)) MEMF(pfov) = of > g_fov_cap ? g_fov_cap : of;
     }
     if (a > 0.0f && logged[mode]++ < 4)
         fprintf(stderr, "[WS] view mode %u %s: fov %.2f -> %.2f, aspect %.4f, y %.1f h %.1f\n",

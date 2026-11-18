@@ -82,7 +82,8 @@ def test_anything_else_reads_as_the_defaults(out):
     dec = {int(b): (v, t, k) for b, v, t, k in rows(out, 'dec')}
     valid = {b for b, (v, _, _) in dec.items() if v == '1'}
     # 0 and the twelve set bytes (0x85, the defaults spelled out, reads as the defaults too)
-    assert valid == {0} | {0x80 | t | (k << 2) for t in range(4) for k in range(3)}
+    # build 95: and the three Points bytes (0x90 | time index 0..2 | the default KO index), never without a clock
+    assert valid == {0} | {0x80 | t | (k << 2) for t in range(4) for k in range(3)} | {0x90 | t | (1 << 2) for t in range(3)}
     for b, (v, t, k) in dec.items():
         if v == '0' or b == 0:
             assert (t, k) == ('1', '1')

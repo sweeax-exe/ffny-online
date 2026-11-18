@@ -206,6 +206,7 @@ int netplay_rts_rules(void) { return 0; }
 int netplay_rts_room(void) { return 0; }
 int netplay_fighter_of_room_slot(int s) { (void)s; return -1; }
 int netplay_relay_rts(void) { return 0; }
+int netplay_relay_rts_points(void) { return 0; }
 int netplay_delay_info(NetDelayInfo *o) { if (o) memset(o, 0, sizeof(*o)); return 0; }
 void netplay_on_seed(uint32_t e, int w, uint32_t x) { (void)e; (void)w; (void)x; }
 void netplay_on_result(uint32_t w, uint32_t l, uint32_t c) { (void)w; (void)l; (void)c; }
@@ -359,6 +360,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                  * with the players' numbers, START (WATCH, WATCHLATE) after the skins with the match's
                                  * numbers; the relay keeps one only where every member announced this bit and has the
                                  * room's content print (server docs/unlimited-fighters-online.md) */
+#define CAPS_RTS_POINTS 1073741824u /* 1 << 30 (build 95), both ways: a Run the Streets room's rounds byte may carry the
+                                     * Points round mode (OW_RTS_POINTS); the relay keeps it (NETPLAY_CAP_RTS_POINTS) */
 #define CAPS_RELAYS   268435456u /* 1 << 28 (build 91), both ways: the pings to the relays beyond the first three
                                  * (South America...): QUICK's and the long RANKED's pings get a trailer (a count, then
                                  * u16 each, netservers_put_more_pings), and ROOMLIST's listed pings too (server
@@ -1004,6 +1007,10 @@ int netplay_fighter_of_room_slot(int slot)
     return pos >= 0 && pos < MAXP && pos < N.players ? pos : -1;
 }
 int netplay_relay_rts(void) { return N.relay_caps > 0 && (N.relay_caps & NETPLAY_CAP_RTS) != 0; }
+int netplay_relay_rts_points(void)
+{
+    return netplay_relay_rts() && ((uint32_t)N.relay_caps & CAPS_RTS_POINTS) != 0;
+}
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
 {
@@ -4986,7 +4993,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
                               CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
-                              CAPS_SKINS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                              CAPS_SKINS | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -7407,8 +7414,10 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 const char *tt = getenv("RECOMP_TEST_RTS_RULES");
                 if (tt && *tt && strchr(tt, ',') && r.in_room && r.phase == 0 && r.you == r.host && !N.match_live &&
                     NETPLAY_IS_RTS(r.settings.mode)) {
-                    int want_rules = ow_rules_rts_encode(ow_rules_rts_time_index(atoi(tt) * 60),
-                                                         ow_rules_rts_ko_index(atoi(strchr(tt, ',') + 1)));
+                    /* build 95: a third field "points" (",points") asks for the Points round mode */
+                    int want_rules = ow_rules_rts_encode_mode(ow_rules_rts_time_index(atoi(tt) * 60),
+                                                              ow_rules_rts_ko_index(atoi(strchr(tt, ',') + 1)),
+                                                              strstr(tt, "points") != NULL);
                     if (r.settings.rounds != want_rules) {
                         static ULONGLONG asked;
                         if (r.player_count >= 2 && GetTickCount64() - asked > 1000) {

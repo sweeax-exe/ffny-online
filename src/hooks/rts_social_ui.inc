@@ -252,7 +252,8 @@ void rts_world_paint(ImDrawList *dl, ImVec2 display, const RtsSocialView &v, con
 // ---- build 88: nameplates over the heads and the minimap ---------------------------------------------------------
 // Drawing only, from the view the game thread copied (rts_social.c): nothing reaches a fight's input or checksums.
 // [openworld] nameplates (on), nameplate_self (off), minimap (on), minimap_range (70 m), combat_pings (on, build 91).
-struct RtsOverlayCfg { bool plates = true, plate_self = false, map = true, pings = true; float range_m = 70.0f; };
+// build 95: minimap_team (on).
+struct RtsOverlayCfg { bool plates = true, plate_self = false, map = true, pings = true, team = true; float range_m = 70.0f; };
 RtsOverlayCfg rts_overlay_cfg()
 {
     static RtsOverlayCfg c;
@@ -265,9 +266,54 @@ RtsOverlayCfg rts_overlay_cfg()
         c.map = recomp_settings_get("openworld", "minimap", 1) != 0;
         c.range_m = (float)recomp_settings_get("openworld", "minimap_range", 70);
         c.pings = recomp_settings_get("openworld", "combat_pings", 1) != 0;
+        c.team = recomp_settings_get("openworld", "minimap_team", 1) != 0;
     }
     return c;
 }
+
+// Build 95: this PC's side on the minimap. crew: the fighters of players in this account's crew (the room's names
+// against the crew roster, social.cpp); team: in a Team match (2 vs 2: slots 0 and 1 against 2 and 3) the partner.
+// Display only. Tests: RECOMP_RTS_TEAM_TEST=<crew mask>[,<team mask>] marks slots (offline CPUs among them).
+struct RtsSides { uint32_t crew = 0, team = 0; };
+RtsSides rts_sides(const RtsSocialView &v, int me)
+{
+    RtsSides out;
+    if (gallery_on()) { out.crew = 1u << 2; return out; }
+    if (const char *t = getenv("RECOMP_RTS_TEAM_TEST")) {
+        if (*t) {
+            out.crew = (uint32_t)strtoul(t, nullptr, 0) & 0xFu;
+            if (const char *c = strchr(t, ',')) out.team = (uint32_t)strtoul(c + 1, nullptr, 0) & 0xFu;
+            if (me >= 0) { out.crew &= ~(1u << me); out.team &= ~(1u << me); }
+            return out;
+        }
+    }
+    NetVersus nv;
+    if (!netplay_match_info(&nv)) return out;
+    if (nv.type == ONLINE_MODE_TEAM && nv.count == 4 && me >= 0 && me < 4) out.team = 1u << (me ^ 1);
+    static social::View sv;
+    static bool have;
+    static unsigned long long at;
+    unsigned long long now = GetTickCount64();
+    if (!at || now - at > 2000) {
+        at = now;
+        if (social::snapshot(sv, have ? sv.version : 0xFFFFFFFFu)) have = true;
+    }
+    if (!have || !sv.crew) return out;
+    auto same = [](const std::string &a, const char *b) {
+        size_t n = strlen(b);
+        if (a.size() != n || !n) return false;
+        for (size_t i = 0; i < n; i++)
+            if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) return false;
+        return true;
+    };
+    for (int s = 0; s < nv.count && s < 4; s++) {
+        if (s == me || nv.cpu[s] || !nv.name[s][0] || !(v.present & (1u << s))) continue;
+        for (const social::CrewMember &m : sv.crew_roster)
+            if (same(m.name, nv.name[s])) { out.crew |= 1u << s; break; }
+    }
+    return out;
+}
+const ImU32 k_rts_crew_col = IM_COL32(70, 150, 255, 255), k_rts_team_col = IM_COL32(80, 215, 110, 255);
 
 const ImU32 k_rts_slot_col[4] = { IM_COL32(235, 64, 64, 255), IM_COL32(70, 150, 255, 255), IM_COL32(90, 210, 90, 255),
                                   IM_COL32(245, 215, 60, 255) };
@@ -368,14 +414,29 @@ void rts_minimap(ImDrawList *dl, const Frame &f, const RtsSocialView &v, float r
             }
         }
     }
+    // build 95 (minimap_team): only this PC's side always, in its colour (crew blue, team green); everyone else
+    // only through the red combat pings above
+    RtsSides side = c.team ? rts_sides(v, me) : RtsSides();
+    {
+        static uint32_t logged = 0xFFFFFFFFu;
+        uint32_t key = c.team ? (side.crew | side.team << 4) : 0x100u;
+        if (key != logged && !gallery_on()) {
+            logged = key;
+            fprintf(stderr, "[RTSMAP] minimap: %s (crew %X, team %X)\n",
+                    c.team ? "your side always, the others by their combat pings" : "every fighter", side.crew, side.team);
+        }
+    }
     for (int pass = 0; pass < 2; pass++)        // CPUs first, the humans over them
         for (int s = 0; s < 4; s++) {
             if (!(v.present & (1u << s)) || s == me) continue;
-            bool cpu = (v.cpu >> s) & 1u;
+            bool mate = ((side.crew | side.team) >> s) & 1u;
+            if (c.team && !mate) continue;
+            bool cpu = ((v.cpu >> s) & 1u) && !mate;
             if ((pass == 0) != cpu) continue;
             float mx, my;
             int rim = rts_minimap_point(fx, fz, lx, lz, v.pos[s][0], v.pos[s][2], scale, half - 3, &mx, &my);
-            ImU32 col = cpu ? IM_COL32(150, 150, 150, 230) : k_rts_slot_col[s];
+            ImU32 col = cpu ? IM_COL32(150, 150, 150, 230) : !c.team ? k_rts_slot_col[s]
+                      : ((side.team >> s) & 1u) ? k_rts_team_col : k_rts_crew_col;
             if (rim) {
                 float l = sqrtf(mx * mx + my * my), ux = mx / l, uy = my / l, tx = cx + mx, ty = cy + my;
                 ImVec2 tri[3] = { f.p(tx + ux * 3.5f, ty + uy * 3.5f), f.p(tx - uy * 2.6f - ux * 2, ty + ux * 2.6f - uy * 2),

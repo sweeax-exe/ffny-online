@@ -137,7 +137,10 @@ static const int k_rts_kos[OW_RTS_KOS] = { 5, 10, 20 };
 int ow_rules_rts_valid(int byte)
 {
     if (byte == 0) return 1;
-    if (byte < 0 || byte > 0xFF || (byte & 0xF0) != OW_RTS_RULES_SET) return 0;
+    if (byte < 0 || byte > 0xFF) return 0;
+    if ((byte & 0xF0) == (OW_RTS_RULES_SET | OW_RTS_POINTS))    /* build 95: Points needs a clock and keeps no KO target */
+        return (byte & 3) != OW_RTS_TIME_NONE && ((byte >> 2) & 3) == OW_RTS_DEFAULT_KOS;
+    if ((byte & 0xF0) != OW_RTS_RULES_SET) return 0;
     return ((byte >> 2) & 3) < OW_RTS_KOS;
 }
 
@@ -147,6 +150,18 @@ int ow_rules_rts_encode(int time_idx, int ko_idx)
     if (ko_idx < 0 || ko_idx >= OW_RTS_KOS) ko_idx = OW_RTS_DEFAULT_KOS;
     if (time_idx == OW_RTS_DEFAULT_TIME && ko_idx == OW_RTS_DEFAULT_KOS) return 0;
     return OW_RTS_RULES_SET | time_idx | (ko_idx << 2);
+}
+
+int ow_rules_rts_encode_mode(int time_idx, int ko_idx, int points)
+{
+    if (!points) return ow_rules_rts_encode(time_idx, ko_idx);
+    if (time_idx < 0 || time_idx >= OW_RTS_TIMES || time_idx == OW_RTS_TIME_NONE) time_idx = OW_RTS_DEFAULT_TIME;
+    return OW_RTS_RULES_SET | OW_RTS_POINTS | time_idx | (OW_RTS_DEFAULT_KOS << 2);
+}
+
+int ow_rules_rts_points(int byte)
+{
+    return byte != 0 && ow_rules_rts_valid(byte) && (byte & OW_RTS_POINTS) != 0;
 }
 
 void ow_rules_rts_decode(int byte, int *time_idx, int *ko_idx)
@@ -195,6 +210,7 @@ int ow_rules_rts_text(int byte, char *out, int size)
     if (!out || size <= 0) return 0;
     ow_rules_rts_decode(byte, &t, &k);
     s = ow_rules_rts_seconds(t);
+    if (ow_rules_rts_points(byte)) return snprintf(out, (size_t)size, "%d MIN  -  POINTS", s / 60);
     if (s > 0) return snprintf(out, (size_t)size, "%d MIN  -  FIRST TO %d", s / 60, ow_rules_rts_kos(k));
     return snprintf(out, (size_t)size, "NO TIME LIMIT  -  FIRST TO %d", ow_rules_rts_kos(k));
 }

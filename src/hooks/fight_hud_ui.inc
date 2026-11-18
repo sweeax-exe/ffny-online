@@ -431,7 +431,10 @@ void fh_arena(ImDrawList *dl, ImVec2 display)
     dl->AddRectFilled(f.p(x0, top), f.p(x0 + w, top + 38), dark, 4 * f.s());
     dl->AddRectFilled(f.p(x0, top + 36), f.p(x0 + w, top + 38), with_alpha(GOLD, 0.85f));
     char line[48];
-    snprintf(line, sizeof line, "%s  -  FIRST TO %d", ow_rts_active() ? "RUN THE STREETS" : "BIG ARENA", a.score_limit);
+    if (a.points)       // build 95: the Points round mode has no KO target, the clock ends it
+        snprintf(line, sizeof line, "%s  -  MOST POINTS WINS", ow_rts_active() ? "RUN THE STREETS" : "BIG ARENA");
+    else
+        snprintf(line, sizeof line, "%s  -  FIRST TO %d", ow_rts_active() ? "RUN THE STREETS" : "BIG ARENA", a.score_limit);
     text(dl, f, g_body, 8.5f, 320, top + 2, with_alpha(CREAM, 0.8f), line, CENTER, 0);
     float x = x0 + 8;
     for (int s = 0; s < 4; s++) {
@@ -471,7 +474,7 @@ void fh_arena(ImDrawList *dl, ImVec2 display)
     }
     // this PC's fighter is down: the count back
     int me = a.local;
-    if (!a.ending && ((a.down >> me) & 1)) {
+    if (!a.ending && !a.points && ((a.down >> me) & 1)) {      // (Points: up again at once, no count)
         int secs = (a.back_in[me] + 59) / 60;
         fh_band(dl, f, 228, 0.85f, 0.7f);
         text(dl, f, g_body, 13, 320, 196, CREAM, "KNOCKED OUT", CENTER, 1.2f);

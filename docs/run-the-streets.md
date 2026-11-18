@@ -159,12 +159,33 @@ Overlay only (`rts_social_ui.inc`, from the view `rts_social.c` copies each fram
   fading out (`rts_ping_alpha`, unit-tested); every new hit refreshes it. Beyond `minimap_range` it is a larger red
   arrow on the rim, pointing the way (the same clamp as the grey arrows). This PC's own fighter is not pinged. Only a
   time per slot in host memory (`rts_social_combat`), read by the overlay: no network data, nothing the fight reads,
-  so lockstep and rollback do not see it. `[openworld] combat_pings` (on). Crew colours: not done (the mode does not
-  carry crews yet).
+  so lockstep and rollback do not see it. `[openworld] combat_pings` (on). Crew colours: build 95 (next item).
+- **Your side always, the rest by their pings (build 95):** with `[openworld] minimap_team` (on) the minimap always
+  shows the players of your crew (blue: the room's names against your crew roster, `rts_sides`) and, in a Team match,
+  your partner (green); everyone else, CPUs too, only while their red combat ping lasts. Off: every fighter as before.
+  Run the Streets rooms are Free for All, so the team colour is for later modes. Display only.
 - **A real map image later:** the pack would carry a top-down picture (e.g. `minimap.png`, north up, 1024 px) and
   its world rectangle (`"minimap": {"image": "minimap.png", "x0": .., "z0": .., "x1": .., "z1": ..}` in
   bigarena.json), rendered by the map generator / Studio from the same scene; the minimap would draw it under the
   dots, turned and scaled with the same `rts_minimap_point`.
+
+## Points round mode and camera options (build 95)
+
+- **Points (no knockouts):** the room's ROUND MODE (after MODE; relays answering CAPS bit 30, `NETPLAY_CAP_RTS_POINTS`)
+  and VS CPU's (`[openworld] rts_round_mode` knockouts / points). `OW_RTS_POINTS` (0x10) in the rules byte: 0x90 | time
+  index | the default KO index (0x94, 0x95, 0x96 = 5, 10, 15 minutes; never without a clock). Nobody is out of the
+  round: a knockout gives the last hitter a point as before, and the fighter is back on its feet where it fell after
+  half a second (`OW_RTS_POINTS_BACK`, `ba_revive` without a spawn point: full health, 2 s protection). There is no KO
+  target (`BA.score_limit` 0); the clock ends the round, the most points win (ties: fewer times knocked out, then the
+  lower slot). Decided from the rules byte inside the step and kept in the checksummed Big Arena state (`BA.points`),
+  so lockstep and rollback see the same. The plate says MOST POINTS WINS. The relay keeps the byte (`RTSRules`,
+  `CapRTSPoints`); QUICK still only joins rooms at the defaults.
+- **Field of view and distance:** `[openworld] fov` (0 the game's own, about 43 degrees across at 16:9; 30..110, 50..90
+  usual) and `camera_distance` (near x0.72, normal, far x1.4 of the follow camera's distance and height), in the
+  launcher's Basics under Run the Streets (only with access). The field of view goes into the scene viewport's
+  projection (`ws_view_params`, `ow_render_fov`) only while the follow camera runs in a Run the Streets fight; the
+  overlays' lens follows it. Nothing the fight reads changes, so PCs with other choices keep equal checksums. There
+  is no in-game pause menu for Run the Streets yet.
 
 ## Test switches
 
@@ -175,7 +196,9 @@ Overlay only (`rts_social_ui.inc`, from the view `rts_social.c` copies each fram
 | `RECOMP_RTS_TEST_FIGHT=1` | every offline fight on the map plays by Run the Streets rules (with an automatch) |
 | `RECOMP_RTS_TIME_LIMIT=<min>`, `RECOMP_RTS_KO_TARGET=<n>` | VS CPU's round rules (the `[openworld]` settings) |
 | `RECOMP_RTS_TEST_SECONDS=<s>` | offline tests: the clock ends a Run the Streets fight after s seconds (never online) |
-| `RECOMP_TEST_RTS_RULES=<min>,<kos>` | online tests: the host sets its Run the Streets room's round rules |
+| `RECOMP_TEST_RTS_RULES=<min>,<kos>[,points]` | online tests: the host sets its Run the Streets room's round rules |
+| `RECOMP_RTS_ROUND_MODE=points`, `RECOMP_OW_FOV=<deg>`, `RECOMP_OW_CAMERA_DISTANCE=far` | build 95's settings |
+| `RECOMP_RTS_TEAM_TEST=<crew mask>[,<team mask>]` | the minimap treats these slots as your crew / team (tests) |
 | `RECOMP_RTS_GAME_CLOCK=1` | keeps the game's own fight clock (top centre) in Run the Streets fights |
 | `RECOMP_ROLLBACK_RTS=1` | rollback in RTS fights (every copy) |
 | `RECOMP_RTS_VOICE_LOG=1`, `RECOMP_RTS_SOCIAL_TEST=1`, `RECOMP_RTS_TEST_*` | the social layer's logs and samples |

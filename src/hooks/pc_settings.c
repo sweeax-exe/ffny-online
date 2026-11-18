@@ -65,6 +65,8 @@ static const char *const k_ws_cutscenes[] = { "authored", "fill", NULL };
 static const char *const k_ws_fill[] = { "blur", "black", NULL };
 static const char *const k_crowd_near[] = { "fade", "hide", NULL };
 static const char *const k_ow_camera[] = { "stock", "follow", "behind", NULL };
+static const char *const k_ow_camera_distance[] = { "near", "normal", "far", NULL };   /* build 95 */
+static const char *const k_rts_round_mode[] = { "knockouts", "points", NULL };          /* build 95 */
 
 /* A four-fighter match holds about 2 GiB of replacements. At 512 MiB the cache evicted and
  * re-decoded dozens of textures every two seconds in a fight on the Steam Deck. */
@@ -263,6 +265,9 @@ static RecompSetting g_display_settings[] = {
       "Set on the Run the Streets page." },
     { "openworld", "rts_ko_target", RECOMP_SETTING_INT, 10, 5, 20, NULL, "RECOMP_RTS_KO_TARGET", 0,
       "Run the Streets VS CPU: knockouts to win: 5, 10 or 20. Set on the Run the Streets page." },
+    { "openworld", "rts_round_mode", RECOMP_SETTING_ENUM, 0, 0, 0, k_rts_round_mode, "RECOMP_RTS_ROUND_MODE", 0,
+      "Run the Streets VS CPU: knockouts (first to the KO target) or points (nobody is out: a knockout is a point and "
+      "the fighter is back up at once; the most points when the time is up wins). Set on the Run the Streets page." },
     { "openworld", "blazin", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_OW_BLAZIN", 0,
       "Big Arena: BLAZIN' moves. Off for now: a BLAZIN' on a map built with FFNY Studio crashes the game after the "
       "fight (being fixed)." },
@@ -277,6 +282,14 @@ static RecompSetting g_display_settings[] = {
     { "openworld", "combat_pings", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OW_COMBAT_PINGS", 0,
       "Run the Streets: a fighter who hits, is hit or grabs shows as a red dot on the minimap for about 3 seconds "
       "(on the rim as an arrow when far away), so you can see where the fighting is." },
+    { "openworld", "minimap_team", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OW_MINIMAP_TEAM", 0,
+      "Run the Streets: the minimap always shows the players of your crew (blue) and of your team (green); everyone "
+      "else only while they fight (the red combat pings). Off: every fighter is always on the minimap." },
+    { "openworld", "fov", RECOMP_SETTING_INT, 0, 0, 100, NULL, "RECOMP_OW_FOV", 0,
+      "Run the Streets: the camera's field of view, in degrees across the picture (50 to 90 is usual; 0: the game's "
+      "own, about 43 at 16:9). Wider shows more of the street. Only your PC sees it; the fight is the same everywhere." },
+    { "openworld", "camera_distance", RECOMP_SETTING_ENUM, 1, 0, 0, k_ow_camera_distance, "RECOMP_OW_CAMERA_DISTANCE", 0,
+      "Run the Streets: how far the camera stays from your fighter (near, normal, far). Only your PC sees it." },
     { "openworld", "free_roam", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OW_FREE_ROAM", 0,
       "Run the Streets / Big Arena: out of combat your fighter walks freely and faces where it goes; a fight button "
       "next to someone, a hit, or White/Black (or a right-stick flick) to lock on brings the fight stance back. "

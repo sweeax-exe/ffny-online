@@ -77,6 +77,7 @@ extern "C" {
 #include "voice.h"
 #include "online_screen.h"
 #include "rts_social_rules.h"
+#include "rts.h"
 #include "hd_build.h"
 #include "updater.h"
 #include "next_song.h"
@@ -2865,6 +2866,19 @@ static std::string server_line(const NetServerInfo &s)
                           "accounts and stats are shared. All servers: the rooms of every server in one list; matches across the ocean have higher ping.");
 }
 
+// Build 95: Run the Streets' own camera and minimap choices, for players who have the mode (rts_access; the launcher
+// app without the game has none of these settings and shows nothing). Only this PC sees them.
+static void rts_settings()
+{
+#ifndef DEFJAM_APP
+    if (!rts_access()) return;
+    if (!find("openworld", "fov")) return;
+    ImGui::SeparatorText("Run the Streets");
+    settings_group("openworld", { "fov", "camera_distance", "minimap_team" });
+    ImGui::TextDisabled("Only your PC sees these; the fight is the same for everyone. 0: the game's own field of view.");
+#endif
+}
+
 static void page_basics()
 {
     ImGui::SeparatorText("Picture");
@@ -2892,6 +2906,7 @@ static void page_basics()
     p2p_setting();
     ImGui::SeparatorText("Gameplay");
     offline_countdown_setting();
+    rts_settings();
     ImGui::SeparatorText("Community content");
     settings_group("content", { "community_offline" });
     ImGui::TextDisabled("Off: offline play has only the game's own fighters and venues, so your own mods do not clash with "

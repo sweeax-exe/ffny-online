@@ -21,7 +21,8 @@ uint32_t ow_state_hash(void);
 /* the overlay (fight_hud_ui.inc): the scores of a Big Arena fight, 0 when none runs */
 typedef struct OwHudView {
     int on;                 /* a Big Arena fight runs */
-    int score_limit;        /* first to this many knockouts wins */
+    int score_limit;        /* first to this many knockouts wins (0: none, the Points round mode) */
+    int points;             /* build 95: the Points round mode (no knockouts out of the round; the clock ends it) */
     int score[4], deaths[4];
     uint32_t present;       /* fighter slots in the fight (bit per slot) */
     uint32_t down;          /* slots knocked out and waiting to come back */
@@ -76,8 +77,17 @@ float ow_rules_view_heading(float eye_x, float eye_z, float at_x, float at_z);
 #define OW_RTS_DEFAULT_KOS    1         /* first to 10 */
 #define OW_RTS_TIME_NONE      3
 #define OW_RTS_SAFETY_SECONDS 1800      /* no time limit: still over after 30 minutes */
+/* Build 95: the round mode "Points (no knockouts)", OW_RTS_POINTS in the same byte: nobody is out of the round, a
+ * knockout gives the last hitter a point and the fighter is back on its feet at once where it fell (full health,
+ * the respawn protection), there is no KO target, and the most points when the clock runs out wins. It needs a
+ * time limit (5, 10 or 15 minutes; the KO bits stay the default's), so its bytes are 0x90 | time index | 1 << 2.
+ * Relays answering NETPLAY_CAP_RTS_POINTS keep it in a room's rounds byte. */
+#define OW_RTS_POINTS         0x10
+#define OW_RTS_POINTS_BACK    30u       /* steps from the knockout to standing up again (half a second) */
 int ow_rules_rts_valid(int byte);
 int ow_rules_rts_encode(int time_idx, int ko_idx);              /* the defaults are 0 */
+int ow_rules_rts_encode_mode(int time_idx, int ko_idx, int points); /* points: no KO target, never without a clock */
+int ow_rules_rts_points(int byte);                              /* 1: the Points round mode */
 void ow_rules_rts_decode(int byte, int *time_idx, int *ko_idx); /* invalid: the defaults */
 int ow_rules_rts_seconds(int time_idx);                         /* 300, 600, 900; 0 none */
 int ow_rules_rts_kos(int ko_idx);
@@ -107,6 +117,10 @@ void ow_roam_walk(void);
 
 /* Run the Streets (rts.c, openworld.c): the overlays and the voice read these. */
 int ow_rts_active(void);    /* a Run the Streets fight runs on this PC (offline or online) */
+/* Build 95: [openworld] fov for the scene viewport vp (0: any) while the follow camera runs in a Run the Streets
+ * fight: 1 and the horizontal field of view in degrees, 0 the game's own. The projection only (widescreen.c's
+ * ws_view_params and the overlays' lens), never anything the fight reads. */
+int ow_render_fov(uint32_t vp, float *fov);
 /* sub_001BAA00's entry after netplay_on_pad_read: every fighter at rest once the clock ended the fight (TIME!) */
 void ow_pad_hold(uint32_t actor);
 
