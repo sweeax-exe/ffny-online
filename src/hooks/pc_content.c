@@ -151,15 +151,19 @@ static int valid_id(const char *id)
 static int read_files_ini(const char *root, char *applied, size_t applied_size,
                           char (*files)[256], int max_files, int *nfiles)
 {
-    char path[1024], line[1200];
+    /* The applied line is as long as the list (build 94: 1200 characters cut it at about 70 packs, and the packs
+     * after the cut counted as not applied, the community ones out of the netplay print with them). */
+    size_t line_size = applied_size + 1200;
+    char path[1024], *line;
     FILE *f;
     int in_section = 0, ok = 0;
     if (applied_size) applied[0] = 0;
     if (nfiles) *nfiles = 0;
     if (!root) return 0;
     snprintf(path, sizeof path, "%s" HOST_SEP "%s" HOST_SEP "files.ini", root, composed_dir());
-    if (!(f = content_fopen(path, "rb"))) return 0;
-    while (fgets(line, sizeof line, f)) {
+    if (!(line = (char *)malloc(line_size))) return 0;
+    if (!(f = content_fopen(path, "rb"))) { free(line); return 0; }
+    while (fgets(line, (int)line_size, f)) {
         char *s = trim(line), *eq;
         if (*s == '[') { in_section = !strcmp(s, "[content-files]"); continue; }
         if (!in_section || !(eq = strchr(s, '='))) continue;
@@ -176,6 +180,7 @@ static int read_files_ini(const char *root, char *applied, size_t applied_size,
         }
     }
     fclose(f);
+    free(line);
     if (!ok) { if (applied_size) applied[0] = 0; if (nfiles) *nfiles = 0; }
     return ok;
 }

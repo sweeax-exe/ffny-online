@@ -106,3 +106,28 @@ def test_the_print_is_the_same_on_every_thread(driver, tmp_path):
     assert rows['print'] != '00000000'
     assert int(rows['calls']) == 5 * 400
     assert rows['bad'] == '0', got.stdout
+
+
+def test_a_long_applied_line_is_read_whole(driver, tmp_path):
+    """300 packs: the applied line is far over 1200 characters. A pack at its end must count (build 94)."""
+    packs = 300
+
+    def run(name, applied_count):
+        data = tmp_path / name
+        (data / 'mod-manager' / 'content-files').mkdir(parents=True)
+        for i in range(packs):
+            (data / 'mods' / ('studio-pack-%d' % i)).mkdir(parents=True)
+        (data / 'mod-manager' / 'content.ini').write_text(content_ini(packs), encoding='utf-8')
+        applied = ','.join('studio-pack-%d' % i for i in range(applied_count))
+        (data / 'mod-manager' / 'content-files' / 'files.ini').write_text(
+            '[content-files]\nschema=1\napplied=%s\n' % applied, encoding='utf-8')
+        env = {k: v for k, v in os.environ.items() if not k.startswith('RECOMP_')}
+        env['DEFJAM_DATA'] = str(data)
+        env['RECOMP_SETTINGS'] = 'none'
+        got = subprocess.run([str(driver)], capture_output=True, text=True, env=env, timeout=300)
+        assert got.returncode == 0, got.stderr
+        rows = dict(line.split(' ', 1) for line in got.stdout.splitlines())
+        assert rows['bad'] == '0', got.stdout
+        return rows['print']
+
+    assert run('all', packs) != run('last-missing', packs - 1)
