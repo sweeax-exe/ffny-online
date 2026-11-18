@@ -1948,7 +1948,7 @@ bool online_count(ImDrawList *dl, const Frame &f, bool button = false)
 // ---- players online ----
 
 // Build 96: a FIGHTING row is watched with one press: on this relay at once, on another the hub moves there and
-// watches (netservers_spectate_on). The relay names the room only of a public match (NETPLAY_CAP_WHO_ROOMS).
+// watches (netservers_spectate_on). The relay names the room only of a public match (the who-rooms trailer).
 bool can_watch();
 bool player_watchable(const NetPlayer &p) { return p.state == 2 && p.room_known == 1 && p.room[0]; }
 bool g_players_watch_hint;          // the chosen row can be watched (the A WATCH hint)
@@ -5656,7 +5656,7 @@ void gallery_step()
                                          // build 47: every server's players (All servers)
                                          "players-all",
                                          // build 33: the grid at Eric Sermon, O.E, Santos and Teck
-                                         "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "vote", "hill",
+                                         "fighters-91", "fighters-92", "fighters-93", "fighters-85", "room", "room-changing", "vote", "hill",
                                          "up", "watch", "room-voice", "voice-p2p", "match",
                                          // build 67: the CPU level (CREATE A ROOM's row, the room's line)
                                          "create-cpu", "room-cpu",
@@ -6170,6 +6170,12 @@ void gallery_step()
         for (size_t i = 0; i < list.size(); i++) if (list[i].id == id) S.fighter_sel = (int)i;
     }
     else if (p == "room") { S.page = HUB; G.room = sample_room(2, 4, 3); }
+    else if (p == "room-changing") {    // build 96: Ben was READY and went back to CHOOSE FIGHTER: CHANGING FIGHTER
+        S.page = HUB;
+        G.room = sample_room(2, 2, 2);
+        G.room.players[0].ready = 0;
+        G.room.players[1].ready = G.page_ms < 200;
+    }
     else if (p == "room-cpu") { S.page = HUB; G.room = sample_room(3, 4, 2); G.room.settings.cpu_level = NETPLAY_CPU_EASY; }
     else if (p == "room-rules") {   // FIGHTER RULES and MAX PING on the server line; one player far away: the warning
         S.page = HUB;

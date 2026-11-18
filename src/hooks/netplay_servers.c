@@ -639,13 +639,9 @@ static void players_round(void)
         req[6] = (uint8_t)nonce[i]; req[7] = (uint8_t)(nonce[i] >> 8); req[8] = (uint8_t)(nonce[i] >> 16);
         req[9] = (uint8_t)(nonce[i] >> 24);
         memcpy(req + 10, print, 8);     /* this build's players, as WHO names them */
-        /* build 96: the caps word after the build (an older relay took zeros only there): NETPLAY_CAP_WHO_ROOMS asks
-         * for the listed players' rooms, NETPLAY_CAP_RTS lets Run the Streets rooms be named to a player who has it */
-        {
-            uint32_t caps = NETPLAY_CAP_WHO_ROOMS | (rts_access() ? NETPLAY_CAP_RTS : 0u);
-            req[18] = (uint8_t)caps; req[19] = (uint8_t)(caps >> 8); req[20] = (uint8_t)(caps >> 16);
-            req[21] = (uint8_t)(caps >> 24);
-        }
+        /* build 96: the flags word after the build (not CAPS bits; an older relay took zeros only there):
+         * the listed players' rooms, and Run the Streets rooms named too for a player who has the mode */
+        req[18] = (uint8_t)(NETPLAY_PLAYERLIST_ROOMS | (rts_access() ? NETPLAY_PLAYERLIST_RTS : 0u));
         sendto(s, (const char *)req, (int)sizeof(req), 0, (const struct sockaddr *)&addr[i], sizeof(addr[i]));
         open++;
     }
