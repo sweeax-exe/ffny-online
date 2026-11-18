@@ -45,6 +45,7 @@ typedef struct TowerRun {
     int health_pct;             /* the climber's health going into the next fight, 1..100 (100 under the full rule) */
     uint32_t climb_ms;          /* time in fights, summed */
     int interrupted;            /* fights the game closed in (resumed on the same floor) */
+    int in_fight;               /* the floor whose fight was under way when the file was last written (0: none) */
     int draws;                  /* fights that ended in a draw (fought again) */
     int skipped;                /* floors whose opponent this PC no longer has (counted as passed) */
     long long started;          /* unix seconds */

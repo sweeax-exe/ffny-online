@@ -185,9 +185,10 @@ int towers_file_write(const TowerRun *const runs[TOWER_COUNT], const int best[TO
         const TowerRun *r = runs[t];
         if (!r || r->floors <= 0) continue;
         PUT("%s\n{\"tower\":%d,\"seed\":%u,\"fighter\":%d,\"skin\":%d,\"floors\":%d,\"floor\":%d,\"hash\":%u,"
-            "\"health\":%d,\"climb_ms\":%u,\"interrupted\":%d,\"draws\":%d,\"skipped\":%d,\"started\":%lld,",
+            "\"health\":%d,\"climb_ms\":%u,\"interrupted\":%d,\"in_fight\":%d,\"draws\":%d,\"skipped\":%d,"
+            "\"started\":%lld,",
             first ? "" : ",", r->tower, r->seed, r->fighter, r->skin, r->floors, r->floor, r->roster_hash, r->health_pct,
-            r->climb_ms, r->interrupted, r->draws, r->skipped, r->started);
+            r->climb_ms, r->interrupted, r->in_fight, r->draws, r->skipped, r->started);
         n = put_list(out, n, size, "venues", r->venues, r->venue_n);
         PUT(",");
         n = put_list(out, n, size, "roster", r->roster, r->floors);
@@ -278,6 +279,7 @@ int towers_file_read(const char *text, TowerRun runs[TOWER_COUNT], int have[TOWE
             r.tower = tower;
             read_u32(p, close, "climb_ms", &r.climb_ms);
             read_int(p, close, "interrupted", &r.interrupted);
+            read_int(p, close, "in_fight", &r.in_fight);
             read_int(p, close, "draws", &r.draws);
             read_int(p, close, "skipped", &r.skipped);
             if (read_ll(p, close, "started", &started)) r.started = started;

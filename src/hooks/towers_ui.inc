@@ -329,7 +329,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
 {
     backdrop(dl, f, display, true, LOOK_STATS);
     page_title(dl, f, "TOWERS");
-    text(dl, f, g_hand, 14, 52, 58, ORANGE, "CLIMB NEW YORK, ONE FIGHTER AT A TIME", LEFT, 1.0f);
+    text(dl, f, g_hand, 14, 590, 34, ORANGE, "CLIMB NEW YORK, ONE FIGHTER AT A TIME", RIGHT, 1.0f);
     int tower = TWU.sel + 1;
     TowerRun saved;
     bool have = tw_saved(tower, &saved);
@@ -347,7 +347,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     }
     for (int k = 0; k < TOWER_COUNT; k++) {
         int t = k + 1;
-        float cx = 130 + k * 190, base = 340;
+        float cx = 130 + k * 190, base = 326;
         float s = 1.0f + 0.08f * ease_out_cubic(TWU.grow[k]);
         float dim = 0.6f + 0.4f * TWU.grow[k];
         if (mouse_pick(f, cx - 80, 80, 160, 300) && TWU.card == 0) TWU.sel = k;
@@ -368,19 +368,19 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
             text(dl, f, g_title, 15, cx, by + 3, with_alpha(WHITE, dim), "COMING SOON", CENTER, 1.0f);
         }
         // the name plate
-        glass(dl, f, cx - 82, base + 10, 164, 46, 8, k == TWU.sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255),
+        glass(dl, f, cx - 82, base + 8, 164, 44, 8, k == TWU.sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255),
               k == TWU.sel ? 0.8f : 0.55f);
-        if (k == TWU.sel && TWU.card == 0) selector(dl, f, cx - 82, base + 10, 164, 46);
-        text(dl, f, g_title, 17, cx, base + 13, with_alpha(k == TWU.sel ? CREAM : GREY, dim), towers_name(t), CENTER, 1.2f);
+        if (k == TWU.sel && TWU.card == 0) selector(dl, f, cx - 82, base + 8, 164, 44);
+        text(dl, f, g_title, 17, cx, base + 10, with_alpha(k == TWU.sel ? CREAM : GREY, dim), towers_name(t), CENTER, 1.2f);
         char line[64];
         if (t == TOWER_WEEKLY) snprintf(line, sizeof line, "20 FLOORS  -  SOON");
         else if (hr) snprintf(line, sizeof line, "FLOOR %d / %d", r.floor, r.floors);
         else if (best > 0) snprintf(line, sizeof line, "BEST %d  -  %d FLOORS", best, floors);
         else snprintf(line, sizeof line, "%d FLOORS", floors);
-        text(dl, f, g_title, 11, cx, base + 35, with_alpha(hr ? TOWER_COL[k] : ORANGE, dim), line, CENTER, 0.8f);
+        text(dl, f, g_title, 11, cx, base + 32, with_alpha(hr ? TOWER_COL[k] : ORANGE, dim), line, CENTER, 0.8f);
     }
     // what the chosen tower is
-    text(dl, f, g_hand, 12, 320, 404, with_alpha(CREAM, 0.95f), tower_desc(tower).c_str(), CENTER, 0.8f, 560);
+    text(dl, f, g_hand, 12, 320, 384, with_alpha(CREAM, 0.95f), tower_desc(tower).c_str(), CENTER, 0.8f, 560);
     if (TWU.rules) {
         towers_rules_panel(dl, f, tower);
         if (pad.y || pad.b) TWU.rules = false;
@@ -415,15 +415,15 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     TWU.card = 0;
     float hx = 54;
     if (tower == TOWER_WEEKLY) {
-        hx += hint(dl, f, hx, 448, "y", "RULES");
-        hint(dl, f, hx, 448, "b", "BACK");
+        hx += hint(dl, f, hx, 424, "y", "RULES");
+        hint(dl, f, hx, 424, "b", "BACK");
     } else {
-        hx += hint(dl, f, hx, 448, "a", have ? "CONTINUE" : "CLIMB");
-        if (have) hx += hint(dl, f, hx, 448, "x", "NEW CLIMB");
-        hx += hint(dl, f, hx, 448, "y", "RULES");
-        hint(dl, f, hx, 448, "b", "BACK");
+        hx += hint(dl, f, hx, 424, "a", have ? "CONTINUE" : "CLIMB");
+        if (have) hx += hint(dl, f, hx, 424, "x", "NEW CLIMB");
+        hx += hint(dl, f, hx, 424, "y", "RULES");
+        hint(dl, f, hx, 424, "b", "BACK");
     }
-    text(dl, f, g_hand, 10, 590, 452, with_alpha(GREY, 0.9f), "OFFLINE  -  BOARDS COME LATER", RIGHT, 0.8f);
+    text(dl, f, g_hand, 10, 590, 428, with_alpha(GREY, 0.9f), "OFFLINE  -  BOARDS COME LATER", RIGHT, 0.8f);
     if (pad.y) { TWU.rules = true; return; }
     if (pad.b) { S.page = HUB; return; }
     if (tower == TOWER_WEEKLY) {
@@ -559,12 +559,12 @@ void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersVi
         float vy = y + 178;
         text(dl, f, g_title, 10, x + 16, vy, with_alpha(GREY, a), "AT", LEFT, 0.6f);
         const Tex &vt = venue_tex(v.next_venue);
-        if (vt.srv) image_fit(dl, f, vt, x + 16, vy + 13, 150, 84, with_alpha(IM_COL32_WHITE, a));
-        else {
-            rect(dl, f, x + 16, vy + 13, 150, 84, with_alpha(IM_COL32(30, 26, 30, 255), a), 4);
-            text(dl, f, g_title, 11, x + 91, vy + 44, with_alpha(CREAM, a), upper(online_venue_name(v.next_venue)).c_str(), CENTER, 0.8f, 140);
+        if (vt.srv) image_fit(dl, f, vt, x + 16, vy + 13, 110, 84, with_alpha(IM_COL32_WHITE, a));
+        else {      // a community venue has no picture: its name on a plate
+            rect(dl, f, x + 16, vy + 13, 110, 84, with_alpha(IM_COL32(30, 26, 30, 255), a), 4);
+            text(dl, f, g_title, 10, x + 71, vy + 46, with_alpha(GREY, a), "COMMUNITY VENUE", CENTER, 0.6f, 100);
         }
-        text(dl, f, g_title, 13, x + 176, vy + 20, with_alpha(WHITE, a), upper(online_venue_name(v.next_venue)).c_str(), LEFT, 0.8f, 86);
+        text(dl, f, g_title, 14, x + 138, vy + 30, with_alpha(WHITE, a), upper(online_venue_name(v.next_venue)).c_str(), LEFT, 0.8f, 124);
     }
 
     // the floor plate

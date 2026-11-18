@@ -339,6 +339,15 @@ int towers_resume(int tower)
     file_load();
     if (!g_have[tower - 1]) { unlock(); return 0; }
     g_run = g_saved[tower - 1];
+    if (g_run.in_fight) {
+        /* T0 is lenient: the floor is fought again and the run notes it (the boards of T1 decide what it costs) */
+        g_run.interrupted++;
+        fprintf(stderr, "[TOWERS] the game closed during floor %d's fight: fought again (interrupted %d)\n",
+                g_run.in_fight, g_run.interrupted);
+        g_run.in_fight = 0;
+        g_saved[tower - 1] = g_run;
+        file_store();
+    }
     g_best_before = g_best[tower - 1];
     g_new_best = 0;
     g_last_floor = 0;
@@ -382,6 +391,10 @@ void towers_match_start(void)
         g_fight_t0 = GetTickCount64();
         /* the CPU's level for this floor and the climber's fixed one, after the set-up copied the words and before
          * the CPU brains load (netplay.c cpu_level_apply) */
+        if (g_have[g_run.tower - 1] && g_saved[g_run.tower - 1].seed == g_run.seed) {
+            g_saved[g_run.tower - 1].in_fight = g_run.floor;     /* cleared when the fight counts */
+            file_store();
+        }
         MEM32(G_SLOT_LEVEL) = PLAYER_LEVEL;
         MEM32(G_SLOT_LEVEL + 4u) = (uint32_t)g_rules.cpu_level;
         fprintf(stderr, "[TOWERS] floor %d set up: slot levels %u %u\n", g_run.floor, MEM32(G_SLOT_LEVEL),
@@ -424,7 +437,7 @@ void towers_step(void)
             g_winner = w;
             g_draw = d;
             g_end_health = top > 0.0f ? (int)(100.0f * now / top + 0.5f) : 100;
-            fprintf(stderr, "[TOWERS] floor %d decided at step %u: %s (the climber's health %d%%)\n", g_run.floor,
+            fprintf(stderr, "[TOWERS] floor %d decided at step %u: %s; the climber's health %d%%\n", g_run.floor,
                     g_step, d ? "a draw" : w == 0 ? "the climber won" : "the CPU won", g_end_health);
         }
     }
@@ -455,8 +468,12 @@ static void finish_fight(void)
     g_run.climb_ms += (uint32_t)(ms > 3600000ull ? 3600000ull : ms);
     g_left = !g_decided;
     g_save_point = 0;
+    g_run.in_fight = 0;
+    file_load();
+    if (g_have[g_run.tower - 1]) g_saved[g_run.tower - 1].in_fight = 0;     /* the fight counted */
     if (g_decided && d) {
         g_run.draws++;
+        file_store();
         set_state(TOWERS_DRAW);
         fprintf(stderr, "[TOWERS] floor %d: a draw, fought again\n", beaten);
     } else if (g_decided && w == 0) {

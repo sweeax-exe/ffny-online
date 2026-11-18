@@ -71,7 +71,7 @@ int main(void)
         const TowerRun *runs[TOWER_COUNT] = { &a, NULL, NULL };
         TowerRun back[TOWER_COUNT];
         int have[TOWER_COUNT], best[TOWER_COUNT] = { 17, 3, 0 }, best2[TOWER_COUNT], len, ok;
-        a.floor = 13; a.health_pct = 64; a.climb_ms = 777000u; a.interrupted = 1; a.draws = 2; a.skipped = 1;
+        a.floor = 13; a.health_pct = 64; a.climb_ms = 777000u; a.interrupted = 1; a.in_fight = 13; a.draws = 2; a.skipped = 1;
         a.started = 1795000000LL; a.skin = 2;
         len = towers_file_write(runs, best, text, (int)sizeof text);
         {   /* one line for the test: the file's line breaks as spaces */
@@ -81,9 +81,10 @@ int main(void)
             printf("file|%d|%s\n", len, flat);
         }
         ok = towers_file_read(text, back, have, best2);
-        printf("read|%d|%d|%d|%d|%d|%d|%d|%d|%d|%u|%d|%d|%d|%lld|%d\n", ok, have[0], have[1], have[2], best2[0], best2[1],
+        printf("read|%d|%d|%d|%d|%d|%d|%d|%d|%d|%u|%d|%d|%d|%lld|%d|%d\n", ok, have[0], have[1], have[2], best2[0], best2[1],
                back[0].floor, back[0].health_pct, back[0].skin, back[0].climb_ms, back[0].interrupted, back[0].draws,
-               back[0].skipped, back[0].started, memcmp(back[0].roster, a.roster, sizeof(int) * (size_t)a.floors) == 0);
+               back[0].skipped, back[0].started, memcmp(back[0].roster, a.roster, sizeof(int) * (size_t)a.floors) == 0,
+               back[0].in_fight);
         print_run("back", &back[0]);
         /* a damaged roster (one ID changed: the hash no longer matches) is dropped */
         {
@@ -197,7 +198,7 @@ def test_the_run_file_round_trips(out):
     run = data['runs'][0]
     assert run['tower'] == 1 and run['floor'] == 13 and len(run['roster']) == run['floors']
     r = row(out, 'read')
-    assert r == ['1', '1', '0', '0', '17', '3', '13', '64', '2', '777000', '1', '2', '1', '1795000000', '1']
+    assert r == ['1', '1', '0', '0', '17', '3', '13', '64', '2', '777000', '1', '2', '1', '1795000000', '1', '13']
     assert row(out, 'back')[:6] == row(out, 'run')[:6] or row(out, 'back')[4] == row(out, 'run')[4]
     assert row(out, 'damaged') == ['1', '0', '17']        # the run is dropped, the best floors stay
     assert row(out, 'notafile') == ['0']
