@@ -24,6 +24,7 @@
 extern "C" {
 #include "music_decode.h"
 #include "recomp_settings.h"
+#include "next_song.h"
 }
 
 #if defined(_WIN32)
@@ -49,6 +50,7 @@ std::atomic<int> g_game_volume{85};
 std::atomic<unsigned> g_track_changes{0};
 std::atomic<unsigned> g_fights_ended{0};    // fights over so far (musiclib::FightWatch)
 std::atomic<unsigned> g_fights_begun{0};    // fights begun after one was over
+std::atomic<unsigned> g_skips{0};           // next song asked (custom_music_skip, the [audio] next_song key)
 musiclib::FightWatch g_fight_watch;         // the game thread's only
 musiclib::Mode g_mode = musiclib::MODE_ORIGINAL;
 bool g_shuffle = true;
@@ -310,6 +312,7 @@ struct Player
         unsigned seen_changes = g_track_changes.load();
         unsigned seen_begun = g_fights_begun.load();
         unsigned seen_order = g_order_changes.load();
+        unsigned seen_skips = g_skips.load();
         float applied = -1;
         auto last_report = std::chrono::steady_clock::now();
         while (g_active) {
@@ -327,6 +330,30 @@ struct Player
                     log("the game changes track: the next in the list");
                     start_song(g_in_fight);
                     if (!g_active) break;
+                }
+            }
+            unsigned skips = g_skips.load();
+            if (skips != seen_skips) {
+                seen_skips = skips;
+                // Next song (next_song.h): the song of ours that plays gives way to the next in the list at
+                // once, as at a new fight; in mix that may be the game's own track (its music comes back).
+                if (g_custom_turn && (song || draining)) {
+                    log("next song asked: the next in the list");
+                    if (voice) { voice->DestroyVoice(); voice = nullptr; voice_rate = 0; started = false; }
+                    applied = -1;
+                    close_song();
+                    draining = false;
+                    g_have_song = false;
+                    start_song(g_in_fight);
+                    if (!g_active) break;
+                    if (g_have_song && song_index < g_songs.size()) {
+                        const Song &now = g_songs[song_index];
+                        std::string title = now.name;
+                        if (!now.artist.empty() && title.find(now.artist) == std::string::npos) title += " - " + now.artist;
+                        next_song_note_set(title.c_str());
+                    } else {
+                        next_song_note_set("the game's soundtrack");
+                    }
                 }
             }
             unsigned begun = g_fights_begun.load();
@@ -448,6 +475,8 @@ extern "C" int custom_music_active(void) { return g_active.load(); }
 // Silent while our song is the music; in mix the game's own track plays between ours. A song is loaded
 // before the mute is asked for, so a song that cannot be opened never leaves the game silent.
 extern "C" int custom_music_want_mute(void) { return g_active && g_custom_turn && g_have_song; }
+
+extern "C" void custom_music_skip(void) { g_skips++; }
 
 extern "C" void custom_music_set_game_volume(int volume) { g_game_volume = volume; }
 extern "C" void custom_music_set_in_fight(int in_fight) { g_in_fight = in_fight != 0; }

@@ -88,6 +88,13 @@ line turns it on for one run. Every key here is read at start-up.
 | `vignette_strength` | `100` | How dark the vignette is, 0-100 percent of the game's own; 0 is the same as off. Applies at once. Env `RECOMP_VIGNETTE_STRENGTH`. [How both work](research/picture-options.md). |
 | `crowd_near` | `fade` | Spectators close to the camera. `fade` is the game's own: they fade out but stay faintly see-through (alpha 0.2) in front of the fight; `hide` drops them until the camera moves away. Only the picture changes (online checksums are unaffected). Applies at once. Launcher: Basics and Advanced, Display ("Crowd near the camera"). Env `RECOMP_CROWD_NEAR` (`fade`, `hide`). |
 
+## [audio]
+
+| Key | Default | Meaning |
+|---|---|---|
+| `next_song_key` | `M` | Skips to the next song of the music playing now, in the menus and in fights (offline and online), with a short "Now playing: <title>" note. One of your own songs (`[music]`) goes on to the next in your list; the game's soundtrack goes on to the next song of its playlist, which holds only the songs that are on. Only your PC hears it: online matches are unaffected (the change is made between two game steps, never in a rollback re-run). Not while you type in a chat. Empty for none. Launcher: Basics, Music ("Next song key"). Test aid: `RECOMP_TEST_NEXT_SONG=40,55` asks for it that many seconds in. |
+| `next_song_pad` | *(empty)* | Controller buttons for the same, pressed together (it acts when the last one goes down), e.g. `back+right_shoulder`; alternatives separated by commas, button names as in `[gamepad]`. The game sees the presses too. Off by default. |
+
 ## [gameplay]
 
 | Key | Default | Meaning |

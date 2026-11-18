@@ -299,6 +299,13 @@ static RecompSetting g_display_settings[] = {
     { "music", "new_song_per_match", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_MUSIC_NEW_SONG_PER_MATCH", 0,
       "Each new fight (a rematch, the next match, the next fight of a rotation) starts the next of your songs; "
       "off keeps the song playing on from where it was." },
+    { "audio", "next_song_key", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "The key that skips to the next song, in the menus and in fights (offline and online; only your PC hears "
+      "it): a letter or digit, F1-F12, Tab, CapsLock, LAlt, Mouse4 or Mouse5. Empty for none.", "M" },
+    { "audio", "next_song_pad", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "Controller buttons that skip to the next song, pressed together (it acts when the last one goes down), "
+      "e.g. back+right_shoulder; alternatives separated by commas, button names as in [gamepad]. The game sees "
+      "the presses too. Empty (the default) for none.", "" },
     { "graphics", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Enhanced graphics (community): the ReShade / DLSS pack with presets by Marleymarletto, installed by the "
       "launcher next to the game (Launcher > Graphics). Heavy on the GPU: for NVIDIA RTX cards." },
