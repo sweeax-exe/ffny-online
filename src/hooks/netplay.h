@@ -185,6 +185,8 @@ typedef struct NetRoom {
 #define NETPLAY_CAP_CPULEVEL 32768 /* the room's CPU level (NetRoomSettings.cpu_level, build 67) */
 #define NETPLAY_CAP_ROOMRULES 65536 /* room rules (NetRoomSettings.fighter_rules, max_ping, build 68) */
 int netplay_lobby_caps(void);
+/* The CAPS word this client announces (T_CAPS; RINGS carries it too, F0). */
+uint32_t netplay_client_caps(void);
 /* 1 when the relay refused the hub session because this PC already has a live session there (ERROR 11,
  * build 46 relays): another copy of the game is online on this PC. Not a connection problem. */
 int netplay_online_twice(void);

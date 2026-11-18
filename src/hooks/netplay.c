@@ -182,6 +182,7 @@ int netplay_maintenance(char *t, int n) { if (t && n > 0) t[0] = 0; return -1; }
 int netplay_room_rollback(int s) { (void)s; return -1; }
 int netplay_room_rollback_mandatory(void) { return 0; }
 int netplay_lobby_caps(void) { return 0; }
+uint32_t netplay_client_caps(void) { return 0; }
 int netplay_online_twice(void) { return 0; }
 int netplay_room_chat(NetChatLine *o, int m, unsigned *s) { (void)o; (void)m; if (s) *s = 0; return 0; }
 int netplay_room_chat_can_write(char *w, int n) { if (w && n > 0) w[0] = 0; return -1; }
@@ -416,7 +417,17 @@ int netplay_fighter_loadable(int fighter)
                                  * consent is per match, T_P2P is sent only while [online] p2p_direct is on (netplay_p2p.h) */
 /* build 86: CAPS_UNLIMITED unless a test plays an older game (RECOMP_TEST_NO_UNLIMITED) */
 #define CAPS_UNLIMITED_OPT (getenv("RECOMP_TEST_NO_UNLIMITED") ? 0u : CAPS_UNLIMITED)
-#define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
+
+/* The CAPS word this client announces (T_CAPS; F0: RINGS carries it too, so a relay lists the rings this game can
+ * join) */
+uint32_t netplay_client_caps(void)
+{
+    return CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
+           CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
+           CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
+           CAPS_SKINS | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED;
+}
+#define CP_WAIT_MS   10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
 #define SET_MENU_MS   4000u     /* a ranked set's game: the results' Rematch menu goes back to the room by itself */
@@ -715,6 +726,7 @@ static struct {
     AutoMatch report_m;
     char report_names[MAXP][25];
     char report_key[32];
+    int report_ring;                /* F0: the ring type (RING_*) of the room START came in, RING_NONE: not a ring */
     int reported, fighting_seen, last_late;
     int start_reported;             /* this match's "start" went to the account service */
     int seed_bypass;                /* crowd_reset seeds a generator with its own words */
@@ -4108,7 +4120,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     AutoMatch m;
     uint32_t seed;
     int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred, late = watching == 2, cpu = NETPLAY_CPU_HARD;
-    int hill_watch = watching == 3, leaving = 0;
+    int hill_watch = watching == 3, leaving = 0, ring_type = RING_NONE;
     int skin_of_slot[ROOMSLOTS], templ[MAXP], fixed = 0;
     unsigned lineup = 0;
     memset(skin_of_slot, 0, sizeof(skin_of_slot));
@@ -4231,6 +4243,16 @@ static void on_start_as(const uint8_t *b, int len, int watching)
             m.count = i + 1;
         }
     }
+    {   /* F0: a fight in a ring room carries its type in the report (the relay's RINGS named the room); asked before
+         * g_cs is taken (netplay_servers.c has a lock of its own) */
+        NetRoom rv;
+        NetRingCard ring;
+        netplay_lobby_room(&rv);
+        ring_type = NETPLAY_IS_KOTH(rv.settings.mode) && netservers_ring_of(netservers_connected(), rv.code, &ring)
+                    ? ring.type : RING_NONE;
+        if (ring_type) fprintf(stderr, "[NETPLAY] ring bout in %s: %s (%s)\n", rv.code, ring.name,
+                               ring_type_id(ring.type) ? ring_type_id(ring.type) : "?");
+    }
     EnterCriticalSection(&g_cs);
     memset(N.rematch_want, 0, sizeof(N.rematch_want));
     memset(N.rematch_acks, 0, sizeof(N.rematch_acks));
@@ -4314,6 +4336,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
                     snprintf(N.report_names[i], sizeof(N.report_names[i]), "%s", N.roomv.players[j].name);
     }
     snprintf(N.report_key, sizeof(N.report_key), "%.6s-%08X", N.roomv.code[0] ? N.roomv.code : N.room, seed);
+    N.report_ring = ring_type;
     N.reported = N.fighting_seen = 0;
     disarm_crash_report();
     /* King of the Hill: one fight, then RESULT and back to the hill */
@@ -4990,10 +5013,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 uint8_t cb[6 + 8 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
-                put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
-                              CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
-                              CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
-                              CAPS_SKINS | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                put32(cb + n, netplay_client_caps()); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -6487,7 +6507,7 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
     AutoMatch m;
     char names[MAXP][25], key[32];
     const OnlineMode *mode;
-    int i, n = 0, pos, players, first = 1;
+    int i, n = 0, pos, players, first = 1, ring;
     EnterCriticalSection(&g_cs);
     if (!N.report_key[0]) {
         LeaveCriticalSection(&g_cs);
@@ -6498,10 +6518,13 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
     memcpy(key, N.report_key, sizeof(key));
     pos = N.pos;
     players = N.players;
+    ring = N.report_ring;
     LeaveCriticalSection(&g_cs);
     mode = online_mode(m.type);
     n += snprintf(json + n, (size_t)(size - n), "{\"key\":\"%s\",\"mode\":%d,\"mode_name\":", key, m.type);
-    n = json_put(json, size, n, mode ? mode->name : "");
+    /* F0: a ring bout names its ring's type ("ring":"cage"); mode stays 0, mode_name is display text */
+    n = json_put(json, size, n, ring_type_id(ring) ? ring_type_title(ring) : mode ? mode->name : "");
+    if (ring_type_id(ring)) n += snprintf(json + n, (size_t)(size - n), ",\"ring\":\"%s\"", ring_type_id(ring));
     n += snprintf(json + n, (size_t)(size - n), ",\"venue\":%d,\"venue_name\":", m.venue);
     n = json_put(json, size, n, online_venue_name(m.venue));
     n += snprintf(json + n, (size_t)(size - n), ",\"you\":%d,\"players\":[", pos);
