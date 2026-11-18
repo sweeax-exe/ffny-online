@@ -167,6 +167,16 @@ def read_off(data):
     return off
 
 
+def read_own_off(data):
+    """Build 94: the player's own packs that are switched off: <data>/mod-manager/own-off.txt, one pack id per line
+    (the launcher's Content page writes it; a setting holds only 1023 characters, which is about 60 pack ids)."""
+    try:
+        text = (Path(data) / 'mod-manager' / 'own-off.txt').read_text(encoding='utf-8-sig', errors='replace')
+    except OSError:
+        return set()
+    return {line.strip() for line in text.splitlines() if line.strip()}
+
+
 _langpack_module = None
 
 

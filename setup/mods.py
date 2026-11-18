@@ -1145,7 +1145,7 @@ class Manager:
         new place, so the next compose and the Content page agree."""
         with file_lock(self.root / 'runtime.lock'):
             self.progress('Preparing community content')
-            off = content_compose.read_off(self.data)
+            off = content_compose.read_off(self.data) | content_compose.read_own_off(self.data)
             packs = self.composed_packs() + [p for p in self.local_packs() if p['composed'] and p['id'] not in off]
             moved = []
             result = content_compose.compose(self.data, self.game, packs, root=self.root, log=moved.append,

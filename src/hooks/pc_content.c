@@ -230,6 +230,197 @@ void pc_content_set_off(const char *id, int off)
     recomp_settings_set_text("content", "off", out);
 }
 
+/* Build 94: small state files of the launcher in <data>/mod-manager, read and written whole. A setting holds at most
+ * 1023 characters (about 60 pack ids); the player's own packs can be several hundred, so which of them are switched
+ * off, and what the master switch remembers, live in files. Writing replaces the file in one step. */
+static int state_file_path(const char *name, char *path, size_t size)
+{
+    const char *root = data_root();
+    size_t i;
+    if (!root || !name || !*name || strlen(name) > 60) return 0;
+    for (i = 0; name[i]; i++)
+        if (!(isalnum((unsigned char)name[i]) || name[i] == '-' || name[i] == '.')) return 0;
+    return snprintf(path, size, "%s" HOST_SEP "mod-manager" HOST_SEP "%s", root, name) < (int)size;
+}
+
+int pc_content_state_read(const char *name, char *out, int size)
+{
+    char path[1400];
+    FILE *f;
+    long len;
+    if (!out || size <= 1) return 0;
+    out[0] = 0;
+    if (!state_file_path(name, path, sizeof path) || !(f = content_fopen(path, "rb"))) return 0;
+    fseek(f, 0, SEEK_END);
+    len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len < 0 || len > size - 1) { fclose(f); return -1; }
+    len = (long)fread(out, 1, (size_t)len, f);
+    out[len] = 0;
+    fclose(f);
+    return (int)len;
+}
+
+int pc_content_state_write(const char *name, const char *text)
+{
+    char path[1400], tmp[1420], dir[1400];
+    FILE *f;
+    size_t n;
+    int ok;
+    if (!state_file_path(name, path, sizeof path)) return 0;
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    snprintf(dir, sizeof dir, "%s" HOST_SEP "mod-manager", data_root());
+#if defined(_WIN32)
+    {
+        WCHAR w[1400], wt[1430];
+        if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, w, (int)(sizeof w / sizeof w[0])) ||
+            !MultiByteToWideChar(CP_UTF8, 0, tmp, -1, wt, (int)(sizeof wt / sizeof wt[0]))) return 0;
+        if (!text || !*text) { DeleteFileW(w); return 1; }
+        if (!folder_exists(dir)) {
+            WCHAR wd[1400];
+            if (MultiByteToWideChar(CP_UTF8, 0, dir, -1, wd, (int)(sizeof wd / sizeof wd[0]))) CreateDirectoryW(wd, NULL);
+        }
+        f = _wfopen(wt, L"wb");
+        if (!f) return 0;
+        n = strlen(text);
+        ok = fwrite(text, 1, n, f) == n;
+        ok = fclose(f) == 0 && ok;
+        if (ok) ok = MoveFileExW(wt, w, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+        if (!ok) DeleteFileW(wt);
+        return ok;
+    }
+#else
+    if (!text || !*text) { remove(path); return 1; }
+    if (!folder_exists(dir)) mkdir(dir, 0777);
+    f = fopen(tmp, "wb");
+    if (!f) return 0;
+    n = strlen(text);
+    ok = fwrite(text, 1, n, f) == n;
+    ok = fclose(f) == 0 && ok;
+    if (ok) ok = rename(tmp, path) == 0;
+    if (!ok) remove(tmp);
+    return ok;
+#endif
+}
+
+/* The ids of the player's own packs that are switched off: <data>/mod-manager/own-off.txt, one id per line. Read at
+ * most once a second (the Content page asks for every pack on every frame); a write updates the copy at once. */
+#define OWN_OFF_FILE "own-off.txt"
+#define OWN_OFF_MAX (1 << 17)
+static char g_own_text[OWN_OFF_MAX];     /* "\n<id>\n<id>\n" */
+static time_t g_own_stamp;
+static int g_own_loaded;
+
+static void own_load(void)
+{
+    char raw[OWN_OFF_MAX];
+    time_t now = time(NULL);
+    char *p, *e;
+    size_t o = 1;
+    if (g_own_loaded && now == g_own_stamp) return;
+    g_own_loaded = 1;
+    g_own_stamp = now;
+    g_own_text[0] = '\n';
+    g_own_text[1] = 0;
+    if (pc_content_state_read(OWN_OFF_FILE, raw, (int)sizeof raw) <= 0) return;
+    for (p = raw; *p;) {
+        char *line = p;
+        for (e = p; *e && *e != '\n'; e++) {}
+        p = *e ? e + 1 : e;
+        *e = 0;
+        line = trim(line);
+        if (!valid_id(line) || o + strlen(line) + 2 >= sizeof g_own_text) continue;
+        o += (size_t)snprintf(g_own_text + o, sizeof g_own_text - o, "%s\n", line);
+    }
+}
+
+static int own_has(const char *id)
+{
+    char key[96];
+    if (!valid_id(id)) return 0;
+    own_load();
+    snprintf(key, sizeof key, "\n%s\n", id);
+    return strstr(g_own_text, key) != NULL;
+}
+
+static int own_save(void)
+{
+    int ok = pc_content_state_write(OWN_OFF_FILE, g_own_text[1] ? g_own_text + 1 : "");
+    g_own_stamp = time(NULL);
+    return ok;
+}
+
+int pc_content_own_is_off(const char *id)
+{
+    return own_has(id) || pc_content_is_off(id);     /* the settings list: builds before 94 kept them there */
+}
+
+int pc_content_own_set_off(const char *id, int off)
+{
+    char key[96];
+    char *at;
+    if (!valid_id(id)) return 0;
+    own_load();
+    snprintf(key, sizeof key, "\n%s\n", id);
+    at = strstr(g_own_text, key);
+    if (at) memmove(at + 1, at + strlen(key), strlen(at + strlen(key)) + 1);       /* drop it */
+    if (off) {
+        size_t n = strlen(g_own_text);
+        if (n + strlen(id) + 2 >= sizeof g_own_text) return 0;
+        snprintf(g_own_text + n, sizeof g_own_text - n, "%s\n", id);
+    }
+    if (pc_content_is_off(id)) pc_content_set_off(id, 0);          /* an old settings entry would switch it off again */
+    return own_save();
+}
+
+int pc_content_own_off_csv(char *out, int size)
+{
+    const char *p;
+    int o = 0;
+    if (!out || size <= 0) return -1;
+    out[0] = 0;
+    own_load();
+    for (p = g_own_text + 1; *p;) {
+        const char *e = strchr(p, '\n');
+        int k = e ? (int)(e - p) : (int)strlen(p);
+        if (!k) break;
+        if (o + k + 2 > size) { out[0] = 0; return -1; }
+        o += snprintf(out + o, (size_t)(size - o), "%s%.*s", o ? "," : "", k, p);
+        p = e ? e + 1 : p + k;
+    }
+    return o;
+}
+
+int pc_content_own_off_put(const char *csv)
+{
+    const char *p;
+    size_t o = 1;
+    char *fresh = (char *)malloc(OWN_OFF_MAX);
+    int ok;
+    if (!fresh) return 0;
+    fresh[0] = '\n';
+    fresh[1] = 0;
+    for (p = csv ? csv : ""; *p;) {
+        char item[128];
+        size_t k = 0;
+        char key[96];
+        while (*p == ',' || *p == ' ') p++;
+        while (*p && *p != ',' && k < sizeof item - 1) item[k++] = *p++;
+        item[k] = 0;
+        while (k && item[k - 1] == ' ') item[--k] = 0;
+        if (!valid_id(item)) continue;
+        snprintf(key, sizeof key, "\n%s\n", item);
+        if (strstr(fresh, key)) continue;
+        if (o + k + 2 >= OWN_OFF_MAX) { free(fresh); return 0; }
+        o += (size_t)snprintf(fresh + o, OWN_OFF_MAX - o, "%s\n", item);
+    }
+    own_load();
+    memcpy(g_own_text, fresh, o + 1);
+    free(fresh);
+    ok = own_save();
+    return ok;
+}
+
 int pc_content_pack_file(const char *id, const char *name, char *out, int size)
 {
     char path[1400];
@@ -305,7 +496,7 @@ static int list_all(PcContentPack *out, int max)
     }
     fclose(f);
     {   /* keep only packs whose folder is there; the rest are not installed */
-        static char applied[4096];
+        static char applied[32768];
         int i, m = 0;
         read_files_ini(root, applied, sizeof applied, NULL, 0, NULL);
         for (i = 0; i < n; i++) {
@@ -313,7 +504,8 @@ static int list_all(PcContentPack *out, int max)
             snprintf(dir, sizeof dir, "%s" HOST_SEP "mods" HOST_SEP "%s", root, out[i].id);
             out[i].installed = folder_exists(dir);
             if (strcmp(out[i].kind, "content")) strcpy(out[i].kind, "replacement");
-            out[i].off = (out[i].local || !strcmp(out[i].kind, "replacement")) && pc_content_is_off(out[i].id);
+            out[i].off = out[i].local ? pc_content_own_is_off(out[i].id)
+                                      : !strcmp(out[i].kind, "replacement") && pc_content_is_off(out[i].id);
             out[i].applied = out[i].composed && in_list(applied, out[i].id);
             if (out[i].installed) out[m++] = out[i];
         }
@@ -861,7 +1053,7 @@ static BOOL content_redirect(const char *relative, content_host_char *host_path,
 
 static void serve_composed_files(const char *root)
 {
-    static char applied[4096];
+    static char applied[32768];
     int i, n = 0;
     if (!root || !read_files_ini(root, applied, sizeof applied, g_files, CONTENT_FILES_MAX, &n) || !n) return;
     snprintf(g_files_dir, sizeof g_files_dir, "%s" HOST_SEP "%s", root, composed_dir());

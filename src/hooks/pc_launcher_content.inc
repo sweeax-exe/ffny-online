@@ -105,6 +105,25 @@ static float content_tag(ImDrawList *dl, ImVec2 at, const char *text, float s, c
 
 #include "pc_launcher_community.inc"   // the Community tab: every submitted pack's page, votes
 
+// Build 94: the own packs of packs[] switched off (off) or on, all in one write of the own-off list (a setting holds
+// 1023 characters; a player's own roster is several hundred packs). only_offline: just those that keep the game offline.
+static void own_packs_switch(const PcContentPack *packs, int count, bool off, bool only_offline)
+{
+    std::vector<char> csv(MODS_OWN_TEXT);
+    std::string ids;
+    for (int i = 0; i < count; i++)
+        if (packs[i].local && (!only_offline || !packs[i].online_ok)) ids += (ids.empty() ? "" : ",") + std::string(packs[i].id);
+    if (pc_content_own_off_csv(csv.data(), (int)csv.size()) < 0) return;
+    if (off) {
+        if (!mods_list_add(csv.data(), csv.size(), ids.c_str())) return;
+    } else {
+        mods_list_remove(csv.data(), ids.c_str());
+        for (int i = 0; i < count; i++)
+            if (packs[i].local && pc_content_is_off(packs[i].id)) pc_content_set_off(packs[i].id, 0);   // an old [content] off entry
+    }
+    pc_content_own_off_put(csv.data());
+}
+
 // MY PACKS: the player's own packs (FFNY Studio's "Use in my game": <data>/mods/<id> with local.json, content.ini
 // local=1). Each has a switch. One that adds or changes more than textures (clothing, venues, fighters, props)
 // works offline only: while one is on the game refuses online (PC_CONTENT_LOCAL_LINE), so a line here says so,
@@ -118,9 +137,29 @@ static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, floa
     ld->AddText(ImGui::GetFont(), 13 * s, ImVec2(lx + 120 * s, y + 7 * s), col(k_white, 0.6f),
                 "Made by you in FFNY Studio (Use in my game). Only on this PC.");
     y += 34 * s;
-    int blocking = 0;
-    for (int i = 0; i < count; i++)
-        blocking += packs[i].local && !packs[i].online_ok && !pc_content_is_off(packs[i].id);
+    int blocking = 0, mine_total = 0, mine_off = 0;
+    for (int i = 0; i < count; i++) {
+        if (!packs[i].local) continue;
+        mine_total++;
+        mine_off += packs[i].off != 0;
+        blocking += !packs[i].online_ok && !packs[i].off;
+    }
+    if (mine_off) {     // build 94: all of them on again in one press (the master switch brings back what was on)
+        char line[160];
+        snprintf(line, sizeof line, "%d of your %d packs are off.", mine_off, mine_total);
+        ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 52 * s);
+        ld->AddRectFilled(ra, rb, col(k_white, 0.05f), 12 * s);
+        ld->AddRect(ra, rb, col(k_white, 0.12f), 12 * s);
+        ld->AddText(ImGui::GetFont(), 13.5f * s, ImVec2(ra.x + 16 * s, ra.y + 17 * s), col(k_white, 0.85f), line);
+        if (glass_button("##content_mine_all_on", "Turn all on", ImVec2(rb.x - 176 * s, ra.y + 9 * s), ImVec2(160 * s, 34 * s), s,
+                         GLASS_PLAIN, bold_font(), 14 * s, !busy)) {
+            own_packs_switch(packs, count, false, false);
+            PcContentPack none{};
+            snprintf(none.id, sizeof none.id, "%s", "-");
+            toggle(none, false);        // saves the settings and composes again ("-" is no pack)
+        }
+        y += 62 * s;
+    }
     if (blocking) {
         ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 52 * s);
         ld->AddRectFilled(ra, rb, col(k_gold, 0.12f), 12 * s);
@@ -129,9 +168,7 @@ static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, floa
                     PC_CONTENT_LOCAL_LINE, nullptr, inner - 230 * s);
         if (glass_button("##content_mine_off", "Turn them off", ImVec2(rb.x - 176 * s, ra.y + 9 * s), ImVec2(160 * s, 34 * s), s,
                          GLASS_RED, bold_font(), 14 * s, !busy)) {
-            for (int i = 0; i < count; i++)
-                if (packs[i].local && !packs[i].online_ok && !pc_content_is_off(packs[i].id))
-                    pc_content_set_off(packs[i].id, 1);
+            own_packs_switch(packs, count, true, true);
             PcContentPack none{};
             snprintf(none.id, sizeof none.id, "%s", "-");
             toggle(none, false);        // saves the settings and composes again ("-" is no pack: switched on, a no-op)
@@ -141,7 +178,7 @@ static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, floa
     for (int i = 0; i < count; i++) {
         PcContentPack &p = packs[i];
         if (!p.local) continue;
-        bool on = !pc_content_is_off(p.id);
+        bool on = !p.off;
         ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 76 * s);
         ld->AddRectFilled(ra, rb, col(k_white, on ? 0.05f : 0.025f), 12 * s);
         ld->AddRect(ra, rb, col(k_white, 0.06f), 12 * s);
@@ -173,28 +210,34 @@ static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, floa
 }
 
 // Build 90, Turn all mods off (mods_master_logic.h): one button for the game as the original, one that brings back
-// exactly what was on. The settings it moves: community content in offline play, the player's own packs, HD
-// textures, the community graphics pack and a language pack.
-static ModsState mods_state_now()
+// what was on. The settings it moves: community content in offline play, the player's own packs, HD textures, the
+// community graphics pack and a language pack. Build 94: the own packs' switches and the backup are files (a setting
+// holds 1023 characters, about 60 pack ids; a player's own roster is several hundred).
+#define MODS_BACKUP_FILE "mods-backup.txt"
+
+static void mods_state_now(ModsState &st, const std::string &local_ids)
 {
-    ModsState st;
     memset(&st, 0, sizeof st);
     st.community = recomp_settings_get("content", "community_offline", 1) != 0;
     st.textures = recomp_settings_get("textures", "enabled", 0) != 0;
     st.graphics = recomp_settings_get("graphics", "enabled", 0) != 0;
     recomp_settings_get_text("language", "pack", st.language_pack, sizeof st.language_pack, "");
     recomp_settings_get_text("content", "off", st.content_off, sizeof st.content_off, "");
-    return st;
+    pc_content_own_off_csv(st.own_off, (int)sizeof st.own_off);
+    mods_normalise(&st, local_ids.c_str());         // builds 90 to 93 kept an own pack's switch in [content] off
 }
 
-static void mods_state_apply(const ModsState &st)
+// Writes the state; false when the own packs' file could not be saved (nothing else was changed then).
+static bool mods_state_apply(const ModsState &st)
 {
+    if (!pc_content_own_off_put(st.own_off)) return false;
     recomp_settings_set("content", "community_offline", st.community ? 1 : 0);
     recomp_settings_set("textures", "enabled", st.textures ? 1 : 0);
     recomp_settings_set("graphics", "enabled", st.graphics ? 1 : 0);
     recomp_settings_set_text("language", "pack", st.language_pack);
     recomp_settings_set_text("content", "off", st.content_off);
     pc_settings_save();
+    return true;
 }
 
 // The ids of the player's own packs, comma-separated.
@@ -206,70 +249,176 @@ static std::string mods_local_ids(const PcContentPack *packs, int count)
     return ids;
 }
 
+// The backup the master switch made: present (a file or an old setting holds something), usable (it reads as a state).
+static void mods_backup_load(ModsState &out, bool &present, bool &usable, const std::string &local_ids)
+{
+    std::vector<char> text(MODS_BACKUP_TEXT + 16);
+    if (pc_content_state_read(MODS_BACKUP_FILE, text.data(), (int)text.size()) <= 0)
+        recomp_settings_get_text("content", "mods_backup", text.data(), MODS_TEXT, "");      // builds 90 to 93
+    present = text[0] != 0;
+    usable = present && mods_backup_decode(text.data(), &out);
+    if (usable) usable = mods_normalise(&out, local_ids.c_str());
+}
+
+static void mods_backup_clear()
+{
+    pc_content_state_write(MODS_BACKUP_FILE, "");
+    recomp_settings_set_text("content", "mods_backup", "");
+}
+
 // Pressed: the master button. Returns true when it moved a setting (the own packs' files are composed again).
 static bool mods_master_press(const std::string &local_ids)
 {
-    char backup[MODS_TEXT];
-    recomp_settings_get_text("content", "mods_backup", backup, sizeof backup, "");
-    ModsState now = mods_state_now(), before;
-    if (backup[0] && mods_backup_decode(backup, &before)) {         // back on, exactly as it was
-        mods_state_apply(before);
-        recomp_settings_set_text("content", "mods_backup", "");
+    auto now = std::make_unique<ModsState>(), before = std::make_unique<ModsState>(), next = std::make_unique<ModsState>();
+    bool present = false, usable = false;
+    mods_state_now(*now, local_ids);
+    mods_backup_load(*before, present, usable, local_ids);
+    // a backup that is itself all off would bring nothing back: it is no help to the player, so it counts as none
+    if (usable && !mods_is_all_off(before.get(), local_ids.c_str())) {         // back on, exactly as it was
+        if (!mods_state_apply(*before)) return false;
+        mods_backup_clear();
         pc_settings_save();
         fprintf(stderr, "[CONTENT] mods back on as before (community %d, textures %d, graphics %d, language pack '%s')\n",
-                before.community, before.textures, before.graphics, before.language_pack);
+                before->community, before->textures, before->graphics, before->language_pack);
         return true;
     }
-    ModsState off;
-    char text[MODS_TEXT];
-    if (!mods_all_off(&now, local_ids.c_str(), &off) || !mods_backup_encode(&now, text, sizeof text)) return false;
-    recomp_settings_set_text("content", "mods_backup", text);
-    mods_state_apply(off);
-    fprintf(stderr, "[CONTENT] all mods off (saved: %s)\n", text);
+    if (mods_is_all_off(now.get(), local_ids.c_str()) || usable) {
+        // everything is off and there is nothing to restore: the community content and every own pack come on; textures,
+        // the graphics pack and the language mod stay as they are
+        mods_back_on_default(now.get(), local_ids.c_str(), next.get());
+        if (!mods_state_apply(*next)) return false;
+        mods_backup_clear();
+        pc_settings_save();
+        fprintf(stderr, "[CONTENT] mods back on (no usable backup): community content and all own packs on\n");
+        return true;
+    }
+    std::vector<char> text(MODS_BACKUP_TEXT);
+    if (!mods_all_off(now.get(), local_ids.c_str(), next.get()) || !mods_backup_encode(now.get(), text.data(), text.size())) return false;
+    if (!pc_content_state_write(MODS_BACKUP_FILE, text.data())) return false;
+    recomp_settings_set_text("content", "mods_backup", "");
+    if (!mods_state_apply(*next)) { mods_backup_clear(); return false; }
+    fprintf(stderr, "[CONTENT] all mods off (saved %u bytes)\n", (unsigned)strlen(text.data()));
     return true;
 }
 
-static float mods_master_card(ImDrawList *ld, float lx, float y, float inner, float s, bool busy, const std::string &local_ids,
-                              bool &moved)
+// Tests: RECOMP_TEST_CONTENT="<frame>:<step>;..." runs steps in order once the Content page is open and no job is
+// running: master (presses the master switch's button) and report (one [CONTENT-TEST] line: the community setting,
+// how many own packs are on, whether a backup is kept, the helper's last status line).
+static bool content_test_step(const char *want, bool busy)
 {
-    char backup[MODS_TEXT];
-    recomp_settings_get_text("content", "mods_backup", backup, sizeof backup, "");
-    ModsState now = mods_state_now(), before;
-    bool saved = backup[0] && mods_backup_decode(backup, &before);
-    bool all_off = mods_is_all_off(&now, local_ids.c_str());
+    struct Step { int frame; std::string action; bool done; };
+    static std::vector<Step> steps;
+    static bool parsed;
+    if (!parsed) {
+        parsed = true;
+        const char *text = getenv("RECOMP_TEST_CONTENT");
+        std::string all = text ? text : "";
+        for (size_t at = 0; at < all.size();) {
+            size_t end = all.find(';', at);
+            if (end == std::string::npos) end = all.size();
+            std::string item = all.substr(at, end - at);
+            size_t colon = item.find(':');
+            if (colon != std::string::npos) steps.push_back({atoi(item.c_str()), item.substr(colon + 1), false});
+            at = end + 1;
+        }
+    }
+    for (auto &st : steps) {
+        if (st.done) continue;
+        if (busy || ImGui::GetFrameCount() < st.frame || st.action != want) return false;
+        st.done = true;
+        fprintf(stderr, "[CONTENT-TEST] step %s\n", st.action.c_str());
+        return true;
+    }
+    return false;
+}
+
+static void content_test_report(const std::string &local_ids)
+{
+    auto now = std::make_unique<ModsState>(), before = std::make_unique<ModsState>();
+    bool present = false, usable = false;
+    int on = 0, total = 0;
+    mods_state_now(*now, local_ids);
+    mods_backup_load(*before, present, usable, local_ids);
+    mods_own_count(now.get(), local_ids.c_str(), &on, &total);
+    fprintf(stderr, "[CONTENT-TEST] report community=%d own_on=%d own_total=%d backup=%d/%d all_off=%d status='%s'\n",
+            now->community, on, total, present, usable, mods_is_all_off(now.get(), local_ids.c_str()), pcui::mod_status().c_str());
+}
+
+// What the card says, worked out at most twice a second (it reads files and compares every own pack).
+struct ModsCard {
+    bool saved = false, all_off = false;
+    std::string title, line, key;
+    double stamp = -10;
+};
+static ModsCard g_mods_card;
+
+static void mods_card_refresh(const std::string &local_ids)
+{
+    double t = ImGui::GetTime();
+    if (t - g_mods_card.stamp < 0.5 && g_mods_card.key == local_ids) return;
+    g_mods_card.stamp = t;
+    g_mods_card.key = local_ids;
+    auto now = std::make_unique<ModsState>(), before = std::make_unique<ModsState>();
+    bool present = false, usable = false;
+    mods_state_now(*now, local_ids);
+    mods_backup_load(*before, present, usable, local_ids);
+    bool saved = usable && !mods_is_all_off(before.get(), local_ids.c_str());
+    bool all_off = mods_is_all_off(now.get(), local_ids.c_str());
+    int own_on = 0, own_total = 0;
+    mods_own_count(now.get(), local_ids.c_str(), &own_on, &own_total);
     std::string title, line;
     if (all_off) {
         title = "Mods: OFF";
         line = "The game starts as the original: no community content, no packs of yours, no HD textures, no graphics pack, no "
-               "language mod. Online still asks to restart with the community content.";
+               "language mod. Online still asks to restart with the community content. ";
+        line += saved ? "Turn mods back on brings back what was on before (own packs you had switched off stay off)."
+                      : "Turn mods back on switches on the community content and all your own packs; HD textures, the graphics "
+                        "pack and the language mod stay as they are.";
     } else if (saved) {
         title = "Mods: partly on";
         line = "You turned all mods off and switched some back on. The button brings back what was on before.";
     } else {
         title = "Mods: ON";
         std::string on;
-        auto add = [&](const char *what) { on += (on.empty() ? "" : ", ") + std::string(what); };
-        if (now.community) add("community content");
-        if (!local_ids.empty()) add("your own packs");
-        if (now.textures) add("HD textures");
-        if (now.graphics) add("graphics pack");
-        if (now.language_pack[0]) add("language mod");
-        line = "On: " + (on.empty() ? std::string("your own packs are off") : on) +
-               ". The button turns them all off at once and remembers them.";
+        auto add = [&](const std::string &what) { on += (on.empty() ? "" : ", ") + what; };
+        if (now->community) add("community content");
+        if (own_on > 0) add(own_on == own_total ? "your own packs" : "your own packs (" + std::to_string(own_on) + " of " + std::to_string(own_total) + ")");
+        if (now->textures) add("HD textures");
+        if (now->graphics) add("graphics pack");
+        if (now->language_pack[0]) add("language mod");
+        line = "On: " + (on.empty() ? std::string("nothing") : on);
+        if (own_total > 0 && own_on == 0) line += ". All your own packs are off (MY PACKS, below)";
+        line += ". The button turns them all off at once and remembers them.";
     }
-    ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 78 * s);
+    g_mods_card.saved = saved;
+    g_mods_card.all_off = all_off;
+    g_mods_card.title = title;
+    g_mods_card.line = line;
+}
+
+static float mods_master_card(ImDrawList *ld, float lx, float y, float inner, float s, bool busy, const std::string &local_ids,
+                              bool &moved)
+{
+    mods_card_refresh(local_ids);
+    const ModsCard &c = g_mods_card;
+    ImVec2 ra(lx, y), rb(lx + inner - 14 * s, y + 92 * s);
     ld->AddRectFilled(ra, rb, col(k_white, 0.05f), 12 * s);
-    ld->AddRect(ra, rb, col(all_off ? k_gold : k_green, 0.55f), 12 * s);
+    ld->AddRect(ra, rb, col(c.all_off ? k_gold : k_green, 0.55f), 12 * s);
     ld->PushClipRect(ra, ImVec2(rb.x - 210 * s, rb.y), true);
-    ld->AddText(bold_font(), 18 * s, ImVec2(ra.x + 18 * s, ra.y + 8 * s), col(k_white), title.c_str());
+    ld->AddText(bold_font(), 18 * s, ImVec2(ra.x + 18 * s, ra.y + 8 * s), col(k_white), c.title.c_str());
     ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 33 * s), col(ImVec4(0.80f, 0.80f, 0.82f, 1)),
-                line.c_str(), nullptr, inner - 250 * s);
+                c.line.c_str(), nullptr, inner - 250 * s);
     ld->PopClipRect();
-    const char *label = saved ? "Turn mods back on" : "Turn all mods off";
-    if (glass_button("##content_mods_master", label, ImVec2(rb.x - 196 * s, ra.y + 21 * s), ImVec2(178 * s, 36 * s), s,
-                     saved ? GLASS_PLAIN : GLASS_RED, bold_font(), 14.5f * s, !busy && (saved || !all_off)))
+    const bool back = c.saved || c.all_off;         // the button always does what its label says
+    if (glass_button("##content_mods_master", back ? "Turn mods back on" : "Turn all mods off",
+                     ImVec2(rb.x - 196 * s, ra.y + 28 * s), ImVec2(178 * s, 36 * s), s, back ? GLASS_PLAIN : GLASS_RED,
+                     bold_font(), 14.5f * s, !busy) ||
+        content_test_step("master", busy)) {
         moved = mods_master_press(local_ids);
-    return y + 90 * s;
+        g_mods_card.stamp = -10;
+    }
+    if (content_test_step("report", busy)) content_test_report(local_ids);
+    return y + 104 * s;
 }
 
 static void content_dialog(ImVec2 o, float w, float h, float s)
@@ -278,6 +427,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
     static int count = -1;
     static bool changed;            // a switch moved
     static bool composing;          // ... and the launcher composes the packs' files again
+    static bool reload_list;        // build 94: read the packs' switches again (own packs' state comes from the list)
     ImVec2 size(std::min(w - 40 * s, 820 * s), std::min(h - 40 * s, 620 * s));
     ImGui::SetNextWindowPos(ImVec2(o.x + (w - size.x) / 2, o.y + (h - size.y) / 2));
     ImGui::SetNextWindowSize(size);
@@ -291,7 +441,7 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
     if (!open) { count = -1; return; }
     static bool was_busy;
     bool busy = pcui::mod_busy();
-    if (count < 0 || (was_busy && !busy)) count = pc_content_list(packs, PC_CONTENT_MAX);
+    if (count < 0 || reload_list || (was_busy && !busy)) { count = pc_content_list(packs, PC_CONTENT_MAX); reload_list = false; }
     was_busy = busy;
 
     ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -341,7 +491,8 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
         if (moved) {
             changed = true;
             composing = pcui::mod_start("compose");     // the own packs' files follow the switches
-            count = -1;
+            fprintf(stderr, "[CONTENT] compose %s after the master switch\n", composing ? "started" : "NOT started");
+            reload_list = true;
         }
     }
     {   // build 90: community content in offline play (settings.ini [content] community_offline, default on)
@@ -383,7 +534,9 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
     // a switch moved: the composed files follow (fighter bodies, clothing and venues are composed into the
     // game's files: again, now)
     auto toggle = [&](const PcContentPack &p, bool on) {
-        pc_content_set_off(p.id, on ? 1 : 0);
+        if (p.local) pc_content_own_set_off(p.id, on ? 1 : 0);
+        else pc_content_set_off(p.id, on ? 1 : 0);
+        reload_list = true;             // the list is read again next frame: each pack's switch as it is now
         pc_settings_save();
         changed = true;
         composing = pcui::mod_start("compose");
