@@ -222,6 +222,7 @@ static void run_sequence(void)
     InterlockedExchange(&g_armed, 0);
     for (i = 0; i < m->count; i++) if (m->pad[i] >= 0) humans++;
     netplay_sync_point();
+    netplay_lineup_agree(&g_req);       /* build 95: a fighter a player has no row for plays its template or Doc */
     if (netplay_match_abandoned()) {     /* the other player left while this PC got here */
         g_running = 0;
         return;

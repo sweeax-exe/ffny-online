@@ -88,8 +88,11 @@ static RecompSetting g_display_settings[] = {
       "host or host:port (port 27777 if left out).", "auto" },
     { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Your name, shown to the other player.", "Player" },
-    { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
-      "The fighter you pick in online rooms (its Battle-mode ID); chosen in the room." },
+    /* build 95: up to the fighter numbers (1000 and up, fighter_banks.h): 0..255 saved 1008 as 255, which READY sent
+     * and every PC of the match crashed on (builds 93/94, community/crash-hoodiebatman.md) */
+    { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 2147483647, NULL, NULL, 0,
+      "The fighter you pick in online rooms (its Battle-mode ID, or a community fighter's number from 1000); chosen "
+      "in the room." },
     { "online", "fighter_skin", RECOMP_SETTING_INT, 0, 0, 15, NULL, NULL, 0,
       "The community skin of that fighter you play online (0 its own look, 1.. its skins in the catalogue's order; "
       "build 85); chosen in the room's CHOOSE A LOOK window." },

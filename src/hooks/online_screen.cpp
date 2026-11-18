@@ -1650,7 +1650,16 @@ static int saved_fighter()
 {
     int id = online_fighter_id(recomp_settings_get("online", "fighter", 55));
     if (id >= FB_FIRST_LOGICAL && !fighter_banks_find(id)) return 55;     // build 86: a community fighter no longer here
-    return id == NETPLAY_CREATED_FIGHTER && !cp_available() ? 55 : id;
+    if (id == NETPLAY_CREATED_FIGHTER) return cp_available() ? id : 55;
+    if (!netplay_fighter_loadable(id)) {
+        // build 95: no fighter this PC can load (255: builds 93/94 saved a community fighter's number as 255, READY
+        // sent it and the match crashed on every PC): Doc, until the player picks again
+        static int told = -2;
+        if (told != id) fprintf(stderr, "[NETPLAY] the saved online fighter %d is no fighter here: Doc (55)\n", id);
+        told = id;
+        return 55;
+    }
+    return id;
 }
 
 // A fighter's name for the screen: a created fighter's is its record's (the member in relay slot

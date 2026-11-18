@@ -62,6 +62,8 @@ const char *online_fighter_name(int id);    /* "Fighter 12" if unknown */
 /* A fighter ID as saved by builds that offered Teck, Santos, O.E and Eric Sermon under their
  * fighter.xml IDs (13 and 14), as the Battle-mode ID; any other ID unchanged. */
 int online_fighter_id(int id);
+/* Build 95: the database has a Character row for this front-end ID (its own fighters; not a place, a number or 99). */
+int online_fighter_has_row(int id);
 const char *online_venue_name(int fe_id);
 const OnlineMode *online_mode(int type);    /* NULL if not offered */
 
