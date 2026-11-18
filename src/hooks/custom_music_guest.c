@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "guest_call.h"
+#include "next_song.h"
 
 #define MUSIC_ASKED     0x0033EA18u     /* int: the music volume the game last asked for (slider and ducking) */
 #define MATCH_PHASE     0x003B8F30u     /* int: 0 start, 1 fighting, 2 decided, 3 finished */
@@ -65,6 +66,9 @@ void custom_music_options_ready(void) { g_options_ready = 1; }
 void custom_music_on_update(int rerun, int in_fight)
 {
     int want, v, i, phase, zeroed = 0;
+    /* Next song (next_song.h): a key or pad press moves the music on here, at the clean point between two
+     * game updates (sub_0002C530_enter, after netplay_on_update), never in a rollback re-run step. */
+    next_song_game_tick(rerun);
     if (rerun || !g_audio_up)
         return;
     g_updates++;
