@@ -5021,6 +5021,17 @@ static DWORD WINAPI net_thread(LPVOID unused)
             }
             N.caps_sent = now;
         }
+        /* F0: in a King of the Hill room the RINGS answers say whether it is a ring (the report's `ring`, the crown
+         * banner), however it was joined (the Fight Complex, a code, a link): asked every 15 s while it is not known
+         * (a ring's code is learnt within a round trip of the first ask; a player's own hill never is) */
+        if (N.lobby && N.state == NETPLAY_LOBBY && N.roomv.in_room && NETPLAY_IS_KOTH(N.roomv.settings.mode)) {
+            char code[7];
+            EnterCriticalSection(&g_cs);
+            memcpy(code, N.roomv.code, sizeof(code));
+            LeaveCriticalSection(&g_cs);
+            code[6] = 0;
+            if (code[0] && !netservers_ring_of(-1, code, NULL)) netservers_fetch_rings(15000);
+        }
         chat_tick(now);     /* room chat: IDENT, and the line being sent (relays answering CAPS_CHAT) */
         /* crew battles: CREWJOIN once the relay knows this account (IDENT), every CREW_RETRY_MS until in */
         if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && N.crew_want && N.relay_caps > 0 &&
