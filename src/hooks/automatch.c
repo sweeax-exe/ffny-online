@@ -214,10 +214,27 @@ static void difficulty_back(void)
     g_saved_difficulty = -1;
 }
 
+/* RECOMP_TEST_TEAM_PICKS=<four digits> (offline tests only): after the set-ups, the Team screen's own picks
+ * (chsTeam4: Controller.ControllerSelect(slot, pad, fighter + 1, position), digit i the position of slot i), which
+ * reorder the four set-up entries as the menus do (docs/research/team-and-special-match-types.md 3.1). Automatch
+ * itself never sends them; online Team matches set the entries in their final order. */
+static void team_picks_for_test(const AutoMatch *m, const int *set_up)
+{
+    const char *e = getenv("RECOMP_TEST_TEAM_PICKS");
+    char cmd[96];
+    int i;
+    if (!e || strlen(e) != 4 || m->count != 4 || netplay_active()) return;
+    for (i = 0; i < 4; i++) {
+        snprintf(cmd, sizeof cmd, "Controller.ControllerSelect(%d,%d,%d,%d)", i, m->pad[i], set_up[i] + 1, e[i] - '0');
+        call("%s", cmd);
+        fighter_skins_after_funccall(cmd);      /* as the FuncCall hook does after a menu's call */
+    }
+}
+
 static void run_sequence(void)
 {
     const AutoMatch *m = &g_req;
-    int i, humans = 0;
+    int i, humans = 0, set_up[4] = { -1, -1, -1, -1 };
     g_running = 1;
     InterlockedExchange(&g_armed, 0);
     for (i = 0; i < m->count; i++) if (m->pad[i] >= 0) humans++;
@@ -264,10 +281,12 @@ static void run_sequence(void)
             if (test >= 0) fighter = test;
         }
         call("Controller.ControllerSetup(%d,%d,%d,%d)", i, m->pad[i], fighter, i);
+        set_up[i] = fighter;
     }
     /* build 85: each fighter's skin (START's, or a test's), after the set-up calls that reset them */
     fighter_skins_clear_slots();
     for (i = 0; i < m->count; i++) fighter_skins_set_slot(i, m->fighter[i], m->pad[i] >= 0 ? m->skin[i] : 0);
+    team_picks_for_test(m, set_up);
     call("Game.ResetVenueList(0)");
     call("Game.ChooseVenue(%d)", m->venue);
     call("Controller.GetCustomControlMap()");

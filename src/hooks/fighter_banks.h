@@ -63,6 +63,14 @@ static __inline int fighter_banks_index(int fe_id)
  * command is another (or names no logical fighter); *slot and *id say what it named. */
 int fighter_banks_rewrite_setup(const char *command, int replacement, char *out, size_t out_size, int *slot, int *id);
 
+/* "Controller.ControllerSelect(thumb,pad,id+1,position)" (the Team screen chsTeam4, one call a player; the game
+ * then rewrites the four set-up entries in position order, docs/research/team-and-special-match-types.md 3.1)
+ * with id a logical fighter's: the command with replacement (a bank or a stock feID) + 1 in its place, into out.
+ * Returns 1 when it rewrote, 0 otherwise (thumb < 0 is the undo/clear form); *thumb, *pad, *id (the fighter, the
+ * argument - 1) and *pos say what it named. */
+int fighter_banks_rewrite_select(const char *command, int replacement, char *out, size_t out_size, int *thumb,
+                                 int *pad, int *id, int *pos);
+
 /* A fighter picture's name ("portrait/p_ML_125_2p.swf", "thumbs/thumb124off") that names a bank (its ID, or ID + 1
  * for the families that number so) with bank_to_id[bank] the fighter bound to it (FB_FIRST_LOGICAL and up), under
  * that fighter's ID instead, into out. 1 when it rewrote. */

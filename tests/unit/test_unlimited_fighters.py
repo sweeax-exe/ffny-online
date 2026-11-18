@@ -140,6 +140,11 @@ int main(int argc, char **argv) {
         printf("%d %d %d %s\n", r, slot, id, r ? out : "-");
         return 0;
     }
+    if (!strcmp(argv[1], "select")) {
+        int t, pad, id, pos, r = fighter_banks_rewrite_select(argv[2], atoi(argv[3]), out, sizeof out, &t, &pad, &id, &pos);
+        printf("%d %d %d %d %d %s\n", r, t, pad, id, pos, r ? out : "-");
+        return 0;
+    }
     if (!strcmp(argv[1], "picture")) {
         int map[4] = { 1007, -1, 1003, -1 };
         int r = fighter_banks_picture_name(argv[2], map, out, sizeof out);
@@ -180,6 +185,17 @@ def test_c_set_up_command(banks_exe):
     assert banks_exe("setup", "Game.StartGame()", 124) == "0 -1 -1 -"
 
 
+def test_c_team_pick_command(banks_exe):
+    # chsTeam4 sends the fighter's ID + 1; a community fighter's pick names its bank + 1 (report 20261118-194257)
+    assert banks_exe("select", "Controller.ControllerSelect(1,1,1009,1)", 125) == \
+        "1 1 1 1008 1 Controller.ControllerSelect(1,1,126,1)"
+    assert banks_exe("select", "Controller.ControllerSelect(2,-3,1004,0)", 124) == \
+        "1 2 -3 1003 0 Controller.ControllerSelect(2,-3,125,0)"
+    assert banks_exe("select", "Controller.ControllerSelect(2,-3,23,2)", 125) == "0 2 -3 22 2 -"    # a stock fighter
+    assert banks_exe("select", "Controller.ControllerSelect(-1,0,1009,0)", 125) == "0 -1 0 1008 0 -"  # undo
+    assert banks_exe("select", "Controller.ControllerSetup(1,1,1008,1)", 125) == "0 -1 -1 -1 -1 -"
+
+
 def test_c_picture_names(banks_exe):
     assert banks_exe("picture", "p_cf_125_2p") == "1 p_cf_1008_2p"          # ID + 1 families
     assert banks_exe("picture", "portrait/p_ML_127_3p.swf") == "1 portrait/p_ML_1004_3p.swf"
@@ -213,6 +229,9 @@ def test_hooks_are_wired():
     assert "fighter_banks_movie_load(" in manual
     hooks = (ROOT / "src/hooks/fighter_bank_hooks.c").read_text(encoding="utf-8")
     assert "ffny_online_locked()" in hooks       # offline only
+    assert "Controller.ControllerSelect(" in hooks and "fighter_banks_rewrite_select(" in hooks   # the Team screen
+    skins = (ROOT / "src/hooks/fighter_skins.c").read_text(encoding="utf-8")
+    assert "Controller.ControllerSelect(" in skins     # the looks follow the Team order
 
 
 @needs_dump
