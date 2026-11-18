@@ -80,6 +80,8 @@ def build_call_sites(gen_dir, cache):
 
 
 STACK_WORD_RE = re.compile(r"^\s+GS \+(\d+)\s+([0-9A-Fa-f]{8})\s*$")
+# The [CRASH] and [HANG] blocks' scans ("    [esp+12  ] 0x0027EC6E").
+SCAN_WORD_RE = re.compile(r"^\s+\[esp\+(\d+)\s*\]\s+0x([0-9A-Fa-f]{8})")
 
 
 def filter_log(path, sites):
@@ -91,10 +93,10 @@ def filter_log(path, sites):
     of the call; this keeps the ones that are real call sites."""
     with open(path, errors="replace") as f:
         for line in f:
-            if line.startswith("[WATCH] entry"):
+            if line.startswith(("[WATCH] entry", "[CRASH]", "[HANG] no present")) or " guest thread " in line:
                 print(line.rstrip()[:120])
                 continue
-            m = STACK_WORD_RE.match(line)
+            m = STACK_WORD_RE.match(line) or SCAN_WORD_RE.match(line)
             if m:
                 word = int(m.group(2), 16)
                 if word in sites:
@@ -113,7 +115,8 @@ def main():
     ap.add_argument("--samples", type=int, default=1)
     ap.add_argument("--interval", type=float, default=0.5)
     ap.add_argument("--log", help="filter the stack scans an entry breakpoint printed "
-                                  "(RECOMP_WATCH_EXEC_STACK) instead of reading a live process")
+                                  "(RECOMP_WATCH_EXEC_STACK), or the [CRASH]/[HANG] scans of a log or "
+                                  "report, instead of reading a live process")
     a = ap.parse_args()
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
