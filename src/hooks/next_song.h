@@ -31,6 +31,17 @@ extern "C" {
 /* Ask for the next song (`from`: "key", "pad", "test" for the log). Any thread. */
 void next_song_request(const char *from);
 
+/* Previous song (build 96, [audio] prev_song_key / prev_song_pad; song_history.h): the first press plays
+ * the current song from its start, a second one within 3 s (or one in a song's first 3 s) the song that
+ * played before it, a game song or one of the player's own. Any thread; acted on like the next song. */
+void next_song_back_request(const char *from);
+
+/* custom_music.cpp's player thread: one of the player's songs (its path in the music folder) starts. */
+void next_song_own_started(const char *rel);
+
+/* Tests: the clock the history reads (NULL: the real one). */
+void next_song_test_clock(unsigned long long (*clock)(void));
+
 /* Game thread, at the clean point between two updates; `rerun` 1 inside a rollback re-run step
  * (then nothing happens: the request waits for a real step). */
 void next_song_game_tick(int rerun);

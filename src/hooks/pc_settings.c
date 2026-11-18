@@ -322,6 +322,13 @@ static RecompSetting g_display_settings[] = {
       "Controller buttons that skip to the next song, pressed together (it acts when the last one goes down), "
       "e.g. back+right_shoulder; alternatives separated by commas, button names as in [gamepad]. The game sees "
       "the presses too. Empty (the default) for none.", "" },
+    { "audio", "prev_song_key", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "The key for the previous song, as on a music player: the first press plays the song from its start, a "
+      "second one within 3 seconds (or a press in a song's first 3 seconds) the song that played before it. "
+      "A letter or digit, F1-F12, Tab, CapsLock, LAlt, Mouse4 or Mouse5. Empty for none.", "N" },
+    { "audio", "prev_song_pad", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "Controller buttons for the previous song, pressed together, as for the next song. Empty (the default) "
+      "for none.", "" },
     { "graphics", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Enhanced graphics (community): the ReShade / DLSS pack with presets by Marleymarletto, installed by the "
       "launcher next to the game (Launcher > Graphics). Heavy on the GPU: for NVIDIA RTX cards." },

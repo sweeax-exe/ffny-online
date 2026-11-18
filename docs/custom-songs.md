@@ -54,19 +54,26 @@ losing its place. Which version plays when is the game's choice; try it and see.
 The short clips the game plays on loading screens and as a fight starts are still the template
 song's own (an instrumental for Straight, "Holler If Ya Hear Me" for Interactive).
 
-## Next song, song from the start
+## Next song, previous song
 
-Any song, the game's or yours, in the menus and in fights:
+Any song, the game's or your own (`[music]`), in the menus and in fights, offline and online (only
+your PC hears it):
 
-| | Pad | Keyboard |
+| | Keyboard | Controller |
 |---|---|---|
-| Next song | hold the right stick in (R3), press D-pad right | F8 |
-| The song from its start | hold the right stick in (R3), press D-pad left | F7 |
+| Next song | M | `[audio] next_song_pad` (off by default) |
+| Previous song | N | `[audio] prev_song_pad` (off by default) |
 
-The game does not use the stick clicks, so holding R3 changes nothing else; the D-pad press does
-reach the game as well (in a menu it moves the cursor one step). The shortcuts act as the game
-does when a song ends, so the song banner shows the new song. In a Story fight, "next song" moves
-on from the opponent's own song to your Beatbox list. Change or turn them off on the launcher's
-Songs page (Shortcuts) or in [`[songs]`](settings-reference.md).
+Previous song works as on a music player: the first press plays the current song from its start;
+a second press within 3 seconds, or a press in the first 3 seconds of a song, goes to the song that
+played before it, and further presses go on back. The game keeps a short history of what played
+(its songs and yours, the last 16). A game song plays again from the playlist the game has now (in
+a fight, the fight's playlist; in a Story fight that is the opponent's song first, then your
+Beatbox list), so a song that is not on it is passed over; with nothing earlier to go back to, the
+song starts again. The game's song banner shows the song, and a short "Now playing" note names it.
+
+Change the keys or turn them off on the launcher's Basics page (Music) or in
+[`[audio]`](settings-reference.md). Test aid: `RECOMP_TEST_NEXT_SONG=40,55,b70,b71` asks for the next
+song (a number) or the previous song (`b` and a number) that many seconds in.
 
 Settings: [`[songs]`](settings-reference.md). How it works: [research notes](research/custom-songs.md).

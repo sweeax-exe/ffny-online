@@ -51,6 +51,9 @@ std::atomic<unsigned> g_track_changes{0};
 std::atomic<unsigned> g_fights_ended{0};    // fights over so far (musiclib::FightWatch)
 std::atomic<unsigned> g_fights_begun{0};    // fights begun after one was over
 std::atomic<unsigned> g_skips{0};           // next song asked (custom_music_skip, the [audio] next_song key)
+std::atomic<unsigned> g_plays{0};           // a song asked by its path (custom_music_play, the previous song key)
+std::mutex g_play_lock;
+std::string g_play_rel;                     // under g_play_lock: the song custom_music_play asked for ("" the current)
 musiclib::FightWatch g_fight_watch;         // the game thread's only
 musiclib::Mode g_mode = musiclib::MODE_ORIGINAL;
 bool g_shuffle = true;
@@ -235,6 +238,11 @@ struct Player
             g_active = false;
             return;
         }
+        begin(index, d);
+    }
+    // Song `index` (opened as `d`) plays now.
+    void begin(size_t index, MusicDecoder *d)
+    {
         // A new rate needs a new voice: let the old one finish first.
         if (voice && voice_rate != music_decoder_rate(d) && queued()) {
             while (queued() && g_active) std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -256,6 +264,36 @@ struct Player
         double sec = music_decoder_seconds(d);
         log("playing %s (%d Hz, %d ch, %.0f s; song %u, %zu in the list)", g_songs[index].rel.c_str(),
             music_decoder_rate(d), music_decoder_channels(d), sec, songs_played, g_songs.size());
+        next_song_own_started(g_songs[index].rel.c_str());
+    }
+    // Previous song (custom_music_play): song `rel` ("" the current one) from its start, at once.
+    void play(const std::string &rel)
+    {
+        size_t at = g_songs.size();
+        if (rel.empty()) {
+            if (songs_played && song_index < g_songs.size()) at = song_index;
+        } else {
+            for (size_t i = 0; i < g_songs.size(); i++)
+                if (g_songs[i].rel == rel) at = i;
+        }
+        if (at >= g_songs.size() || g_songs[at].state == musiclib::BAD) {
+            log("previous song: %s is not in the list", rel.empty() ? "no song" : rel.c_str());
+            return;
+        }
+        char why[160] = "";
+        MusicDecoder *d = music_decoder_open(musiclib::utf8(g_songs[at].path).c_str(), why, sizeof(why));
+        if (!d) {
+            log("previous song: %s cannot be opened: %s", g_songs[at].rel.c_str(), why);
+            return;
+        }
+        log("previous song asked: %s %s", g_songs[at].rel.c_str(), rel.empty() ? "from its start" : "");
+        if (voice) { voice->DestroyVoice(); voice = nullptr; voice_rate = 0; started = false; }
+        close_song();
+        draining = false;
+        g_have_song = false;
+        // in order, the next after it is the one after it in the list
+        if (!g_shuffle) g_list.continue_after(at);
+        begin(at, d);
     }
     void feed()
     {
@@ -313,6 +351,7 @@ struct Player
         unsigned seen_begun = g_fights_begun.load();
         unsigned seen_order = g_order_changes.load();
         unsigned seen_skips = g_skips.load();
+        unsigned seen_plays = g_plays.load();
         float applied = -1;
         auto last_report = std::chrono::steady_clock::now();
         while (g_active) {
@@ -355,6 +394,18 @@ struct Player
                         next_song_note_set("the game's soundtrack");
                     }
                 }
+            }
+            unsigned plays = g_plays.load();
+            if (plays != seen_plays) {
+                seen_plays = plays;
+                std::string rel;
+                {
+                    std::lock_guard<std::mutex> lock(g_play_lock);
+                    rel = g_play_rel;
+                }
+                play(rel);
+                applied = -1;
+                if (!g_active) break;
             }
             unsigned begun = g_fights_begun.load();
             if (begun != seen_begun) {
@@ -477,6 +528,15 @@ extern "C" int custom_music_active(void) { return g_active.load(); }
 extern "C" int custom_music_want_mute(void) { return g_active && g_custom_turn && g_have_song; }
 
 extern "C" void custom_music_skip(void) { g_skips++; }
+
+extern "C" void custom_music_play(const char *rel)
+{
+    {
+        std::lock_guard<std::mutex> lock(g_play_lock);
+        g_play_rel = rel ? rel : "";
+    }
+    g_plays++;
+}
 
 extern "C" void custom_music_set_game_volume(int volume) { g_game_volume = volume; }
 extern "C" void custom_music_set_in_fight(int in_fight) { g_in_fight = in_fight != 0; }
