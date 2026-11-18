@@ -1328,6 +1328,29 @@ void sub_001EBBE0(void)
 {
     input_late_lock();sub_001EBBE0_gen();input_late_unlock();
 }
+/*
+ * The XInput driver's wait for one USB request (sub_0027F19A: 50 ms, cancel, then for good), entered.
+ *
+ * The event is a KEVENT the driver writes on its own stack (no KeInitializeEvent), and the
+ * runtime's shadow for it is keyed by address and never reset: the second GET_CAPABILITIES transfer
+ * of sub_0027DE9D, or the next call at the same depth, found the host event still set from the
+ * last one, so the wait returned at once with the request still queued. Its completion then came a
+ * few ms later through the request's +8 and wrote 3 words and a byte into whatever frame held that
+ * stack slot by then (the boot report 2a67f6 of build 95 called 0x00F7FD50: the slot had become a
+ * new KEVENT whose wait list pointed at itself). docs/research/stale-urb-completion.md.
+ *
+ * The title wrote SignalState = 0 before it submitted, so the host event follows the header here;
+ * the toolkit's KeSetEvent writes SignalState = 1 first, so a completion that already came stays
+ * seen. The argument is the event: [esp+4] at the entry.
+ */
+extern int xbox_KeEventResyncFromGuest(uint32_t guest_va);   /* kernel_bridge.c */
+void sub_0027F19A_enter(void)
+{
+    static unsigned resets;
+    if (xbox_KeEventResyncFromGuest(MEM32(g_esp + 4)) && ++resets <= 3)
+        fprintf(stderr, "[XINPUT] a USB request's wait would have returned early (stale event at 0x%08X); "
+                        "it waits for the request now (#%u)\n", MEM32(g_esp + 4), resets);
+}
 extern void sub_001EBE10_gen(void);
 void sub_001EBE10(void)
 {
