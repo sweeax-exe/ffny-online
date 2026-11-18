@@ -58,6 +58,12 @@ def fighter_number(value):
 # 84 and older read index-v3.json, which leaves skins out, and would refuse a new fighter without a place)
 FIGHTER_MODES = ('skin',)
 SKIN_TEMPLATES = frozenset(i for i in range(0, 98) if i not in (80, 81, 82, 83, 84))
+# Build 94: the creator's CREDITS ("credits": who made the textures, models or voices the pack uses; index-v6.json
+# only: launchers of build 93 and older read index-v5.json, which leaves it out, and would refuse the key). Free text
+# the account service checked (one credit per line, at most 6 lines and 300 characters, no links); not part of the
+# pack, its content hash or its signature, so the account service edits it without a new version.
+CREDITS_MAX = 300
+CREDITS_MAX_LINES = 6
 # a mod that is one item of a pack of several mods ("Pack (N mods)"): the pack's id and title, always together
 # (index-v3.json only: launchers of build 79 read index-v2.json, which leaves bundle items out, and would refuse
 # the keys). The launcher installs and removes a pack's mods as one unit.
@@ -83,6 +89,8 @@ def ffny_mod(mod):
                 and isinstance(mod.get('id'), str) and mod['id'].startswith(OFFICIAL_PREFIX)
                 and type(mod.get('venue_fe_id')) is int and mod['venue_fe_id'] in VENUE_FE_IDS
                 and type(mod.get('rts_map', False)) is bool and 'bundle' not in mod, 'Invalid official map')
+    if 'credits' in mod:
+        credits(mod['credits'])
     if 'language' in mod:
         require(isinstance(mod['language'], str) and re.fullmatch(r'[a-z]{2,3}(-[A-Za-z0-9]{2,8})?', mod['language']),
                 'Invalid language code')
@@ -91,6 +99,15 @@ def ffny_mod(mod):
         slug(mod['bundle'])
         text(mod['bundle_name'])
         require(mod['bundle'] != mod['id'], 'A pack item has the pack id')
+
+
+def credits(value):
+    """The creator's credits: 1..CREDITS_MAX characters on at most CREDITS_MAX_LINES lines, line breaks the only
+    control characters (the account service leaves the key out when a pack has none)."""
+    require(isinstance(value, str) and value.strip() and len(value) <= CREDITS_MAX
+            and len(value.split(chr(10))) <= CREDITS_MAX_LINES
+            and not any(ord(c) < 32 and c != chr(10) for c in value) and chr(127) not in value,
+            'Invalid credits')
 
 
 def ffny_version(row):
@@ -147,7 +164,7 @@ def positive(value):
 
 def validate_mod(mod):
     fields(mod, 'id name description authors class licence homepage versions revoked_versions',
-           'kind type order language fighter_fe_id fighter_mode skin_of bundle bundle_name rts_map venue_fe_id')
+           'kind type order language fighter_fe_id fighter_mode skin_of bundle bundle_name rts_map venue_fe_id credits')
     ffny_mod(mod)
     slug(mod['id'])
     for key in ('name', 'description', 'licence'):

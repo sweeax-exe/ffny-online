@@ -155,7 +155,7 @@ def test_a_launcher_without_the_capability_skips_it(tmp_path):
 
 
 def test_index_v5_falls_back_to_v4_then_v3(monkeypatch):
-    assert mods.CATALOGUE_URL.endswith('/index-v5.json') and mods.CATALOGUE_URL_V4.endswith('/index-v4.json')
+    assert mods.CATALOGUE_URL_V5.endswith('/index-v5.json') and mods.CATALOGUE_URL_V4.endswith('/index-v4.json')
     served = {mods.CATALOGUE_URL_V3: b'v3', mods.CATALOGUE_URL_V3 + '.sig': b's3'}
 
     def fetch(url, limit):
@@ -163,11 +163,11 @@ def test_index_v5_falls_back_to_v4_then_v3(monkeypatch):
             raise urllib.error.HTTPError(url, 404, 'Not Found', None, None)
         return served[url]
     monkeypatch.setattr(mods, 'fetch_small', fetch)
-    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v3', b's3', mods.CATALOGUE_URL_V3)
+    assert mods.fetch_index(mods.CATALOGUE_URL_V5) == (b'v3', b's3', mods.CATALOGUE_URL_V3)
     served.update({mods.CATALOGUE_URL_V4: b'v4', mods.CATALOGUE_URL_V4 + '.sig': b's4'})
-    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v4', b's4', mods.CATALOGUE_URL_V4)
-    served.update({mods.CATALOGUE_URL: b'v5', mods.CATALOGUE_URL + '.sig': b's5'})
-    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v5', b's5', mods.CATALOGUE_URL)
+    assert mods.fetch_index(mods.CATALOGUE_URL_V5) == (b'v4', b's4', mods.CATALOGUE_URL_V4)
+    served.update({mods.CATALOGUE_URL_V5: b'v5', mods.CATALOGUE_URL_V5 + '.sig': b's5'})
+    assert mods.fetch_index(mods.CATALOGUE_URL_V5) == (b'v5', b's5', mods.CATALOGUE_URL_V5)
 
 
 def official_folder(data, kind='official-map', pack_id=MAP_ID, order=1):

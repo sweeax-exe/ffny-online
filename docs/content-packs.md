@@ -257,6 +257,26 @@ game build.
 - The log's `[CONTENT] community content in offline play:` line and F9's `[REPORT] community content in offline play:`
   line say which. Tests: `tests/unit/test_content_offline.py`.
 
+## Credits (build 94)
+
+A community pack may use somebody else's work (a skin texture, a model, a voice). The creator names the original makers
+in the **Credits** field of FFNY Studio's submit step (one credit per line, at most 300 characters and 6 lines, no
+links); the submit rules say that such work needs the maker's permission and a name in Credits.
+
+- **Where they live.** Not in the package: not in `pack.json`, not in `content_sha256` or the pack signature, not in the
+  installable zip. So they never change what online matching compares (`pc_content_print` hashes id, version and content
+  hash only), and the team can add or fix them without a new version (the review post's Edit credits button, or the
+  creator's Save credits in Studio while the pack waits).
+- **Catalogue.** `index-v6.json` is `index-v5.json` plus the mod key `credits` (`mod_catalogue.credits`). Launchers of
+  build 93 and older validate mod keys strictly and keep reading `index-v5.json`; build 94 reads v6 and falls back
+  v6 -> v5 -> v4 -> v3 on a 404 (`mods.FALLBACK`).
+- **Launcher.** `setup/mods.py` writes `credits=` (one line, ` | ` between credits) into each `[pack.<id>]` of
+  `content.ini` from the verified catalogue at every sync, so a credits edit shows without installing the pack again
+  (a credits-only revision is no news and no download). The Content page shows "Credits: ..." under a pack's card (a
+  single pack and a pack of several mods); the Community tab shows them on the pack's page (`credits` of
+  `GET /api/gallery/{id}`). The game's own screens do not name creators.
+- Tests: `tests/unit/test_content_credits.py`; the server side is in `docs/content-catalogue.md` "Credits".
+
 ## Testing
 
 ```

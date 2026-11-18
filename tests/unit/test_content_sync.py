@@ -154,7 +154,8 @@ def test_sync_moves_an_unowned_folder_aside(setup, tmp_path):
 
 
 def test_catalogue_url_is_ours_and_local_http_only_for_tests():
-    assert mods.CATALOGUE_URL == 'https://play.defjam.online/updates/content/index-v5.json'   # build 86: official maps
+    assert mods.CATALOGUE_URL == 'https://play.defjam.online/updates/content/index-v6.json'   # build 94: credits
+    assert mods.CATALOGUE_URL_V5 == 'https://play.defjam.online/updates/content/index-v5.json'   # build 86: official maps
     assert mods.local_test_url('http://127.0.0.1:8095/updates/content/index.json')
     assert not mods.local_test_url('http://example.com:80/index.json')
     assert not mods.local_test_url('http://127.0.0.1.evil.com:80/x')
@@ -180,8 +181,10 @@ def test_index_v4_falls_back_to_v3_on_an_older_server(monkeypatch):
     served.update({mods.CATALOGUE_URL_V4: b'v4', mods.CATALOGUE_URL_V4 + '.sig': b's4'})
     assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v4', b's4', mods.CATALOGUE_URL_V4)     # before build 86's server
     assert mods.fetch_index(mods.CATALOGUE_URL_V4) == (b'v4', b's4', mods.CATALOGUE_URL_V4)
-    served.update({mods.CATALOGUE_URL: b'v5', mods.CATALOGUE_URL + '.sig': b's5'})
-    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v5', b's5', mods.CATALOGUE_URL)
+    served.update({mods.CATALOGUE_URL_V5: b'v5', mods.CATALOGUE_URL_V5 + '.sig': b's5'})
+    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v5', b's5', mods.CATALOGUE_URL_V5)     # before build 94's server
+    served.update({mods.CATALOGUE_URL: b'v6', mods.CATALOGUE_URL + '.sig': b's6'})
+    assert mods.fetch_index(mods.CATALOGUE_URL) == (b'v6', b's6', mods.CATALOGUE_URL)
     with pytest.raises(urllib.error.HTTPError):       # another index (a local test catalogue) does not fall back
         mods.fetch_index('https://play.defjam.online/updates/content/other.json')
 
