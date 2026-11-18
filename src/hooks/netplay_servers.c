@@ -478,13 +478,17 @@ static struct {
 #define RINGS_FRESH     12000   /* an older answer is not shown */
 #define RINGS_KNOWN     64      /* ring rooms remembered this session (the report's `ring`, the hill screen's banner) */
 
+#define RG_CUSTOM       NETSERVER_COUNT /* the slot of a hub on a custom address (tests, a private relay) */
+#define RG_SLOTS        (NETSERVER_COUNT + 1)
+
 static struct {
-    int want[NETSERVER_COUNT];
-    ULONGLONG asked[NETSERVER_COUNT], got[NETSERVER_COUNT];
-    int answered[NETSERVER_COUNT];      /* answered RINGS at least once (a relay with F0) */
-    int count[NETSERVER_COUNT];
-    NetRingCard cards[NETSERVER_COUNT][RINGS_MAX];
-    int logged[NETSERVER_COUNT], logged_silent[NETSERVER_COUNT];
+    int want[RG_SLOTS];
+    ULONGLONG asked[RG_SLOTS], got[RG_SLOTS];
+    int answered[RG_SLOTS];             /* answered RINGS at least once (a relay with F0) */
+    int count[RG_SLOTS];
+    NetRingCard cards[RG_SLOTS][RINGS_MAX];
+    int logged[RG_SLOTS], logged_silent[RG_SLOTS];
+    char custom[128];                   /* RG_CUSTOM's address: the hub's, when it is not one of the table's */
     int rounds;                         /* finished rounds, every relay's answer in or timed out */
     unsigned version;
     struct { int server; NetRingCard card; } known[RINGS_KNOWN];
@@ -1171,21 +1175,38 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
 
 /* ---- F0: every relay's rings (RINGS 0x46, community/fight-complex-f0-protocol.md section 2) ------- */
 
+/* A host:port's IPv4 address, without the table's fallbacks (RG_CUSTOM). */
+static int resolve_plain(const char *address, struct sockaddr_in *out)
+{
+    char host[128], port[16];
+    struct addrinfo hints, *res = NULL;
+    split(address, host, sizeof(host), port, sizeof(port));
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    if (getaddrinfo(host, port, &hints, &res) || !res) return -1;
+    memcpy(out, res->ai_addr, sizeof(*out));
+    freeaddrinfo(res);
+    return 0;
+}
+
+static const char *slot_name(int i) { return i == RG_CUSTOM ? "the hub's relay" : P.s[i].name; }
+
 /* One ask of every wanted relay: a RINGS padded to a full datagram for this build's ring instances. A relay
  * without F0 drops it: no answer within RINGS_WAIT is "no rings there" (the round still counts as done). */
 static void rings_round(void)
 {
-    struct sockaddr_in addr[NETSERVER_COUNT];
-    int want[NETSERVER_COUNT], i, open = 0, any = 0;
-    uint32_t nonce[NETSERVER_COUNT], caps = netplay_client_caps();
-    char address[NETSERVER_COUNT][128];
+    struct sockaddr_in addr[RG_SLOTS];
+    int want[RG_SLOTS], i, open = 0, any = 0;
+    uint32_t nonce[RG_SLOTS], caps = netplay_client_caps();
+    char address[RG_SLOTS][128];
     uint8_t print[8], req[RINGS_REQ_LEN];
     double until, short_until;
     SOCKET s;
     u_long nonblocking = 1;
     EnterCriticalSection(&g_cs);
-    for (i = 0; i < NETSERVER_COUNT; i++) {
-        memcpy(address[i], P.s[i].address, sizeof(address[i]));
+    for (i = 0; i < RG_SLOTS; i++) {
+        memcpy(address[i], i == RG_CUSTOM ? RG.custom : P.s[i].address, sizeof(address[i]));
         want[i] = RG.want[i];
         RG.want[i] = 0;
         any |= want[i];
@@ -1196,9 +1217,12 @@ static void rings_round(void)
     s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s == INVALID_SOCKET) return;
     ioctlsocket(s, FIONBIO, &nonblocking);
-    for (i = 0; i < NETSERVER_COUNT; i++) {
+    for (i = 0; i < RG_SLOTS; i++) {
         int len;
-        if (!want[i] || resolve(i, address[i], &addr[i])) { want[i] = 0; continue; }
+        if (!want[i] || (i == RG_CUSTOM ? resolve_plain(address[i], &addr[i]) : resolve(i, address[i], &addr[i]))) {
+            want[i] = 0;
+            continue;
+        }
         nonce[i] = ((uint32_t)GetTickCount() * 2654435789u) ^ ((uint32_t)GetCurrentProcessId() << 6) ^ (uint32_t)(i + 11);
         len = rings_build_request(req, (int)sizeof(req), nonce[i], print, caps);
         sendto(s, (const char *)req, len, 0, (const struct sockaddr *)&addr[i], sizeof(addr[i]));
@@ -1216,7 +1240,7 @@ static void rings_round(void)
         /* the relays that never answered RINGS (no F0, after the first two rounds) are asked but not waited for past
          * RINGS_WAIT_SILENT: the list thread runs ROOMLIST too and must not idle on old relays */
         EnterCriticalSection(&g_cs);
-        for (i = 0; i < NETSERVER_COUNT; i++) if (want[i] && (RG.answered[i] || RG.rounds < 2)) waiting++;
+        for (i = 0; i < RG_SLOTS; i++) if (want[i] && (RG.answered[i] || RG.rounds < 2)) waiting++;
         LeaveCriticalSection(&g_cs);
         if (!waiting && now_ms() >= short_until) break;
         FD_ZERO(&rd);
@@ -1225,7 +1249,7 @@ static void rings_round(void)
         if (n <= 0) continue;
         count = rings_parse_answer(b, n, &got_nonce, list, RINGS_MAX);
         if (count < 0) continue;
-        for (i = 0; i < NETSERVER_COUNT; i++) if (want[i] && got_nonce == nonce[i]) who = i;
+        for (i = 0; i < RG_SLOTS; i++) if (want[i] && got_nonce == nonce[i]) who = i;
         if (who < 0) continue;
         want[who] = 0;
         open--;
@@ -1238,14 +1262,14 @@ static void rings_round(void)
         for (k = 0; k < count; k++) {   /* every ring room seen this session, for the report and the hill screen */
             int j, at = -1;
             for (j = 0; j < RG.known_n; j++)
-                if (RG.known[j].server == who && !strcmp(RG.known[j].card.code, list[k].code)) at = j;
+                if (RG.known[j].server == (who == RG_CUSTOM ? -2 : who) && !strcmp(RG.known[j].card.code, list[k].code)) at = j;
             if (at < 0) at = RG.known_n < RINGS_KNOWN ? RG.known_n++ : (int)(RG.version % RINGS_KNOWN);
-            RG.known[at].server = who;
+            RG.known[at].server = who == RG_CUSTOM ? -2 : who;
             RG.known[at].card = list[k];
         }
         if (RG.logged[who] != count + 1) {
             RG.logged[who] = count + 1;
-            fprintf(stderr, "[SERVERS] rings: %s lists %d ring%s", P.s[who].name, count, count == 1 ? "" : "s");
+            fprintf(stderr, "[SERVERS] rings: %s lists %d ring%s", slot_name(who), count, count == 1 ? "" : "s");
             for (k = 0; k < count && k < 4; k++)
                 fprintf(stderr, "%s %s \"%s\" (type %d, ch %d, flags %d, %d in, %d line, %d watching, phase %d, king \"%s\" x%d)",
                         k ? "," : ":", list[k].code, list[k].name, list[k].type, list[k].channel, list[k].flags,
@@ -1256,10 +1280,10 @@ static void rings_round(void)
     }
     closesocket(s);
     EnterCriticalSection(&g_cs);
-    for (i = 0; i < NETSERVER_COUNT; i++)
+    for (i = 0; i < RG_SLOTS; i++)
         if (want[i] && RG.logged_silent[i] != 1) {
             RG.logged_silent[i] = 1;
-            fprintf(stderr, "[SERVERS] rings: %s did not answer RINGS (no rings there)\n", P.s[i].name);
+            fprintf(stderr, "[SERVERS] rings: %s did not answer RINGS (no rings there)\n", slot_name(i));
         } else if (!want[i]) RG.logged_silent[i] = 0;
     RG.rounds++;
     RG.version++;
@@ -1270,10 +1294,22 @@ void netservers_fetch_rings(int every_ms)
 {
     ULONGLONG now;
     int i, any = 0;
+    char custom[128];
+    /* a hub on a custom address (tests, a private relay): that relay too (asked before g_cs: netplay's own lock) */
+    int is_custom = netservers_connected() == -2 && netplay_lobby_address(custom, sizeof(custom));
     init();
     if (every_ms < RINGS_FLOOR) every_ms = RINGS_FLOOR;
     now = GetTickCount64();
     EnterCriticalSection(&g_cs);
+    if (is_custom) {
+        if (strcmp(RG.custom, custom)) { RG.asked[RG_CUSTOM] = 0; RG.got[RG_CUSTOM] = 0; RG.answered[RG_CUSTOM] = 0; }
+        snprintf(RG.custom, sizeof(RG.custom), "%s", custom);
+        if (!RG.asked[RG_CUSTOM] || now - RG.asked[RG_CUSTOM] >= (ULONGLONG)every_ms) {
+            RG.want[RG_CUSTOM] = 1;
+            RG.asked[RG_CUSTOM] = now;
+            any = 1;
+        }
+    } else RG.got[RG_CUSTOM] = 0;
     for (i = 0; i < NETSERVER_COUNT; i++)
         if (P.s[i].state != NETSERVER_OFFLINE && (!RG.asked[i] || now - RG.asked[i] >= (ULONGLONG)every_ms)) {
             RG.want[i] = 1;
@@ -1299,6 +1335,14 @@ int netservers_rings(NetRing *out, int max, int *rounds)
         }
     EnterCriticalSection(&g_cs);
     if (rounds) *rounds = RG.rounds;
+    if (RG.got[RG_CUSTOM] && now - RG.got[RG_CUSTOM] <= RINGS_FRESH) {
+        int k;
+        for (k = 0; k < RG.count[RG_CUSTOM] && n < max; k++, n++) {
+            out[n].card = RG.cards[RG_CUSTOM][k];
+            out[n].server = -2;
+            out[n].ping_ms = -1;
+        }
+    }
     for (j = 0; j < NETSERVER_COUNT; j++) {
         int r = order[j], k;
         if (!RG.got[r] || now - RG.got[r] > RINGS_FRESH) continue;
