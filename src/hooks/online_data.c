@@ -143,6 +143,15 @@ static int battle_id(int xml_id)
     return -1;
 }
 
+/* Build 95: whether the database has a Character row for front-end ID `id` (k_sod_fighters), the same on every PC:
+ * a match never loads a fighter without one (netplay_lineup_rules.h). */
+int online_fighter_has_row(int id)
+{
+    unsigned i;
+    for (i = 0; i < sizeof(k_sod_fighters); i++) if (k_sod_fighters[i] == id) return 1;
+    return 0;
+}
+
 /* "Doc (MAR)" -> name "Doc", style "Martial arts". Entries without a known style are not
  * selectable fighters (placeholders, story figures). */
 static void load_fighters(void)

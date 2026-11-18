@@ -154,7 +154,9 @@ def test_the_results_screen_never_holds_the_next_fight():
     assert 'p[15] = (uint8_t)N.peer_rb_max[N.pos];' in NETPLAY_C
     assert 'N.peer_rb_max[from] = len >= 17 ? (p[15] | (p[16] << 8)) : 0;' in NETPLAY_C
     # build 78: byte 17, the sender's R0 of the hybrid rollback delay (match_rb_r0 takes the lowest; 0: build-76 delay)
-    assert 'p[17] = (uint8_t)N.peer_rb_r0[N.pos];' in NETPLAY_C and 'send_data(p, 18);' in NETPLAY_C
+    assert 'p[17] = (uint8_t)N.peer_rb_r0[N.pos];' in NETPLAY_C
+    # build 95: byte 18, the positions whose fighter the sender has no row for (netplay_lineup_rules.h)
+    assert 'p[18] = (uint8_t)N.lineup_mine;' in NETPLAY_C and 'send_data(p, 19);' in NETPLAY_C
     assert 'N.peer_rb_r0[from] = len >= 18 ? p[17] : 0;' in NETPLAY_C
     assert 'N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);' in NETPLAY_C
     assert "leave the last fight's results" in NETPLAY_C

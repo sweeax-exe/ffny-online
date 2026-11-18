@@ -41,6 +41,7 @@
 #include "guest_window.h"
 #include "netplay.h"
 #include "netplay_delay_rules.h"
+#include "netplay_lineup_rules.h"
 #include "recomp_settings.h"
 #include "pc_settings.h"
 #include "updater.h"
@@ -186,6 +187,8 @@ int netplay_room_chat(NetChatLine *o, int m, unsigned *s) { (void)o; (void)m; if
 int netplay_room_chat_can_write(char *w, int n) { if (w && n > 0) w[0] = 0; return -1; }
 int netplay_room_chat_send(const char *t) { (void)t; return 0; }
 void netplay_sync_point(void) {}
+void netplay_lineup_agree(struct AutoMatch *m) { (void)m; }
+int netplay_fighter_loadable(int f) { return f >= 0 && f != 0xFF; }
 void netplay_on_main_menu(void) {}
 int netplay_match_abandoned(void) { return 0; }
 void netplay_on_match_start(void) { start_countdown_match_start(); fight_hud_match_start(); }
@@ -373,6 +376,36 @@ static int unl_template(int number)
 {
     const FighterBanksEntry *e = fighter_banks_find(number);
     return e && e->template_fe_id >= 0 && e->template_fe_id < 0xFF ? e->template_fe_id : 55;
+}
+
+/* Build 95 (netplay_lineup_rules.h): the rows this PC has. A new fighter's place is one of the packs' (online_new_fighters);
+ * the bank rows 124..127 are never a fighter of their own online (on_start_as plays Doc for them first). */
+static int lineup_stock(int id) { return online_fighter_has_row(id); }
+static int lineup_place(int id) { return new_fighter_is_place(id) && fighter_banks_index(id) < 0; }
+static int lineup_have(int id)
+{
+    const OnlineFighter *nf;
+    int n, i;
+    {   /* tests: RECOMP_TEST_LINEUP_LACK=<id>[,<id>...]: this copy has no row for these (a PC whose bank file failed) */
+        const char *lack = getenv("RECOMP_TEST_LINEUP_LACK");
+        char want[16];
+        snprintf(want, sizeof(want), ",%d,", id);
+        if (lack && *lack) {
+            char list[256];
+            snprintf(list, sizeof(list), ",%s,", lack);
+            if (strstr(list, want)) return 0;
+        }
+    }
+    if (is_number(id)) return fighter_banks_find(id) != NULL;
+    n = online_new_fighters(&nf);
+    for (i = 0; i < n; i++) if (nf[i].id == id) return 1;
+    return 0;
+}
+
+int netplay_fighter_loadable(int fighter)
+{
+    return netlineup_kind(fighter, lineup_stock, lineup_place, lineup_have) == NETLINEUP_STOCK ||
+           netlineup_kind(fighter, lineup_stock, lineup_place, lineup_have) == NETLINEUP_HERE;
 }
 
 #define CAPS_DIRECT   NETP2P_CAP /* 1 << 27 (build 90), both ways: this game can take a direct connection (P2P) to the other
@@ -734,6 +767,11 @@ static struct {
     int rb_frames;                      /* the relay's R0 for the hybrid delay (CAPS_RB_FRAMES; 0: none set) */
     int peer_rb_r0[MAXP];               /* each position's R0 for this match (P_RTT byte 17, build 78; 0: older or the
                                          * build-76 formula) */
+    /* build 95 (netplay_lineup_rules.h): START's fighter byte by position (a number's template), the positions
+     * whose fighter this PC has no row for (its mask, P_RTT byte 18) and each player's mask */
+    int start_template[MAXP];
+    unsigned lineup_mine;
+    unsigned peer_lineup[MAXP];
     /* the per-match fallback for a PC that cannot keep up (rb_budget_tick): this PC stops predicting and
      * rolls back no more until the next START; the window's start, the ms of rollback work in it, and
      * how many windows in a row went over */
@@ -2717,7 +2755,7 @@ void netplay_data_print_start(void)
 /* Hub: this PC's ping for the current START, so every PC derives the same input delay. */
 static void send_rtt(void)
 {
-    uint8_t p[18];
+    uint8_t p[19];
     int rtt;
     if (N.pos < 0 || N.watching) return;    /* a spectator: nothing of the lockstep goes out */
     data_print_ready();     /* again after a reset at game start (netplay_data_print_reset) */
@@ -2741,7 +2779,10 @@ static void send_rtt(void)
     /* builds before 78 send 17: R0 of the hybrid rollback delay this PC uses (0: the build-76 formula); every
      * PC takes the lowest of the players' (match_rb_r0) */
     p[17] = (uint8_t)N.peer_rb_r0[N.pos];
-    send_data(p, 18);
+    /* builds before 95 send 18: the positions whose fighter this PC has no row for (netplay_lineup_rules.h); every PC
+     * plays their template or Doc (netplay_lineup_agree) */
+    p[18] = (uint8_t)N.lineup_mine;
+    send_data(p, 19);
     N.last_rtt_sent = GetTickCount64();
 }
 
@@ -2962,6 +3003,9 @@ static void on_data(int from, const uint8_t *p, int len)
             N.peer_rb_must[from] = len >= 15 && (p[14] & 2);   /* build 52: the server makes it mandatory there */
             N.peer_rb_max[from] = len >= 17 ? (p[15] | (p[16] << 8)) : 0;   /* build 54: its rollback ping limit */
             N.peer_rb_r0[from] = len >= 18 ? p[17] : 0;                     /* build 78: its R0 (hybrid delay) */
+            if (len >= 19 && N.peer_lineup[from] != p[18])                  /* build 95: the fighters it lacks */
+                fprintf(stderr, "[BANKS] player %d lacks the fighters of positions mask %02X\n", from + 1, p[18]);
+            N.peer_lineup[from] = len >= 19 ? p[18] : 0;
             if (len >= 12 && g_data_print && get32(p + 8) && get32(p + 8) != g_data_print) {
                 static uint32_t warned_seed[MAXP];
                 if (warned_seed[from] != N.start_seed) {
@@ -4058,7 +4102,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     uint32_t seed;
     int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred, late = watching == 2, cpu = NETPLAY_CPU_HARD;
     int hill_watch = watching == 3, leaving = 0;
-    int skin_of_slot[ROOMSLOTS];
+    int skin_of_slot[ROOMSLOTS], templ[MAXP], fixed = 0;
+    unsigned lineup = 0;
     memset(skin_of_slot, 0, sizeof(skin_of_slot));
     if (len < 4) return;
     if (late || hill_watch) watching = 1;   /* T_WATCHLATE: watched like a WATCH, from the players' next fight */
@@ -4072,6 +4117,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     if (count < 2 || count > MAXP) return;
     for (i = 0; i < count; i++) { slots[i] = rd8(&r); fighters[i] = rd8(&r); }
     if (r.bad) return;
+    for (i = 0; i < count; i++) templ[i] = fighters[i];     /* build 95: a number's template (START's byte) */
     {   /* created fighters: the records START names (absent: none) */
         uint32_t named[ROOMSLOTS];
         memset(named, 0, sizeof(named));
@@ -4106,6 +4152,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
                 for (j = 0; j < 4; j++) num |= (uint32_t)rd8(&r) << (8 * j);
                 if (r.bad || num > 0x7FFFFFFFu || !is_number((int)num)) return;
                 for (j = 0; j < count; j++) if (slots[j] == s) fighters[j] = (int)num;
+                fprintf(stderr, "[BANKS] START: slot %d plays community fighter %u\n", s, (unsigned)num);
             }
             if (r.bad) return;
         }
@@ -4142,7 +4189,17 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         for (j = i; j > 0 && slots[j - 1] > slots[j]; j--) {
             int t = slots[j]; slots[j] = slots[j - 1]; slots[j - 1] = t;
             t = fighters[j]; fighters[j] = fighters[j - 1]; fighters[j - 1] = t;
+            t = templ[j]; templ[j] = templ[j - 1]; templ[j - 1] = t;
         }
+    /* build 95 (netplay_lineup_rules.h): a fighter no PC has a row for (255, an unknown ID) plays Doc here and on every
+     * other PC; one this PC lacks (a number, a new fighter's place) goes in the mask the players agree on (P_RTT) */
+    lineup = netlineup_mask(fighters, count, lineup_stock, lineup_place, lineup_have, &fixed);
+    if (fixed)
+        fprintf(stderr, "[NETPLAY] START: %d fighter(s) without a database row on any PC (255: none named); they play "
+                "Doc (55)\n", fixed);
+    if (lineup)
+        fprintf(stderr, "[BANKS] START: this PC lacks the fighters of positions mask %02X; every PC plays their template "
+                "or Doc\n", lineup);
     for (i = 0; i < ROOMSLOTS; i++) N.pos_of_slot[i] = -1;
     for (i = 0; i < count; i++) {
         if (slots[i] < ROOMSLOTS) N.pos_of_slot[slots[i]] = i;
@@ -4198,6 +4255,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.delay_fixed = 0;
     for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = N.peer_rb_cp[i] = N.peer_rb_must[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
     for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0, N.peer_rb_max[i] = 0, N.peer_rb_r0[i] = 0;
+    for (i = 0; i < MAXP; i++) N.peer_lineup[i] = 0, N.start_template[i] = i < count ? templ[i] : 55;
+    N.lineup_mine = lineup;
     if (pos >= 0 && pos < MAXP) N.peer_rb_max[pos] = own_rb_limit();   /* the relay's answer came before START */
     if (pos >= 0 && pos < MAXP) N.peer_rb_r0[pos] = own_rb_r0();        /* build 78 */
     N.rb_slow_off = 0;              /* the per-match fallback for a slow PC holds until the next START */
@@ -6204,9 +6263,18 @@ void netplay_lobby_ready_skin(int ready, int fighter, int skin)
 {
     /* build 85: the skin as a third byte, only to a relay that answered CAPS_SKINS (an older one reads two);
      * build 86: a community fighter's number after it (relays answering CAPS_UNLIMITED), its template in the byte */
-    uint8_t b[7] = { (uint8_t)(ready ? 1 : 0), (uint8_t)fighter, (uint8_t)(skin > 0 && skin <= FIGHTER_SKINS_PER ? skin : 0) };
+    uint8_t b[7];
     int len = 2, number = is_number(fighter) ? fighter : 0;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    if (!number && netlineup_ready_fighter(fighter) != fighter) {
+        /* build 95: never a fighter byte outside 0..254 (255 is the relay's "no fighter", which START then carried and
+         * every PC of the match crashed on: builds 93/94 saved a community fighter's number as 255) */
+        fprintf(stderr, "[NETPLAY] READY: fighter %d is no fighter; it sends Doc (55)\n", fighter);
+        fighter = netlineup_ready_fighter(fighter);
+    }
+    b[0] = (uint8_t)(ready ? 1 : 0);
+    b[1] = (uint8_t)fighter;
+    b[2] = (uint8_t)(skin > 0 && skin <= FIGHTER_SKINS_PER ? skin : 0);
     if (number) {
         b[1] = (uint8_t)unl_template(number);
         b[2] = 0;
@@ -6227,6 +6295,9 @@ void netplay_lobby_ready_skin(int ready, int fighter, int skin)
         N.koth_pick_sent = GetTickCount64();
     }
     LeaveCriticalSection(&g_cs);
+    /* build 95: every READY, as it goes out (the fighter-255 crash of builds 93/94 had no line for its READY) */
+    fprintf(stderr, "[NETPLAY] READY: ready %d, fighter byte %d, skin %d, number %d (%d bytes)\n", b[0], b[1],
+            len >= 3 ? b[2] : 0, len == 7 ? number : 0, len);
     if (len == 3 && b[2]) fprintf(stderr, "[SKINS] READY: fighter %d, skin %d\n", fighter, b[2]);
     if (len == 7) fprintf(stderr, "[BANKS] READY: community fighter %d (template %d)\n", number, b[1]);
     else if (number) fprintf(stderr, "[BANKS] READY: community fighter %d plays its template %d (the relay takes no "
@@ -6715,6 +6786,28 @@ void netplay_sync_point(void)
     memset(N.seeds, 0, sizeof(N.seeds));
     LeaveCriticalSection(&g_cs);
     fprintf(stderr, "[NETPLAY] sync point: setting up the room's match\n");
+}
+
+/* Build 95 (automatch, right after the sync point): the lineup every PC of the match plays. A position whose fighter
+ * any player (or this PC) has no row for plays its template (a number) or Doc (netplay_lineup_rules.h); the masks came
+ * in P_RTT, which the sync point waited for. Offline it changes nothing. */
+void netplay_lineup_agree(AutoMatch *m)
+{
+    unsigned missing;
+    int i, n, before[MAXP];
+    if (!m || !N.lobby || !N.match_live) return;
+    EnterCriticalSection(&g_cs);
+    missing = N.lineup_mine;
+    for (i = 0; i < N.players && i < MAXP; i++) missing |= N.peer_lineup[i];
+    for (i = 0; i < MAXP; i++) before[i] = m->fighter[i];
+    n = netlineup_agree(m->fighter, N.start_template, m->count < N.players ? m->count : N.players, missing, lineup_stock);
+    LeaveCriticalSection(&g_cs);
+    for (i = 0; n && i < m->count && i < MAXP; i++)
+        if (before[i] != m->fighter[i]) {
+            fprintf(stderr, "[BANKS] lineup: position %d plays %d instead of %d (a player has no row for it)\n", i + 1,
+                    m->fighter[i], before[i]);
+            m->skin[i] = 0;
+        }
 }
 
 void xbox_NoteAnchorEvent(const char *text);     /* kernel.h: an event a pad script can wait for */

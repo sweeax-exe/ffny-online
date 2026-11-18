@@ -473,6 +473,12 @@ int netplay_room_rollback(int slot);
  * same place in the front end), and the front end is back in the menus (the main menu, or the
  * battle match-type screen that a match's summary leads to). */
 void netplay_sync_point(void);
+/* Build 95 (netplay_lineup_rules.h): automatch, right after the sync point: the lineup every PC of the match plays (a
+ * fighter a player has no row for plays its template or Doc). Offline it changes nothing. */
+struct AutoMatch;
+void netplay_lineup_agree(struct AutoMatch *m);
+/* Build 95: this PC can load `fighter` in a match (a database row, a created fighter, a place or number it has). */
+int netplay_fighter_loadable(int fighter);
 void netplay_on_main_menu(void);
 int netplay_match_abandoned(void);  /* the sync point: a player left before the match was set up */
 
