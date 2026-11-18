@@ -39,9 +39,9 @@ def test_ready_long_form():
     """READY: ready, the template byte, skin 0, then the number u32 LE (7 bytes), only to a relay that answered the
     bit; without it the template plays (2 or 3 bytes)."""
     body = _body(NETPLAY, "void netplay_lobby_ready_skin(")
-    assert "uint8_t b[7]" in body
-    assert "b[1] = (uint8_t)unl_template(number);" in body and "b[2] = 0;" in body
-    assert re.search(r"number && relay_has\(CAPS_UNLIMITED\)\) \{\s+len = 7;\s+put32\(b \+ 3, \(uint32_t\)number\);", body)
+    assert "uint8_t b[9]" in body                       # build 94: the wide skin (u16) makes it 8 bytes with a number
+    assert "b[1] = (uint8_t)unl_template(number);" in body and "skin = 0;" in body
+    assert re.search(r"number && relay_has\(CAPS_UNLIMITED\)\) \{\s+len = wide \? 8 : 7;\s+put32\(b \+ \(wide \? 4 : 3\), \(uint32_t\)number\);", body)
     assert "fighter = b[1];" in body            # a relay without the bit: the template, as the room will show it
 
 

@@ -20,7 +20,9 @@
 extern "C" {
 #endif
 
-#define PC_CONTENT_MAX 64
+/* Build 94: room for 2048 community skins besides the other packs (each skin is a pack). The arrays that hold a
+ * list are static (zero pages the OS commits only as they are used) or heap, never on the stack. */
+#define PC_CONTENT_MAX 2560
 
 typedef struct PcContentPack {
     char id[96];
@@ -59,7 +61,7 @@ typedef struct PcContentPack {
  * look; no place, no Character row). The launcher composed its model files and lists it in content-files/files.ini
  * ("skin=<pack id>|<template feID>|<model>|<name>"), in catalogue order: the skins of one template are numbered
  * from 1 in that order (0 is the template's own look), the same on every PC with the same content print. */
-#define PC_SKIN_MAX 64
+#define PC_SKIN_MAX 2048
 typedef struct PcContentSkin {
     char id[96];            /* the pack id */
     int template_fe_id;

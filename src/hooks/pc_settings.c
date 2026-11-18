@@ -90,7 +90,7 @@ static RecompSetting g_display_settings[] = {
       "Your name, shown to the other player.", "Player" },
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 255, NULL, NULL, 0,
       "The fighter you pick in online rooms (its Battle-mode ID); chosen in the room." },
-    { "online", "fighter_skin", RECOMP_SETTING_INT, 0, 0, 15, NULL, NULL, 0,
+    { "online", "fighter_skin", RECOMP_SETTING_INT, 0, 0, 255, NULL, NULL, 0,
       "The community skin of that fighter you play online (0 its own look, 1.. its skins in the catalogue's order; "
       "build 85); chosen in the room's CHOOSE A LOOK window." },
     { "online", "fighter_tab", RECOMP_SETTING_INT, 0, 0, 2, NULL, NULL, 0,
