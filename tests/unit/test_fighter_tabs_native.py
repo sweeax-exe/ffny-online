@@ -102,9 +102,10 @@ def test_grid_wiring():
     assert '!(t == FTAB_COMMUNITY && originals)' in fighters and 'offered[grid_tab(list, i)]' in fighters
     origin = screen.split('bool grid_originals_only(', 1)[1].split('\n}\n', 1)[0]
     assert 'standard_only(r.settings.fighter_rules)' in origin and 'search_original(NETPLAY_ORIGINAL_RANKED)' in origin
-    # remembered, never by the gallery; RANDOM draws from the cards shown
+    # remembered, never by the gallery; RANDOM draws from the tab's cards (build 96: every version of a character
+    # group, test_char_groups_native.py) or the search's
     assert 'recomp_settings_set("online", "fighter_tab", to)' in fighters and '!gallery_on() &&' in fighters
-    assert 'for (int i : vis) if (list[i].id != FIGHTER_RANDOM && !blocked(i)' in fighters
+    assert 'for (int i : searching ? vis : pool)' in fighters and 'list[i].id != FIGHTER_RANDOM && !blocked(i)' in fighters
     read = screen.split('Pad read_pad()', 1)[1].split('\n}\n', 1)[0]
     assert 'ImGuiKey_GamepadL2, key(ImGuiKey_Z)' in read and 'ImGuiKey_GamepadR2, key(ImGuiKey_C)' in read
     assert '{ "online", "fighter_tab", RECOMP_SETTING_INT, 0, 0, 2,' in src('src/hooks/pc_settings.c')

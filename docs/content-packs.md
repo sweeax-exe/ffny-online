@@ -277,6 +277,29 @@ links); the submit rules say that such work needs the maker's permission and a n
   `GET /api/gallery/{id}`). The game's own screens do not name creators.
 - Tests: `tests/unit/test_content_credits.py`; the server side is in `docs/content-catalogue.md` "Credits".
 
+## Character groups (build 96)
+
+Community fighters that are the same character ("Lil Wayne" and "Weezy", three "Spider-Man" versions) are one card in
+CHOOSE FIGHTER's COMMUNITY tab (a community idea, approved by the owner). The creator names the **Character** in FFNY
+Studio's submit step (autocomplete from the live catalogue) and, for a single pack, a **Version name** (empty: the
+pack's title); the review post's Set character button does the same for the team.
+
+- **Where it lives.** Like the credits: not in the package, so hashes, signatures and the content print stay as they
+  are. The account service folds case, spacing and fancy letters and keeps a group's first accepted spelling.
+- **Catalogue.** `index-v7.json` is `index-v6.json` plus the mod keys `character` and `version_name` on new fighters
+  (`mod_catalogue.character_line`). Builds 94 and 95 keep reading `index-v6.json`; build 96 falls back v7 -> v6 -> ...
+- **Launcher.** `setup/mods.py` writes `character=` and `version_name=` into each `[pack.<id>]` of `content.ini` at
+  every sync (`groups_by_id`), so a group edit shows without installing again.
+- **Game.** `char_groups.c` (pure: the key, the groups, the card's version) and `char_groups_game.c` (content.ini's
+  groups, `<data>/character-choices.ini`, the last version per group). The COMMUNITY tab shows one card a group (the
+  version picked last, else the newest; "N VERSIONS"); A opens the version window (`char_groups_ui.inc`, the skin
+  window's look: picture, version name, creator, credits). A group of one is a plain card; a group of numbered
+  versions none of which is on the shelf still gets its card. The name search finds groups and versions; RANDOM draws
+  among every version. What is picked is the concrete version's place or number, sent as before: no protocol change.
+- Tests: `tests/unit/test_char_groups_native.py`, `tests/unit/test_char_groups_catalogue.py`; the gallery pages
+  `fighters-groups`, `fighters-groups-window`, `fighters-groups-search` (RECOMP_TEST_CHAR_GROUPS=<feID>:<character>
+  [:<version>];... sets groups over content.ini's); the server side is in `docs/content-catalogue.md`.
+
 ## Testing
 
 ```

@@ -55,6 +55,9 @@ typedef struct PcContentPack {
     int official;           /* build 86: an official map of the FFNY team (catalogue kind "official-map"), always on */
     int rts_map;            /* ... a Run the Streets map (openworld rts.c loads it) */
     char venue_code[8];     /* ... its venue's code ("28A": V2BG_28A), "" unknown */
+    char character[64];     /* build 96: a new fighter's character group (index-v7.json's "character"; char_groups.h),
+                               "" none. Never part of the content print */
+    char version_name[64];  /* ... the version's name in the hub's version window, "" the pack's name */
 } PcContentPack;
 
 /* Build 85, skins: a new-fighter pack the team accepted as an extra outfit of a stock fighter (same gameplay, new

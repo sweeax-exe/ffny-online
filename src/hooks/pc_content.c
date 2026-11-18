@@ -497,6 +497,7 @@ static int list_all(PcContentPack *out, int max)
             else if (!strcmp(k, "official")) p->official = atoi(v) == 1;
             else if (!strcmp(k, "rts_map")) p->rts_map = atoi(v) == 1;
             CONTENT_TEXT(venue_code);
+            CONTENT_TEXT(character); CONTENT_TEXT(version_name);     /* build 96: character groups */
 #undef CONTENT_TEXT
         }
     }

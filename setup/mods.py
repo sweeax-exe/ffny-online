@@ -45,7 +45,10 @@ import content_compose
 # fighter number (1000 and up, mod_catalogue.fighter_number); index-v4.json leaves both out for launchers of build 85.
 # Build 94: index-v6.json is index-v5.json plus each mod's creator credits ("credits", mod_catalogue.credits); build 93
 # and older refuse the key, so they keep reading index-v5.json.
-CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v6.json'
+# Build 96: index-v7.json is index-v6.json plus each new fighter's character group ("character", "version_name",
+# mod_catalogue.character_line); builds 94 and 95 refuse the keys, so they keep reading index-v6.json.
+CATALOGUE_URL = 'https://play.defjam.online/updates/content/index-v7.json'
+CATALOGUE_URL_V6 = 'https://play.defjam.online/updates/content/index-v6.json'
 CATALOGUE_URL_V5 = 'https://play.defjam.online/updates/content/index-v5.json'
 CATALOGUE_URL_V4 = 'https://play.defjam.online/updates/content/index-v4.json'
 CATALOGUE_URL_V3 = 'https://play.defjam.online/updates/content/index-v3.json'
@@ -490,12 +493,13 @@ def fetch_small(url, limit):
         return data
 
 
-FALLBACK = {CATALOGUE_URL: CATALOGUE_URL_V5, CATALOGUE_URL_V5: CATALOGUE_URL_V4, CATALOGUE_URL_V4: CATALOGUE_URL_V3}
+FALLBACK = {CATALOGUE_URL: CATALOGUE_URL_V6, CATALOGUE_URL_V6: CATALOGUE_URL_V5, CATALOGUE_URL_V5: CATALOGUE_URL_V4, CATALOGUE_URL_V4: CATALOGUE_URL_V3}
 
 
 def fetch_index(url):
     """(raw, signature, url) of a catalogue index. An index the server does not have yet (404) falls back one step:
-    index-v6.json (an account service from before build 94) to index-v5.json, the same catalogue without credits;
+    index-v7.json (an account service from before build 96) to index-v6.json, the same catalogue without character
+    groups; index-v6.json (before build 94) to index-v5.json, the same catalogue without credits;
     index-v5.json (before build 86) to index-v4.json, without official maps; index-v4.json (before build 85) to
     index-v3.json, without fighters at low places. Any other failure, and
     any other index (a local test catalogue), stays a failure."""
@@ -586,6 +590,11 @@ def plain_reason(problems, skew=None):
     if text.startswith('Catalogue') or 'catalogue' in low.split(':', 1)[0]:
         return 'catalogue', text[:300]
     return 'pack', text[:300]
+
+
+def one_line(text):
+    """A catalogue name as one content.ini value (no line breaks, at most 60 characters)."""
+    return ' '.join(str(text or '').split())[:60]
 
 
 def credits_line(text):
@@ -1223,6 +1232,7 @@ class Manager:
                  '[content]', 'revision=%d' % revision]
         reviewed = self.reviewed_dates()
         credits = self.credits_by_id()
+        groups = self.groups_by_id()
         rows = [(r.get('order', 0), mod_id, r) for mod_id, r in self.state()['installed'].items() if r.get('synced')]
         for order, mod_id, r in sorted(rows, key=lambda x: (x[0], x[1])):
             contract.slug(mod_id)
@@ -1245,6 +1255,10 @@ class Manager:
             # build 94: the creator's credits from the verified catalogue (index-v6.json), one line, ' | ' between;
             # the Content page shows them. Not part of the pack: never in the content print
             lines.append('credits=' + credits_line(credits.get(mod_id, '')))
+            # build 96: the character group from the verified catalogue (index-v7.json): the hub's COMMUNITY tab shows
+            # a group as one card with a version picker. Not part of the pack: never in the content print
+            group = groups.get(mod_id, ('', ''))
+            lines += ['character=' + one_line(group[0]), 'version_name=' + one_line(group[1])]
             if (self.mods / mod_id / 'install.json').is_file():
                 lines.append('composed=1')     # pc_content.c counts it online only when content-files applied it
                 venue = new_venue_fe_id(self.mods / mod_id / 'install.json')
@@ -1328,6 +1342,15 @@ class Manager:
             ).encode('utf-8'))
         except (ValueError, OSError, KeyError, TypeError):
             pass
+
+    def groups_by_id(self):
+        """{mod id: (character, version name)} of the new fighters in a character group, from the cached verified
+        catalogue ({} without one, and for a catalogue read as index-v6.json or older, which has none)."""
+        try:
+            index = self.trusted()
+        except (ValueError, OSError, KeyError, TypeError):
+            return {}
+        return {m['id']: (m['character'], m.get('version_name', '')) for m in index['mods'] if m.get('character')}
 
     def credits_by_id(self):
         """{mod id: the creator's credits} from the cached verified catalogue ({} without one, and for a catalogue
