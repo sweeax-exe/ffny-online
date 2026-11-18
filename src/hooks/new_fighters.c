@@ -536,11 +536,14 @@ static int new_fighter_voice(int fe_id)
     return -1;
 }
 
+static int g_voice_banks_queued;     /* the speech set-up being run queued the banks (sub_0003DB00) */
+
 void new_fighters_voice(void)
 {
     static uint32_t s_logged[4];
     uint32_t gd = game_data();
     int s, fe, voice;
+    g_voice_banks_queued = 1;
     if (gd < 0x10000u) return;
     for (s = 0; s < 4; s++) {
         uint32_t row = SPEECH_ROWS + SPEECH_ROW_SIZE * (uint32_t)s, was = MEM32(row + SPEECH_VOICE);
@@ -584,6 +587,25 @@ void new_fighters_voice(void)
         MEM32(row + SPEECH_VOICE) = (uint32_t)voice;
         fprintf(stderr, "[VOICE] slot %d feID %d: own voice %03d (the template's was %03u)\n", s, fe, voice, was);
     }
+}
+
+/* Around the match's speech set-up (sub_0003E170). It writes every slot's speech row again, the voice number the
+ * stock one (0x2DC5D0[coreID]: the template's), and queues the banks only when the match is not a restart: on a
+ * Rematch (0x33EC74 set: sub_0008BB00 without the teardown) the banks of the match before stay loaded and
+ * sub_0003DB00 does not run. The rows then named the template's voice while the loaded banks were the own voice's:
+ * the intro and extro streamed the template's lines, and bank lines asked for a voice with no bank were silent.
+ * After a set-up that queued nothing, the own voices go back into the rows, as the first match had them (the same
+ * lineup, the same binding: the banks loaded are theirs). Audio only, the same bytes on every PC. */
+void new_fighters_voice_setup(int after)
+{
+    if (!after) {
+        g_voice_banks_queued = 0;
+        return;
+    }
+    if (g_voice_banks_queued || MEM8(0x00340540u)) return;     /* queued (our rows are in), or no speech at all */
+    fprintf(stderr, "[VOICE] speech set-up kept the banks (rematch flag %u): own voices back in the rows\n",
+            MEM8(0x0033EC74u));
+    new_fighters_voice();
 }
 
 /* RECOMP_SPEECH_LOG=1: every bank line the game looks up (sub_001393F0: cdecl (bank header, entry index, ...);

@@ -58,6 +58,9 @@ void new_fighters_blazins(void);
  * voice number becomes the fighter's own when its row asks for it and the files are there; and a log of the bank
  * lines looked up (sub_001393F0_enter: RECOMP_SPEECH_LOG=1, always for own voices). */
 void new_fighters_voice(void);
+/* Around the speech set-up (sub_0003E170 wrapper): after = 0 before it, 1 after; a set-up that kept the loaded banks
+ * (a Rematch) gets the own voices back in its rows. */
+void new_fighters_voice_setup(int after);
 
 /* The select grid's shelf of community fighters beyond the places (fighter_banks.h): their IDs, last played
  * first, at most max; and a fighter just played (it moves to the front). */
