@@ -4862,9 +4862,12 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     // while the room stays in its lobby; a vote or a match (which clears every flag) starts it over.
     static struct { char name[25]; bool was_ready; } marks[NETPLAY_ROOM_SLOTS];
     static char marks_room[7];
-    if (strcmp(marks_room, r.code) || r.phase != 0 || NETPLAY_IS_HILL(r.settings.mode)) {
+    static NetRoomSettings marks_settings;  // new settings clear every READY on the relay: no one is changing then
+    if (strcmp(marks_room, r.code) || r.phase != 0 || NETPLAY_IS_HILL(r.settings.mode) ||
+        memcmp(&marks_settings, &r.settings, sizeof(marks_settings))) {
         memset(marks, 0, sizeof(marks));
         snprintf(marks_room, sizeof(marks_room), "%s", r.code);
+        marks_settings = r.settings;
     }
     auto changing = [&](const NetRoomPlayer &p) {
         if (p.slot < 0 || p.slot >= NETPLAY_ROOM_SLOTS || r.phase != 0 || NETPLAY_IS_HILL(r.settings.mode)) return false;
