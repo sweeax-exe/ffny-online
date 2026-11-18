@@ -2032,8 +2032,15 @@ void draw_players(ImDrawList *dl, const Frame &f, const Pad &pad)
     // build 96: a chosen row (up/down, left/right between the columns); A on a FIGHTING row watches it
     if (n > 0) {
         int &sel = S.players_sel;
-        if (pad.up) sel = (sel + n - 1) % n;
-        if (pad.down) sel = (sel + 1) % n;
+        {   // list_nav.h: held up/down speeds up, LT/RT a column (20 rows), held to the ends; a single press wraps
+            static ListNav nav;
+            ListNavKeys nk;
+            nk.keys = pad.keys;
+            nk.page_keys = false;
+            bool single = false;
+            int delta = list_nav_delta(nav, pad.up, pad.down, nk, 20, &single);
+            if (delta) sel = list_nav_move(sel, n, delta, single ? 1 : 0);
+        }
         if (pad.left && sel >= 20) sel -= 20;
         if (pad.right && sel + 20 < n) sel += 20;
         if (sel >= n) sel = n - 1;

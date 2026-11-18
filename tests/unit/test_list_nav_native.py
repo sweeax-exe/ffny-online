@@ -124,3 +124,13 @@ def test_move_wraps_only_single_steps(exe):
     assert run(exe, 'move', 100, 240, -1000000, 0) == '0'   # Home / a held trigger
     assert run(exe, 'move', 100, 240, 1000000, 0) == '239'
     assert run(exe, 'move', 5, 0, 1, 1) == '0'
+
+
+def test_hub_players_online_scrolls_fast():
+    # build 96: the hub's PLAYERS ONLINE rows (fix/watch-any's cursor) use the helper too; a single press wraps
+    src = (ROOT / 'src' / 'hooks' / 'online_screen.cpp').read_text(encoding='utf-8')
+    body = src[src.index('void draw_players(ImDrawList *dl'):]
+    body = body[:body.index('\n}\n')]
+    assert 'list_nav_delta(nav, pad.up, pad.down, nk, 20, &single)' in body
+    assert 'list_nav_move(sel, n, delta, single ? 1 : 0)' in body
+    assert 'if (pad.up) sel' not in body and 'if (pad.down) sel' not in body
