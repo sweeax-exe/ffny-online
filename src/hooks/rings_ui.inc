@@ -224,7 +224,7 @@ void rings_fetch_board(int which)
     }).detach();
 }
 
-// ---- the gallery's sample (as tests/fixtures/rings-board-sample.txt) ----
+// ---- the gallery's sample: the protocol doc's example board, a little fuller ----
 
 const char *const RINGS_SAMPLE =
     "enabled=1\n"

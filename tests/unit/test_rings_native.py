@@ -160,7 +160,11 @@ def test_every_relay_is_asked_and_the_list_thread_runs_it():
     fetch = SERVERS_C.split('void netservers_fetch_rings(int every_ms)')[1].split('\n}\n')[0]
     assert 'NETSERVER_COUNT' in fetch and 'NETSERVER_OFFLINE' in fetch
     # RINGS carries the same CAPS word as T_CAPS
-    assert 'netplay_client_caps()' in SERVERS_C and 'put32(cb + n, netplay_client_caps())' in NETPLAY_C
+    assert 'netplay_client_caps()' in SERVERS_C
+    sent = re.search(r'put32\(cb \+ n, (CAPS_[A-Z_| \n]+)\); n \+= 4;', NETPLAY_C).group(1)
+    word = re.search(r'uint32_t netplay_client_caps\(void\)\n\{\n    return ([A-Z_| \n]+);', NETPLAY_C).group(1)
+    bits = lambda s: sorted(b.strip() for b in s.split('|'))
+    assert bits(sent) == bits(word)
 
 
 def test_report_carries_the_ring():
