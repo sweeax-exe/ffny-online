@@ -1435,6 +1435,21 @@ void enableDarkFrame(HWND hwnd) {
     DwmSetWindowAttribute(hwnd, 36 /* DWMWA_TEXT_COLOR */, &textColor, sizeof(textColor));
 }
 
+// The folder card when the helper gave no plan: its own words (it writes {"error": ...} next to a non-zero
+// exit), or why it could not start; the advice for a tool Windows blocked (4551) in place of the usual fix.
+Check planErrorCheck(const Answer& answer) {
+    std::wstring reason;
+    if (!answer.text.empty()) { auto j = parseJson(answer.text); reason = j["error"].str(); }
+    if (reason.empty() && !answer.error.empty()) reason = utf8(answer.error);
+    std::wstring fix = L"Choose another folder, or see the setup log.";
+    if (!blockedAdvice.empty()) {
+        fix.clear();
+        for (const auto& line : blockedAdvice) fix += (fix.empty() ? L"" : L" ") + line;
+    }
+    return {L"error", reason.empty() ? L"Setup couldn't check this folder (exit " + std::to_wstring(answer.code) + L")"
+                                     : L"Setup couldn't check this folder: " + reason, fix, false};
+}
+
 LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     switch (message) {
         case WM_PAINT: { PAINTSTRUCT ps; BeginPaint(hwnd, &ps); paintWindow(); EndPaint(hwnd, &ps); return 0; }
@@ -1586,17 +1601,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                 for (const auto& c : j["checks"].items) p.checks.push_back({c["id"].str(), c["text"].str(), c["fix"].str(), c["ok"].yes()});
             } else {
                 p.valid = true; p.ok = false;
-                // The helper's own words (it writes {"error": ...} next to a non-zero exit), or why it could not start.
-                std::wstring reason;
-                if (!answer->text.empty()) { auto j = parseJson(answer->text); reason = j["error"].str(); }
-                if (reason.empty() && !answer->error.empty()) reason = utf8(answer->error);
-                std::wstring fix = L"Choose another folder, or see the setup log.";
-                if (!blockedAdvice.empty()) {
-                    fix.clear();
-                    for (const auto& line : blockedAdvice) fix += (fix.empty() ? L"" : L" ") + line;
-                }
-                p.checks.push_back({L"error", reason.empty() ? L"Setup couldn't check this folder (exit " + std::to_wstring(answer->code) + L")"
-                                                              : L"Setup couldn't check this folder: " + reason, fix, false});
+                p.checks.push_back(planErrorCheck(*answer));
             }
             st.plan = p;
             redraw();
@@ -1659,7 +1664,7 @@ Plan samplePlan(bool good) {
 }
 
 bool sampleState(const std::wstring& name) {
-    st = State{};
+    st = State{}; blockedAdvice.clear();
     st.payloadReady = true; st.searching = false;
     st.found = {sampleFound(true)};
     if (name == L"game" || name == L"main") { st.screen = S_GAME; return true; }
@@ -1690,6 +1695,21 @@ bool sampleState(const std::wstring& name) {
     if (name == L"folder") { st.screen = S_FOLDER; st.plan = samplePlan(true); return true; }
     if (name == L"folder-checking") { st.screen = S_FOLDER; st.planning = true; return true; }
     if (name == L"folder-problem") { st.screen = S_FOLDER; st.plan = samplePlan(false); return true; }
+    if (name == L"folder-error" || name == L"folder-blocked") {
+        // The helper gave no plan: a drive Windows cannot read (error 1450), or the helper itself blocked (4551).
+        Answer answer{0, 4, {}, {}};
+        if (name == L"folder-error")
+            answer.text = "{\"error\": \"Windows could not read this folder: [WinError 1450] Insufficient system resources "
+                          "exist to complete the requested service: 'E:\\\\Games\\\\FFNY Online'\"}";
+        else {
+            auto problem = describeToolStartFailure(4551, L"C:\\Users\\Player\\AppData\\Local\\DefJamSetup\\{5C1D7E0A}\\payload\\python\\python.exe");
+            answer.error = narrow(problem.message); blockedAdvice = problem.advice;
+        }
+        Plan p = samplePlan(true);
+        p.ok = false; p.checks.clear(); p.checks.push_back(planErrorCheck(answer));
+        st.screen = S_FOLDER; st.plan = p;
+        return true;
+    }
     if (name == L"installing" || name == L"installing-details" || name == L"cancel-confirm") {
         st.screen = S_INSTALLING; st.plan = samplePlan(true); st.permille = 460; st.stageKey = "build";
         st.statusText = L"Build in progress (this may take several minutes)";
@@ -1719,7 +1739,7 @@ bool sampleState(const std::wstring& name) {
 
 const wchar_t* SNAPSHOT_STATES[] = {L"game", L"game-searching", L"game-empty", L"game-several", L"checking", L"recognized",
     L"wrong-pal", L"wrong-pal-found", L"wrong-ps2", L"wrong-gamecube", L"wrong-generic", L"folder", L"folder-checking",
-    L"folder-problem", L"installing", L"installing-details", L"cancel-confirm", L"done", L"failed", L"failed-blocked", L"cancelled", L"wine"};
+    L"folder-problem", L"folder-error", L"folder-blocked", L"installing", L"installing-details", L"cancel-confirm", L"done", L"failed", L"failed-blocked", L"cancelled", L"wine"};
 
 HWND createWindow(HINSTANCE instance, bool visible) {
     WNDCLASSW wc{}; wc.lpfnWndProc = windowProc; wc.hInstance = instance;
