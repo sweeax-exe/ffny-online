@@ -955,7 +955,7 @@ std::string upper(const char *s)
 // ---- the screens --------------------------------------------------------------------------------
 
 enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS,
-            QUICK, LOCKER, RANKED_BOARD, TURF, MUSIC, RTS };
+            QUICK, LOCKER, RANKED_BOARD, TURF, MUSIC, RTS, COMPLEX };
 
 struct State {
     Page page = HUB;
@@ -1137,6 +1137,17 @@ std::string season_countdown();                             // build 83: "SEASON
 void turf_board_note(ImDrawList *dl, const char *note, bool error);   // a note on it
 bool tset_gallery(const std::string &p);      // tset_ui.inc
 bool tset_created_ok(const NetRoom &r);       // tset_ui.inc
+// F0: the FIGHT COMPLEX and KING OF THE RING (rings_ui.inc)
+void rings_poll();
+bool complex_shown();
+void open_complex(Page back, int tab);
+void draw_complex(ImDrawList *dl, const Frame &f, const Pad &pad);
+bool ring_room(const NetRoom &r, NetRingCard *out);
+void ring_banner(ImDrawList *dl, const Frame &f, const NetRingCard &c, float x0, float y, float x1);
+std::string ring_king_note(const NetRingCard &c, const char *room_king);
+std::string ring_title_of(int type);
+void rings_tick(const NetRoom &room);
+bool rings_gallery(const std::string &p);
 
 enum NetplayState net_state() { return gallery_on() ? G.state : netplay_state(); }
 bool net_in_lobby() { return gallery_on() ? G.in_lobby : netplay_in_lobby() != 0; }
@@ -1869,8 +1880,8 @@ void open_servers()
 
 // ---- hub ----
 
-const int HUB_ITEMS = 12, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9, HUB_CREW = 10,
-          HUB_RTS = 11;
+const int HUB_ITEMS = 13, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9, HUB_CREW = 10,
+          HUB_RTS = 11, HUB_COMPLEX = 12;
 // The hub's order: TURF WAR (stage 4) after MY STATS; it shows while the account service answers the map.
 // TOURNAMENT MATCH after RANKED MATCH; it shows while signed in on a relay that offers tournament sets.
 // MY CREW (build 77) after TURF WAR (after MY STATS when TURF WAR is hidden): the chat window's CREW tab
@@ -1878,7 +1889,9 @@ const int HUB_ITEMS = 12, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF
 // signed out (A then asks for the sign-in).
 // RUN THE STREETS (build 86, closed test) after RANKED MATCH, only for accounts with access (rts.c): everyone else
 // sees no trace of it.
-const int HUB_ORDER[HUB_ITEMS] = { 0, 1, HUB_RTS, HUB_TSET, 2, 3, 4, HUB_TURF, HUB_CREW, 5, 6, 7 };
+// FIGHT COMPLEX (F0) after RANKED MATCH: the official rings, King of the Ring; it shows while the account service's
+// ring board is on or a relay lists a ring (rings_ui.inc).
+const int HUB_ORDER[HUB_ITEMS] = { 0, 1, HUB_COMPLEX, HUB_RTS, HUB_TSET, 2, 3, 4, HUB_TURF, HUB_CREW, 5, 6, 7 };
 void open_rts();
 bool my_crew_shown();   // social_ui.inc
 void open_my_crew();
@@ -2208,11 +2221,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static const char *const items[] = { "QUICK MATCH", "RANKED MATCH", "FIND A ROOM", "CREATE A ROOM", "MY STATS",
                                          "PLAYERS ONLINE", "VOICE CHAT", "LEAVE", "TURF WAR", "TOURNAMENT MATCH", "MY CREW",
-                                         "RUN THE STREETS" };
+                                         "RUN THE STREETS", "FIGHT COMPLEX" };
     static const char *const subs[] = { "STRAIGHT INTO A FIGHT", "ONE ON ONE FOR YOUR RATING", "OPEN ROOMS", "YOUR RULES",
                                         "RECORD AND LEADERBOARD", "WHO IS AROUND", "TALK IN ROOMS AND FIGHTS",
                                         "BACK TO THE MENU", "CREWS FIGHT FOR NEW YORK", "YOUR SET IN A TOURNAMENT",
-                                        "YOUR CREW'S PAGE", "THE CITY IS YOURS - CLOSED TEST" };
+                                        "YOUR CREW'S PAGE", "THE CITY IS YOURS - CLOSED TEST", "KING OF THE RING" };
     static const char *const descs[] = {
         "You are put into an open room of this mode, or one is opened for the next players.",
         "Classic (stock fighters) or Open (your created fighter too), best of three sets against a player of a "
@@ -2232,18 +2245,22 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         "ladder. Not in a crew yet: your crew invites, or found one of your own. Sign in with Discord to have one.",
         "A whole New York block at night, up to four fighters loose on the streets. Get knocked out, you are back "
         "on a corner in seconds; the KO target takes it, or the lead when the clock runs out. Against the CPU or online.",
+        "The official rings, always open: step into the line or watch. Win 5 counted fights in a row to be crowned "
+        "King; whoever beats a king claims the bounty. Roster fighters only. Sign in with Discord for your wins to count.",
     };
     std::vector<int> quick_modes = mode_cycle();     // King of the Hill last, when the relay has it
     int mode_count = (int)quick_modes.size();
     if (S.quick_mode >= mode_count) S.quick_mode = 0;
     turf_poll();
     tset_poll();
+    rings_poll();
     int shown[HUB_ITEMS], count = 0, at = 0;
     bool turf = turf_shown(), tour = tset_shown(), crew = my_crew_shown(), rts = gallery_on() ? G.rts : rts_access() != 0;
+    bool rings_on = complex_shown();
     for (int k = 0; k < HUB_ITEMS; k++) {
         int i = HUB_ORDER[k];
         if ((i != HUB_RANKED || ranked_shown()) && (i != HUB_TURF || turf) && (i != HUB_TSET || tour) && (i != HUB_CREW || crew) &&
-            (i != HUB_RTS || rts))
+            (i != HUB_RTS || rts) && (i != HUB_COMPLEX || rings_on))
             shown[count++] = i;
     }
     for (int k = 0; k < count; k++) if (shown[k] == S.hub_sel) at = k;
@@ -2328,7 +2345,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         }
     }
     {   // the items on one glass panel
-        float bottom = count > 11 ? 76 + (count - 1) * 27.2f + 26 : count > 10 ? 77 + (count - 1) * 29.5f + 28 : count > 9 ? 78 + (count - 1) * 33 + 31 : count > 8 ? 80 + (count - 1) * 37 + 35
+        float bottom = count > 12 ? 75 + (count - 1) * 25.2f + 24 : count > 11 ? 76 + (count - 1) * 27.2f + 26 : count > 10 ? 77 + (count - 1) * 29.5f + 28 : count > 9 ? 78 + (count - 1) * 33 + 31 : count > 8 ? 80 + (count - 1) * 37 + 35
                      : count > 7 ? 84 + (count - 1) * 41 + 39 : count > 6 ? 84 + (count - 1) * 45 + 42 : 88 + (count - 1) * 53 + 46;
         glass(dl, f, 36, 74, 290, bottom - 74 + 10);
     }
@@ -2337,15 +2354,17 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         // eight items (ranked shown) sit closer, so the panel still ends above the hints
         // nine (ranked and turf shown): closer still, a little smaller
         // ten (tournament match too): closer still; eleven (MY CREW too, build 77): closer still
-        bool nine = count > 8, ten = count > 9, eleven = count > 10, twelve = count > 11;
-        float x = 50, y = twelve ? 76 + k * 27.2f : eleven ? 77 + k * 29.5f : ten ? 78 + k * 33 : nine ? 80 + k * 37 : count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
-        float h = twelve ? 26 : eleven ? 28 : ten ? 31 : nine ? 35 : count > 7 ? 39 : count > 6 ? 42 : 46;
+        // thirteen (FIGHT COMPLEX too, F0): closer still
+        bool nine = count > 8, ten = count > 9, eleven = count > 10, twelve = count > 11, thirteen = count > 12;
+        float x = 50, y = thirteen ? 75 + k * 25.2f : twelve ? 76 + k * 27.2f : eleven ? 77 + k * 29.5f : ten ? 78 + k * 33 : nine ? 80 + k * 37 : count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
+        float h = thirteen ? 24 : twelve ? 26 : eleven ? 28 : ten ? 31 : nine ? 35 : count > 7 ? 39 : count > 6 ? 42 : 46;
         if (mouse_pick(f, x, y, w, h)) S.hub_sel = i;
         bool sel = S.hub_sel == i;
         if (sel) selector(dl, f, x, y, w, h);
-        text(dl, f, g_title, twelve ? 16 : eleven ? 17 : ten ? 19 : nine ? 21 : 23, x + 16, y + (nine ? 1 : 3),
+        text(dl, f, g_title, thirteen ? 15 : twelve ? 16 : eleven ? 17 : ten ? 19 : nine ? 21 : 23, x + 16, y + (nine ? 1 : 3),
              sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
-        text(dl, f, g_hand, twelve ? 8.5f : eleven ? 9 : ten ? 10 : nine ? 11 : 12, x + 18, y + (twelve ? 18.0f : eleven ? 19.5f : ten ? 21 : nine ? 24 : 29), sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
+        text(dl, f, g_hand, thirteen ? 8 : twelve ? 8.5f : eleven ? 9 : ten ? 10 : nine ? 11 : 12, x + 18,
+             y + (thirteen ? 16.5f : twelve ? 18.0f : eleven ? 19.5f : ten ? 21 : nine ? 24 : 29), sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
         // build 62: who searches ranked right now (every mode, each player once), at the item's right
         if (i == HUB_RANKED) {
             searching_poll();
@@ -2463,6 +2482,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             else open_my_crew();
             break;
         case HUB_RTS: open_rts(); break;
+        case HUB_COMPLEX: open_complex(HUB, 0); break;
         case HUB_LEAVE: break;      // handled by the caller (closes)
         }
     }
@@ -4437,7 +4457,10 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
     dl->AddCircleFilled(f.p(64, 40), 5 * f.s(), (GetTickCount64() / 600) % 2 ? WHITE : with_alpha(WHITE, 0.3f));
     text(dl, f, g_title, 18, 76, 30, WHITE, "WAITING", LEFT, 1.0f);
     text(dl, f, g_hand, 14, 180, 34, ORANGE, r.settings.name, LEFT, 0.8f);
-    text(dl, f, g_title, 14, 590, 30, GOLD, "KING OF THE HILL", RIGHT, 1.1f);
+    NetRingCard ring;
+    bool is_ring = ring_room(r, &ring);     // F0: an official ring: its title and the crown banner (left of the king's crown)
+    text(dl, f, g_title, 14, 590, 30, GOLD, is_ring ? ring_title_of(ring.type).c_str() : "KING OF THE HILL", RIGHT, 1.1f);
+    if (is_ring) ring_banner(dl, f, ring, 176, 54, 448);
     int sides[2] = { a, b };
     for (int k = 0; k < 2; k++) {
         int slot = sides[k];
@@ -4667,10 +4690,13 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     if (h.phase != NETHILL_FIGHTING) S.watch_hidden = 0;
 
     page_title(dl, f, r.settings.name);
-    text(dl, f, g_title, 16, 590, 26, GOLD, v.rot ? "FFA ROTATION" : "KING OF THE HILL", RIGHT, 1.2f);
+    NetRingCard ring;
+    bool is_ring = ring_room(r, &ring);     // F0: an official ring: its title and the crown banner
+    text(dl, f, g_title, 16, 590, 26, GOLD, is_ring ? ring_title_of(ring.type).c_str() : v.rot ? "FFA ROTATION" : "KING OF THE HILL", RIGHT, 1.2f);
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
     text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
+    if (is_ring) ring_banner(dl, f, ring, 40, 52, 478);
 
     // left: the line, numbered from the top
     glass(dl, f, 36, 76, 296, 318, 12, IM_COL32(10, 10, 13, 255), 0.65f);
@@ -4724,6 +4750,10 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         char streak[48];
         snprintf(streak, sizeof(streak), h.streak == 1 ? "%d WIN IN A ROW" : "%d WINS IN A ROW", h.streak);
         text(dl, f, g_title, 15, 463, 280, GOLD, streak, CENTER, 1.2f);
+        if (is_ring) {      // the counted side: the crown this king holds, or how far to it (the board's)
+            std::string note = ring_king_note(ring, slot_name(r, h.king));
+            if (!note.empty()) text(dl, f, g_title, 10, 463, 296, with_alpha(GOLD, 0.85f), note.c_str(), CENTER, 0.8f, 240);
+        }
     } else {
         crown(dl, f, 463, 140, 64, with_alpha(GREY, 0.5f));
         text(dl, f, g_title, 20, 463, 190, CREAM, v.rot ? "NO WINNER YET" : "NO KING YET", CENTER, 1.4f);
@@ -4768,7 +4798,9 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
              ("LAST FIGHT: " + res).c_str(), CENTER, 0.8f, 250);
     }
     // this PC's place, under the door (the line can fill the left panel)
-    if (v.my_state == NETLINE_AWAY)
+    if (v.my_state == NETLINE_AWAY && is_ring)      // F0: a ring's watchers are away: one press steps into the line
+        text(dl, f, g_hand, 13, 463, 370, ORANGE, pad_text("YOU WATCH: PRESS {A} TO STEP INTO THE LINE").c_str(), CENTER, 0.8f, 250);
+    else if (v.my_state == NETLINE_AWAY)
         text(dl, f, g_hand, 13, 463, 370, RED, pad_text("YOU ARE AWAY: PRESS {A} TO GET BACK IN THE LINE").c_str(), CENTER, 0.8f, 250);
     else if (v.next == r.you)
         text(dl, f, g_hand, 18, 463, 368, ORANGE, "YOU'RE UP NEXT", CENTER, 1.2f);
@@ -4776,7 +4808,7 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     // two rows: what this PC can do in the line, then the room
     float hx = 54, hy = 398;
     bool left = false;
-    if (v.my_state == NETLINE_AWAY) hx += hint(dl, f, hx, hy, "a", "I'M BACK");
+    if (v.my_state == NETLINE_AWAY) hx += hint(dl, f, hx, hy, "a", is_ring ? "STEP IN" : "I'M BACK");
     hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
     if (h.valid && v.my_index >= 0) hx += give_up(dl, f, pad, hx, hy, &left, v.rot);
     hint(dl, f, hx, hy, "b", "LEAVE ROOM");
@@ -5759,6 +5791,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "crew_ui.inc"
 #include "locker_ui.inc"
 #include "turf_ui.inc"
+#include "rings_ui.inc"
 #include "tset_ui.inc"
 #include "delay_hud_ui.inc"
 #include "milestones_ui.inc"
@@ -5883,7 +5916,12 @@ void gallery_step()
                                          "rts-cpu", "rts-cpu-none", "create-rts", "room-rts",
                                          // build 86: Run the Streets' social layer (rts_social_ui.inc): the docked
                                          // chat closed and open on each tab, the chat bubbles and speaker icons
-                                         "rts-dock", "rts-dock-room", "rts-dock-global", "rts-dock-private", "rts-bubbles" };
+                                         "rts-dock", "rts-dock-room", "rts-dock-global", "rts-dock-private", "rts-bubbles",
+                                         // F0: the FIGHT COMPLEX (two rings, one, none, still asking), KING OF THE RING (the
+                                         // season, all time, the Cage's wins, switched off), a ring room's hill screen, its
+                                         // watching screen and the HUD over a watched ring fight
+                                         "hub-complex", "complex", "complex-one", "complex-empty", "complex-asking", "kotr",
+                                         "kotr-alltime", "kotr-cage", "kotr-off", "hill-ring", "watch-ring", "hill-hud-ring" };
     const int count = (int)(sizeof(pages) / sizeof(pages[0]));
     static unsigned long long start;
     static int ms;
@@ -6061,6 +6099,7 @@ void gallery_step()
         if (milestones_gallery(p)) return;
         if (tset_gallery(p)) return;
         if (turf_gallery(p)) return;
+        if (rings_gallery(p)) return;      // F0 (the ring rooms' hill pages go on below with the board set)
         if (locker_gallery(p)) return;
         if (ranked_gallery(p)) return;
     }
@@ -6481,7 +6520,7 @@ void gallery_step()
         G.room.players[0].voted = 1;
         G.room.ms_left = 11000;
         S.vote_sel = 1;
-    } else if (p == "hill-hud" || p == "hill-hud-next" || p == "hill-hud-up" || p == "rot-hud") {
+    } else if (p == "hill-hud" || p == "hill-hud-next" || p == "hill-hud-up" || p == "rot-hud" || p == "hill-hud-ring") {
         // a fight watched live: Ben (the king, x3) against Cal; the line behind them
         bool rot = p == "rot-hud";
         NetRoom &r = G.room = rot ? sample_room(NETPLAY_MODE_FFAROT, NETPLAY_FFAROT_SLOTS, 7)
@@ -6514,7 +6553,13 @@ void gallery_step()
         w.king = 0;
         w.streak = 3;
         w.called = p == "hill-hud-up";
-    } else if (p == "hill" || p == "up" || p == "up-wait" || p == "watch") {
+        if (p == "hill-hud-ring") {     // F0: the Cage, its crowned king Blaze holds the room
+            snprintf(r.code, sizeof(r.code), "K7Q2ZD");
+            snprintf(r.settings.name, sizeof(r.settings.name), "The Cage");
+            snprintf(r.players[1].name, sizeof(r.players[1].name), "Blaze");
+            snprintf(w.name[0], sizeof(w.name[0]), "Blaze");
+        }
+    } else if (p == "hill" || p == "up" || p == "up-wait" || p == "watch" || p == "hill-ring" || p == "watch-ring") {
         S.page = HUB;
         NetRoom &r = G.room = sample_room(NETPLAY_MODE_KOTH_RANDOM, 10, 9);
         NetHill &h = r.hill;
@@ -6528,7 +6573,14 @@ void gallery_step()
         const int order[9] = { 2, 1, 0, 3, 4, 5, 6, 7, 8 };
         for (int i = 0; i < 9; i++) { h.line[i].slot = order[i]; h.line[i].state = NETLINE_WAITING; h.line[i].wins = i == 0 ? 5 : i == 1 ? 2 : i == 3 ? 1 : 0; }
         h.line[4].state = NETLINE_AWAY;
-        if (p == "hill") { h.phase = NETHILL_CALLING; h.line[0].state = NETLINE_READY; h.line[1].state = NETLINE_CALLED; }
+        if (p == "hill-ring" || p == "watch-ring") {     // F0: the Cage, its crowned king Blaze holds the room
+            snprintf(r.code, sizeof(r.code), "K7Q2ZD");
+            snprintf(r.settings.name, sizeof(r.settings.name), "The Cage");
+            snprintf(r.players[2].name, sizeof(r.players[2].name), "Blaze");
+            r.host = -1;
+            if (p == "hill-ring") h.line[2].state = NETLINE_AWAY;      // this PC came to watch (WATCH: away)
+        }
+        if (p == "hill" || p == "hill-ring") { h.phase = NETHILL_CALLING; h.line[0].state = NETLINE_READY; h.line[1].state = NETLINE_CALLED; }
         else if (p == "up") {
             h.phase = NETHILL_CALLING;
             h.line[0].state = NETLINE_READY;
@@ -6667,7 +6719,7 @@ LookId page_look(const NetRoom &room, enum NetplayState st)
     case SETTINGS: case CODE: return LOOK_LIST;
     case SERVERS: if (!room.in_room) return LOOK_LIST; break;
     case PLAYERS: if (!room.in_room) return LOOK_PLAYERS; break;
-    case STATS: case LOCKER: case RANKED_BOARD: case TURF: if (!room.in_room) return LOOK_STATS; break;
+    case STATS: case LOCKER: case RANKED_BOARD: case TURF: case COMPLEX: if (!room.in_room) return LOOK_STATS; break;
     case RANKED: case RANKED_MODES: if (!room.in_room) return LOOK_SEARCH; break;
     case RANKED_RESULTS: return LOOK_SEARCH;
     case VOICE: case QUICK: case MUSIC: if (!(room.in_room && room.phase != 0)) return LOOK_VOICE; break;
@@ -7213,6 +7265,12 @@ void hill_hud(ImDrawList *dl, const Frame &f, const NetHillWatch &w, const NetRo
         glass(dl, f, 28, y - 28, tw, 24, 7, IM_COL32(40, 22, 4, 255), 0.75f);
         text(dl, f, g_hand, 16, 28 + tw / 2, y - 26, ORANGE, "YOU'RE UP NEXT", CENTER, 1.1f);
     }
+    // F0: a ring's fight: the crown banner over the left end of the strip (above YOU'RE UP NEXT when that shows)
+    NetRingCard ring;
+    if (!rot && ring_room(r, &ring)) {
+        float by = up_next && !w.called ? y - 52 : y - 26;
+        ring_banner(dl, f, ring, 28, by, std::min(360.0f, 604 - lw - 8));
+    }
 }
 
 void draw_hill_hud(ImDrawList *dl, ImVec2 display)
@@ -7384,6 +7442,7 @@ const char *shot_label()
             return r.phase == 1 ? "tset-intro" : st[ts.state < 6 ? ts.state : 5];
         }
         if (S.page == TURF && !r.in_room) return TW.picker ? "turf-claim" : TW.tab == 1 ? "turf-season" : "turf";    // stage 4
+        if (S.page == COMPLEX && !r.in_room) return RU.tab == 1 ? "kotr" : "complex";      // F0
     }
     return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr;
 }
@@ -7536,6 +7595,7 @@ bool draw_pages(ImVec2 display)
         return !g_closed_for_match;
     }
     backdrop(dl, f, display, S.page == FIGHTERS || S.page == NAME || S.page == STATS || S.page == RANKED_BOARD || S.page == TURF || S.page == PLAYERS ||
+             S.page == COMPLEX ||
              room.in_room ||
              st == NETPLAY_CONNECTED ||
              !g_menu_up.load(), page_look(room, st));
@@ -7563,6 +7623,7 @@ bool draw_pages(ImVec2 display)
         }
         if (st == NETPLAY_LOBBY) S.fallback_tried = false;
         ranked_tick(room);
+        rings_tick(room);       // F0: a ring JOIN's READY, the crown's refresh
     }
     {   // tests: RECOMP_TEST_OPEN_ONLINE=rts opens RUN THE STREETS itself (with access), connected or not
         static int once;
@@ -7746,6 +7807,8 @@ bool draw_pages(ImVec2 display)
         draw_ranked_board(dl, f, pad);
     } else if (S.page == TURF && !room.in_room) {
         draw_turf(dl, f, pad, display);
+    } else if (S.page == COMPLEX && !room.in_room) {
+        draw_complex(dl, f, pad);
     } else if (S.page == RANKED_RESULTS) {
         draw_ranked_results(dl, f, pad);
     } else if (S.page == VOICE && !(room.in_room && room.phase != 0)) {

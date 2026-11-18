@@ -20,6 +20,7 @@
 
 #include "netplay.h"    /* NetRoomInfo */
 #include "netplay_servers_rules.h"
+#include "rings_rules.h"    /* F0: NetRingCard */
 
 #ifdef __cplusplus
 extern "C" {
@@ -171,6 +172,26 @@ int netservers_moving(void);
  * screen's notice. -1 (scope 0) for a custom address and King of the Hill. */
 int netservers_quick_move(int mode, int search_s, int alone_s, const char *code, int *waiting, int *ping,
                           unsigned *scope);
+
+/* ---- F0: every relay's rings (the Fight Complex; community/fight-complex-f0-protocol.md) -------------- */
+
+/* One card of the merged ring list: the ring instance, the relay it is on and this PC's ping to that relay. */
+typedef struct NetRing {
+    NetRingCard card;
+    int server;         /* NETSERVER_* */
+    int ping_ms;        /* -1 unknown */
+} NetRing;
+
+/* Asks every relay that is not offline for its rings (RINGS, no session) when its last ask is `every_ms` old (at
+ * least 3 s). Cheap to call every frame. */
+void netservers_fetch_rings(int every_ms);
+/* The rings to show: every relay's answer up to 12 s old, the relay with the lowest ping first, each in its own
+ * order. Returns the count; *rounds: the finished RINGS rounds this session (0: still asking the first time). A
+ * relay that never answered (no F0) adds nothing. */
+int netservers_rings(NetRing *out, int max, int *rounds);
+/* 1 when room `code` is a ring room seen in a RINGS answer this session (relay `server` first, else any relay's);
+ * its last card into *out (may be NULL). A code of NULL or "": 1 when any ring was seen this session. */
+int netservers_ring_of(int server, const char *code, NetRingCard *out);
 
 #ifdef __cplusplus
 }

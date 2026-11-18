@@ -183,6 +183,7 @@ int netplay_maintenance(char *t, int n) { if (t && n > 0) t[0] = 0; return -1; }
 int netplay_room_rollback(int s) { (void)s; return -1; }
 int netplay_room_rollback_mandatory(void) { return 0; }
 int netplay_lobby_caps(void) { return 0; }
+uint32_t netplay_client_caps(void) { return 0; }
 int netplay_online_twice(void) { return 0; }
 int netplay_room_chat(NetChatLine *o, int m, unsigned *s) { (void)o; (void)m; if (s) *s = 0; return 0; }
 int netplay_room_chat_can_write(char *w, int n) { if (w && n > 0) w[0] = 0; return -1; }
@@ -421,7 +422,17 @@ int netplay_fighter_loadable(int fighter)
                                  * consent is per match, T_P2P is sent only while [online] p2p_direct is on (netplay_p2p.h) */
 /* build 86: CAPS_UNLIMITED unless a test plays an older game (RECOMP_TEST_NO_UNLIMITED) */
 #define CAPS_UNLIMITED_OPT (getenv("RECOMP_TEST_NO_UNLIMITED") ? 0u : CAPS_UNLIMITED)
-#define CP_WAIT_MS    10000     /* START: how long to wait for a created fighter's missing record */
+
+/* The CAPS word this client announces in T_CAPS (its put32 there lists the same bits; F0: RINGS carries it, so a
+ * relay lists the rings this game can join) */
+uint32_t netplay_client_caps(void)
+{
+    return CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
+           CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
+           CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
+           CAPS_SKINS | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED;
+}
+#define CP_WAIT_MS   10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
 #define WINNER_DRAW   0xFFu
 #define SET_MENU_MS   4000u     /* a ranked set's game: the results' Rematch menu goes back to the room by itself */
@@ -720,6 +731,7 @@ static struct {
     AutoMatch report_m;
     char report_names[MAXP][25];
     char report_key[32];
+    int report_ring;                /* F0: the ring type (RING_*) of the room START came in, RING_NONE: not a ring */
     int reported, fighting_seen, last_late;
     int start_reported;             /* this match's "start" went to the account service */
     int seed_bypass;                /* crowd_reset seeds a generator with its own words */
@@ -4115,7 +4127,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     AutoMatch m;
     uint32_t seed;
     int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred, late = watching == 2, cpu = NETPLAY_CPU_HARD;
-    int hill_watch = watching == 3, leaving = 0;
+    int hill_watch = watching == 3, leaving = 0, ring_type = RING_NONE;
     int skin_of_slot[ROOMSLOTS], templ[MAXP], fixed = 0;
     unsigned lineup = 0;
     memset(skin_of_slot, 0, sizeof(skin_of_slot));
@@ -4240,6 +4252,16 @@ static void on_start_as(const uint8_t *b, int len, int watching)
             m.count = i + 1;
         }
     }
+    {   /* F0: a fight in a ring room carries its type in the report (the relay's RINGS named the room); asked before
+         * g_cs is taken (netplay_servers.c has a lock of its own) */
+        NetRoom rv;
+        NetRingCard ring;
+        netplay_lobby_room(&rv);
+        ring_type = NETPLAY_IS_KOTH(rv.settings.mode) && netservers_ring_of(netservers_connected(), rv.code, &ring)
+                    ? ring.type : RING_NONE;
+        if (ring_type) fprintf(stderr, "[NETPLAY] ring bout in %s: %s (%s)\n", rv.code, ring.name,
+                               ring_type_id(ring.type) ? ring_type_id(ring.type) : "?");
+    }
     EnterCriticalSection(&g_cs);
     memset(N.rematch_want, 0, sizeof(N.rematch_want));
     memset(N.rematch_acks, 0, sizeof(N.rematch_acks));
@@ -4323,6 +4345,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
                     snprintf(N.report_names[i], sizeof(N.report_names[i]), "%s", N.roomv.players[j].name);
     }
     snprintf(N.report_key, sizeof(N.report_key), "%.6s-%08X", N.roomv.code[0] ? N.roomv.code : N.room, seed);
+    N.report_ring = ring_type;
     N.reported = N.fighting_seen = 0;
     disarm_crash_report();
     /* King of the Hill: one fight, then RESULT and back to the hill */
@@ -4999,6 +5022,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 uint8_t cb[6 + 8 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
+                /* (netplay_client_caps says the same for RINGS; tests/unit/test_rings_native.py keeps the two alike) */
                 put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
                               CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
@@ -5010,6 +5034,17 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 fprintf(stderr, "[NETPLAY] the relay did not answer CAPS: an older relay, no King of the Hill\n");
             }
             N.caps_sent = now;
+        }
+        /* F0: in a King of the Hill room the RINGS answers say whether it is a ring (the report's `ring`, the crown
+         * banner), however it was joined (the Fight Complex, a code, a link): asked every 15 s while it is not known
+         * (a ring's code is learnt within a round trip of the first ask; a player's own hill never is) */
+        if (N.lobby && N.state == NETPLAY_LOBBY && N.roomv.in_room && NETPLAY_IS_KOTH(N.roomv.settings.mode)) {
+            char code[7];
+            EnterCriticalSection(&g_cs);
+            memcpy(code, N.roomv.code, sizeof(code));
+            LeaveCriticalSection(&g_cs);
+            code[6] = 0;
+            if (code[0] && !netservers_ring_of(-1, code, NULL)) netservers_fetch_rings(15000);
         }
         chat_tick(now);     /* room chat: IDENT, and the line being sent (relays answering CAPS_CHAT) */
         /* crew battles: CREWJOIN once the relay knows this account (IDENT), every CREW_RETRY_MS until in */
@@ -6524,7 +6559,7 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
     AutoMatch m;
     char names[MAXP][25], key[32];
     const OnlineMode *mode;
-    int i, n = 0, pos, players, first = 1;
+    int i, n = 0, pos, players, first = 1, ring;
     EnterCriticalSection(&g_cs);
     if (!N.report_key[0]) {
         LeaveCriticalSection(&g_cs);
@@ -6535,10 +6570,13 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
     memcpy(key, N.report_key, sizeof(key));
     pos = N.pos;
     players = N.players;
+    ring = N.report_ring;
     LeaveCriticalSection(&g_cs);
     mode = online_mode(m.type);
     n += snprintf(json + n, (size_t)(size - n), "{\"key\":\"%s\",\"mode\":%d,\"mode_name\":", key, m.type);
-    n = json_put(json, size, n, mode ? mode->name : "");
+    /* F0: a ring bout names its ring's type ("ring":"cage"); mode stays 0, mode_name is display text */
+    n = json_put(json, size, n, ring_type_id(ring) ? ring_type_title(ring) : mode ? mode->name : "");
+    if (ring_type_id(ring)) n += snprintf(json + n, (size_t)(size - n), ",\"ring\":\"%s\"", ring_type_id(ring));
     n += snprintf(json + n, (size_t)(size - n), ",\"venue\":%d,\"venue_name\":", m.venue);
     n = json_put(json, size, n, online_venue_name(m.venue));
     n += snprintf(json + n, (size_t)(size - n), ",\"you\":%d,\"players\":[", pos);
@@ -7165,6 +7203,9 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         }
         /* RECOMP_NETPLAY_QUICK="mode,players", default "0,2" (One on One) */
         const char *q = getenv("RECOMP_NETPLAY_QUICK"), *listed = getenv("RECOMP_TEST_JOIN_LISTED");
+        const char *join_ring = getenv("RECOMP_TEST_JOIN_RING");
+        char ring_readied[7] = "";      /* F0 tests: the ring room this copy stepped into the line of */
+        if (join_ring && !*join_ring) join_ring = NULL;
         const char *who = name && *name ? name : "Test player";
         int qmode = 0, qmax = 2, moves = 0;
         char alone_in[7] = "";
@@ -7239,6 +7280,27 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 Sleep(250);
             }
             if (!joined) fprintf(stderr, "[NETPLAY] tests: no open room listed within %s s; joining nothing\n", listed);
+        } else if (join_ring) {
+            /* RECOMP_TEST_JOIN_RING=<s> (tests, F0): no quick match; JOIN the first ring the relays' RINGS list (the
+             * lowest ping first) as the Fight Complex's JOIN does; in the room (a ring's new member is away) READY 1
+             * below puts it in the line. Nothing is joined when no ring shows within <s> seconds. */
+            NetRing rings[16];
+            ULONGLONG until = GetTickCount64() + (ULONGLONG)atoi(join_ring) * 1000;
+            int joined = 0, k, n;
+            while (!N.stop && GetTickCount64() < until && !joined) {
+                netservers_fetch_rings(3000);
+                n = netservers_rings(rings, 16, NULL);
+                for (k = 0; k < n && !joined; k++) {
+                    if (rings[k].card.flags & RING_FLAG_FULL) continue;
+                    fprintf(stderr, "[NETPLAY] tests: joining ring %s \"%s\" (type %d, ch %d) on %s\n", rings[k].card.code,
+                            rings[k].card.name, rings[k].card.type, rings[k].card.channel, netservers_short(rings[k].server));
+                    if (rings[k].server == netservers_connected()) netplay_lobby_join(rings[k].card.code);
+                    else netservers_join_on(rings[k].server, rings[k].card.code, ring_room_mode(&rings[k].card), who);
+                    joined = 1;
+                }
+                Sleep(250);
+            }
+            if (!joined) fprintf(stderr, "[NETPLAY] tests: no ring listed within %s s; joining nothing\n", join_ring);
         } else if (!strcmp(mode, "ranked")) {
             /* RECOMP_TEST_RANKED_MODES="open" or "classic,open": the modes, the first the primary
              * (default Classic); the found set is accepted (RECOMP_TEST_RANKED_ACCEPT=0 declines) */
@@ -7386,6 +7448,12 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 int me, state = -1;
                 for (me = 0; me < r.hill.count; me++)
                     if (r.hill.line[me].slot == r.you) state = r.hill.line[me].state;
+                if (join_ring && state == NETLINE_AWAY && strcmp(ring_readied, r.code) && !N.match_live) {
+                    /* F0 tests: a ring's new member watches; READY 1 steps into the line, as the page's JOIN does */
+                    snprintf(ring_readied, sizeof(ring_readied), "%s", r.code);
+                    fprintf(stderr, "[NETPLAY] tests: in ring room %s (away); into the line with fighter %d\n", r.code, fighter);
+                    netplay_lobby_ready(1, fighter);
+                }
                 if (state != NETLINE_CALLED || N.match_live) called_at = 0;
                 else if (!called_at) {
                     called_at = GetTickCount64();
