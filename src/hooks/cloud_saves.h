@@ -12,6 +12,7 @@
 // them. A file is taken when its path has the save area's shape and it is a save file: a .xbx starting FF FE
 // (SaveMeta, TitleMeta) or "XPR0" (an image), or a "20CM" file (a profile, Options); at most kMaxFile bytes.
 // Anything else in those folders is left out (and named in the log), so a stray desktop.ini never blocks it.
+// Build 97 adds <save>/ffny/towers.json (the Towers climbs, towers.c), a JSON file; a restore puts it back.
 //
 // The content hash, on both sides: SHA-256 over every file sorted by its path (bytes), each as its path, a
 // 0 byte, its size as 8 bytes little-endian and its bytes. The zip itself (deflate, fixed times) may differ
@@ -35,6 +36,7 @@ constexpr size_t kMaxTotal = 8u << 20;          // its files unpacked
 constexpr size_t kMaxFile = 64u << 10;          // one file
 constexpr size_t kMaxFiles = 400;
 constexpr int kKeep = 5;                        // versions the service keeps
+constexpr const char *kTowersFile = "ffny/towers.json";   // build 97: the Towers climbs (<save>/ffny/towers.json)
 
 std::string sha256_hex(const uint8_t *data, size_t size);
 std::string content_hash(const Files &files);

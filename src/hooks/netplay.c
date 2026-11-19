@@ -6690,6 +6690,17 @@ static int json_put(char *out, int size, int n, const char *s)
     return n;
 }
 
+/* Towers (towers.c, T1): the fight files' print as the online reports carry it, appended at n (,"files":{...}). */
+int netplay_files_json(char *json, int size, int n)
+{
+    if (!g_data_print || n >= size - 64) return n;
+    n += snprintf(json + n, (size_t)(size - n), ",\"files\":{\"print\":\"%08X\",\"override\":", (unsigned)g_data_print);
+    n = json_put(json, size - 2, n, g_data_over);
+    if (n < size - 1) json[n++] = '}';
+    json[n < size ? n : size - 1] = 0;
+    return n;
+}
+
 /* The room match for the account service (account.c), from a signed-in player's game: "start"
  * once the fight is loaded, then "result" when it is decided (winners as a mask of fighter slots,
  * `draw`), or "left" naming the players (mask) who stopped answering before that; "crashed" from

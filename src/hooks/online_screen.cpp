@@ -78,6 +78,7 @@
 #include "content_release.h"
 #include "music_library.h"
 #include "pc_launcher_music.h"
+#include "towers.h"
 #include <time.h>
 
 namespace {
@@ -957,13 +958,14 @@ std::string upper(const char *s)
 // ---- the screens --------------------------------------------------------------------------------
 
 enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS,
-            QUICK, LOCKER, RANKED_BOARD, TURF, MUSIC, RTS, COMPLEX };
+            QUICK, LOCKER, RANKED_BOARD, TURF, MUSIC, RTS, COMPLEX, TOWERS };
 
 struct State {
     Page page = HUB;
     bool settings_edit = false;     // SETTINGS changes the room's (host) instead of a new one
     bool ranked_pick = false;       // FIGHTERS picks the fighter for a ranked search
     bool rts_pick = false;          // FIGHTERS picks the fighter for an offline Run the Streets fight
+    bool towers_pick = false;       // FIGHTERS picks the climber of a tower (towers_ui.inc)
     int rts_sel = 0, rts_cpus = 3;  // RUN THE STREETS: the chosen entry, the CPU fighters of VS CPU (2..3)
     bool rts_setup = false;         // build 87: VS CPU's set-up (CPU fighters, TIME LIMIT, KO TARGET) is open
     int rts_setup_sel = 0;
@@ -1901,8 +1903,8 @@ void open_servers()
 
 // ---- hub ----
 
-const int HUB_ITEMS = 13, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9, HUB_CREW = 10,
-          HUB_RTS = 11, HUB_COMPLEX = 12;
+const int HUB_ITEMS = 14, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9, HUB_CREW = 10,
+          HUB_RTS = 11, HUB_COMPLEX = 12, HUB_TOWERS = 13;
 // The hub's order: TURF WAR (stage 4) after MY STATS; it shows while the account service answers the map.
 // TOURNAMENT MATCH after RANKED MATCH; it shows while signed in on a relay that offers tournament sets.
 // MY CREW (build 77) after TURF WAR (after MY STATS when TURF WAR is hidden): the chat window's CREW tab
@@ -1912,8 +1914,10 @@ const int HUB_ITEMS = 13, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF
 // sees no trace of it.
 // FIGHT COMPLEX (F0) after RANKED MATCH: the official rings, King of the Ring; it shows while the account service's
 // ring board is on or a relay lists a ring (rings_ui.inc).
-const int HUB_ORDER[HUB_ITEMS] = { 0, 1, HUB_COMPLEX, HUB_RTS, HUB_TSET, 2, 3, 4, HUB_TURF, HUB_CREW, 5, 6, 7 };
+// TOWERS (T0) after RUN THE STREETS: the climb mode (towers_ui.inc), always shown.
+const int HUB_ORDER[HUB_ITEMS] = { 0, 1, HUB_COMPLEX, HUB_RTS, HUB_TOWERS, HUB_TSET, 2, 3, 4, HUB_TURF, HUB_CREW, 5, 6, 7 };
 void open_rts();
+void open_towers();     // towers_ui.inc
 bool my_crew_shown();   // social_ui.inc
 void open_my_crew();
 bool tset_shown();      // tset_ui.inc
@@ -2249,11 +2253,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static const char *const items[] = { "QUICK MATCH", "RANKED MATCH", "FIND A ROOM", "CREATE A ROOM", "MY STATS",
                                          "PLAYERS ONLINE", "VOICE CHAT", "LEAVE", "TURF WAR", "TOURNAMENT MATCH", "MY CREW",
-                                         "RUN THE STREETS", "FIGHT COMPLEX" };
+                                         "RUN THE STREETS", "FIGHT COMPLEX", "TOWERS" };
     static const char *const subs[] = { "STRAIGHT INTO A FIGHT", "ONE ON ONE FOR YOUR RATING", "OPEN ROOMS", "YOUR RULES",
                                         "RECORD AND LEADERBOARD", "WHO IS AROUND", "TALK IN ROOMS AND FIGHTS",
                                         "BACK TO THE MENU", "CREWS FIGHT FOR NEW YORK", "YOUR SET IN A TOURNAMENT",
-                                        "YOUR CREW'S PAGE", "THE CITY IS YOURS - CLOSED TEST", "KING OF THE RING" };
+                                        "YOUR CREW'S PAGE", "THE CITY IS YOURS - CLOSED TEST", "KING OF THE RING", "CLIMB NEW YORK" };
     static const char *const descs[] = {
         "You are put into an open room of this mode, or one is opened for the next players.",
         "Classic (stock fighters) or Open (your created fighter too), best of three sets against a player of a "
@@ -2275,6 +2279,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         "on a corner in seconds; the KO target takes it, or the lead when the clock runs out. Against the CPU or online.",
         "The official rings, always open: step into the line or watch. Win 5 counted fights in a row to be crowned "
         "King; whoever beats a king claims the bounty. Roster fighters only. Sign in with Discord for your wins to count.",
+        "Fight your way up a tower, one CPU fighter per floor, each stronger than the last. Uptown has every original "
+        "fighter, Five Boroughs the whole city with community fighters too. One loss and the climb is over. Offline.",
     };
     std::vector<int> quick_modes = mode_cycle();     // King of the Hill last, when the relay has it
     int mode_count = (int)quick_modes.size();
@@ -2383,16 +2389,18 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         // nine (ranked and turf shown): closer still, a little smaller
         // ten (tournament match too): closer still; eleven (MY CREW too, build 77): closer still
         // thirteen (FIGHT COMPLEX too, F0): closer still
-        bool nine = count > 8, ten = count > 9, eleven = count > 10, twelve = count > 11, thirteen = count > 12;
-        float x = 50, y = thirteen ? 75 + k * 25.2f : twelve ? 76 + k * 27.2f : eleven ? 77 + k * 29.5f : ten ? 78 + k * 33 : nine ? 80 + k * 37 : count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
-        float h = thirteen ? 24 : twelve ? 26 : eleven ? 28 : ten ? 31 : nine ? 35 : count > 7 ? 39 : count > 6 ? 42 : 46;
+        // fourteen (TOWERS too): closer still
+        bool nine = count > 8, ten = count > 9, eleven = count > 10, twelve = count > 11, thirteen = count > 12,
+             fourteen = count > 13;
+        float x = 50, y = fourteen ? 74 + k * 23.4f : thirteen ? 75 + k * 25.2f : twelve ? 76 + k * 27.2f : eleven ? 77 + k * 29.5f : ten ? 78 + k * 33 : nine ? 80 + k * 37 : count > 7 ? 84 + k * 41 : count > 6 ? 84 + k * 45 : 88 + k * 53, w = 262;
+        float h = fourteen ? 22 : thirteen ? 24 : twelve ? 26 : eleven ? 28 : ten ? 31 : nine ? 35 : count > 7 ? 39 : count > 6 ? 42 : 46;
         if (mouse_pick(f, x, y, w, h)) S.hub_sel = i;
         bool sel = S.hub_sel == i;
         if (sel) selector(dl, f, x, y, w, h);
-        text(dl, f, g_title, thirteen ? 15 : twelve ? 16 : eleven ? 17 : ten ? 19 : nine ? 21 : 23, x + 16, y + (nine ? 1 : 3),
+        text(dl, f, g_title, fourteen ? 14 : thirteen ? 15 : twelve ? 16 : eleven ? 17 : ten ? 19 : nine ? 21 : 23, x + 16, y + (nine ? 1 : 3),
              sel ? CREAM : with_alpha(GREY, 0.85f), items[i], LEFT, 1.6f);
-        text(dl, f, g_hand, thirteen ? 8 : twelve ? 8.5f : eleven ? 9 : ten ? 10 : nine ? 11 : 12, x + 18,
-             y + (thirteen ? 16.5f : twelve ? 18.0f : eleven ? 19.5f : ten ? 21 : nine ? 24 : 29), sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
+        text(dl, f, g_hand, fourteen ? 7.5f : thirteen ? 8 : twelve ? 8.5f : eleven ? 9 : ten ? 10 : nine ? 11 : 12, x + 18,
+             y + (fourteen ? 15.0f : thirteen ? 16.5f : twelve ? 18.0f : eleven ? 19.5f : ten ? 21 : nine ? 24 : 29), sel ? ORANGE : with_alpha(ORANGE, 0.45f), subs[i], LEFT, 1.0f);
         // build 62: who searches ranked right now (every mode, each player once), at the item's right
         if (i == HUB_RANKED) {
             searching_poll();
@@ -2511,6 +2519,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             break;
         case HUB_RTS: open_rts(); break;
         case HUB_COMPLEX: open_complex(HUB, 0); break;
+        case HUB_TOWERS: open_towers(); break;
         case HUB_LEAVE: break;      // handled by the caller (closes)
         }
     }
@@ -3723,12 +3732,14 @@ bool grid_style_matches(const std::vector<OnlineFighter> &list, int i, const std
     return fighter_style_matches(list[i].style ? list[i].style : "", filter);     // no row: fighter.xml's one style
 }
 
+bool towers_ui_originals_only();   // towers_ui.inc: Uptown's climber is an original (or created) fighter
 // "Original fighters only" where this pick counts: the room's STANDARD ONLY, else the search's choice (ranked, or
 // the hub's Quick Match type); Run the Streets' offline VS CPU has none.
 bool grid_originals_only(const NetRoom &r)
 {
     if (r.in_room) return standard_only(r.settings.fighter_rules);
     if (S.rts_pick) return false;
+    if (S.towers_pick) return towers_ui_originals_only();      // Uptown: original fighters (towers_ui.inc)
     if (S.ranked_pick) return search_original(NETPLAY_ORIGINAL_RANKED);
     std::vector<int> modes = mode_cycle();
     return !modes.empty() && search_original(modes[std::max(0, std::min((int)modes.size() - 1, S.quick_mode))]);
@@ -3946,7 +3957,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         text(dl, f, g_title, 15, gx + cols * (cw + 4) / 2, gy + 130, CREAM, msg.c_str(), CENTER, 1.0f);
         text(dl, f, g_title, 11, gx + cols * (cw + 4) / 2, gy + 154, GREY, "Y: ANOTHER STYLE    LT / RT: ANOTHER TAB", CENTER, 0.6f);
         S.fighters_cp = -1;
-        if (pad.b) { S.page = S.ranked_pick ? RANKED_MODES : S.rts_pick ? RTS : HUB; S.rts_pick = false; }
+        if (pad.b) { S.page = S.ranked_pick ? RANKED_MODES : S.rts_pick ? RTS : S.towers_pick ? TOWERS : HUB; S.rts_pick = S.towers_pick = false; }
         if (pad.b) { S.fsearch_on = false; S.fsearch.clear(); }
         return;
     }
@@ -4197,8 +4208,8 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     }
     // BACK from a ranked search's pick goes back to the mode chooser, not to the online menu (a player
     // who wanted another fighter for ranked landed on the hub, 2026-11-03)
-    if (pad.b) S.page = S.ranked_pick ? RANKED_MODES : S.rts_pick ? RTS : HUB;
-    if (pad.b) S.rts_pick = false;
+    if (pad.b) S.page = S.ranked_pick ? RANKED_MODES : S.rts_pick ? RTS : S.towers_pick ? TOWERS : HUB;
+    if (pad.b) S.rts_pick = S.towers_pick = false;
     if (pad.a || pad.b) { S.fsearch_on = false; S.fsearch.clear(); }
 }
 
@@ -5959,6 +5970,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "delay_hud_ui.inc"
 #include "milestones_ui.inc"
 #include "music_ui.inc"
+#include "towers_ui.inc"
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -6079,6 +6091,13 @@ void gallery_step()
                                          "maint-hub", "maint-room", "maint-vote",
                                          // build 79: MILESTONES (milestones_ui.inc; the sample profile RICO)
                                          "milestones", "milestones-tough", "milestones-card", "milestones-chip",
+                                         // Towers (T0, towers_ui.inc): the hub entry, the page (each tower chosen, the
+                                         // rules, a saved climb, the start card), the climb at four moments, a boss
+                                         // floor, the card over the load (the first floor too), a draw, the ends
+                                         "hub-towers", "towers", "towers-t2", "towers-weekly", "towers-rules", "towers-saved",
+                                         "towers-start", "towers-climb-0", "towers-climb-1", "towers-climb-2", "towers-climb-3",
+                                         "towers-boss", "towers-card", "towers-first", "towers-draw", "towers-lost", "towers-cleared",
+                                         "towers-board", "towers-board-all", "towers-art", "towers-starting",
                                          // build 86: RUN THE STREETS (closed test): the hub entry, the page, its CPU count
                                          "hub-rts", "rts", "rts-online",
                                          // build 87: VS CPU's set-up, a new room's and a room's round rules
@@ -6269,6 +6288,7 @@ void gallery_step()
         ranked_stats_tab() = 0;
         if (music_gallery(p)) return;
         if (milestones_gallery(p)) return;
+        if (towers_gallery(p)) return;
         if (tset_gallery(p)) return;
         if (turf_gallery(p)) return;
         if (rings_gallery(p)) return;      // F0 (the ring rooms' hill pages go on below with the board set)
@@ -7048,6 +7068,33 @@ bool draw_skin_window(ImVec2 display)
 
 static struct { int slot, sel; ULONGLONG opened; } g_cw;
 
+// ---- TOWERS: the climb window between floors and the card over the load (towers_ui.inc) ----
+
+bool take_towers_request() { return towers_take_request_impl(); }
+
+bool draw_towers_window(ImVec2 display)
+{
+    try {
+        return towers_window_impl(display);
+    } catch (...) {
+        static int logged;
+        if (logged++ < 20) fprintf(stderr, "[TOWERS] caught: an exception (climb window)\n");
+        return true;
+    }
+}
+
+bool towers_card_wanted() { return ::towers_card_wanted() != 0; }
+
+void draw_towers_card(ImDrawList *dl, ImVec2 display)
+{
+    try {
+        towers_card_impl(dl, display);
+    } catch (...) {
+        static int logged;
+        if (logged++ < 20) fprintf(stderr, "[TOWERS] caught: an exception (card)\n");
+    }
+}
+
 bool take_community_window_request()
 {
     int slot;
@@ -7627,6 +7674,7 @@ const char *shot_label()
 {
     if (const char *chat = chat_shot_label()) return chat;
     if (const char *rts = rts_shot_label()) return rts;
+    if (const char *tw = towers_shot_label_impl()) return tw;
     if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
     if (!gallery_on() && !g_versus_up && net_state() != NETPLAY_CONNECTED) {    // the crew battle screen (stage 3)
         NetRoom r;
@@ -7656,6 +7704,7 @@ bool take_open_request()
     }
     S = State();
     S.opened = GetTickCount64();
+    if (g_towers_hub.exchange(0)) open_towers();     // the climb's end (towers_ui.inc): back on TOWERS
     C.open = C.kb = C.menu = false;
     QW.open = false;
     QW.editing = -1;
@@ -7828,6 +7877,33 @@ bool draw_pages(ImVec2 display)
         const char *v = getenv("RECOMP_TEST_OPEN_ONLINE");
         if (!once && v && !strcmp(v, "rts") && !gallery_on() && rts_access()) { once = 1; open_rts(); }
     }
+    {   // tests: RECOMP_TEST_OPEN_ONLINE=towers opens TOWERS itself, connected or not
+        static int once;
+        const char *v = getenv("RECOMP_TEST_OPEN_ONLINE");
+        if (!once && v && !strcmp(v, "towers") && !gallery_on()) {
+            once = 1;
+            open_towers();
+            if (getenv("RECOMP_TEST_TOWERS_BOARD")) TWU.board = true;     // tests: the BOARD over the page
+        }
+    }
+    // TOWERS needs no relay either: the page, its fighter pick and its cards (towers_ui.inc).
+    if (!room.in_room && (S.page == TOWERS || (S.page == FIGHTERS && S.towers_pick))) {
+        if (towers_gallery_window(display)) return true;
+        if (S.page == TOWERS) {
+            draw_towers_page(dl, f, pad, display);
+        } else {
+            bool chosen = false;
+            int fighter = 0;
+            draw_fighters(dl, f, pad, &chosen, &fighter);
+            if (chosen) towers_fighter_chosen(fighter);
+            float hx = 54;
+            hx += hint(dl, f, hx, 420, "a", "PICK");
+            hint(dl, f, hx, 420, "b", "BACK");
+        }
+        draw_status(dl, f);
+        if (g_towers_close) { g_towers_close = false; return false; }
+        return true;
+    }
     // RUN THE STREETS' VS CPU needs no relay: its page and its fighter pick work without a connection.
     if (!room.in_room && !gallery_on() && (S.page == RTS || (S.page == FIGHTERS && S.rts_pick)) &&
         net_state() != NETPLAY_LOBBY) {
@@ -7918,8 +7994,10 @@ bool draw_pages(ImVec2 display)
                   pad_text("Check the internet connection, then press {a} to try again.").c_str());
         float hx = 54;
         hx += hint(dl, f, hx, 392, "a", "TRY AGAIN");
+        hx += hint(dl, f, hx, 392, "y", "TOWERS");      // the offline climb needs no connection
         hint(dl, f, hx, 392, "b", "BACK");
         if (pad.a) { S.fallback_tried = true; connect_if_needed(); }
+        if (pad.y) open_towers();
         return !pad.b;
     }
 
@@ -8122,6 +8200,10 @@ bool hill_results_wanted() { return false; }
 void draw_hill_results(ImDrawList *, ImVec2) {}
 bool fight_hud_wanted() { return false; }
 void draw_fight_hud(ImDrawList *, ImVec2) {}
+bool take_towers_request() { return false; }
+bool draw_towers_window(ImVec2) { return true; }
+bool towers_card_wanted() { return false; }
+void draw_towers_card(ImDrawList *, ImVec2) {}
 bool fight_chat_wanted() { return false; }
 bool draw_fight_chat(ImDrawList *, ImVec2) { return false; }
 bool fight_chat_typing() { return false; }

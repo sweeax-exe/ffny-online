@@ -17,6 +17,7 @@ import importlib.util
 import json
 import re
 import os
+import subprocess
 import threading
 import time
 
@@ -3072,6 +3073,260 @@ def lobby97(case="kick", timeout=None, relay_port=27900, lock_timeout=None, log=
         faults = [f for t in texts for f in _faults(t)]
         result.update({"ok": all(checks.values()) and not faults, "checks": checks, "faults": faults,
                        "logs": [_relpath(s.copies[i].log) for i in range(2)], "relay_log": _relpath(relay_log)})
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
+# ---- towers (T0) -----------------------------------------------------------------------------------
+
+TOWERS_WATCH = ["[CRASH]", "[WATCHDOG]", "[TOWERS] window:", "[TOWERS] run saved", " won (", " lost: the run",
+                "save and quit", "set up: slot levels", "[TOWERS] run start", "[TOWERS] run resumed",
+                "the game ends in floor 3", "[TOWERS] board (month)", "fight?format=text floor 3"]
+
+
+def _towers_overlay_pngs(folder, prefix, out_dir, shots, per_label=3):
+    """The overlay's own pictures (RECOMP_OVERLAY_SHOT_DIR: <ms>-<label>.bmp, the overlay included, which a window
+    capture is not) of the TOWERS labels as PNGs: per_label of each label, spread over its run."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return
+    by = {}
+    for f in sorted(glob.glob(os.path.join(folder, "*-towers*.bmp"))):
+        by.setdefault(os.path.basename(f).split("-", 1)[1][:-4], []).append(f)
+    for label, files in sorted(by.items()):
+        if len(files) > per_label:
+            files = [files[k * (len(files) - 1) // (per_label - 1)] for k in range(per_label)]
+        for n, f in enumerate(files):
+            path = os.path.join(out_dir, "%s-%s-%d.png" % (prefix, label, n))
+            im = Image.open(f)
+            im.thumbnail((1280, 720))
+            im.save(path)
+            shots.append(_relpath(path))
+
+
+def _towers_phase(s, i, env, until, shots, shot_plan, timeout):
+    """One copy of the towers test: runs until the log has `until` (count, text) or the timeout; pictures by
+    shot_plan: (log text, its nth time, seconds after, name), and the overlay's own pictures of each TOWERS screen."""
+    env = dict(env)
+    env["RECOMP_OVERLAY_SHOT_DIR"] = os.path.join(s.dir, "overlay%d" % i)
+    os.makedirs(env["RECOMP_OVERLAY_SHOT_DIR"], exist_ok=True)
+    c = s.launch(i, env=env, watch=TOWERS_WATCH)
+    deadline = time.time() + timeout
+    due = []
+    done = set()
+    reached = False
+    while time.time() < deadline and c.alive():
+        s.poll()
+        w = c.watch
+        if w.count("[CRASH]") or w.count("[WATCHDOG]"):
+            time.sleep(2)
+            break
+        for k, (text, nth, after, name) in enumerate(shot_plan):
+            if k not in done and w.count(text) >= nth:
+                done.add(k)
+                due.append((time.time() + after, name))
+        for item in list(due):
+            if time.time() >= item[0]:
+                due.remove(item)
+                _png(s, i, item[1], shots)
+        n, text = until
+        if w.count(text) >= n and not due:
+            reached = True
+            time.sleep(1)
+            break
+        time.sleep(0.25)
+    if c.alive():
+        c.proc.kill()
+        try:
+            c.proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            pass
+    _towers_overlay_pngs(env["RECOMP_OVERLAY_SHOT_DIR"], "p%d" % (i + 1), s.dir, shots)
+    return c, reached
+
+
+def _towers_signed_in(s, h, base, script, extra_env, shots, phases, problems, timeout):
+    """T1 (build 97), signed in against a local account service with Towers on (accounts -towers, a test session):
+    5. Uptown: the service deals the seed and the run; two floors won (15 s knockouts, past the plausibility check),
+       then the game ends 4 s into floor 3's fight (RECOMP_TEST_TOWERS_EXIT_IN_FIGHT: a closed or crashed game).
+    6. The next start opens TOWERS: the fight left open is a loss (the run ends with 2 floors, its "left" report goes
+       to the service), the page's note, and the BOARD (X) with the player's place: pictures. The service's board is
+       read back: Copy 0 on Uptown with 2 floors, the run ended."""
+    import urllib.request
+    acc_port = 18900 + (os.getpid() % 50) * 2
+    name = "Copy 0"
+    try:
+        tokens = s.accounts(acc_port, [name], extra=["-towers"])
+    except (OSError, RuntimeError, SystemExit) as error:
+        phases.append({"phase": "signed-in", "skipped": str(error)})
+        return
+    towers_file = os.path.join(s.dir, "towers-signed.json")
+    signed = dict(base, RECOMP_TOWERS_FILE=towers_file, RECOMP_ACCOUNT_SERVER="127.0.0.1:%d" % acc_port,
+                  RECOMP_ACCOUNT_TEST_TOKEN=tokens[name])
+    signed.pop("RECOMP_TEST_TOWERS_SEED", None)
+    # 5: two floors won, the game ends in floor 3's fight
+    env = dict(signed, RECOMP_TEST_TOWERS="1,55", RECOMP_TEST_KO_STEP="900,0", RECOMP_PAD_SCRIPT=script(4),
+               RECOMP_TEST_TOWERS_EXIT_IN_FIGHT="3")
+    env.update(extra_env or {})
+    c, ok = _towers_phase(s, 4, env, (1, "the game ends in floor 3"), shots, [("set up: slot levels", 1, 8, "p5-fight1")],
+                          timeout or 900)
+    text = logparse.read_text(c.log)
+    run = re.search(r"service: run (\w+), seed ([0-9A-F]+), (\d+) floors[^\n]*?(on the board|off the board: \w*)", text)
+    reports = re.findall(r"service /api/towers/fight\?format=text floor (\d+): HTTP (\d+)", text)
+    phases.append({"phase": "signed-in-climb", "reached": ok or "the game ends in floor 3's fight" in text,
+                   "run": run and run.group(1), "board": run and run.group(4), "reports": reports,
+                   "input_logs": re.findall(r"input log of floor (\d+) \(\d+ bytes\): HTTP (\d+)", text), "log": _relpath(c.log)})
+    if not run:
+        problems.append("signed in: the service dealt no run")
+    elif "on the board" not in run.group(4):
+        problems.append("signed in: the Uptown run is off the board (%s)" % run.group(4))
+    if "the game ends in floor 3's fight" not in text:     # (the copy is gone at once: read the log, not the watch)
+        problems.append("signed in: the game did not end in floor 3's fight")
+    if [r for r in reports if r[1] != "200"]:
+        problems.append("signed in: a report was refused: %s" % reports)
+    # 6: the next start: the fight left open is a loss; TOWERS with the note and the board
+    env = dict(signed, RECOMP_TEST_OPEN_ONLINE="towers", RECOMP_TEST_TOWERS_BOARD="1",
+               RECOMP_PAD_SCRIPT=h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"]))
+    env.update(extra_env or {})
+    c, ok = _towers_phase(s, 5, env, (1, "fight?format=text floor 3"), shots,
+                          [("[TOWERS] board (month)", 1, 3.0, "p6-board")], timeout or 300)
+    time.sleep(1)
+    text = logparse.read_text(c.log)
+    left = re.search(r"UPTOWN: the game closed during floor (\d+)'s fight: a loss, the run ends with (\d+)", text)
+    sent = re.findall(r"service /api/towers/fight\?format=text floor 3: HTTP (\d+)[^\n]*", text)
+    board = ""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/api/towers/board?format=text&tower=1&season=all" % acc_port,
+                                    timeout=5) as r:
+            board = r.read().decode("utf-8", "replace")
+    except OSError as error:
+        board = "unreachable: %s" % error
+    row = re.search(r"row=1\|1\|\d+\|%s\|(\d+)\|" % re.escape(name), board)
+    phases.append({"phase": "left-open-is-a-loss", "reached": ok, "left": left and left.groups(), "sent": sent,
+                   "board": board.strip().splitlines()[:8], "log": _relpath(c.log)})
+    if not left or left.group(1) != "3" or left.group(2) != "2":
+        problems.append("signed in: the fight left open was not a loss on floor 3")
+    if not sent or not sent[0].startswith("200"):
+        problems.append("signed in: the left fight's report did not reach the service (%s)" % sent)
+    if not row or row.group(1) != "2":
+        problems.append("signed in: the service's board has not Copy 0 with 2 floors (%s)" % board.strip()[:200])
+
+
+def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_env=None, content=None):
+    """Towers (T0), offline, four copies one after the other on one run file (RECOMP_TOWERS_FILE in the run's folder):
+    1. Uptown (seed 1234, Doc): three floors won by the test knockout (winner slot 0), every one a save point; the
+       climb's pictures; the game then closes mid-climb.
+    2. Five Boroughs with chapters of 2 (RECOMP_TEST_TOWERS_CHAPTER), a community fighter on floor 3 when the content
+       root has one: two floors won, SAVE AND QUIT on the climb after floor 2; the hub opens on TOWERS (picture).
+    3. Five Boroughs resumed: floor 3 against the community fighter (a bank), won.
+    4. Uptown resumed on floor 4 and lost (the CPU's test knockout): the run ends, the end screen (picture), A back
+       to TOWERS. The run file is checked after each copy. content: a content root with community fighters
+       (DJ_CONTENT, e.g. one setup/mods.py filled; ffny_fighters.bin in its composed files)."""
+    t0 = time.time()
+    s = copies.Session("towers", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "towers", "ok": False, "params": {"content": content}}
+    shots, problems, phases = [], [], []
+    try:
+        h = harness()
+        towers_file = os.path.join(s.dir, "towers-run.json")      # (the account service keeps its own towers.json here)
+        base = {"RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR, "RECOMP_TOWERS_FILE": towers_file,
+                "RECOMP_TEST_TOWERS_SEED": "1234", "RECOMP_OVERLAY_SHOT_MS": "500"}
+
+        def script(matches):
+            return h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(matches, 2, False))
+
+        def read_file():
+            try:
+                with open(towers_file, encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError, ValueError):
+                return None
+
+        def run_of(data, tower):
+            for r in (data or {}).get("runs", []):
+                if r.get("tower") == tower:
+                    return r
+            return None
+
+        if os.environ.get("DJ_TOWERS_SIGNED_ONLY"):     # only the signed-in phases (5 and 6)
+            _towers_signed_in(s, h, base, script, extra_env, shots, phases, problems, timeout)
+            result.update({"ok": not problems, "phases": phases, "problems": problems, "shots": shots})
+            return result
+        old_content = os.environ.get("DJ_CONTENT")
+        # 1: Uptown, three floors
+        env = dict(base, RECOMP_TEST_TOWERS="1,55", RECOMP_TEST_KO_STEP="600,0", RECOMP_PAD_SCRIPT=script(4))
+        env.update(extra_env or {})
+        c, ok = _towers_phase(s, 0, env, (3, " won ("), shots, [("set up: slot levels", 1, 8, "p1-fight1")],
+                              timeout or 900)
+        text = logparse.read_text(c.log)
+        data = read_file()
+        r1 = run_of(data, 1)
+        levels = re.findall(r"floor (\d+) set up: slot levels (\d+) (\d+)", text)
+        phases.append({"phase": "uptown-climb", "reached": ok, "won": len(re.findall(r"floor \d+ won \(", text)),
+                       "levels": levels, "saved_floor": r1 and r1.get("floor"), "best": data and data.get("best"),
+                       "log": _relpath(c.log)})
+        if not ok or not r1 or r1.get("floor") != 4:
+            problems.append("uptown: three floors were not climbed and saved (file floor %s)" % (r1 and r1.get("floor")))
+        if levels and any(l[1] != "1" for l in levels):
+            problems.append("uptown: the climber's slot word was not Normal")
+        content = content or os.environ.get("DJ_CONTENT")
+        if content:
+            os.environ["DJ_CONTENT"] = content
+        # 2: Five Boroughs, chapters of 2, save and quit after floor 2
+        env = dict(base, RECOMP_TEST_TOWERS="2,55", RECOMP_TEST_KO_STEP="600,0", RECOMP_PAD_SCRIPT=script(3),
+                   RECOMP_TEST_TOWERS_CHAPTER="2", RECOMP_TEST_TOWERS_QUIT="2", RECOMP_TEST_TOWERS_OPPONENT="3:community")
+        env.update(extra_env or {})
+        c, ok = _towers_phase(s, 1, env, (1, "save and quit"), shots, [("save and quit", 1, 4.0, "p2-towers-page")],
+                              timeout or 600)
+        text = logparse.read_text(c.log)
+        r2 = run_of(read_file(), 2)
+        community = re.findall(r"test: fighter (\d+) on floor 3", text)
+        phases.append({"phase": "five-boroughs-quit", "reached": ok, "saved_floor": r2 and r2.get("floor"),
+                       "community": community, "floors": r2 and r2.get("floors"), "log": _relpath(c.log)})
+        if not ok or not r2 or r2.get("floor") != 3:
+            problems.append("five boroughs: no save and quit at floor 2 (file floor %s)" % (r2 and r2.get("floor")))
+        # 3: Five Boroughs resumed: floor 3
+        env = dict(base, RECOMP_TEST_TOWERS="2,resume", RECOMP_TEST_KO_STEP="600,0", RECOMP_PAD_SCRIPT=script(2),
+                   RECOMP_TEST_TOWERS_CHAPTER="2")
+        env.update(extra_env or {})
+        c, ok = _towers_phase(s, 2, env, (1, " won ("), shots, [("set up: slot levels", 1, 8, "p3-fight-floor3")],
+                              timeout or 600)
+        text = logparse.read_text(c.log)
+        m = re.search(r"floor 3 of \d+: fighter \d+ against (\d+)", text)
+        bank = re.findall(r"\[BANKS\][^\n]*", text)
+        phases.append({"phase": "five-boroughs-resume", "reached": ok, "opponent": m and int(m.group(1)),
+                       "banks": bank[:3], "resumed": "run resumed: FIVE BOROUGHS" in text, "log": _relpath(c.log)})
+        if not ok or "run resumed: FIVE BOROUGHS, seed" not in text:
+            problems.append("five boroughs: the saved climb was not resumed and won")
+        if community and m and int(m.group(1)) != int(community[0]):
+            problems.append("five boroughs: floor 3 was not the community fighter")
+        if old_content is None:
+            os.environ.pop("DJ_CONTENT", None)
+        else:
+            os.environ["DJ_CONTENT"] = old_content
+        # 4: Uptown resumed and lost
+        env = dict(base, RECOMP_TEST_TOWERS="1,resume", RECOMP_TEST_KO_STEP="600,1", RECOMP_PAD_SCRIPT=script(2),
+                   RECOMP_TEST_TOWERS_END="a")
+        env.update(extra_env or {})
+        c, ok = _towers_phase(s, 3, env, (1, " lost: the run"), shots, [(" lost: the run", 1, 10.0, "p4-back")],
+                              timeout or 600)
+        text = logparse.read_text(c.log)
+        data = read_file()
+        phases.append({"phase": "uptown-loss", "reached": ok, "uptown_run_left": bool(run_of(data, 1)),
+                       "best": data and data.get("best"), "log": _relpath(c.log)})
+        if not ok or run_of(data, 1):
+            problems.append("uptown: the loss did not end the run")
+        if not data or data.get("best", [0])[0] != 3:
+            problems.append("uptown: best floor is not 3 (%s)" % (data and data.get("best")))
+        if not os.environ.get("DJ_TOWERS_NO_SERVER"):
+            _towers_signed_in(s, h, base, script, extra_env, shots, phases, problems, timeout)
+        for p in phases:
+            crashes = _faults(logparse.read_text(os.path.join(machine.REPO, p["log"])))
+            if crashes:
+                problems += ["%s: %s" % (p["phase"], cr) for cr in crashes]
+        result.update({"ok": not problems, "phases": phases, "problems": problems, "shots": shots})
     finally:
         _finish(s, result, t0)
     return result

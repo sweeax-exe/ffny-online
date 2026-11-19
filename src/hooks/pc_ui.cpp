@@ -3792,6 +3792,7 @@ std::atomic<bool> g_exit_req{false};    // ESC or a click on the EXIT chip (wind
 bool g_ms = false;                  // the overlay shows MILESTONES (the user-ID screen, the Story crib)
 bool g_community = false;           // the overlay shows the community window (MORE on a select screen)
 bool g_skin = false;                // build 85: the overlay shows the skin window over a select screen
+bool g_towers = false;              // Towers: the overlay shows the climb window between floors (towers_ui.inc)
 std::atomic<bool> g_ms_req{false};      // a click on the MILESTONES chip (window thread)
 std::atomic<int> g_menu_eats_back{0};   // the title reads no BACK (VIEW) on the main menu (game thread)
 bool g_exit_view_down = true;       // the pad's VIEW was held last frame (true: a held one never opens it)
@@ -3947,7 +3948,7 @@ void set_open(bool open)
     if (g_open.load() == open) return;
     g_open = open;
     g_just_opened = open;
-    if (!open) g_online = g_exit = g_ms = g_skin = g_cupd = g_community = false;
+    if (!open) g_online = g_exit = g_ms = g_skin = g_cupd = g_community = g_towers = false;
     if (open) { g_hold_input = false; xbox_HostInputSetUiActive(1); }
     else g_hold_input = true;           // released in release_input_when_idle
 #if !defined(_WIN32)
@@ -4758,6 +4759,10 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
             set_open(true);
             g_cupd = true;
             online_screen::update_prompt_begin("main menu");
+        } else if (!g_open.load() && !g_note.open && !toggled && online_screen::take_towers_request()) {
+            // Towers: back on a menu after a floor's fight: the climb (or the run's end) holds the game's input
+            set_open(true);
+            g_towers = true;
         } else if (!g_open.load() && !g_note.open && !toggled && online_screen::take_community_window_request()) {
             set_open(true);
             g_community = true;
@@ -4793,6 +4798,9 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     bool delayhud = !g_open.load() && !versus && !decor && !hillhud && online_screen::delay_hud_wanted();
     // Run the Streets: chat bubbles and speaker icons over the fighters (rts_social_ui.inc), drawing only
     bool rtsworld = !g_open.load() && !versus && !decor && online_screen::rts_world_wanted();
+    // Towers: the next floor's card over the load (towers_ui.inc), drawing only; over the main menu's decor too
+    bool towerscard = !g_open.load() && !versus && online_screen::towers_card_wanted();
+    if (towerscard) decor = false;
     static bool fc_held;
     auto fight_chat_hold = [&](bool typing) {
         if (typing && !fc_held) {
@@ -4837,7 +4845,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
     if (rtsworld) talking = false;      // Run the Streets: the speaker icons over the fighters say it (and the dock is there)
-    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !fighthud && !delayhud && !mschip && !offer && !rtsworld) { ui_unlock(); return; }
+    if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !fighthud && !delayhud && !mschip && !offer && !rtsworld && !towerscard) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
     ID3D11DeviceContext *ctx = (ID3D11DeviceContext *)context;
@@ -4895,6 +4903,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         }
     } else if (g_community) {
         if (!g_note.open && online_screen::draw_community_window(io.DisplaySize)) close_request = true;
+    } else if (g_towers) {
+        if (!g_note.open && online_screen::draw_towers_window(io.DisplaySize)) close_request = true;
     } else if (g_exit) {
         int answer = g_note.open ? 0 : online_screen::draw_exit_prompt(io.DisplaySize);
         if (answer == 2 && g_window) {
@@ -4958,6 +4968,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         }
     }
     if (rtsworld) online_screen::draw_rts_world(ImGui::GetForegroundDrawList(), io.DisplaySize);
+    if (towerscard) online_screen::draw_towers_card(ImGui::GetForegroundDrawList(), io.DisplaySize);
     if (fightchat) fight_chat_hold(online_screen::draw_fight_chat(ImGui::GetForegroundDrawList(), io.DisplaySize));
     if (talking) {  // small, bottom left, over everything
         ImDrawList *fg = ImGui::GetForegroundDrawList();

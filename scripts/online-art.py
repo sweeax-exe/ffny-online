@@ -360,6 +360,17 @@ def build(data, out):
     except Exception as error:    # noqa: BLE001 - reported, never fatal
         manifest["missing"].append("ranks (%s)" % error)
 
+    try:        # the port's own Towers buildings (build 97, no game bytes); without them the game draws its own
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tower_art", Path(__file__).resolve().parent / "tower-art.py")
+        tower_art = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tower_art)
+        font = tmp / "fonts" / "TradeCon.ttf"
+        tower_art.render(tmp / "towers", font if font.is_file() else None)
+        manifest["towers"] = 3
+    except Exception as error:    # noqa: BLE001 - reported, never fatal
+        manifest["missing"].append("towers (%s)" % error)
+
     manifest["fighters"].sort()
     manifest["venues"].sort()
     (tmp / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")

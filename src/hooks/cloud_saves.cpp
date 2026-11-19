@@ -263,6 +263,10 @@ std::string file_fault(const std::string &name, const Bytes &data)
     bool place = (parts.size() == 3 && parts[0] == "UserData" && parts[1] == saves::kTitleId && ends_with(lower(parts[2]), ".xbx")) ||
                  (parts.size() == 4 && parts[0] == "UserData" && parts[1] == saves::kTitleId) ||
                  (parts.size() == 3 && parts[0] == "aside");
+    if (name == kTowersFile) {      // build 97: the Towers climbs (towers.c), a JSON file
+        if (data.size() > kMaxFile) return "a file larger than 64 KiB (" + name + ")";
+        return !data.empty() && data[0] == '{' ? "" : "not a Towers run file (" + name + ")";
+    }
     if (!place) return "a file outside the save area (" + name + ")";
     if (data.size() > kMaxFile) return "a file larger than 64 KiB (" + name + ")";
     bool xbx = ends_with(lower(name), ".xbx");
@@ -337,6 +341,21 @@ bool collect(const fs::path &save_dir, Files &out, std::vector<std::string> *ski
             if (!leaf.compare(0, 8, ".moving-")) continue;     // put_aside's own copy while it moves one
             if (!good_part(leaf)) { skip("a folder name that is not allowed (" + leaf + ")"); continue; }
             if (!take_files(it->path(), "aside/" + leaf + "/", true)) return false;
+        }
+    }
+    {   // build 97: <save>/ffny/towers.json, the Towers climbs (towers.c)
+        fs::path towers = save_dir / "ffny" / "towers.json";
+        std::error_code e2;
+        if (fs::symlink_status(towers, e2).type() == fs::file_type::regular) {
+            Bytes data;
+            if (fs::file_size(towers, e2) > kMaxFile) skip("a file larger than 64 KiB (" + std::string(kTowersFile) + ")");
+            else if (!read_bytes(towers, data, kMaxFile)) {
+                if (error) *error = std::string("could not read ") + kTowersFile;
+                return false;
+            } else if (file_fault(kTowersFile, data).empty()) {
+                total += data.size();
+                out[kTowersFile] = std::move(data);
+            } else skip(file_fault(kTowersFile, data));
         }
     }
     if (out.size() > kMaxFiles || total > kMaxTotal) {
@@ -535,6 +554,17 @@ bool restore(const Files &cloud, const fs::path &save_dir, const fs::path &backu
         fs::rename(staging, dst, ec);
         if (ec) { fs::remove_all(staging, ec); continue; }
         added++;
+    }
+    // build 97: the Towers climbs come with it (this PC's file is kept beside it as towers.json.before-cloud)
+    auto towers = cloud.find(kTowersFile);
+    if (towers != cloud.end()) {
+        std::error_code ec;
+        fs::path dir = save_dir / "ffny", file = dir / "towers.json";
+        fs::create_directories(dir, ec);
+        if (fs::exists(file, ec)) fs::copy_file(file, dir / "towers.json.before-cloud", fs::copy_options::overwrite_existing, ec);
+        Files one;
+        one["towers.json"] = towers->second;
+        if (!write_tree(one, dir, "", &why)) fprintf(stderr, "[CLOUD] the Towers file was not restored: %s\n", why.c_str());
     }
     std::string out = "Your cloud save from " + note + " is in place.";
     if (added) out += " " + std::to_string(added) + (added == 1 ? " profile" : " profiles") + " put aside came with it.";

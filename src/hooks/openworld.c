@@ -52,6 +52,7 @@
 #include "netplay.h"
 #include "rts.h"
 #include "rts_social.h"
+#include "towers.h"
 
 #define ACTORS      0x003B92E0u
 #define STRIDE      0x12E8u
@@ -439,6 +440,7 @@ void ow_match_start(void)
 {
     int want = recomp_settings_get("openworld", "big_arena", 0) != 0;
     int online = netplay_active(), rts = 0, i;
+    towers_match_start();       /* Towers (towers.c): the floor's CPU level, offline only */
     memset(&BA, 0, sizeof BA);
     memset(BA.last_hit, -1, sizeof BA.last_hit);
     SP.n = 0;
@@ -1017,6 +1019,7 @@ void ow_health_change(void)
     static float mult = -1.0f;
     int s;
     float delta;
+    towers_health_change();     /* Towers (towers.c): the floor's CPU damage and health, offline only */
     if (!BA.on) return;
     s = slot_of_record(MEM32(g_esp + 4));
     if (s < 0) return;
@@ -1127,6 +1130,7 @@ void ow_step(void (*gen)(void))
         puppet_step();
     }
     bigarena_step();
+    towers_step();              /* Towers (towers.c): the floor's start momentum and the fight's result */
     if (!prof_on()) {
         gen();
     } else {
