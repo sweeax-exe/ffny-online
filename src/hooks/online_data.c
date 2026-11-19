@@ -229,6 +229,24 @@ static void load_venues(void)
         g_venue_count++;
     }
     free(text);
+    {   /* tests (build 97): RECOMP_TEST_EXTRA_VENUES="29:Harbor Yard,30:Rooftop" lists community venues (feIDs 28..63)
+         * this PC does not have, for the online screens' pictures only (nothing plays them) */
+        const char *x = getenv("RECOMP_TEST_EXTRA_VENUES");
+        while (x && *x && g_venue_count < MAX_VENUES) {
+            int fe = atoi(x), i, dup = 0;
+            const char *colon = strchr(x, ':'), *comma = strchr(x, ',');
+            if (colon && (!comma || colon < comma) && fe >= 28 && fe <= 63) {
+                size_t len = comma ? (size_t)(comma - colon - 1) : strlen(colon + 1);
+                for (i = 0; i < g_venue_count; i++) if (g_venues[i].fe_id == fe) dup = 1;
+                if (!dup) {
+                    g_venues[g_venue_count].fe_id = fe;
+                    snprintf(g_venues[g_venue_count].name, sizeof(g_venues[0].name), "%.*s", (int)len, colon + 1);
+                    g_venue_count++;
+                }
+            }
+            x = comma ? comma + 1 : NULL;
+        }
+    }
 }
 
 #if defined(_WIN32)

@@ -233,7 +233,7 @@ int netservers_sum_move(int my_relay, int my_age, const int *mine, int their_rel
 
 int netservers_pool_limit(int age_s)
 {
-    return age_s >= 40 ? 0 : age_s >= 20 ? 250 : age_s >= 10 ? 180 : 120;
+    return age_s >= QUICK_STAGE2_S ? 0 : age_s >= QUICK_STAGE1_S ? QUICK_STAGE1_MS : QUICK_STAGE0_MS;
 }
 
 int netservers_pair_relay(const NetQuickSeat *a, const NetQuickSeat *b, int limit, int *sum, int *worse)
@@ -244,11 +244,14 @@ int netservers_pair_relay(const NetQuickSeat *a, const NetQuickSeat *b, int limi
         if (pa <= 0 || pb <= 0) continue;
         s = pa + pb;
         w = pa > pb ? pa : pb;
-        if (limit > 0 && w > limit) continue;
         if (best < 0 || s < best_sum || (s == best_sum && w < best_worse)) { best = r; best_sum = s; best_worse = w; }
     }
     if (sum) *sum = best_sum;
     if (worse) *worse = best_worse;
+    /* build 97: the sum is the pair's ping; the stage's limit and each player's own limit (never widened) */
+    if (best >= 0 && ((limit > 0 && best_sum > limit) || (a->max_ping > 0 && best_sum > a->max_ping) ||
+                      (b->max_ping > 0 && best_sum > b->max_ping)))
+        return -1;
     return best;
 }
 

@@ -676,6 +676,46 @@ on. OK comes only when both players of that START asked for the same seed; until
 not 1v1, a spectator, another seed, the other game lacks bit 27, an address that is not IPv4. `DIRECT` never
 reaches the relay. Design and fallback: `docs/research/p2p-optin.md`.
 
+## Build 97: host kick, quick ping limits, AFK
+
+No new CAPS bit: the relay gates every new answer on the HELLO's build number (a PC game of build 97 or later,
+`Lobby97MinBuild` in `relay/protocol_kick.go`), and the game sends only new message types, which older relays drop
+silently. Game side: `src/hooks/netplay_lobby97_rules.h`.
+
+| Type | Name | Direction | Body after the header |
+|---|---|---|---|
+| 0x3B | `KICK` | client -> server | `token` 8, `slot` u8 (the member's room slot) |
+| 0x3C | `ACTIVE` | client -> server | `token` 8, `idle` u16 (s since this PC's last pad, key or mouse input; 0xFFFF that long or longer), `max_ping` u16 (the player's own Quick Match max ping in ms, 0 off), `search` u16 (s its quick match has searched, 0 not searching) |
+| 0x3C | `ACTIVE` | server -> client | `left` u16: the AFK warning, removal in `left` s without activity (0: the warning is over) |
+
+New ERROR codes: **16** removed from the room by its host (and, to a JOIN, QUICK placement or SPECTATE of that room,
+"you were removed from it less than 5 minutes ago"); **17** removed for no activity. Both go only to build-97 games.
+
+- **Host kick.** Only the host, only in a room a player made (not ranked, tournament, crew or turf battles, official
+  rings, legacy rooms), never while the member's match runs (a plain room in its lobby or vote; a hill room while the
+  member is not called to fight). The relay answers with the room's `ROOM`; a `KICK` of an empty slot (a retry) gets a
+  `ROOM`. The removed player is kept out of that room for 5 minutes by its account (room chat's IDENT, or the ranked
+  account), else its PC fingerprint (`PC`), else its address. An older removed game gets ERROR 8 with the text "You
+  were removed from the room by its host." (games since build 86 show the relay's text); its refused rejoin gets
+  ERROR 8 "Kicked by host" when the request leaves room for it. The relay logs each kick with client ids only.
+- **Quick Match ping limits.** A pair's ping is the smallest sum, over the relays both measured, of the two players'
+  pings (QUICK's pings). The limit widens with the longer wait of the two: 120 ms, from 20 s 180 ms, from 45 s any
+  (`QuickPingStages` / `QUICK_STAGE*`, one place on each side, kept alike by `tests/unit/test_lobby97.py`). A
+  player's own `max_ping` never widens; a pair whose ping cannot be estimated never meets a player who set one. The
+  wait is the longest of the quick room's age and the game's reported `search`, so a move between relays keeps it.
+  On one relay, `QUICK` skips a waiting room the rule refuses, and the relay later puts the younger room's build-97
+  player into the older room once the widened limit allows it (the game takes the new room's `ROOM`). The games'
+  pool (`netservers_pool`) uses the same rule across relays. `ROOMLIST` (request bits 16, 26 and 28, rooms of a
+  build-97 game) carries, after the relays' pings trailer, 3 bytes per listed room: its one player's max ping in
+  10 ms units (0 off) and its wait (u16 s). One pool, never split.
+- **AFK.** A build-97 member whose last ACTIVE is under a minute old and who shows no activity (its reported input,
+  or its READY, SETTINGS, VOTE, chat, KICK or YIELD) for the limit (default 10 minutes) while its room is in its
+  lobby gets `ACTIVE` warnings for the last 60 s, then ERROR 17, and leaves the room; an empty room closes. Exempt:
+  older games, spectators, rooms in a vote or match (the clock waits), ranked, tournament, crew and ring rooms. The
+  relay's `-room-afk` (default 10m, 0 off) and `-room-afk-warn` (60s), and `<updates-dir>/room-afk` ("off" or a
+  duration) without a restart. The game sends ACTIVE every 5 s from the hub on, before every QUICK, and at once on
+  input during the warning, which it shows as "STILL THERE?" over the room page.
+
 ## Server operation
 
 The relay is one static binary (`server/relay`, Go). `relay -listen :27777` serves; it logs

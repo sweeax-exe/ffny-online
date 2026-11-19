@@ -467,6 +467,8 @@ static struct {
     NetRoomInfo rooms[NETSERVER_COUNT][LISTED_MAX];
     int age[NETSERVER_COUNT][LISTED_MAX];
     int pings[NETSERVER_COUNT][LISTED_MAX][NETSERVER_COUNT];   /* build 90: a quick room's player's pings, 0 none */
+    int seat_max[NETSERVER_COUNT][LISTED_MAX];  /* build 97: its player's own Quick Match max ping (ms, 0 off) */
+    int seat_wait[NETSERVER_COUNT][LISTED_MAX]; /* build 97: how long it has searched (s; -1 not listed) */
     int logged[NETSERVER_COUNT];        /* the room count last logged plus one, 0 none yet */
     unsigned version;
 } R;
@@ -554,6 +556,7 @@ static void list_round(void)
         NetRoomInfo list[LISTED_MAX];
         int ages[LISTED_MAX];
         int pings[LISTED_MAX][NETSERVER_COUNT];
+        int seat_max[LISTED_MAX], seat_wait[LISTED_MAX];
         FD_ZERO(&rd);
         FD_SET(s, &rd);
         n = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(s, (char *)b, sizeof(b), 0) : 0;
@@ -584,13 +587,23 @@ static void list_round(void)
         if (at + count <= n)            /* build 82 relays: each room's FIGHTER RULES bits (the STANDARD tag) */
             for (k = 0; k < count; k++) list[k].rules = b[at + k] & NETPLAY_RULES_MASK;
         memset(pings, 0, sizeof(pings));
+        for (k = 0; k < LISTED_MAX; k++) { seat_max[k] = 0; seat_wait[k] = -1; }
         if (at + count + 2 * NETSERVER_LEGACY * count <= n) { /* build 90 relays with the ping-sum switch on */
-            int p = at + count, j;
+            int p = at + count, j, used;
             for (k = 0; k < count; k++)
                 for (j = 0; j < NETSERVER_LEGACY; j++, p += 2) pings[k][j] = rd16(b + p);
             /* build 91 relays: the pings to the relays beyond the first three (netservers_get_more_pings) */
-            if (netservers_get_more_pings(b + p, n - p, count, &pings[0][0]) < 0)
+            used = netservers_get_more_pings(b + p, n - p, count, &pings[0][0]);
+            if (used < 0)
                 fprintf(stderr, "[SERVERS] %s: a short ROOMLIST pings trailer\n", P.s[who].name);
+            else if (used > 0 && p + used + 3 * count <= n) {
+                /* build 97 relays (server relay/quick_ping.go): each room's player's own max ping (10 ms units) and wait */
+                p += used;
+                for (k = 0; k < count; k++, p += 3) {
+                    seat_max[k] = b[p] * 10;
+                    seat_wait[k] = rd16(b + p + 1);
+                }
+            }
         }
         want[who] = 0;
         open--;
@@ -598,6 +611,8 @@ static void list_round(void)
         memcpy(R.rooms[who], list, sizeof(list[0]) * (size_t)count);
         memcpy(R.age[who], ages, sizeof(ages[0]) * (size_t)count);
         memcpy(R.pings[who], pings, sizeof(pings[0]) * (size_t)count);
+        memcpy(R.seat_max[who], seat_max, sizeof(seat_max[0]) * (size_t)count);
+        memcpy(R.seat_wait[who], seat_wait, sizeof(seat_wait[0]) * (size_t)count);
         R.count[who] = count;
         R.total[who] = rd16(b + 10);
         R.got[who] = GetTickCount64();
@@ -1128,7 +1143,9 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
                 for (j = 0; j < NETSERVER_COUNT; j++) any |= R.pings[o][k][j] > 0;
                 if (!any) continue;                             /* a room without pings is not in the pool */
                 seats[n].relay = o;
-                seats[n].age = R.age[o][k] + (int)((now - R.got[o]) / 1000);
+                /* build 97: the relay's listed wait (its player's search, which a move between relays keeps) */
+                seats[n].age = (R.seat_wait[o][k] >= 0 ? R.seat_wait[o][k] : R.age[o][k]) + (int)((now - R.got[o]) / 1000);
+                seats[n].max_ping = R.seat_max[o][k];
                 memcpy(seats[n].pings, R.pings[o][k], sizeof(seats[n].pings));
                 snprintf(seats[n].code, sizeof(seats[n].code), "%s", x->code);
                 if (o == cur && code && !strcmp(x->code, code)) me = n;

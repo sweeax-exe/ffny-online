@@ -117,6 +117,8 @@ def cmd_scenario(a):
     elif a.kind == "tset":
         r = scenarios.tset(timeout=a.timeout, relay_port=a.relay_port, extra_env=env, out_dir=a.out, fast_ko=a.fast_ko,
                            rollback=a.rollback, rollback_modes=a.rollback_modes, **common)
+    elif a.kind == "lobby97":
+        r = scenarios.lobby97(case=a.case, timeout=a.timeout, relay_port=a.relay_port, extra_env=env, **common)
     elif a.kind == "socialonline":
         r = scenarios.social_online(timeout=a.timeout or 200, relay_port=a.relay_port, extra_env=env, out_dir=a.out, **common)
     elif a.kind == "social":
@@ -227,7 +229,8 @@ def main(argv=None):
 
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
-                                              "crewbattle", "turf", "tset", "socialonline", "mute"])
+                                              "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97"])
+    sc.add_argument("--case", default="kick", help="lobby97 (build 97): kick, quick, quickmax or afk")
     sc.add_argument("--via", default="voice", choices=["voice", "chat"], help="mute: the VOICE CHAT page's call, or the chat window's MUTE IN ROOM")
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")
     sc.add_argument("--stress", action="store_true", help="social: more accounts with emoji, Arabic, combining-mark "

@@ -409,6 +409,15 @@ int netplay_lobby_skins(void);
 int netplay_lobby_unlimited(void);
 void netplay_lobby_vote(int choice);
 void netplay_lobby_leave(void);
+/* Build 97 (netplay_lobby97_rules.h): the host removes the member in a room slot (KICK); this PC's input for the
+ * relay's AFK rule (the online screens call it on any key, button or mouse input); seconds left of the relay's AFK
+ * warning (0: none, or input came since); the player's own Quick Match max ping in ms (0 off); how long this PC's
+ * quick match has searched (-1: not searching). */
+void netplay_lobby_kick(int slot);
+void netplay_note_input(void);
+int netplay_afk_left(void);
+int netplay_quick_max_ping(void);
+int netplay_quick_search_s(void);
 /* King of the Hill: give up this PC's place in the line (to the back; a king gives up the crown).
  * Only when netplay_lobby_caps() has NETPLAY_CAP_YIELD and this PC neither votes nor fights. */
 void netplay_lobby_yield(void);
