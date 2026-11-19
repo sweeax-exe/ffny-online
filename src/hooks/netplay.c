@@ -53,6 +53,7 @@
 #include "openworld.h"
 #include "test_observations.h"
 #include "netplay_servers.h"
+#include "netplay_lobby97_rules.h"
 #include "netplay_check.h"
 #include "netplay_p2p.h"
 #include "anticheat.h"
@@ -149,6 +150,11 @@ int netplay_lobby_skins(void) { return 0; }
 int netplay_lobby_unlimited(void) { return 0; }
 void netplay_lobby_vote(int c) { (void)c; }
 void netplay_lobby_leave(void) {}
+void netplay_lobby_kick(int s) { (void)s; }
+void netplay_note_input(void) {}
+int netplay_afk_left(void) { return 0; }
+int netplay_quick_max_ping(void) { return 0; }
+int netplay_quick_search_s(void) { return -1; }
 void netplay_lobby_yield(void) {}
 void netplay_lobby_crew_join(unsigned b) { (void)b; }
 int netplay_lobby_crew(NetCrew *o) { memset(o, 0, sizeof(*o)); return 0; }
@@ -1856,6 +1862,115 @@ static void request(uint8_t type, const uint8_t *body, int len)
 static void answered(void)
 {
     N.pend_len = 0;
+}
+
+/* ---- build 97: host kick, the Quick Match max ping, AFK in rooms (netplay_lobby97_rules.h) ---------------
+ * Kept outside N (a new session keeps the last input and a quick search that moves between relays). */
+static struct {
+    volatile LONG64 input_at;   /* GetTickCount64 of this PC's last input (netplay_note_input, the pad) */
+    ULONGLONG active_sent;      /* the last ACTIVE */
+    ULONGLONG afk_until;        /* the relay's warning: it removes this PC from the room then (0: none) */
+    LONG64 afk_input;           /* input_at when the warning came: newer input ends it here at once */
+    ULONGLONG search_since;     /* this PC's quick match has searched since then (0: not searching) */
+    char kicked_code[7];        /* the room its host removed this PC from, and when */
+    ULONGLONG kicked_at;
+    unsigned pad_sig;           /* the pad's buttons and stick directions, last seen */
+    int pad_known;
+} L97;
+
+void netplay_note_input(void) { InterlockedExchange64(&L97.input_at, (LONG64)GetTickCount64()); }
+
+/* [online] quick_max_ping (RECOMP_TEST_QUICK_MAX_PING=<ms>: tests) */
+int netplay_quick_max_ping(void)
+{
+    const char *t = getenv("RECOMP_TEST_QUICK_MAX_PING");
+    if (t && *t) return atoi(t) > 0 ? atoi(t) : 0;
+    return netlobby_max_ping_ms(recomp_settings_get("online", "quick_max_ping", 0));
+}
+
+int netplay_quick_search_s(void)
+{
+    ULONGLONG since = L97.search_since;
+    return since ? (int)((GetTickCount64() - since) / 1000u) : -1;
+}
+
+/* The pad as one word: buttons, the analog buttons pressed, the sticks' directions (no noise from a resting stick) */
+static unsigned pad_signature(const XBOX_GAMEPAD *g)
+{
+    unsigned s = g->wButtons, i;
+    for (i = 0; i < 8; i++) if (g->bAnalogButtons[i] > 40) s |= 1u << (16 + i);
+    if (g->sThumbLX > 16000) s |= 1u << 24; else if (g->sThumbLX < -16000) s |= 1u << 25;
+    if (g->sThumbLY > 16000) s |= 1u << 26; else if (g->sThumbLY < -16000) s |= 1u << 27;
+    if (g->sThumbRX > 16000) s |= 1u << 28; else if (g->sThumbRX < -16000) s |= 1u << 29;
+    if (g->sThumbRY > 16000) s |= 1u << 30; else if (g->sThumbRY < -16000) s |= 1u << 31;
+    return s;
+}
+
+static void send_active(ULONGLONG now)
+{
+    uint8_t b[6 + 8 + NETLOBBY_ACTIVE_LEN];
+    ULONGLONG last = (ULONGLONG)L97.input_at;
+    unsigned idle, search;
+    int n;
+    if (!N.lobby || !N.have_token || N.state != NETPLAY_LOBBY) return;
+    if (last < N.started) last = N.started;     /* no input yet this session: idle from its start */
+    idle = now > last ? (unsigned)((now - last) / 1000u) : 0u;
+    search = L97.search_since && now > L97.search_since ? (unsigned)((now - L97.search_since) / 1000u) : 0u;
+    n = header(b, NETLOBBY_T_ACTIVE);
+    memcpy(b + n, N.token, 8); n += 8;
+    n += netlobby_active_body(b + n, idle, netplay_quick_max_ping(), search);
+    send_raw(b, n);
+    L97.active_sent = now;
+}
+
+/* The network thread, every pass: the pad's activity, ACTIVE every few seconds and at once on input while warned. */
+static void active_tick(ULONGLONG now)
+{
+    XBOX_INPUT_STATE s;
+    unsigned sig;
+    memset(&s, 0, sizeof(s));
+    xbox_HostInputGetLocalState(&s);
+    sig = pad_signature(&s.Gamepad);
+    if (L97.pad_known && sig != L97.pad_sig) netplay_note_input();
+    L97.pad_sig = sig;
+    L97.pad_known = 1;
+    if (L97.afk_until && L97.input_at > L97.afk_input && now - L97.active_sent >= 250) {
+        fprintf(stderr, "[NETPLAY] room: input during the AFK warning; telling the relay\n");
+        L97.afk_until = 0;
+        send_active(now);
+        return;
+    }
+    if (now - L97.active_sent >= NETLOBBY_ACTIVE_EVERY_MS) send_active(now);
+}
+
+int netplay_afk_left(void)
+{
+    ULONGLONG until = L97.afk_until, now = GetTickCount64();
+    if (!until || now >= until || L97.input_at > L97.afk_input || !N.roomv.in_room) return 0;
+    return (int)((until - now + 999u) / 1000u);
+}
+
+/* ACTIVE from the relay: its AFK warning (left s), 0 over */
+static void on_afk(const uint8_t *b, int len)
+{
+    unsigned left;
+    if (len < 2) return;
+    left = (unsigned)b[0] | (unsigned)b[1] << 8;
+    if (left && !L97.afk_until)
+        fprintf(stderr, "[NETPLAY] room: AFK warning, the relay removes this PC in %u s without activity\n", left);
+    if (!left && L97.afk_until) fprintf(stderr, "[NETPLAY] room: the AFK warning is over\n");
+    L97.afk_until = left ? GetTickCount64() + (ULONGLONG)left * 1000u : 0;
+    L97.afk_input = L97.input_at;
+}
+
+/* The host removes the member in a room slot (KICK; the relay answers with the room's ROOM) */
+void netplay_lobby_kick(int slot)
+{
+    uint8_t b[1];
+    if (slot < 0 || slot >= ROOMSLOTS) return;
+    b[0] = (uint8_t)slot;
+    fprintf(stderr, "[NETPLAY] room: removing the player in slot %d (host)\n", slot);
+    request(NETLOBBY_T_KICK, b, 1);
 }
 
 /* ---- the other players' controllers, as the title's other pads ---------------- */
@@ -3606,7 +3721,13 @@ static void on_room(const uint8_t *b, int len)
     if (!N.roomv.in_room || memcmp(N.roomv.code, v.code, 6)) {      /* another room: its pings come anew */
         for (i = 0; i < ROOMSLOTS; i++) N.slot_rtt[i] = N.slot_rb[i] = -1;
         N.last_pinginfo = 0;
+        if (N.roomv.in_room && !(N.pend_len && (N.pend[5] == T_JOIN || N.pend[5] == T_QUICK || N.pend[5] == T_CREATE ||
+                                                N.pend[5] == T_SPECTATE)))
+            /* build 97 relays (quick_ping.go): a player within the widened ping limit waits in another quick room */
+            fprintf(stderr, "[NETPLAY] quick match: the relay put this PC into room %s (from %s)\n", v.code, N.roomv.code);
+        L97.afk_until = 0;
     }
+    if (count >= 2) L97.search_since = 0;   /* build 97: met; a later search starts over */
     memcpy(v.error, N.roomv.error, sizeof(v.error));
     v.version = N.roomv.version + 1;
     /* the line comes in its own message (HILL, after every ROOM of such a room): keep the last */
@@ -4671,6 +4792,9 @@ static void on_packet(const uint8_t *b, int len)
     case T_HILL:
         if (N.lobby) on_hill(b + 6, len - 6);
         break;
+    case NETLOBBY_T_ACTIVE:     /* build 97 relays: the AFK warning */
+        if (N.lobby) on_afk(b + 6, len - 6);
+        break;
     case T_IDENT:       /* room chat: the relay's answer to IDENT (relays answering CAPS_CHAT) */
         if (N.lobby && len >= 9) chat_on_ident(b[6], b[7] | b[8] << 8);
         break;
@@ -4792,6 +4916,42 @@ static void on_packet(const uint8_t *b, int len)
                 N.roomv.version++;
                 LeaveCriticalSection(&g_cs);
                 fprintf(stderr, "[NETPLAY] refused: %s\n", text);
+                break;
+            }
+            if (N.lobby && (code == NETLOBBY_ERR_KICKED || code == NETLOBBY_ERR_IDLE)) {
+                /* build 97 relays: the host removed this PC from its room (16), or the relay did for no activity (17);
+                 * 16 to a JOIN, QUICK or SPECTATE: that room's host removed this PC less than five minutes ago */
+                static char kicked[160];
+                int asked = N.pend_len && (N.pend[5] == T_JOIN || N.pend[5] == T_SPECTATE);
+                EnterCriticalSection(&g_cs);
+                if (asked && code == NETLOBBY_ERR_KICKED) {
+                    int same = L97.kicked_code[0] && !memcmp(N.pend + 14, L97.kicked_code, 6);
+                    snprintf(kicked, sizeof(kicked), "You were removed from that room by its host: you can join it again in %d min.",
+                             same ? netlobby_kick_minutes_left(GetTickCount64() - L97.kicked_at) : 5);
+                    answered();
+                } else {
+                    unsigned version = N.roomv.version;
+                    if (code == NETLOBBY_ERR_KICKED) {
+                        memcpy(L97.kicked_code, N.roomv.code, 7);
+                        L97.kicked_at = GetTickCount64();
+                    }
+                    snprintf(kicked, sizeof(kicked), "%s", code == NETLOBBY_ERR_KICKED ? "You were removed from the room by its host."
+                             : "You were removed from the room: no activity for a long time.");
+                    if (N.roomv.in_room) {
+                        memcpy(N.left_room, N.roomv.code, 7);   /* a late ROOM of it does not bring it back */
+                        N.left_at = GetTickCount64();
+                    }
+                    memset(&N.roomv, 0, sizeof(N.roomv));
+                    N.roomv.version = version + 1;
+                    N.room[0] = 0;
+                    L97.afk_until = 0;
+                    L97.search_since = 0;
+                    if (N.pend_len && N.pend[5] != T_LIST) answered();
+                }
+                snprintf(N.roomv.error, sizeof(N.roomv.error), "%s", kicked);
+                N.roomv.version++;
+                LeaveCriticalSection(&g_cs);
+                fprintf(stderr, "[NETPLAY] room: %s (ERROR %d)\n", kicked, code);
                 break;
             }
             if (N.lobby && code == 9 && N.cp_waiting && !N.pend_len) {
@@ -5048,6 +5208,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
             if (code[0] && !netservers_ring_of(-1, code, NULL)) netservers_fetch_rings(15000);
         }
         chat_tick(now);     /* room chat: IDENT, and the line being sent (relays answering CAPS_CHAT) */
+        active_tick(now);   /* build 97: activity for the relay's AFK rule, the Quick Match max ping and search time */
         /* crew battles: CREWJOIN once the relay knows this account (IDENT), every CREW_RETRY_MS until in */
         if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && N.crew_want && N.relay_caps > 0 &&
             (N.relay_caps & CAPS_CREW) && (N.chat_ident == IDENT_OK || N.chat_ident == IDENT_MUTED) &&
@@ -5941,6 +6102,7 @@ int netplay_lobby_rooms(NetRoomInfo *out, int max, unsigned *version)
 void netplay_lobby_create(const NetRoomSettings *settings)
 {
     uint8_t b[80];
+    L97.search_since = 0;
     request(T_CREATE, b, put_settings(b, settings));
 }
 
@@ -5949,6 +6111,7 @@ void netplay_lobby_join(const char *code)
     uint8_t b[8];
     int i;
     for (i = 0; i < 6; i++) b[i] = (uint8_t)toupper((unsigned char)(code && code[i] ? code[i] : 0));
+    L97.search_since = 0;
     request(T_JOIN, b, 6 + put_ping(b + 6));
 }
 
@@ -6041,6 +6204,8 @@ int netplay_spectating(void)
 void netplay_lobby_quick(int mode, int max)
 {
     int most = room_max(mode), n, original = netplay_original(mode), i;
+    if (!L97.search_since) L97.search_since = GetTickCount64();     /* build 97: kept across moves between relays */
+    send_active(GetTickCount64());      /* build 97: the max ping and the search time before the QUICK */
     uint8_t b[11 + 1 + 2 * (NETSERVER_MAX - NETSERVER_LEGACY)] = { (uint8_t)mode, (uint8_t)(max < 2 ? 2 : max > most ? most : max) };
     n = 2 + put_ping(b + 2);
     if (relay_has(CAPS_ORIGINAL)) {     /* build 86: the search's choice after the ping (unknown: 0xFFFF) */
@@ -6053,7 +6218,13 @@ void netplay_lobby_quick(int mode, int max)
             int at = 0;
             for (i = 0; i < NETSERVER_COUNT; i++) {
                 int ms = i < got && sv[i].state == NETSERVER_UP && sv[i].ping_ms > 0 ? sv[i].ping_ms : 0;
-                pings[i] = ms > 0xFFFF ? 0xFFFF : ms;
+                const char *tp = getenv("RECOMP_TEST_RELAY_PINGS");     /* tests (build 97): "70,150,300" by relay */
+                if (tp && *tp) {
+                    int k;
+                    for (k = 0; k < i && tp; k++) { tp = strchr(tp, ','); if (tp) tp++; }
+                    ms = tp ? atoi(tp) : 0;
+                }
+                pings[i] = ms > 0xFFFF ? 0xFFFF : ms < 0 ? 0 : ms;
                 at += snprintf(line + at, sizeof(line) - (size_t)at, "%s%s %d", i ? ", " : "", sv[i].id, pings[i]);
                 if (at >= (int)sizeof(line)) at = (int)sizeof(line) - 1;
             }
@@ -6468,6 +6639,8 @@ int netplay_lobby_tset_joining(void) { return N.tset_wanting != 0; }
 
 void netplay_lobby_leave(void)
 {
+    L97.search_since = 0;       /* build 97: LEAVE ends a quick search (a move between relays does not leave) */
+    L97.afk_until = 0;
     EnterCriticalSection(&g_cs);
     if (N.roomv.in_room) {
         memcpy(N.left_room, N.roomv.code, 7);
@@ -7363,11 +7536,50 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         const char *kscript = getenv("RECOMP_TEST_KOTH_SCRIPT");
         uint32_t watched_seed = 0;
         int watched = 0, calls = 0, in_call = 0;
+        /* build 97 tests: RECOMP_TEST_KICK_AFTER_S=<s>: as the host, remove the first other member once a second
+         * player has been in the room that long (keep the copies from readying with RECOMP_TEST_READY_PLAYERS above
+         * their count); RECOMP_TEST_REJOIN=1: once removed, JOIN that room again 3 s later, then QUICK (neither may
+         * put this copy back into it) */
+        const char *ka = getenv("RECOMP_TEST_KICK_AFTER_S"), *rj = getenv("RECOMP_TEST_REJOIN");
+        int kick_after = ka && *ka ? atoi(ka) : 0, kicked_once = 0, rejoin = rj && *rj == '1', rejoin_step = 0;
+        ULONGLONG kick_since = 0, rejoin_at = 0;
         /* a move to another relay ends this session and starts the next: go on */
         while (netservers_moving() || (!N.stop && N.state != NETPLAY_FAILED && N.state != NETPLAY_OFF)) {
             NetRoom r;
             netservers_tick(NULL);
             netplay_lobby_room(&r);
+            if (kick_after > 0 && !kicked_once && r.in_room && r.phase == 0 && r.you == r.host && r.player_count >= 2) {
+                ULONGLONG tnow = GetTickCount64();
+                if (!kick_since) kick_since = tnow;
+                else if (tnow - kick_since >= (ULONGLONG)kick_after * 1000u) {
+                    int k, slot = -1;
+                    for (k = 0; k < r.player_count && slot < 0; k++) if (r.players[k].slot != r.you) slot = r.players[k].slot;
+                    fprintf(stderr, "[NETPLAY] tests: the host removes %s (slot %d) from room %s\n",
+                            slot >= 0 ? r.players[k - 1].name : "-", slot, r.code);
+                    if (slot >= 0) netplay_lobby_kick(slot);
+                    kicked_once = 1;
+                }
+            }
+            if (rejoin && L97.kicked_code[0] && !r.in_room) {
+                ULONGLONG tnow = GetTickCount64();
+                if (rejoin_step == 0 && tnow - L97.kicked_at > 3000) {
+                    fprintf(stderr, "[NETPLAY] tests: joining room %s again (removed by its host)\n", L97.kicked_code);
+                    netplay_lobby_join(L97.kicked_code);
+                    rejoin_step = 1;
+                    rejoin_at = tnow;
+                } else if (rejoin_step == 1 && tnow - rejoin_at > 4000) {
+                    fprintf(stderr, "[NETPLAY] tests: rejoin of %s: %s; quick match now\n", L97.kicked_code,
+                            r.error[0] ? r.error : "no answer");
+                    netplay_lobby_quick(qmode, qmax);
+                    rejoin_step = 2;
+                    rejoin_at = tnow;
+                }
+            }
+            if (rejoin_step == 2 && r.in_room && GetTickCount64() - rejoin_at > 3000) {
+                fprintf(stderr, "[NETPLAY] tests: after the quick match in room %s (%s the room it was removed from)\n", r.code,
+                        strcmp(r.code, L97.kicked_code) ? "not" : "BACK IN");
+                rejoin_step = 3;
+            }
             if (!strcmp(mode, "ranked")) {
                 /* the found set: accept it (as the ACCEPT popup's A); a move to the host relay: go */
                 if (netplay_lobby_queue(NULL, NULL, NULL, 0) == NETQUEUE_ACCEPT && netplay_lobby_accepted() < 0) {

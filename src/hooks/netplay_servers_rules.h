@@ -125,24 +125,36 @@ int netservers_sum_move(int my_relay, int my_age, const int *mine, int their_rel
  * The relay is only WHERE a match runs, never WHO a player can meet. From the first second a quick match sees the
  * one-player quick rooms of every relay (ROOMLIST, with each room's player's pings to every relay) and pairs the
  * waiting players by the smallest ping sum: for each pair the relay with the smallest sum of the two pings (a tie:
- * the lower worse ping, then the lower relay index), allowed while the worse ping is within the pair's limit
- * (netservers_pool_limit of the longer wait of the two: 120 ms, from 10 s 180, from 20 s 250, from 40 s any).
+ * the lower worse ping, then the lower relay index). Build 97 (owner 2026-11-19): that sum is the pair's ping, and a
+ * pair is allowed while it is within the limit of the longer wait of the two (netservers_pool_limit, the stages
+ * below: 120 ms, from 20 s 180, from 45 s any) and within each player's own Quick Match max ping, which never
+ * widens (seat max_ping; ROOMLIST lists it with the room's wait). The relay (server relay/quick_ping.go
+ * QuickPingStages) uses the same stages for two players on one relay; tests/unit/test_lobby97.py keeps them alike.
  * The pairs are taken greedily, best first (sum, worse ping, then the two room codes), so every game that reads
  * the same lists works out the same pairs. Both players then go to the pair's relay (the one already there
  * stays), where the relay's QUICK puts them in one room. Players of another fighter choice (original fighters
  * only) are a separate pool. */
 #define QUICK_POOL_MAX 64
 
+/* Build 97: the staged widening, the one place on the game side (the relay's QuickPingStages has the same) */
+#define QUICK_STAGE1_S      20      /* from this wait, pairs within QUICK_STAGE1_MS */
+#define QUICK_STAGE2_S      45      /* from this wait, any pair */
+#define QUICK_STAGE0_MS     120
+#define QUICK_STAGE1_MS     180
+
 typedef struct NetQuickSeat {
     int relay;                      /* the relay its quick room is on */
-    int age;                        /* seconds the room has waited */
+    int age;                        /* seconds the room's player has waited (build 97: the relay's listed wait) */
+    int max_ping;                   /* build 97: its player's own Quick Match max ping, ms (0 off) */
     int pings[NETSERVER_COUNT];     /* its player's pings by relay index, 0 unknown */
     char code[8];                   /* the room's code (the tie rule) */
 } NetQuickSeat;
 
-/* The worse-ping limit after waiting `age_s` seconds; 0 = any ping. */
+/* The pair-ping limit after waiting `age_s` seconds; 0 = any ping. */
 int netservers_pool_limit(int age_s);
-/* The relay seats a and b would play on within `limit` ms (0: any), -1 none; *sum and *worse (may be NULL). */
+/* Build 97: the relay seats a and b would play on (the smallest sum of their pings; a tie: the lower worse ping, then
+ * the lower relay index), or -1 when their sum there is over `limit` ms (0: any) or over either seat's max_ping, or
+ * no relay has both pings; *sum and *worse (may be NULL) are that relay's. */
 int netservers_pair_relay(const NetQuickSeat *a, const NetQuickSeat *b, int limit, int *sum, int *worse);
 /* The pool's pairs: partner[i] (-1 unpaired) and relay[i] (where seat i plays, -1 unpaired) for every seat. Two
  * seats on the same relay are never paired (the relay joins them itself). n at most QUICK_POOL_MAX. */

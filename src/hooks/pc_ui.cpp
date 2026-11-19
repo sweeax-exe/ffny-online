@@ -264,6 +264,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "rollback", "Rollback netcode (beta)"},
         {"online", "crossplay_android", "Play with Android players"},
         {"online", "p2p_direct", "Direct connection (P2P) in 1v1 fights"},
+        {"online", "quick_max_ping", "Quick Match max ping"},
         {"gameplay", "offline_countdown", "Start countdown in offline fights"},
         {"online", "voice", "Voice chat"},
         {"online", "voice_key", "Push-to-talk key"},
@@ -829,6 +830,8 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool s
             if (!strcmp(s->key, "button_icons"))
                 return std::string(!strcmp(choice, "auto") ? "Auto (from player 1's controller)" :
                                    !strcmp(choice, "xbox") ? "Xbox" : "PlayStation");
+            if (!strcmp(s->key, "quick_max_ping"))      // build 97
+                return std::string(!strcmp(choice, "off") ? "Off" : choice) + (strcmp(choice, "off") ? " ms" : "");
             std::string text = choice;
             std::replace(text.begin(), text.end(), '_', ' ');
             return text;
@@ -1962,6 +1965,7 @@ static void page_online(UiMode mode)
     }
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });
+    settings_group("online", { "quick_max_ping" });     // build 97
     crossplay_setting();
     p2p_setting();
     ImGui::Spacing();
@@ -2904,6 +2908,7 @@ static void page_basics()
         settings_group("online", { "rollback" });
         ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
     }
+    settings_group("online", { "quick_max_ping" });     // build 97
     crossplay_setting();
     p2p_setting();
     ImGui::SeparatorText("Gameplay");

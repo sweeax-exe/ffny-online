@@ -45,6 +45,7 @@
 #include "netplay.h"
 #include "netplay_servers.h"
 #include "netplay_delay_rules.h"
+#include "netplay_lobby97_rules.h"  // build 97: host kick, the quick ping limit, AFK
 #include "created_fighter.h"
 #include "voice.h"
 #include "voice_mute.h"
@@ -1021,6 +1022,12 @@ struct State {
     // FIGHTERS (build 90): the tab (FFNY, COMMUNITY, CREATED; fighter_tabs.h; -1: not read from [online] fighter_tab
     // yet), the style filter (0 All, 1.. online_styles) and each tab's last selected card
     int ftab = -1, fstyle = 0, ftab_sel[FTAB_COUNT] = { -1, -1, -1 };
+    // build 97: the host's REMOVE PLAYER (LB): choosing a card (kick_mode, kick_sel the room slot), then the prompt
+    // (kick_confirm the slot, -1 none; kick_yes: YES has the cursor)
+    bool kick_mode = false;
+    int kick_sel = -1, kick_confirm = -1;
+    bool kick_yes = false;
+    char kick_name[25] = "";
 } S;
 
 // ---- the test gallery ----------------------------------------------------------------------------
@@ -1066,6 +1073,8 @@ struct Gallery {
     unsigned original = 0;          // build 86: the sample's "Original fighters only" choices (bit per type, as the setting)
     bool rts = false;               // build 86: the hub shows RUN THE STREETS (an account with access)
     int rts_rules = 0;              // build 87: VS CPU's round rules on the gallery's pages (never the settings)
+    int afk_left = 0;               // build 97: the AFK warning's seconds (0 none)
+    int quick_max_ping = 0;         // build 97: the sample player's Quick Match max ping (ms, 0 off)
 } G;
 NetHillWatch G_hill_hud;            // build 70: the spectator HUD pages' sample (count 0: none)
 NetHillMenu G_hill_menu;            // build 73: the room menu pages' sample (results 0: not the results strip)
@@ -4848,6 +4857,65 @@ void tset_banner(ImDrawList *dl, const Frame &f, const NetRoom &r, const NetTSet
 
 void delay_room_line(ImDrawList *dl, const Frame &f);     // delay_hud_ui.inc (build 76)
 
+// Build 97: the host's REMOVE PLAYER prompt over the room page: YES / NO (left / right, A; B is NO; the mouse as on
+// the quit prompt). 1 YES, 2 NO, 0 still open.
+int draw_kick_prompt(ImDrawList *dl, const Frame &f, const Pad &pad, const char *name)
+{
+    rect(dl, f, 0, 0, 640, 480, IM_COL32(0, 0, 0, 140));
+    const float px = 150, py = 150, pw = 340, ph = 170;
+    glass(dl, f, px, py, pw, ph, 14, IM_COL32(10, 10, 13, 255), 0.9f);
+    std::string head = "REMOVE " + upper(name) + "?";
+    float hs = fit_size(f, g_title, 22, head.c_str(), pw - 30);
+    text(dl, f, g_title, hs, 320, py + 18 + (22 - hs) * 0.5f, CREAM, head.c_str(), CENTER, 1.6f);
+    text(dl, f, g_hand, 14, 320, py + 50, ORANGE, "They can't come back to this room for 5 minutes.", CENTER, 1.0f, pw - 24);
+    const float by = py + 88, bh = 32, bw = 120;
+    const float bx[2] = { 320 - 10 - bw, 320 + 10 };
+    const char *label[2] = { "YES", "NO" };
+    int choose = 0;
+    for (int i = 0; i < 2; i++) {
+        bool yes = i == 0;
+        if (mouse_pick(f, bx[i], by, bw, bh)) S.kick_yes = yes;
+        if (mouse_click(f, bx[i], by, bw, bh)) choose = yes ? 1 : 2;
+        bool sel = S.kick_yes == yes;
+        glass(dl, f, bx[i], by, bw, bh, 7, sel ? RED : IM_COL32(10, 10, 13, 255), sel ? 0.92f : 0.6f);
+        text(dl, f, g_title, 18, bx[i] + bw / 2, by + 6, sel ? WHITE : GREY, label[i], CENTER, 1.2f);
+    }
+    float hx = px + 98;
+    hx += hint(dl, f, hx, py + ph - 26, "a", "SELECT");
+    hint(dl, f, hx, py + ph - 26, "b", "BACK");
+    if (pad.left) S.kick_yes = true;
+    if (pad.right) S.kick_yes = false;
+    if (pad.a) choose = S.kick_yes ? 1 : 2;
+    if (pad.b) choose = 2;
+    return choose;
+}
+
+// Build 97: the relay's AFK warning over the room page ("STILL THERE?"); any input ends it (netplay_note_input).
+void draw_afk_warning(ImDrawList *dl, const Frame &f, int left)
+{
+    char line[96];
+    netlobby_afk_line(line, sizeof(line), left);
+    rect(dl, f, 0, 0, 640, 480, IM_COL32(0, 0, 0, 120));
+    const float px = 160, py = 165, pw = 320, ph = 130;
+    glass(dl, f, px, py, pw, ph, 14, IM_COL32(10, 10, 13, 255), 0.92f);
+    text(dl, f, g_title, 26, 320, py + 18, CREAM, "STILL THERE?", CENTER, 1.6f);
+    text(dl, f, g_hand, 15, 320, py + 56, ORANGE, line, CENTER, 1.0f, pw - 24);
+    float frac = std::min(1.0f, std::max(0.0f, left / 60.0f));
+    rect(dl, f, px + 30, py + 92, pw - 60, 8, IM_COL32(40, 40, 46, 230), 4);
+    rect(dl, f, px + 30, py + 92, (pw - 60) * frac, 8, RED, 4);
+}
+
+// Build 97: whether ImGui saw any key, button, stick or mouse input this frame (the relay's AFK rule).
+bool any_input_now()
+{
+    ImGuiIO &io = ImGui::GetIO();
+    if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0 || io.MouseWheel != 0 || io.MouseWheelH != 0) return true;
+    for (int b = 0; b < 5; b++) if (ImGui::IsMouseClicked(b)) return true;
+    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; k++)
+        if (ImGui::IsKeyPressed((ImGuiKey)k, false)) return true;
+    return io.InputQueueCharacters.Size > 0;
+}
+
 void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 {
     if (NETPLAY_IS_HILL(r.settings.mode)) { draw_hill(dl, f, pad, r); return; }
@@ -4879,6 +4947,11 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 
     NetRankInfo ri;
     bool ranked = ranked_room(r, &ri);
+    // build 97: the host removes a member (not in a ranked set or a tournament match; the relay refuses the rest)
+    bool kickable = host && !watcher && !ranked && !tour && r.phase == 0 && r.player_count >= 2;
+    float kick_x[NETPLAY_ROOM_SLOTS], kick_y[NETPLAY_ROOM_SLOTS];
+    for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) kick_x[i] = kick_y[i] = -1;
+    if (!kickable) { S.kick_mode = false; S.kick_confirm = -1; }
     page_title(dl, f, r.settings.name);
     image_fit(dl, f, tex(mode_logo(r.settings.mode)), 360, 22, 220, 30);
     if (ranked) ranked_banner(dl, f, r, ri, 50);     // a little higher: the cards' rank patches under it
@@ -5127,6 +5200,24 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             rect(dl, f, x + 14, y + 240, w - 28, 22, with_alpha(RED, 0.9f), 5);
             text(dl, f, g_title, 15, x + w / 2, y + 242, WHITE, "READY", CENTER, 0.8f);
         }
+        if (kickable && p.slot != r.you && p.slot >= 0 && p.slot < NETPLAY_ROOM_SLOTS) {
+            kick_x[p.slot] = x;
+            kick_y[p.slot] = y;
+        }
+    }
+    // build 97: REMOVE on another member's card for the host: under the mouse, or the card LB chose
+    int kick_click = -1;
+    for (int s = 0; kickable && s < NETPLAY_ROOM_SLOTS; s++) {
+        if (kick_x[s] < 0) continue;
+        bool chosen = S.kick_mode && S.kick_sel == s;
+        bool over = mouse_in(f, kick_x[s], kick_y[s], w, 270);
+        if (chosen) selector(dl, f, kick_x[s], kick_y[s], w, 270);
+        if (!chosen && !over) continue;
+        const float cx = kick_x[s] + 6, cy = kick_y[s] + 5, cw = 62, ch = 17;
+        bool on_chip = mouse_in(f, cx, cy, cw, ch);
+        rect(dl, f, cx, cy, cw, ch, on_chip || chosen ? IM_COL32(190, 24, 40, 240) : IM_COL32(110, 14, 26, 225), 4);
+        text(dl, f, g_title, 11, cx + cw / 2, cy + 2, WHITE, "REMOVE", CENTER, 1.0f);
+        if (mouse_click(f, cx, cy, cw, ch)) kick_click = s;
     }
     // who watches (spectator mode), on the hints' line at the right
     if (r.spectator_count > 0) {
@@ -5218,9 +5309,11 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         if (scope) S.quick_scope = scope;
     }
     float my = team ? 374 : ranked ? 370 : 366;
-    if (alone && scope) {       // where it searches now
-        std::string line = "Waiting for another player on " + scope_words(sv, scope) + "...";
-        text(dl, f, g_hand, 15, 320, my, ORANGE, line.c_str(), CENTER, 0.8f);
+    if (alone && scope) {       // where it searches now; build 97: within which ping (the player's own limit, else the stage)
+        char line[160];
+        int own = gallery_on() ? G.quick_max_ping : netplay_quick_max_ping();
+        netlobby_search_line(line, sizeof(line), own, (int)((tick - S.quick_since) / 1000), scope_words(sv, scope).c_str());
+        text(dl, f, g_hand, 15, 320, my, ORANGE, line, CENTER, 0.8f);
     } else if (team && r.player_count < 4) {
         char line[96];
         snprintf(line, sizeof(line), "Team is two on two: waiting for %d more player%s...", 4 - r.player_count,
@@ -5237,8 +5330,52 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     }
     else if (!ready) text(dl, f, g_hand, 15, 320, my, ORANGE, venue ? "Ready up: when both are, the fight starts."
                                                               : "Ready up: when everyone is, the venue vote starts.", CENTER, 0.8f);
+    // build 97: REMOVE PLAYER: the prompt over the page, or the card being chosen, take the pad
+    if (kickable && kick_click >= 0) {
+        S.kick_mode = false;
+        S.kick_confirm = kick_click;
+        S.kick_yes = false;
+    }
+    if (kickable && (S.kick_confirm >= 0 || S.kick_mode)) {
+        const NetRoomPlayer *target = nullptr;
+        int want = S.kick_confirm >= 0 ? S.kick_confirm : S.kick_sel;
+        for (int i = 0; i < r.player_count; i++) if (r.players[i].slot == want && want != r.you) target = &r.players[i];
+        if (!target) {          // gone meanwhile (or never there): back to the room
+            S.kick_mode = false;
+            S.kick_confirm = -1;
+        } else if (S.kick_confirm >= 0) {
+            snprintf(S.kick_name, sizeof(S.kick_name), "%s", target->name);
+            int answer = draw_kick_prompt(dl, f, pad, target->name);
+            if (answer == 1) {
+                netplay_lobby_kick(S.kick_confirm);
+                say(std::string("You removed ") + target->name + " from the room.", 5000);
+            }
+            if (answer) S.kick_confirm = -1;
+            return;
+        } else {
+            // the card choice: left / right through the other members, A the prompt, B back
+            if (pad.left || pad.right) {
+                int order[NETPLAY_ROOM_SLOTS], n = 0, at = 0;
+                for (int s = 0; s < NETPLAY_ROOM_SLOTS; s++) if (kick_x[s] >= 0) order[n++] = s;
+                for (int k = 0; k < n; k++) if (order[k] == S.kick_sel) at = k;
+                if (n) S.kick_sel = order[(at + (pad.right ? 1 : n - 1)) % n];
+            }
+            float kx = 54;
+            kx += hint(dl, f, kx, hy, "a", "REMOVE THIS PLAYER");
+            hint(dl, f, kx, hy, "b", "BACK");
+            if (pad.a) { S.kick_confirm = S.kick_sel; S.kick_yes = false; S.kick_mode = false; }
+            if (pad.b || pad.lb_once) S.kick_mode = false;
+            return;
+        }
+    }
+    if (kickable && pad.lb_once) {
+        for (int s = 0; s < NETPLAY_ROOM_SLOTS && !S.kick_mode; s++)
+            if (kick_x[s] >= 0) { S.kick_mode = true; S.kick_sel = s; }
+        if (S.kick_mode) return;
+    }
     hx += hint(dl, f, hx, hy, "a", ready ? "NOT READY" : "READY");
     if (!ready) hx += hint(dl, f, hx, hy, "x", "CHOOSE FIGHTER");
+    if (kickable) hx += hint(dl, f, hx, hy, "lb", "REMOVE");
     if (ranked || tour) host = false;       // a ranked or tournament room's settings are the set's
     if (host && !ready) hx += hint(dl, f, hx, hy, "y", "ROOM SETTINGS");
     hx += hint(dl, f, hx, hy, "rb", "VOICE");
@@ -5874,6 +6011,9 @@ void gallery_step()
                                          "hub-both", "servers-both", "rooms-both", "rooms-both-na", "room-both-move",
                                          // build 38: the staged quick-match search
                                          "room-quick-near", "room-quick-wide",
+                                         // build 97: the host's REMOVE PLAYER (a card chosen, the prompt), the AFK
+                                         // warning, the quick search with the player's own max ping and at the 180 ms step
+                                         "room-kick", "room-kick-prompt", "room-afk", "room-quick-maxping", "room-quick-stage",
                                          // the versus screen while a match loads
                                          "versus-1v1", "versus-3way", "versus-ffa", "versus-team", "versus-koth",
                                          // build 37: created fighters
@@ -6036,6 +6176,9 @@ void gallery_step()
     g_rts_gallery_world = false;
     S.note_until = 0;
     S.settings_edit = false;
+    G.afk_left = G.quick_max_ping = 0;      // build 97
+    S.kick_mode = false;
+    S.kick_confirm = -1;
     {   // the relays as a player in Europe sees them, the hub on Europe
         NetServerInfo eu = {}, na = {}, west = {}, sa = {}, mia = {};
         eu.id = "eu"; eu.name = "Europe"; eu.short_name = "EU"; eu.state = NETSERVER_UP; eu.ping_ms = 38;
@@ -6699,6 +6842,26 @@ void gallery_step()
         G.server_cur = NETSERVER_NA;
         snprintf(S.quick_room, sizeof(S.quick_room), "%s", G.room.code);
         S.alone_since = S.quick_since = now - (p == "room-quick-near" ? 12000 : 31000);
+    } else if (p == "room-kick" || p == "room-kick-prompt") {   // build 97: Ann (host) removes Ben
+        S.page = HUB; G.room = sample_room(2, 4, 3);
+        G.room_pings[0] = 38; G.room_pings[1] = 96; G.room_pings[2] = 41;
+        S.kick_mode = p == "room-kick";
+        S.kick_sel = 1;
+        S.kick_confirm = p == "room-kick-prompt" ? 1 : -1;
+        S.kick_yes = false;
+    } else if (p == "room-afk") {     // build 97: 42 s left of the AFK warning
+        S.page = HUB; G.room = sample_room(0, 2, 2);
+        G.afk_left = 42;
+    } else if (p == "room-quick-maxping" || p == "room-quick-stage") {
+        // build 97: alone 12 s with a Quick Match max ping of 150 ms; alone 25 s, no limit set (the 180 ms step)
+        S.page = HUB; G.room = sample_room(0, 2, 1);
+        G.room.players[0].ready = 1;
+        G.room_pings[0] = 31;
+        G.servers[NETSERVER_EU].ping_ms = 104; G.servers[NETSERVER_NA].ping_ms = 31; G.servers[NETSERVER_WEST].ping_ms = 72;
+        G.server_cur = NETSERVER_NA;
+        G.quick_max_ping = p == "room-quick-maxping" ? 150 : 0;
+        snprintf(S.quick_room, sizeof(S.quick_room), "%s", G.room.code);
+        S.alone_since = S.quick_since = now - (p == "room-quick-maxping" ? 12000 : 25000);
     } else if (p == "offline-server") { S.page = HUB; G.state = NETPLAY_FAILED; G.in_lobby = false; }
     else if (p == "hub-both") {         // Both servers: the chip says so, the hub is on Europe
         S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; G.choice = NETCHOICE_ALL;
@@ -7536,6 +7699,7 @@ bool draw_pages(ImVec2 display)
     Frame f = menu_frame(display);
     ImGui::GetIO().KeyRepeatDelay = 0.45f;     // a scripted or quick press moves one step
     Pad pad = read_pad();
+    if (!gallery_on() && any_input_now()) netplay_note_input();     // build 97: activity for the relay's AFK rule
     // the first frame takes no choice: the A that opened the screens is still down
     if (GetTickCount64() - S.opened < 250) pad = Pad();
     if (C.open) pad = Pad();       // the chat window has the input
@@ -7878,6 +8042,17 @@ bool draw_pages(ImVec2 display)
             say("All matches use rollback now: restart the game once.", 9000);
     }
     draw_maintenance(dl, f, room);
+    {   // build 97: the relay's AFK warning over a room in its lobby; removed (kick or AFK): the hub
+        int afk = gallery_on() ? G.afk_left : netplay_afk_left();
+        if (afk > 0 && room.in_room && room.phase == 0) draw_afk_warning(dl, f, afk);
+        static bool was_in;
+        if (was_in && !room.in_room && strstr(room.error, "You were removed from the room")) {
+            S.page = HUB;
+            S.kick_mode = false;
+            S.kick_confirm = -1;
+        }
+        was_in = room.in_room != 0;
+    }
     draw_status(dl, f);
     return keep;
 }

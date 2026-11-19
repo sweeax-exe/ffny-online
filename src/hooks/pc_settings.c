@@ -67,6 +67,7 @@ static const char *const k_crowd_near[] = { "fade", "hide", NULL };
 static const char *const k_ow_camera[] = { "stock", "follow", "behind", NULL };
 static const char *const k_ow_camera_distance[] = { "near", "normal", "far", NULL };   /* build 95 */
 static const char *const k_rts_round_mode[] = { "knockouts", "points", NULL };          /* build 95 */
+static const char *const k_quick_max_ping[] = { "off", "100", "150", "200", NULL };      /* build 97 (netlobby_max_ping_ms) */
 
 /* A four-fighter match holds about 2 GiB of replacements. At 512 MiB the cache evicted and
  * re-decoded dozens of textures every two seconds in a fight on the Steam Deck. */
@@ -143,6 +144,10 @@ static RecompSetting g_display_settings[] = {
       "Let quick match, rooms and King of the Hill pair you with players of the community Android port "
       "(by contatg) in builds that FFNY Online has tested for cross-play. Off: you only meet PC players. "
       "Ranked never mixes platforms. Takes effect the next time you go online." },
+    { "online", "quick_max_ping", RECOMP_SETTING_ENUM, 0, 0, 0, k_quick_max_ping, NULL, 0,
+      "Quick Match only meets players whose ping to you is under this (off, 100, 150 or 200 ms). Off: Quick Match "
+      "starts with close players and widens the search the longer it waits. Your limit never widens, so with it on "
+      "the wait can be longer. Rooms and Ranked are not affected." },
     { "online", "p2p_direct", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_P2P_DIRECT", 0,
       "Direct connection (P2P) in 1v1 online fights, used only when the other player has it on too: the fight's "
       "inputs also go straight between the two PCs, which can be faster than through the server. The other player's "

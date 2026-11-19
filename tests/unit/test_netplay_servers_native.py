@@ -192,8 +192,20 @@ int main(void)
         r = netservers_pair_relay(&sa, &sb, 120, &sum, &worse);
         printf("near|%d|%d|%d\n", r, sum, worse);
         printf("far|%d|%d\n", netservers_pair_relay(&sa, &sc, 120, NULL, NULL), netservers_pair_relay(&sa, &sc, 250, NULL, NULL));
-        printf("limit|%d|%d|%d|%d|%d\n", netservers_pool_limit(0), netservers_pool_limit(10), netservers_pool_limit(20),
-               netservers_pool_limit(39), netservers_pool_limit(40));
+        printf("limit|%d|%d|%d|%d|%d\n", netservers_pool_limit(0), netservers_pool_limit(19), netservers_pool_limit(20),
+               netservers_pool_limit(44), netservers_pool_limit(45));
+        {   /* build 97: a seat's own max ping never widens: 140 ms apart, one at 100 ms, the other at 150 */
+            NetQuickSeat x = sa, y = sb;
+            int r100, r150;
+            memset(x.pings, 0, sizeof(x.pings)); memset(y.pings, 0, sizeof(y.pings));
+            x.pings[NETSERVER_DFW] = 70; y.pings[NETSERVER_DFW] = 70;
+            x.max_ping = 100;
+            r100 = netservers_pair_relay(&x, &y, 0, NULL, NULL);
+            x.max_ping = 150;
+            r150 = netservers_pair_relay(&x, &y, 0, NULL, NULL);
+            y.max_ping = 120;
+            printf("own|%d|%d|%d\n", r100, r150, netservers_pair_relay(&x, &y, 0, NULL, NULL));
+        }
         list1[0] = sa; list1[1] = sb; list1[2] = sc;
         list2[0] = sc; list2[1] = sb; list2[2] = sa;
         netservers_pool(list1, 3, partner, where);
@@ -385,12 +397,17 @@ def test_search_is_global_from_the_first_second(rows):
 
 def test_pool_matches_everyone_spread_over_six_relays(rows):
     """Six players on six different relays (Germany, New York, Singapore, Brazil, Miami, Texas), all searching from
-    0 s: everyone is paired within the widening window (by 40 s any ping is allowed), nobody twice, and never on
-    a relay with a worse ping above the limit of the moment."""
+    0 s: everyone is paired within the widening window (by 45 s any ping is allowed), nobody twice, and never
+    with a ping sum above the limit of the moment (build 97: 120 ms, from 20 s 180 ms)."""
     sim = [tuple(map(int, r)) for r in by(rows, 'sim')]
     paired = [p for _, a, b, _ in sim for p in (a, b)]
     assert sorted(paired) == list(range(6)), sim
-    assert all(t <= 40 for t, _, _, _ in sim), sim
+    assert all(t <= 45 for t, _, _, _ in sim), sim
+    pings = [(20, 95, 170, 210, 120, 130, 160), (90, 10, 230, 130, 30, 40, 70), (170, 230, 8, 330, 240, 190, 170),
+             (200, 120, 330, 15, 110, 140, 170), (110, 30, 240, 110, 8, 30, 60), (130, 40, 190, 140, 30, 8, 30)]
+    for t, a, b, r in sim:
+        limit = 120 if t < 20 else 180 if t < 45 else 10 ** 6
+        assert pings[a][r] + pings[b][r] <= limit, (t, a, b, r)
     # the Americas pair at once near home; New York and Miami on a US relay, not in Europe
     first = {(a, b): (t, r) for t, a, b, r in sim}
     assert any(t == 0 for t, _, _, _ in sim)
@@ -402,8 +419,11 @@ def test_pool_near_relay_and_same_answer_in_any_order(rows):
     """Two players in Texas, one on Los Angeles and one on Miami, play on Dallas (a third relay, the smallest
     ping sum); with a Brazilian, Miami; both games, listing the seats in their own order, agree."""
     assert by(rows, 'near') == [[str(DFW), '16', '9']]
-    assert by(rows, 'far') == [[str(MIA), str(MIA)]]   # Texas and Brazil: Miami (110 ms worse, the smallest sum)
-    assert by(rows, 'limit') == [['120', '180', '250', '250', '0']]
+    # Texas and Brazil: Miami (the smallest sum, 142 ms): not within 120 ms (build 97: the sum is the pair's ping)
+    assert by(rows, 'far') == [['-1', str(MIA)]]
+    assert by(rows, 'limit') == [['120', '120', '180', '180', '0']]     # build 97: 120, from 20 s 180, from 45 s any
+    # build 97: a player's own max ping holds at any wait (140 ms: over 100 and over 120, under 150)
+    assert by(rows, 'own') == [['-1', str(DFW), '-1']]
     assert by(rows, 'order1') == [['1', '0', str(DFW)]]
     assert by(rows, 'order2') == [['1', '2', str(DFW)]]
     assert by(rows, 'same') == [['-1', '-1']]
@@ -415,9 +435,11 @@ def test_two_games_with_skewed_views_never_swap(rows):
     0); netservers_pool_steady waits inside the slack, so the two never move apart, and they still meet."""
     views = {int(r[0]): tuple(map(int, r[1:])) for r in by(rows, 'views')}
     old_swap, new_bad, latest, never = views[0]
-    assert old_swap > 0           # the case is real with the plain pool
+    # build 97: the pair's relay is the smallest sum whatever the stage (the stage only says whether they meet), so
+    # the plain pool no longer swaps here either; the steady answer still never sends the two apart
+    assert old_swap == 0
     assert new_bad == 0 and never == 0
-    assert latest <= 10 + 2 + 3   # the 180 ms step, the skew and the slack
+    assert latest <= 45 + 2 + 3   # 220 ms apart: the last step (any ping), the skew and the slack
     # equal pings both ways (a simultaneous search: equal ages): both go to Miami, the smallest sum, at once
     old_swap, new_bad, latest, never = views[1]
     assert (old_swap, new_bad, latest, never) == (0, 0, 0, 0)

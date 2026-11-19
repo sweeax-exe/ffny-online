@@ -2959,3 +2959,119 @@ def gallery(page_ms=1500, timeout=300, lock_timeout=None, log=None, keep_roots=F
     finally:
         _finish(s, result, t0)
     return result
+
+
+# ---- build 97: host kick, the quick ping limits, AFK in rooms ----------------------------------------
+
+LOBBY97_CASES = ("kick", "quick", "quickmax", "afk")
+
+
+def lobby97(case="kick", timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots=False, extra_env=None):
+    """Build 97's lobby features with a local relay and two copies in the quick-match hub (RECOMP_NETPLAY=quick),
+    which never ready (RECOMP_TEST_READY_PLAYERS=3), so their room stays in its lobby:
+      kick      copy 0 hosts and removes copy 1 after 5 s (RECOMP_TEST_KICK_AFTER_S); copy 1 JOINs that room again
+                (refused, ERROR 16) and then quick-matches, which must not put it back there (RECOMP_TEST_REJOIN)
+      quick     simulated relay pings 150 ms apart (RECOMP_TEST_RELAY_PINGS): two rooms at first, one once the
+                limit widens at 20 s (the relay moves the younger room's player)
+      quickmax  the same, copy 1 with a Quick Match max ping of 100 ms: still apart after 55 s (never widened)
+      afk       the relay's AFK limit 40 s, warning 15 s (-room-afk, -room-afk-warn): both copies are warned, removed,
+                and the room closes; copy 1 has the online screens open for a capture of the warning
+    The checks read the copies' and the relay's logs."""
+    t0 = time.time()
+    if case not in LOBBY97_CASES:
+        raise SystemExit("lobby97: --case is one of %s" % ", ".join(LOBBY97_CASES))
+    timeout = timeout or {"kick": 150, "quick": 150, "quickmax": 160, "afk": 170}[case]
+    s = copies.Session("lobby97-" + case, lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "lobby97", "case": case, "ok": False}
+    try:
+        extra = ["-ping-sum"]
+        if case == "afk":
+            extra += ["-room-afk", "40s", "-room-afk-warn", "15s"]
+        s.relay(relay_port, extra=extra)
+        relay_log = os.path.join(s.dir, "relay%d.err" % (len(s.relays) - 1))
+        shots = os.path.join(s.dir, "shots")
+        os.makedirs(shots, exist_ok=True)
+        for i in range(2):
+            env = {"RECOMP_NETPLAY": "quick", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port,
+                   "RECOMP_NETPLAY_QUICK": "0,2", "RECOMP_NETPLAY_NAME": "Copy %d" % i, "RECOMP_TEST_READY_PLAYERS": "3",
+                   "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                   # a branch before the release commit still says 96 in config/remaster-version.txt; the relay gates
+                   # the new behaviour on the HELLO's build number
+                   "RECOMP_TEST_LOCAL_BUILD": "97"}
+            if i == 1:
+                env["RECOMP_TEST_QUICK_DELAY_MS"] = "3000"      # copy 0's room first: it hosts
+            if case == "kick":
+                env["RECOMP_TEST_KICK_AFTER_S" if i == 0 else "RECOMP_TEST_REJOIN"] = "5" if i == 0 else "1"
+            if case in ("quick", "quickmax"):
+                env["RECOMP_TEST_RELAY_PINGS"] = "70,0,0" if i == 0 else "80,0,0"   # 150 ms apart on Europe
+            if case == "quickmax" and i == 1:
+                env["RECOMP_TEST_QUICK_MAX_PING"] = "100"
+            if case == "afk" and i == 1:
+                env.update({"RECOMP_TEST_OPEN_ONLINE": "1", "RECOMP_OVERLAY_SHOT_DIR": shots, "RECOMP_OVERLAY_SHOT_MS": "2000"})
+            for k, v in (extra_env or {}).items():
+                name, _, only = k.partition("@")
+                if not only or (only.isdigit() and int(only) == i):
+                    env[name] = v
+            s.launch(i, env=env, watch=WATCH)
+        deadline = time.time() + timeout
+        while time.time() < deadline and all(c.alive() for c in s.copies.values()):
+            s.poll()
+            relay = logparse.read_text(relay_log) if os.path.isfile(relay_log) else ""
+            texts = [logparse.read_text(s.copies[i].log) for i in range(2)]
+            done = {"kick": "after the quick match in room" in texts[1],
+                    "quick": "moved from room" in relay,
+                    "quickmax": False,
+                    "afk": relay.count("(afk, limit") >= 2 and "closed (empty)" in relay}[case]
+            if done:
+                time.sleep(2)
+                break
+            time.sleep(1.0)
+        s.poll()
+        relay = logparse.read_text(relay_log) if os.path.isfile(relay_log) else ""
+        texts = [logparse.read_text(s.copies[i].log) for i in range(2)]
+        if case == "kick":
+            checks = {
+                "host_kicked": "the host removes Copy 1" in texts[0],
+                "relay_logged_kick": " kick: c=" in relay and "removed by the host" in relay,
+                "guest_told": "You were removed from the room by its host. (ERROR 16)" in texts[1],
+                "rejoin_refused": "You were removed from that room by its host: you can join it again in" in texts[1]
+                                  and "refused c=" in relay,
+                "quick_not_back": "(not the room it was removed from)" in texts[1],
+            }
+        elif case == "quick":
+            checks = {
+                "apart_at_first": "pair ping 150 ms over 120 ms" in relay,
+                "merged_at_20s": "moved from room" in relay and "stage limit 180 ms" in relay,
+                "copy_followed": "quick match: the relay put this PC into room" in texts[0] + texts[1],
+            }
+        elif case == "quickmax":
+            checks = {
+                "refused_by_own_limit": "over a player's max ping 100 ms" in relay,
+                "never_merged": "moved from room" not in relay,
+            }
+        else:
+            pngs = sorted(glob.glob(os.path.join(shots, "*.bmp")))
+            checks = {
+                "warned": relay.count("afk warning to c=") >= 2 and "AFK warning, the relay removes this PC" in texts[1],
+                "removed_both": relay.count("(afk, limit 40 s)") >= 2,
+                "room_closed": "closed (empty)" in relay,
+                "game_told": "You were removed from the room: no activity for a long time. (ERROR 17)" in texts[1],
+            }
+            try:
+                from PIL import Image
+                out = []
+                for b in pngs:
+                    p = b[:-4] + ".png"
+                    Image.open(b).convert("RGB").save(p)
+                    os.remove(b)
+                    out.append(os.path.basename(p))
+                result["shots"] = _relpath(shots)
+                result["shot_count"] = len(out)
+            except ImportError:
+                result["shots"] = _relpath(shots)
+        faults = [f for t in texts for f in _faults(t)]
+        result.update({"ok": all(checks.values()) and not faults, "checks": checks, "faults": faults,
+                       "logs": [_relpath(s.copies[i].log) for i in range(2)], "relay_log": _relpath(relay_log)})
+    finally:
+        _finish(s, result, t0)
+    return result
