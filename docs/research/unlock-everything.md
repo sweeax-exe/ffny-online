@@ -304,6 +304,20 @@ room's match is started with explicit fighter and venue ids (`Game.ChooseVenue`,
 `Game.StartGame`), and nothing on that path reads the sets; ranked clamps created-fighter stats, which the edit
 does not touch.
 
+### The switch unlocks the current profile's items too (build 98)
+
+The developers' routine (`sub_000158F0`) leaves the per-profile items alone, so with only the Saves page's
+button a profile created later (a third user ID, say) stayed locked. Since build 98 `[debug] unlock_all` also
+runs the profile part of the save edit on the slot the game holds in memory, on the same screen changes
+(`src/patches/dev_unlock.c` `unlock_current_profile`, `save_unlock.h` `unlock_profile_slot`): the current slot
+index at `P+0x5AC7C`, slot `S = P+0x177C + i*0x5950`; each item's Unlocked bit set and the row counters raised
+to the totals, exactly as `unlock_profile_bytes` does it on a file, but **no cash and no development points**
+(those stay on the Saves page's box). It acts only when the slot index is below 16 and the six containers'
+state pointers (`+0xC + i*4`) point where `sub_000148B0` lays them out in that slot, with the item counts the
+database (`pcsaves::game_database`, read once) gives; otherwise nothing is written and one line is logged. It
+only raises bits and counters, so repeating it changes nothing, and like the rest of the switch it does nothing
+while online (`online_guard.h`). The log line is `[UNLOCK] profile <i>: <n> items unlocked`.
+
 ## Why not a save
 
 A profile is a 22,928-byte file (`20CM` magic, a header whose bytes `0x10` to `0x4B` change with any

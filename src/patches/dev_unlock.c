@@ -1,6 +1,7 @@
 /* Developer switches the retail image still carries, behind environment variables.
  *
- *   RECOMP_UNLOCK_ALL=1  every fighter and venue, 10,000 points (below)
+ *   RECOMP_UNLOCK_ALL=1  every fighter and venue, 10,000 points, and every item of the current
+ *                        profile (below)
  *   RECOMP_DEV_DEBUG=1   the in-fight debug overlay: what the "Debug" branch of the
  *                        Extras code handler (guest 0x00049EB5) does, which is to call
  *                        sub_000B4CE0(1), a setter for the byte at 0x0039C1DA. sub_000B5AD0
@@ -12,7 +13,7 @@
  *   RECOMP_UNLOCK_REPORT=1           log what the current profile has unlocked, per screen (read only)
  *                        The last three act at Game.StartGame (the end of this file).
  *
- * Developer unlock (RECOMP_UNLOCK_ALL=1): every fighter and venue, 10,000 points.
+ * Developer unlock (RECOMP_UNLOCK_ALL=1): every fighter and venue, 10,000 points, profile items.
  *
  * The retail image still carries the developers' "unlock everything" routine,
  * guest 0x000158F0. It walks the character table (key 0x4CE5B1B2) and the
@@ -34,6 +35,16 @@
  * It changes the profile in memory and asks the game to save it: run it on a
  * disposable save (the harness and the scenario suite already do), not on a
  * real one. Off unless asked for, so the unmodified path stays testable.
+ *
+ * The developers' routine leaves the per-profile items alone (clothing, hair styles, tattoos,
+ * jewellery, Blazin moves, fighting styles). So on the same screen changes the current profile's
+ * items are unlocked too, as the launcher's Saves page does it for one profile file (save_unlock.h,
+ * unlock_profile_slot): each item's state to Unlocked (owned ones stay owned), the shops' counts of
+ * unlocked rows raised to the totals; never the cash or the development points (that stays on the
+ * Saves page). The current slot (P+0x5AC7C) is checked first: below 16, and the six item arrays
+ * where the game's own containers say they are, with the counts the database gives; anything else
+ * is left alone. A profile created later is unlocked on the first screen change after it is the
+ * current one. Like the rest it only raises bits and counters, so repeating it changes nothing.
  *
  * FFNY Online: none of this acts while this PC is online (src/patches/online_guard.h): no unlock,
  * no debug overlay (its flag is cleared), and Game.StartGame keeps the match the room set up.
@@ -58,6 +69,17 @@ static int s_debug = -1;
 static int s_started;
 static unsigned long s_runs;
 #define GAMEDATA_SLOT_REPORT 0x18u
+/* The six item containers at save record +0x14E4 (sub_00015890), in the order the profile slot keeps
+ * their states: hair, tattoo, jewellery, clothing, Blazin, style. Each holds the item count at +8 and,
+ * per profile slot, a pointer to its 2-bit states at +0xC + slot * 4. */
+static const uint32_t kItemContainer[6] = {0x0, 0x58, 0x108, 0xB0, 0x160, 0x1B8};
+#define PROFILE_SLOTS   16u
+#define PROFILE_SLOT0   0x177Cu     /* slot i at P + 0x177C + i * 0x5950 */
+#define PROFILE_STRIDE  0x5950u
+#define PROFILE_CURRENT 0x5AC7Cu    /* the current slot's index */
+
+/* src/hooks/save_unlock_live.cpp: the launcher's profile item edit on the slot in memory. */
+extern int saves_unlock_profile_slot(uint8_t *slot, uint32_t size, const uint32_t items[6], const uint32_t states[6]);
 
 int defjam_unlock_all_enabled(void)
 {
@@ -65,8 +87,8 @@ int defjam_unlock_all_enabled(void)
         const char *v = getenv("RECOMP_UNLOCK_ALL");
         s_enabled = v && *v && strcmp(v, "0") != 0;
         if (s_enabled)
-            fprintf(stderr, "[UNLOCK] RECOMP_UNLOCK_ALL: every fighter and venue, 10000 points, "
-                            "on each screen change after the main menu starts\n");
+            fprintf(stderr, "[UNLOCK] RECOMP_UNLOCK_ALL: every fighter and venue, 10000 points and the "
+                            "current profile's items, on each screen change after the main menu starts\n");
     }
     return s_enabled;
 }
@@ -80,6 +102,33 @@ static int debug_enabled(void)
             fprintf(stderr, "[UNLOCK] RECOMP_DEV_DEBUG: in-fight debug overlay on\n");
     }
     return s_debug;
+}
+
+/* The current profile's items (above). Nothing unless the slot and its six arrays are as expected. */
+static void unlock_current_profile(void)
+{
+    static uint32_t s_logged;           /* one bit per slot: its first unlock was logged */
+    uint32_t gd = MEM32(0x002FB148u + GAMEDATA_SLOT_REPORT * 4u), p, idx, slot, items[6], states[6], k;
+    int n;
+    if (!gd || !(p = MEM32(gd + 4)))
+        return;
+    idx = MEM32(p + PROFILE_CURRENT);
+    if (idx >= PROFILE_SLOTS)
+        return;
+    slot = p + PROFILE_SLOT0 + idx * PROFILE_STRIDE;
+    for (k = 0; k < 6; k++) {
+        uint32_t c = p + 0x14E4u + kItemContainer[k], at = MEM32(c + 0xC + idx * 4);
+        items[k] = MEM32(c + 8);
+        if (at < slot || at - slot >= PROFILE_STRIDE)
+            return;                     /* not set up yet, or not in this slot */
+        states[k] = at - slot;
+    }
+    n = saves_unlock_profile_slot((uint8_t *)XBOX_PTR(slot), PROFILE_STRIDE, items, states);
+    if (n > 0 || (n == 0 && !(s_logged >> idx & 1))) {
+        fprintf(stderr, "[UNLOCK] profile %u: %d items unlocked\n", idx, n);
+        fflush(stderr);
+        s_logged |= 1u << idx;
+    }
 }
 
 static void run_unlock(void)
@@ -97,6 +146,7 @@ static void run_unlock(void)
     s_runs++;
     if (s_runs == 1 || s_runs == 10 || s_runs == 100)
         fprintf(stderr, "[UNLOCK] sub_000158F0 run %lu\n", s_runs);
+    unlock_current_profile();
 }
 
 /* RECOMP_UNLOCK_REPORT=1 (tests, read only): on each screen change, what the current profile has
@@ -105,7 +155,7 @@ static void run_unlock(void)
  * profile slot, and how many are locked / unlocked / owned; and the fighter and venue set sizes. */
 static void unlock_report(const char *text)
 {
-    static const uint32_t at[6] = {0x0, 0x58, 0x108, 0xB0, 0x160, 0x1B8};   /* profile order */
+    const uint32_t *at = kItemContainer;   /* profile order */
     static const char *const name[6] = {"hair", "tattoo", "jewel", "cloth", "blazin", "style"};
     uint32_t gd = MEM32(0x002FB148u + GAMEDATA_SLOT_REPORT * 4u), p, idx, slot, k;
     char line[512];
