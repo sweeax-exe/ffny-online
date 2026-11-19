@@ -1750,21 +1750,32 @@ const std::vector<OnlineFighter> &roster()
     return list;
 }
 
-// Venue presets for the room settings: the whole list, then a few themed sets.
+// Venue presets for the room settings: the whole list, then a few themed sets; build 97: last, "Community maps", the
+// community venues this PC has (only when it has one; preset_ids leaves them out of STANDARD ONLY rooms and of modes
+// with more than two fighters, and the VENUES row skips a preset with nothing left). Built again whenever the
+// installed venue list changes (netlobby_venue_sig): today a content update restarts the game, but a list that grows
+// in the run shows its new venues in "Every venue" and "Community maps" at once.
 struct Preset { const char *name; std::vector<int> ids; };
 const std::vector<Preset> &presets()
 {
     static std::vector<Preset> list;
-    if (list.empty()) {
-        const OnlineVenue *v;
-        int n = online_venues(&v);
-        Preset all{ "Every venue", {} };
-        for (int i = 0; i < n; i++) all.ids.push_back(v[i].fe_id);
-        list.push_back(all);
+    static unsigned sig;
+    const OnlineVenue *v;
+    int n = online_venues(&v);
+    std::vector<int> ids;
+    for (int i = 0; i < n; i++) ids.push_back(v[i].fe_id);
+    unsigned now = netlobby_venue_sig(ids.data(), (int)ids.size());
+    if (list.empty() || now != sig) {
+        sig = now;
+        list.clear();
+        list.push_back({ "Every venue", ids });
         list.push_back({ "Classic three", { 1, 6, 11 } });
         list.push_back({ "Clubs", { 4, 6, 9, 12, 16, 10 } });
         list.push_back({ "Street", { 14, 15, 7, 11, 17, 13 } });
         list.push_back({ "Fight clubs", { 1, 2, 21, 22, 18 } });
+        std::vector<int> mine(ids.size() + 1);
+        int m = netlobby_community_venues(ids.data(), (int)ids.size(), mine.data(), (int)mine.size());
+        if (m > 0) list.push_back({ "Community maps", std::vector<int>(mine.begin(), mine.begin() + m) });
     }
     return list;
 }
@@ -3376,7 +3387,14 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
             s.mode = s.mode == NETPLAY_MODE_KOTH ? NETPLAY_MODE_KOTH_RANDOM : NETPLAY_MODE_KOTH;
             break;
         case R_PLAYERS: s.max = std::max(least_of(s.mode), std::min(most_of(s.mode), s.max + step)); break;
-        case R_POOL: if (!fixed_venue(s.mode)) apply_preset(s, (preset_of(s) < 0 ? 0 : preset_of(s)) + step); break;
+        case R_POOL:
+            if (!fixed_venue(s.mode)) {     // build 97: a preset with no venue for this room is skipped
+                const auto &pl = presets();
+                std::vector<int> usable(pl.size());
+                for (size_t i = 0; i < pl.size(); i++) usable[i] = !preset_ids((int)i, s.mode, community_pool(s)).empty();
+                apply_preset(s, netlobby_preset_step(preset_of(s), step, (int)pl.size(), usable.data()));
+            }
+            break;
         case R_LISTED: s.is_public = !s.is_public; break;
         case R_CPU: {    // left easier, right harder
             static const int order[] = { NETPLAY_CPU_EASY, NETPLAY_CPU_NORMAL, NETPLAY_CPU_HARD };
@@ -5976,6 +5994,9 @@ void gallery_step()
                                          // the news line; run with RECOMP_TEST_CONTENT_PRINT, a content root,
                                          // RECOMP_TEST_CONTENT_NEW=all and RECOMP_TEST_CONTENT_NEWS=2)
                                          "create-standard", "room-standard", "rooms-standard", "fighters-standard",
+                                         // build 97: VENUES on "Community maps" (with RECOMP_TEST_EXTRA_VENUES, or a
+                                         // content root with community venues)
+                                         "create-community-maps",
                                          "fighters-new", "vote-new", "hub-news",
                                          // build 87: content to come at the next release window ("NEW CONTENT AT 17:00")
                                          "hub-release",
@@ -6420,6 +6441,11 @@ void gallery_step()
             S.settings.fighter_rules = NETPLAY_RULES_STOCK;
             S.settings.max_ping = 150;
             S.settings_sel = 3;
+        }
+        if (p == "create-community-maps") {     // build 97: the VENUES row on the community venues' preset
+            const auto &pl = presets();
+            for (size_t i = 0; i < pl.size(); i++) if (!strcmp(pl[i].name, "Community maps")) apply_preset(S.settings, (int)i);
+            S.settings_sel = 2;
         }
         if (p == "create-standard") {   // community content off; the cursor on its row (before LISTED)
             S.settings.fighter_rules = NETPLAY_RULES_STANDARD;

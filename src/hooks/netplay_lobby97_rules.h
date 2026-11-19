@@ -50,6 +50,18 @@ int netlobby_afk_line(char *out, int size, int left_s);
 /* Minutes, rounded up, until a block of NETLOBBY_KICK_BLOCK_S that began `since_ms` ago ends (1 at least). */
 int netlobby_kick_minutes_left(unsigned long long since_ms);
 
+/* ---- the room settings' VENUES presets (build 97, owner 2026-11-19: "Community maps") ----------------------------
+ * The community venues among the installed ones (venue.xml feIDs, ONLINE_NEW_VENUE: 28..63), in their order, into out
+ * (at most max); returns the count. The preset "Community maps" exists only when this is not 0. */
+int netlobby_community_venues(const int *fe_ids, int n, int *out, int max);
+/* A signature of the installed venue list: the presets are built again when it changes (a content sync that adds
+ * venues), so "Every venue" and "Community maps" follow without a restart. */
+unsigned netlobby_venue_sig(const int *fe_ids, int n);
+/* The preset VENUES steps to from `current` (-1: none) by `step` (+1 / -1) among `count` presets, skipping the ones
+ * with no venue for the room (usable[i] 0: "Community maps" in a STANDARD ONLY room or a mode with more than two
+ * fighters); `current` itself when no other is usable. */
+int netlobby_preset_step(int current, int step, int count, const int *usable);
+
 #ifdef __cplusplus
 }
 #endif

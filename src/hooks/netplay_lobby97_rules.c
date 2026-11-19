@@ -5,6 +5,7 @@
 
 #include "netplay_lobby97_rules.h"
 #include "netplay_servers_rules.h"
+#include "online_data.h"
 
 int netlobby_max_ping_ms(int choice)
 {
@@ -48,6 +49,33 @@ int netlobby_afk_line(char *out, int size, int left_s)
     if (left_s < 1) left_s = 1;
     n = snprintf(out, (size_t)size, "Press any button: you leave the room in %d s.", left_s);
     return n < 0 ? 0 : n >= size ? size - 1 : n;
+}
+
+int netlobby_community_venues(const int *fe_ids, int n, int *out, int max)
+{
+    int i, k = 0;
+    for (i = 0; fe_ids && i < n; i++)
+        if (ONLINE_NEW_VENUE(fe_ids[i]) && k < max) out[k++] = fe_ids[i];
+    return k;
+}
+
+unsigned netlobby_venue_sig(const int *fe_ids, int n)
+{
+    unsigned h = 2166136261u ^ (unsigned)n;
+    int i;
+    for (i = 0; fe_ids && i < n; i++) h = (h ^ (unsigned)fe_ids[i]) * 16777619u;     /* FNV-1a, in order */
+    return h;
+}
+
+int netlobby_preset_step(int current, int step, int count, const int *usable)
+{
+    int i, at = current < 0 ? (step > 0 ? -1 : 0) : current;
+    if (count <= 0) return current;
+    for (i = 0; i < count; i++) {
+        at = ((at + (step >= 0 ? 1 : -1)) % count + count) % count;
+        if (usable[at]) return at;
+    }
+    return current < 0 ? 0 : current;
 }
 
 int netlobby_kick_minutes_left(unsigned long long since_ms)

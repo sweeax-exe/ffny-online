@@ -45,6 +45,24 @@ int main(void)
            netlobby_kick_minutes_left(299000), netlobby_kick_minutes_left(400000));
     printf("stages|%d|%d|%d|%d|%d\n", QUICK_STAGE0_MS, QUICK_STAGE1_S, QUICK_STAGE1_MS, QUICK_STAGE2_S,
            netservers_pool_limit(QUICK_STAGE2_S));
+    {   /* the VENUES presets: the community venues, the list's signature, the step over empty presets */
+        static const int stock[] = { 1, 2, 4, 6, 11 }, more[] = { 1, 2, 28, 4, 6, 63, 11, 64, 27 };
+        int out[16], k, m;
+        m = netlobby_community_venues(stock, 5, out, 16);
+        printf("community|stock|%d\n", m);
+        m = netlobby_community_venues(more, 9, out, 16);
+        printf("community|more|%d", m);
+        for (k = 0; k < m; k++) printf("|%d", out[k]);
+        printf("\n");
+        printf("sig|%d|%d|%d\n", netlobby_venue_sig(stock, 5) == netlobby_venue_sig(stock, 5),
+               netlobby_venue_sig(stock, 5) != netlobby_venue_sig(more, 9), netlobby_venue_sig(stock, 4) != netlobby_venue_sig(stock, 5));
+    }
+    {
+        static const int all[6] = { 1, 1, 1, 1, 1, 1 }, no_last[6] = { 1, 1, 1, 1, 1, 0 }, one[6] = { 0, 0, 1, 0, 0, 0 };
+        printf("step|%d|%d|%d|%d|%d|%d|%d\n", netlobby_preset_step(4, 1, 6, all), netlobby_preset_step(4, 1, 6, no_last),
+               netlobby_preset_step(0, -1, 6, no_last), netlobby_preset_step(-1, 1, 6, all), netlobby_preset_step(-1, -1, 6, no_last),
+               netlobby_preset_step(2, 1, 6, one), netlobby_preset_step(5, 1, 6, all));
+    }
     return 0;
 }
 '''
@@ -94,6 +112,21 @@ def test_search_lines(rows):
     assert by(rows, 'stages') == [['120', '20', '180', '45', '0']]
 
 
+def test_venue_presets(rows):
+    """Build 97: "Community maps" is the installed community venues (feIDs 28..63) and exists only with one; the
+    presets follow a changed venue list (signature); VENUES steps over a preset with nothing for the room."""
+    assert by(rows, 'community') == [['stock', '0'], ['more', '2', '28', '63']]
+    assert by(rows, 'sig') == [['1', '1', '1']]
+    # 4 -> 5; 4 -> 0 when 5 (Community maps) is empty for the room; 0 back -> 4; custom -> 0 / the last usable;
+    # only 2 usable: stays 2; 5 -> 0 round
+    assert by(rows, 'step') == [['5', '0', '4', '0', '4', '2', '0']]
+    ui = _src('src/hooks/online_screen.cpp')
+    assert 'list.push_back({ "Community maps"' in ui and 'netlobby_venue_sig(ids.data()' in ui
+    assert 'netlobby_preset_step(preset_of(s), step, (int)pl.size(), usable.data())' in ui
+    assert '"create-community-maps"' in ui
+    assert 'RECOMP_TEST_EXTRA_VENUES' in _src('src/hooks/online_data.c')
+
+
 def test_game_wiring():
     net = _src('src/hooks/netplay.c')
     assert 'case NETLOBBY_T_ACTIVE:' in net and 'on_afk(b + 6, len - 6)' in net
@@ -120,7 +153,8 @@ def test_setting():
     assert ui.count('settings_group("online", { "quick_max_ping" });') == 2     # the launcher's and the overlay's pages
 
 
-@pytest.mark.skipif(RELAY is None, reason=SKIP)
+@pytest.mark.skipif(RELAY is None or not (RELAY / 'protocol_kick.go').is_file(),
+                    reason=SKIP + ' (or it predates build 97: server branch feat/lobby-97)')
 def test_relay_agrees():
     kick = (RELAY / 'protocol_kick.go').read_text(encoding='utf-8')
     afk = (RELAY / 'afk.go').read_text(encoding='utf-8')
