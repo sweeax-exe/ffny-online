@@ -530,7 +530,10 @@ def apply_pack(work, folder, info, fe_id=None, new=False, skin=False, skin_of=No
         taken |= {n.lower() for n, _ in (a[2] if a else [])}
         venue_xml, entity_xml, sod_blob = newvenue.apply(work.current(newvenue.VENUE_XML),
                                                          work.current(newvenue.ENTITY_XML),
-                                                         work.current(clothing.SOD_PATH), op, taken)
+                                                         work.current(clothing.SOD_PATH), op, taken,
+                                                         [e['entry'] for e in info.get('entries', [])
+                                                          if e.get('archive') == newvenue.VENUE_ARCHIVE
+                                                          and e.get('mode') == 'add'])
         if rts:
             sod_blob = sodmod.set_venue_modes(sod_blob, int(op['fe_id']), 0)
         work.set_loose(newvenue.VENUE_XML, venue_xml)
