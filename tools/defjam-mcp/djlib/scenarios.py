@@ -3059,13 +3059,14 @@ def _towers_signed_in(s, h, base, script, extra_env, shots, phases, problems, ti
     text = logparse.read_text(c.log)
     run = re.search(r"service: run (\w+), seed ([0-9A-F]+), (\d+) floors[^\n]*?(on the board|off the board: \w*)", text)
     reports = re.findall(r"service /api/towers/fight\?format=text floor (\d+): HTTP (\d+)", text)
-    phases.append({"phase": "signed-in-climb", "reached": ok, "run": run and run.group(1), "board": run and run.group(4),
-                   "reports": reports, "log": _relpath(c.log)})
+    phases.append({"phase": "signed-in-climb", "reached": ok or "the game ends in floor 3's fight" in text,
+                   "run": run and run.group(1), "board": run and run.group(4), "reports": reports,
+                   "input_logs": re.findall(r"input log of floor (\d+) \(\d+ bytes\): HTTP (\d+)", text), "log": _relpath(c.log)})
     if not run:
         problems.append("signed in: the service dealt no run")
     elif "on the board" not in run.group(4):
         problems.append("signed in: the Uptown run is off the board (%s)" % run.group(4))
-    if not ok:
+    if "the game ends in floor 3's fight" not in text:     # (the copy is gone at once: read the log, not the watch)
         problems.append("signed in: the game did not end in floor 3's fight")
     if [r for r in reports if r[1] != "200"]:
         problems.append("signed in: a report was refused: %s" % reports)
@@ -3113,7 +3114,7 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
     shots, problems, phases = [], [], []
     try:
         h = harness()
-        towers_file = os.path.join(s.dir, "towers.json")
+        towers_file = os.path.join(s.dir, "towers-run.json")      # (the account service keeps its own towers.json here)
         base = {"RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR, "RECOMP_TOWERS_FILE": towers_file,
                 "RECOMP_TEST_TOWERS_SEED": "1234", "RECOMP_OVERLAY_SHOT_MS": "500"}
 
@@ -3133,6 +3134,10 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
                     return r
             return None
 
+        if os.environ.get("DJ_TOWERS_SIGNED_ONLY"):     # only the signed-in phases (5 and 6)
+            _towers_signed_in(s, h, base, script, extra_env, shots, phases, problems, timeout)
+            result.update({"ok": not problems, "phases": phases, "problems": problems, "shots": shots})
+            return result
         old_content = os.environ.get("DJ_CONTENT")
         # 1: Uptown, three floors
         env = dict(base, RECOMP_TEST_TOWERS="1,55", RECOMP_TEST_KO_STEP="600,0", RECOMP_PAD_SCRIPT=script(4))
