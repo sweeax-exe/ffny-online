@@ -109,7 +109,7 @@ Local read_local()
 bool list(cloud::Listing &out)
 {
     std::vector<char> buf(32768);
-    int status = account_call("GET", "/api/saves?format=text", nullptr, buf.data(), (int)buf.size(), 0, nullptr);
+    int status = account_call("GET", "/api/saves?format=text&files=ffny", nullptr, buf.data(), (int)buf.size(), 0, nullptr);
     std::string answer = buf.data();
     if (status == 200) {
         out = cloud::parse_listing(answer);
@@ -136,7 +136,7 @@ int upload(const cloud::Files &files, const std::string &hash, const std::string
                           "\r\nX-Save-PC: " + pc_name().substr(0, 32) + "\r\n";
     if (force) headers += "X-Save-Force: 1\r\n";
     std::vector<char> buf(4096);
-    int status = account_send("POST", "/api/saves?format=text", "application/zip", zip.data(), (int)zip.size(),
+    int status = account_send("POST", "/api/saves?format=text&files=ffny", "application/zip", zip.data(), (int)zip.size(),
                               headers.c_str(), buf.data(), (int)buf.size());
     if (answer) *answer = buf.data();
     fprintf(stderr, "[CLOUD] upload: %zu bytes, %zu files, hash %.12s, base %.12s%s: HTTP %d\n", zip.size(), files.size(),
@@ -158,7 +158,7 @@ bool download(const cloud::Version &v, cloud::Files &files, std::string *error)
 {
     cloud::Bytes zip;
     int partial = 0;
-    std::string path = "/api/saves/" + v.id;
+    std::string path = "/api/saves/" + v.id + "?files=ffny";     // build 97: this launcher takes ffny/towers.json
     int status = account_download(path.c_str(), 0, sink, &zip, &partial);
     fprintf(stderr, "[CLOUD] download %s: HTTP %d, %zu bytes\n", v.id.c_str(), status, zip.size());
     fflush(stderr);

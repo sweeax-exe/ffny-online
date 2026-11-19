@@ -60,7 +60,11 @@ typedef struct TowersView {
  * fighters or venues read from the dump). Signed in it first asks the account service for the run (up to about 8 s:
  * call it off the overlay's thread); without an answer the run starts offline. */
 int towers_start(int tower, int fighter, int skin);
-/* Resume the saved run of `tower` on its floor. 0 when there is none. */
+/* Resume the saved run of `tower` on its floor. 0 when there is none, or (an online Five Boroughs run) when it meets
+ * community fighters this PC lacks that are still live (towers_start_error says so). Blocks for the service then: call
+ * it off the overlay's thread. */
+/* Why the last towers_start / towers_resume was refused for the player ("" none): this PC's content is behind. */
+const char *towers_start_error(void);
 int towers_resume(int tower);
 /* The saved run of `tower` (copied into *out when out != NULL): 1 if there is one. */
 int towers_saved(int tower, TowerRun *out);

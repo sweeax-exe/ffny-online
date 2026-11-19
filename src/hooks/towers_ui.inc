@@ -637,11 +637,20 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
         hx += hint(dl, f, hx, 336, "a", "CONTINUE");
         hx += hint(dl, f, hx, 336, "x", "NEW CLIMB");
         hint(dl, f, hx, 336, "b", "BACK");
+        int st = TWU.starting.load();      // T1: a resume may ask the service first (towers_resume blocks)
+        if (st == 1) return;
+        if (st == 2) { TWU.starting = 0; say("Back to the tower..."); g_towers_close = true; return; }
+        if (st == 3) {
+            TWU.starting = 0;
+            const char *why = towers_start_error();
+            say(why && *why ? why : "That climb could not be resumed.", 8000);
+        }
         if (pad.b) TWU.card = 0;
         else if (pad.x) { open_fighters_for(true); }
         else if (pad.a && !gallery_on()) {
-            if (towers_resume(tower)) { say("Back to the tower..."); g_towers_close = true; }
-            else say("That climb could not be resumed.");
+            int t = tower;
+            TWU.starting = 1;
+            std::thread([t]() { TWU.starting = towers_resume(t) ? 2 : 3; }).detach();
         }
         return;
     }
@@ -654,7 +663,11 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
             return;
         }
         if (st == 2) { TWU.starting = 0; say("Into the tower..."); g_towers_close = true; return; }
-        if (st == 3) { TWU.starting = 0; say("This tower cannot be built on this PC: no fighters or venues were read from the game."); }
+        if (st == 3) {
+            TWU.starting = 0;
+            const char *why = towers_start_error();
+            say(why && *why ? why : "This tower cannot be built on this PC: no fighters or venues were read from the game.", 8000);
+        }
         bool signed_now = gallery_on() || account_state() == ACCOUNT_IN;
         text(dl, f, g_hand, 11, 320, 318, signed_now ? GOLD : GREY, signed_now ? "Signed in: this climb goes on the board." :
              "Signed out: an offline climb, not on the board.", CENTER, 0.8f);

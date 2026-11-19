@@ -576,23 +576,52 @@ static void net_end(const TowerRun *run, const char *why)
     net_enqueue("/api/towers/end?format=text", run->run_id, run->floor, json, 0, 0);
 }
 
-/* POST /api/towers/start for a new run (blocks, no lock held): 1 with the seed and the run's id, board and why. */
-static int net_start(int tower, int fighter, int skin, const int *pool, int pool_n, const int *venues, int venue_n,
+static char g_start_error[200];         /* why the last start or resume was refused ("" none) */
+
+const char *towers_start_error(void) { return g_start_error; }
+
+/* Ids "1000|1004" of a text answer: 1 when a is in the list. */
+static int ids_have(const char *list, int a)
+{
+    const char *p = list;
+    while (p && *p) {
+        if (atoi(p) == a) return 1;
+        p = strchr(p, '|');
+        if (p) p++;
+    }
+    return 0;
+}
+
+/* POST /api/towers/start for a new run (blocks, no lock held): 1 with the seed and the run's id, board and why; -1 when
+ * the service refused it because this PC's community content is behind (why "update": the start is refused, never
+ * an offline climb with another roster). Five Boroughs: the service names the community fighters (1000 and up) the
+ * run keeps (the live ones now); the others are dropped from pool[] (*pool_n shrinks) before the run is built. */
+static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, const int *venues, int venue_n,
                      uint32_t *seed, char *run, int *board, char *why, int why_size)
 {
     static char json[TOWER_MAX_ROSTER * 8 + TOWER_MAX_VENUES * 4 + 256];
-    char reply[1024], v[48];
+    static char reply[8192];
+    char v[48];
     int n, i, status;
     if (!net_on()) return 0;
     n = snprintf(json, sizeof json, "{\"tower\":%d,\"fighter\":%d,\"skin\":%d,\"rules\":%d,\"pool\":[", tower, fighter, skin,
                  TOWER_RULES_VERSION);
-    for (i = 0; i < pool_n && n < (int)sizeof json - 16; i++) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", i ? "," : "", pool[i]);
+    for (i = 0; i < *pool_n && n < (int)sizeof json - 16; i++) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", i ? "," : "", pool[i]);
     n += snprintf(json + n, sizeof json - (size_t)n, "],\"venues\":[");
     for (i = 0; i < venue_n && n < (int)sizeof json - 16; i++) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", i ? "," : "", venues[i]);
     snprintf(json + n, sizeof json - (size_t)n, "]}");
     reply[0] = 0;
     status = account_call("POST", "/api/towers/start?format=text", json, reply, (int)sizeof reply, 8000, NULL);
     reply[sizeof reply - 1] = 0;
+    if (status == 409 && kv(reply, "why", v, sizeof v) && !strcmp(v, "update")) {
+        char missing[160];
+        kv(reply, "missing", missing, sizeof missing);
+        snprintf(g_start_error, sizeof g_start_error, "Some community fighters are missing on this PC: update your content "
+                 "first (restart the launcher), then climb.");
+        fprintf(stderr, "[TOWERS] service: refused, this PC's content is behind (missing %s)\n", missing);
+        run[0] = 0;
+        return -1;
+    }
     if (status != 200 || !kv(reply, "run", run, TOWER_RUN_ID_MAX + 1) || !run[0] || !kv(reply, "seed", v, sizeof v)) {
         fprintf(stderr, "[TOWERS] service: no run (HTTP %d): an offline climb\n", status);
         run[0] = 0;
@@ -601,6 +630,18 @@ static int net_start(int tower, int fighter, int skin, const int *pool, int pool
     *seed = (uint32_t)strtoul(v, NULL, 10);
     *board = kv_int(reply, "board");
     kv(reply, "why", why, why_size);
+    {   /* Five Boroughs: keep exactly the community fighters the service keeps (the live ones at this start) */
+        static char community[TOWER_MAX_ROSTER * 6];
+        if (kv(reply, "community", community, (int)sizeof community)) {
+            int k = 0, dropped = 0;
+            for (i = 0; i < *pool_n; i++) {
+                if (pool[i] >= FB_FIRST_LOGICAL && !ids_have(community, pool[i])) { dropped++; continue; }
+                pool[k++] = pool[i];
+            }
+            *pool_n = k;
+            if (dropped) fprintf(stderr, "[TOWERS] service: %d community fighter(s) not live: not in this climb\n", dropped);
+        }
+    }
     fprintf(stderr, "[TOWERS] service: run %s, seed %08X, %d floors, roster %s, %s%s\n", run, *seed, kv_int(reply, "floors"),
             kv(reply, "roster", v, sizeof v) ? v : "?", *board ? "on the board" : "off the board: ", *board ? "" : why);
     return 1;
@@ -710,11 +751,13 @@ int towers_start(int tower, int fighter, int skin)
     int venues[TOWER_MAX_VENUES], n, vn, ok, board = 0, online;
     uint32_t seed = 0;
     char run[TOWER_RUN_ID_MAX + 1] = "", why[24] = "";
+    g_start_error[0] = 0;
     if (netplay_active() || (tower != TOWER_UPTOWN && tower != TOWER_FIVE_BOROUGHS)) return 0;
     n = pool_of(tower, pool, TOWER_MAX_ROSTER);
     vn = venues_of(venues, TOWER_MAX_VENUES);
     /* T1: signed in, the service deals the seed (no lock held while it answers) */
-    online = n > 0 && vn > 0 && net_start(tower, fighter, skin, pool, n, venues, vn, &seed, run, &board, why, (int)sizeof why);
+    online = n > 0 && vn > 0 ? net_start(tower, fighter, skin, pool, &n, venues, vn, &seed, run, &board, why, (int)sizeof why) : 0;
+    if (online < 0) return 0;      /* this PC's content is behind: g_start_error says so */
     lock();
     {   /* a saved run of this tower is replaced: the service ends it too (it also does at a new start) */
         file_load();
@@ -749,10 +792,47 @@ int towers_start(int tower, int fighter, int skin)
     return ok;
 }
 
+/* A resumed online run whose community fighters (1000 and up, the floors still to climb) this PC lacks: the service
+ * says which were withdrawn since the start (both sides skip their floors) and which are still live (this PC's content
+ * is behind: 0, the resume is refused until it is updated). Blocks (no lock held). 1 to go on. */
+static int net_check_missing(const TowerRun *run)
+{
+    static char json[TOWER_MAX_ROSTER * 8 + 128];
+    static char reply[8192];
+    char live[256];
+    int n, i, m = 0, status;
+    if (!run->run_id[0] || run->tower != TOWER_FIVE_BOROUGHS || !net_on()) return 1;
+    n = snprintf(json, sizeof json, "{\"run\":\"%s\",\"missing\":[", run->run_id);
+    for (i = run->floor; i <= run->floors && n < (int)sizeof json - 16; i++) {
+        int id = towers_opponent(run, i);
+        if (id >= FB_FIRST_LOGICAL && !fighter_here(id)) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", m++ ? "," : "", id);
+    }
+    if (!m) return 1;
+    snprintf(json + n, sizeof json - (size_t)n, "]}");
+    status = account_call("POST", "/api/towers/check?format=text", json, reply, (int)sizeof reply, 8000, NULL);
+    reply[sizeof reply - 1] = 0;
+    if (status != 200) {
+        fprintf(stderr, "[TOWERS] service: check of %d missing fighter(s): HTTP %d: going on\n", m, status);
+        return 1;
+    }
+    kv(reply, "live", live, sizeof live);
+    fprintf(stderr, "[TOWERS] service: %d missing fighter(s): live %s, withdrawn %s\n", m, live[0] ? live : "none",
+            strstr(reply, "withdrawn=") ? strstr(reply, "withdrawn=") + 10 : "?");
+    if (live[0]) {
+        snprintf(g_start_error, sizeof g_start_error, "This climb meets community fighters that are missing on this PC: "
+                 "update your content first (restart the launcher), then continue.");
+        return 0;
+    }
+    return 1;
+}
+
 int towers_resume(int tower)
 {
     int ok;
+    TowerRun check;
+    g_start_error[0] = 0;
     if (netplay_active() || tower < 1 || tower > TOWER_COUNT) return 0;
+    if (towers_saved(tower, &check) && !net_check_missing(&check)) return 0;
     lock();
     file_load();
     if (!g_have[tower - 1]) { unlock(); return 0; }

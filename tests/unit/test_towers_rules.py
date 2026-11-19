@@ -285,3 +285,9 @@ def test_the_game_side_is_wired():
     assert '#include "towers_ui.inc"' in hub and 'HUB_TOWERS' in hub
     towers = (HOOKS / 'towers.c').read_text(encoding='utf-8')
     assert 'netplay_active()' in towers      # never online
+    # T1: Five Boroughs keeps the service's community list; a PC whose content is behind is refused, not diverged
+    assert 'kv(reply, "community", community' in towers and 'towers_start_error' in towers
+    assert '/api/towers/check?format=text' in towers
+    cloud = (HOOKS / 'pc_launcher_cloud.cpp').read_text(encoding='utf-8')
+    assert cloud.count('files=ffny') == 3        # list, upload, download: the service sends ffny/towers.json
+
