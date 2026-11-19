@@ -16,6 +16,8 @@
 //   Name tags in an online fight each player's online name on the line over the fighter's name on the
 //             HUD, this PC's own in orange ([online] name_tags). Offline nothing is drawn. The places
 //             are fight_hud_rules.c's (2 to 4 fighters, 4:3, stretched, widescreen at the edges or centred).
+//             Build 98: after the name, in gold, the player's wins in a row in this room from 2 on ("(4 WINS)";
+//             hud_stats.h), in the same line, so the game's own HUD stays as it is.
 //
 //   Countdown "3 - 2 - 1 - FIGHT!" over the first 180 steps of every fight (build 77), while every fighter's
 //             input is held at rest (start_countdown.h; netplay.c applies the hold), then FIGHT! for a
@@ -56,7 +58,9 @@ struct FightHudUi {
     NetVersus match{};
     bool match_live = false;
     std::vector<std::string> test_names;
+    std::vector<int> test_streaks;      // RECOMP_TEST_STREAKS=0,3,..: the tags' streaks with the test names
     int test_read = 0;
+    int streak_logged[FIGHT_HUD_SLOTS] = { 0, 0, 0, 0 };
     // Big Arena (openworld.c): the scores, a respawn count, the winner
     OwHudView arena{};
     bool arena_on = false, arena_won = false;
@@ -78,6 +82,8 @@ void fh_test_names()
         else one += *p;
     }
     fprintf(stderr, "[FIGHTHUD] RECOMP_TEST_NAME_TAGS (tests): %d names for the fighters of any fight\n", (int)FH.test_names.size());
+    if (const char *k = getenv("RECOMP_TEST_STREAKS"))
+        for (const char *p = k; *p;) { FH.test_streaks.push_back(atoi(p)); while (*p && *p != ',') p++; if (*p) p++; }
 }
 
 // The game's look, when the player's online art has it (version 7): its FIGHT! lettering, the wear tile
@@ -287,15 +293,29 @@ void fh_tags(ImDrawList *dl, ImVec2 display)
         FightTag t;
         char shown[64];
         if (!fight_tag_place(&pic, fighters, slot, &t) || !fight_tag_text(name, 24, shown, sizeof(shown))) continue;
+        // build 98: the player's wins in a row in this room, after the name, from 2: "SlawPro (4 WINS)"
+        char streak[24] = "";
+        int wins = FH.test_names.empty() ? hud_stats_streak(FH.match.room_key, FH.match.name[slot])
+                                         : (int)FH.test_streaks.size() > slot ? FH.test_streaks[slot] : 0;
+        hud_streak_label(wins, streak, sizeof(streak));
+        std::string all = std::string(shown) + (streak[0] ? std::string(" ") + streak : std::string());
         float px = t.size;
-        ImVec2 sz = font->CalcTextSizeA(px, FLT_MAX, 0, shown);
-        if (sz.x > t.width && sz.x > 0) { px *= t.width / sz.x; sz = font->CalcTextSizeA(px, FLT_MAX, 0, shown); }
+        ImVec2 sz = font->CalcTextSizeA(px, FLT_MAX, 0, all.c_str());
+        if (sz.x > t.width && sz.x > 0) { px *= t.width / sz.x; sz = font->CalcTextSizeA(px, FLT_MAX, 0, all.c_str()); }
         ImVec2 at(t.right ? t.x - sz.x : t.x, t.y + (t.size - px));
         bool me = FH.test_names.empty() ? (FH.match_live && slot == FH.match.you) : slot == 0;
         float o = std::max(1.0f, px * 0.1f);
         static const float d[8][2] = { {-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1} };
-        for (auto &k : d) dl->AddText(font, px, ImVec2(at.x + k[0] * o, at.y + k[1] * o), IM_COL32(0, 0, 0, 230), shown);
+        for (auto &k : d) dl->AddText(font, px, ImVec2(at.x + k[0] * o, at.y + k[1] * o), IM_COL32(0, 0, 0, 230), all.c_str());
         dl->AddText(font, px, at, me ? ORANGE : CREAM, shown);
+        if (streak[0]) {
+            float nx = font->CalcTextSizeA(px, FLT_MAX, 0, (std::string(shown) + " ").c_str()).x;
+            dl->AddText(font, px, ImVec2(at.x + nx, at.y), GOLD, streak);
+            if (FH.streak_logged[slot] != wins) {
+                FH.streak_logged[slot] = wins;
+                fprintf(stderr, "[FIGHTHUD] streak tag: %s %s\n", shown, streak);
+            }
+        }
     }
 }
 

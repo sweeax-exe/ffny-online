@@ -63,6 +63,7 @@
 #include "pc_mods.h"
 #include "content_update.h"
 #include "fight_hud.h"
+#include "hud_stats.h"
 #include "fighter_skins.h"
 #include "fighter_banks.h"
 #include "start_countdown.h"
@@ -741,6 +742,7 @@ static struct {
     char report_key[32];
     int report_ring;                /* F0: the ring type (RING_*) of the room START came in, RING_NONE: not a ring */
     int reported, fighting_seen, last_late;
+    int streak_counted;             /* build 98: this match's decision went into the room streaks (hud_stats.c) */
     int start_reported;             /* this match's "start" went to the account service */
     int seed_bypass;                /* crowd_reset seeds a generator with its own words */
     uint32_t rematch_want[MAXP];    /* the match number each player chose Rematch after, REMATCH_NO: went back */
@@ -1509,6 +1511,12 @@ int netplay_toast(char *out, int size)
 #define VS_MIN_MS   4000u           /* shown at least this long after the START, when a load is instant */
 #define VS_FADE_MS  400u
 #define VS_LIMIT_MS 120000u         /* a match that never got going: the screen does not stay up for ever */
+/* Build 98: the room the streaks count in (its code and name; called with g_cs held) */
+static void room_streak_key(char *out, int size)
+{
+    snprintf(out, (size_t)size, "%.6s %s", N.roomv.code[0] ? N.roomv.code : N.room, N.roomv.settings.name);
+}
+
 int netplay_versus(NetVersus *out)
 {
     ULONGLONG now, start, end, from;
@@ -1563,6 +1571,7 @@ int netplay_versus(NetVersus *out)
         out->king = N.koth_match ? N.vs_king : -1;
         out->streak = N.vs_streak;
         snprintf(out->room, sizeof(out->room), "%s", N.roomv.settings.name);
+        room_streak_key(out->room_key, (int)sizeof(out->room_key));
         out->ms = (int)(now - start);
         out->loaded = N.match_seen;
         out->alpha = !end || now < from ? 1.0f : 1.0f - (float)(now - from) / (float)VS_FADE_MS;
@@ -4468,8 +4477,14 @@ static void on_start_as(const uint8_t *b, int len, int watching)
                     snprintf(N.report_names[i], sizeof(N.report_names[i]), "%s", N.roomv.players[j].name);
     }
     snprintf(N.report_key, sizeof(N.report_key), "%.6s-%08X", N.roomv.code[0] ? N.roomv.code : N.room, seed);
+    {   /* build 98: the versus screen's "LAST 10" for each player, asked in the background (hud_stats.c) */
+        const char *list[MAXP];
+        for (i = 0; i < MAXP; i++) list[i] = i < count && !(i >= N.players || m.pad[i] < 0) ? N.report_names[i] : "";
+        hud_stats_recent_request(list, count < MAXP ? count : MAXP);
+    }
     N.report_ring = ring_type;
     N.reported = N.fighting_seen = 0;
+    N.streak_counted = 0;
     disarm_crash_report();
     /* King of the Hill: one fight, then RESULT and back to the hill */
     N.koth_match = NETPLAY_IS_HILL(N.roomv.settings.mode);
@@ -6881,6 +6896,23 @@ void netplay_on_result(uint32_t winners, uint32_t losers, uint32_t code)
     (void)losers;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     EnterCriticalSection(&g_cs);
+    /* Build 98: the room streaks on the fight HUD (hud_stats.c), once per match, signed in or not; the same
+     * decision every PC of the match reports, so every PC counts the same */
+    if (N.lobby && N.match_live && !N.streak_counted && !N.desync && (N.lockstep || N.decided_alone) && !N.watching) {
+        char names[MAXP][25], key[40];
+        const char *list[MAXP];
+        int i, n = N.report_m.count < 2 ? 2 : N.report_m.count > MAXP ? MAXP : N.report_m.count;
+        N.streak_counted = 1;
+        for (i = 0; i < n; i++) {
+            int cpu = i >= N.players || N.report_m.pad[i] < 0;
+            snprintf(names[i], sizeof(names[i]), "%s", cpu ? "" : N.report_names[i]);
+            list[i] = names[i];
+        }
+        room_streak_key(key, (int)sizeof(key));
+        LeaveCriticalSection(&g_cs);
+        hud_stats_result(key, list, n, (code & 4u) ? 0u : winners);
+        EnterCriticalSection(&g_cs);
+    }
     /* Build 54: also when the match was decided in lockstep and the other PC then went on ahead (the rest
      * ran here alone): its decision is the room's. Only one of the two games reported such a game, and
      * the account service paused ranked sets for it ("1 of 2 players reported a result"; a ranked test
@@ -8335,6 +8367,7 @@ static void match_start_body(void)
                  (unsigned)N.match_count);
     }
     N.reported = N.fighting_seen = N.start_reported = 0;
+    N.streak_counted = 0;
     N.decided_alone = 0;
     InterlockedExchange(&N.on_results, 0);      /* a rematch's fight: the results are behind */
     disarm_crash_report();
@@ -11062,6 +11095,7 @@ int netplay_match_info(NetVersus *out)
         out->king = N.koth_match ? N.vs_king : -1;
         out->streak = N.vs_streak;
         snprintf(out->room, sizeof(out->room), "%s", N.roomv.settings.name);
+        room_streak_key(out->room_key, (int)sizeof(out->room_key));
         out->ms = (int)(GetTickCount64() - N.start_tick);
         out->loaded = N.match_seen;
         out->alpha = 1.0f;

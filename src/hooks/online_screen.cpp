@@ -65,6 +65,7 @@
 #include "rts_social.h"
 #include "rts_social_rules.h"
 #include "fight_hud_rules.h"
+#include "hud_stats.h"
 #include "start_countdown.h"
 #include "milestones.h"
 #include "season_search.h"
@@ -5732,6 +5733,17 @@ void versus_card(ImDrawList *dl, const Frame &f, const NetVersus &v, int i, floa
     std::string style = created ? std::string(v.cp_style[i]) : upper(fighter_style(v.fighter[i]));
     if (!style.empty())
         text(dl, f, g_body, big ? 14 : 12, x + w / 2, ty + (big ? 58 : 48), with_alpha(CREAM, 0.75f), style.c_str(), CENTER, 0.8f);
+    if (!v.cpu[i] && v.name[i][0]) {      // build 98: the player's recent form from the account service, once it is here
+        char form[40];
+        if (!gallery_on() && hud_stats_recent_label(v.name[i], form, sizeof(form)) > 0) {
+            text(dl, f, g_title, 10, x + 12, y0 + h - 18, with_alpha(GOLD, 0.9f), form, LEFT, 0.8f);
+            static char logged[4][40];
+            if (i < 4 && strcmp(logged[i], form)) {
+                snprintf(logged[i], sizeof(logged[i]), "%s", form);
+                fprintf(stderr, "[ONLINE] versus card %d: %s %s\n", i, v.name[i], form);
+            }
+        }
+    }
     if (!v.cpu[i] && v.ping[i] >= 0) {     // the player's own ping to the server, as it reported it
         char ms[16];
         snprintf(ms, sizeof(ms), "%d MS", v.ping[i]);

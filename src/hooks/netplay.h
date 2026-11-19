@@ -628,6 +628,7 @@ typedef struct NetVersus {
     float alpha;                /* 1, falling to 0 over the fade */
     char cp_name[4][17];        /* a created fighter (fighter 99): its name (up to 16, CP_NAME_MAX); "" otherwise */
     char cp_style[4][64];       /* and its fighting styles ("KICKBOXING / STREETFIGHTING") */
+    char room_key[40];          /* build 98: the room the streaks count in (hud_stats.h): its code and name */
 } NetVersus;
 int netplay_versus(NetVersus *out);
 /* Discord's presence (discord_presence.c): the hub room's match as its START set it up, from the
