@@ -71,7 +71,8 @@ int main(int argc, char **argv)
     n = pc_content_list(packs, PC_CONTENT_MAX);
     printf("count %d\n", n);
     for (i = 0; i < n; i++)
-        printf("%s|local=%d|applied=%d\n", packs[i].id, packs[i].local, packs[i].applied);
+        printf("%s|local=%d|applied=%d%s%s\n", packs[i].id, packs[i].local, packs[i].applied,
+               packs[i].not_in_game[0] ? "|not_in_game=" : "", packs[i].not_in_game);
     printf("print %08X\n", (unsigned)pc_content_print());
     printf("news %d\n", pc_content_news(names, sizeof names));
     return 0;
@@ -268,3 +269,22 @@ def test_own_packs_are_composed_apart():
     m = src('setup/mods.py')
     assert 'self.compose_own(off)' in m and "OWN_DIR = 'own-packs'" in m
     assert 'COMPOSED_OWN_DIR "mod-manager" HOST_SEP "own-packs" HOST_SEP "content-files"' in src('src/hooks/pc_content.c')
+
+
+def test_a_left_out_pack_says_why(tools, tmp_path):
+    """Build 98: content.ini's not_in_game= (setup/content_compose.py not_in_game) reaches the Content page's rows,
+    which say "Not in game: <reason>"; a pack without one reads as before."""
+    data = tmp_path / 'data'
+    make_data(data)
+    ini = (data / 'mod-manager' / 'content.ini').read_text(encoding='utf-8')
+    ini += ('[pack.my-fighter]\nname=My fighter\nkind=content\ntype=new-fighter\nversion=0.0.1\n'
+            'content_sha256=ee\norder=901\nfighter_fe_id=61234\nlocal=1\nonline_ok=0\ncomposed=1\n'
+            'not_in_game=more than 250 of your own new fighters are on; switch some of them off\n')
+    (data / 'mod-manager' / 'content.ini').write_text(ini, encoding='utf-8')
+    (data / 'mods' / 'my-fighter').mkdir()
+    info, lines = run(tools, data)
+    assert ('my-fighter|local=1|applied=0|not_in_game=more than 250 of your own new fighters are on; switch some of '
+            'them off') in lines
+    assert 'my-venue|local=1|applied=1' in lines
+    page = (HOOKS / 'pc_launcher_content.inc').read_text(encoding='utf-8')
+    assert page.count('"Not in game: %s", p.not_in_game') == 2       # MY PACKS and the community rows

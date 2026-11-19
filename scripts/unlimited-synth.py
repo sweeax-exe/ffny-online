@@ -11,9 +11,18 @@ own in turn, an own model ``V2IP_7xxA`` (the template's model files with the sym
 them), its camera banks, intro entry, entity and pictures under its logical ID (1000 and up), name ``Syn <ID>``;
 every ``--stats-every``-th one has gameplay of its own (upper and lower body 15, speed 12), so a test can tell
 whose stats a bank holds. The folder holds only the player's own files re-arranged; it stays local
-(``DJ_OVERRIDE`` points a test copy at it)."""
+(``DJ_OVERRIDE`` points a test copy at it).
+
+    python scripts/unlimited-synth.py --own-data <data> --count 40 [--game <dump>]
+
+(build 98) writes N of the player's OWN new-fighter packs instead, as FFNY Studio's "Use in my game" leaves them:
+``<data>/mods/my-synth-own-NNN`` with local.json and install.json (the model as delta add entries, the op, no
+place); ``python setup/mods.py compose --data-dir <data>`` then gives each its own number, and ``dj.py scenario
+offline --content-root <data> --f0 <number>`` plays one. Prints the numbers as JSON."""
 
 import argparse
+import hashlib
+import json
 import os
 import sys
 import tempfile
@@ -23,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "setup"))
 
 import content_compose as cc  # noqa: E402
-from ffnycontent import newfighter as nf, unlimited  # noqa: E402
+from ffnycontent import delta, newfighter as nf, unlimited  # noqa: E402
 
 ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 OWN_STATS = {"version": 1, "stats": {"upper": 15, "lower": 15, "speed": 12, "toughness": 6, "health": 6,
@@ -64,17 +73,59 @@ def build(game, out, count, first=1000, stats_every=7, log=print):
     return written
 
 
+def own_packs(game, data, count, stats_every=7, log=print):
+    """``count`` own new-fighter packs in ``data``/mods (see the module text). Returns {pack id: own number} (the
+    number the launcher's compose will give each, unlimited.own_number in folder order)."""
+    with tempfile.TemporaryDirectory() as empty:
+        bases = cc.Bases(empty, game)
+        stock = templates(bases.read(nf.SOD_PATH, ""))
+        models = bases.archive(nf.MODEL_ARCHIVE)
+        taken, out = set(), {}
+        for i in range(count):
+            tpl = stock[i % len(stock)]
+            pack_id = "my-synth-own-%03d" % i
+            folder = Path(data) / "mods" / pack_id
+            (folder / "deltas").mkdir(parents=True, exist_ok=True)
+            model = "V2IP_7%s%sA" % ("GHIJKLMNOPQRSTUVWXYZ"[(i // 36) % 20], ALPHABET[i % 36])
+            originals = {s: models.read(tpl["model"] + s) for s in nf.MODEL_SUFFIXES if models.has(tpl["model"] + s)}
+            entries = []
+            for entry, base_entry, base, result in nf.model_entries(tpl["model"], model, originals):
+                rel = "deltas/%s.ffdelta" % entry
+                (folder / rel).write_bytes(delta.encode(base, result))
+                entries.append({"archive": nf.MODEL_ARCHIVE, "entry": entry, "mode": "add",
+                                "base_archive": nf.MODEL_ARCHIVE, "base_entry": base_entry, "delta": rel,
+                                "original_sha256": hashlib.sha256(base).hexdigest(),
+                                "result_sha256": hashlib.sha256(result).hexdigest(), "result_size": len(result)})
+            gameplay = OWN_STATS if stats_every and (i + 1) % stats_every == 0 else None
+            op = nf.make_op(tpl["fe_id"], tpl["model"], model, "Own %d" % i, gameplay=gameplay)
+            (folder / "install.json").write_text(json.dumps({"schema": 1, "type": "new-fighter", "entries": entries,
+                                                             "ops": [op]}), encoding="utf-8")
+            (folder / "local.json").write_text(json.dumps({"schema": 1, "source": "ffny-studio", "name": "Own %d" % i,
+                                                           "kind": "content", "type": "new-fighter",
+                                                           "version": "1.0.0"}), encoding="utf-8")
+            out[pack_id] = unlimited.own_number(pack_id, taken)
+            taken.add(out[pack_id])
+    log(json.dumps(out))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--count", type=int, default=120)
     ap.add_argument("--first", type=int, default=1000)
     ap.add_argument("--stats-every", type=int, default=7)
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", help="the override folder of community fighters (with --first)")
+    ap.add_argument("--own-data", help="a data folder: write the player's own new-fighter packs into its mods/")
     ap.add_argument("--game", default=None, help="the extracted dump (default: game/ or $DEFJAM_DATA/extracted)")
     a = ap.parse_args()
     game = a.game or (ROOT / "game" if (ROOT / "game" / "default.xbe").is_file()
                       else Path(os.environ.get("DEFJAM_DATA", "")) / "extracted")
-    build(game, a.out, a.count, a.first, a.stats_every)
+    if a.own_data:
+        own_packs(game, a.own_data, a.count, a.stats_every)
+    elif a.out:
+        build(game, a.out, a.count, a.first, a.stats_every)
+    else:
+        ap.error("--out or --own-data")
 
 
 if __name__ == "__main__":

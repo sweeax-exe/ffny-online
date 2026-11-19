@@ -261,3 +261,23 @@ def test_a_template_without_thumbs_gets_docs(tmp_path):
     cc.apply_new_fighter(work, op, 1000)
     added = {n.lower() for n, _ in work.archives[nf.SCREENS_ARCHIVE.lower()][2]}
     assert "screens/thumbs/thumb1000.big" in added and "screens/thumbs/thumb1000off.big" in added
+
+
+def test_own_numbers_one_text_with_studio():
+    """Build 98: FFNY Studio's ffnystudio/unlimited.py is this file below its first comment lines (own_number is the
+    rule Studio's Use in my game and the launcher's compose share). $FFNY_STUDIO_REPO, or the studio/ checkout of
+    the main clone beside this worktree."""
+    candidates = [os.environ.get("FFNY_STUDIO_REPO"), str(ROOT / "studio")] + [str(p / "studio") for p in ROOT.parents]
+    other = next((Path(c) / "ffnystudio" / "unlimited.py" for c in candidates
+                  if c and (Path(c) / "ffnystudio" / "unlimited.py").is_file()), None)
+    if other is None or "def own_number" not in other.read_text(encoding="utf-8"):
+        pytest.skip("no FFNY Studio checkout with own numbers beside this one (set FFNY_STUDIO_REPO)")
+
+    def body(text):
+        lines = text.replace("\r\n", "\n").splitlines()
+        while lines and lines[0].startswith("#"):
+            lines.pop(0)
+        return "\n".join(lines)
+    mine = (ROOT / "setup" / "ffnycontent" / "unlimited.py").read_text(encoding="utf-8")
+    assert body(mine) == body(other.read_text(encoding="utf-8")), "copy the changed unlimited.py over the other"
+    assert unlimited.OWN_FIRST > nf.FIRST_LOGICAL and unlimited.OWN_LAST < nf.MORE_ID

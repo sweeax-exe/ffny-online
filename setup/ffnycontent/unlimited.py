@@ -42,6 +42,40 @@ NAME_MAX = 31
 MODEL_MAX = 15
 ROW_NAME_MAX = 19               # ResetFighterList copies a row name into 32 bytes at +4 with tier/feID at +0x18
 
+# -- the player's own new fighters (build 98) ---------------------------------------------------------------------
+#
+# A new fighter of the player's own (FFNY Studio's "Use in my game", <data>/mods/my-<id>, offline only) plays
+# through the banks as a community fighter beyond the places does, under an OWN NUMBER: one of OWN_FIRST..OWN_LAST,
+# a range the account service never gives (it counts up from FIRST_LOGICAL, one number per accepted fighter). The
+# number follows from the pack's own id (``own_number``), so a fighter keeps it across launches and on every
+# compose; the launcher also writes it into the pack's local.json. Own numbers never reach the relay: a pack with a
+# new fighter keeps the game offline while it is on (setup/mods.py local_online_safe, pc_content_local_offline).
+OWN_FIRST = 60000
+OWN_LAST = 99999                # five digits: picture, voice and row names stay as long as with 1000..9999 + 1
+OWN_MAX = 250                   # own new fighters on at once (the composer leaves the rest out, saying so)
+
+
+def is_own_number(fe_id):
+    """Whether ``fe_id`` is an own number (``OWN_FIRST..OWN_LAST``)."""
+    return isinstance(fe_id, int) and not isinstance(fe_id, bool) and OWN_FIRST <= fe_id <= OWN_LAST
+
+
+def own_number(pack_id, taken=(), keep=None):
+    """The own number of the player's own new-fighter pack ``pack_id`` (its folder name, ``my-<id>``): ``keep`` (the
+    number it has) while that is an own number not in ``taken``, else the first number not in ``taken`` from the
+    pack id's FNV-1a on (wrapping within the range). The same id and ``taken`` give the same number on every PC
+    and launch. Raises FighterError when every own number is taken."""
+    taken = set(taken)
+    if is_own_number(keep) and keep not in taken:
+        return keep
+    span = OWN_LAST - OWN_FIRST + 1
+    start = fnv1a(str(pack_id).encode("utf-8")) % span
+    for k in range(span):
+        n = OWN_FIRST + (start + k) % span
+        if n not in taken:
+            return n
+    raise FighterError("every number for your own new fighters is taken")
+
 
 # -- own voices (phase 3B) --------------------------------------------------------------------------------------
 #

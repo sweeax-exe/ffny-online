@@ -659,6 +659,18 @@ def write_files_ini(new, applied, skipped, off, files, lang_files, lang_skipped)
         f.write('\n'.join(lines) + '\n')
 
 
+def not_in_game(root):
+    """{pack id: reason} of the packs the last composition into ``root`` left out (its state's ``skipped``), each
+    reason one line of at most 240 characters: content.ini's not_in_game= (setup/mods.py), which the Content page
+    shows as "Not in game: <reason>" (build 98: a pack is never left out without a word). Empty when there is none."""
+    try:
+        state = json.loads((Path(root) / STATE).read_text(encoding='utf-8'))
+        return {str(i): ' '.join(str(r).split())[:240] or 'it does not fit your game files'
+                for i, r in state.get('skipped', [])}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+
+
 def new_fighter_op(folder):
     """The new-fighter op of a pack folder's install.json, or None (none, or an unreadable file)."""
     try:
@@ -668,57 +680,66 @@ def new_fighter_op(folder):
 
 
 def settle_places(packs, reserved=(), log=print):
-    """One feID per new fighter, before composing. A community pack keeps its catalogue place (the account service
-    gives each its own; a second one on a place already given is left out). A player's own pack (``local``, FFNY
-    Studio's "Use in my game") keeps the place Studio chose while no community pack, no place of the signed
-    catalogue (``reserved``: a pack that is live but not synced yet) and no earlier own pack has it; else it moves
-    to the first free place in ``newfighter.PLACE_ORDER`` (100..123, the low places, 124..127), and with none
-    free it is left out. Changes ``packs`` in place: a moved pack's ``fighter_fe_id``, ``place_problem`` (the
-    sentence for the Content page) on one left out. Returns [(pack id, old place, new place)] of the moves."""
+    """One feID per new fighter, before composing. A community pack keeps its catalogue place or number (the account
+    service gives each its own; a second one on a place already given is left out). A player's own pack (``local``,
+    FFNY Studio's "Use in my game") gets an OWN NUMBER (build 98, ``unlimited.own_number``): it plays through the
+    banks as a community fighter beyond the places does, offline only, so own new fighters need no place and are
+    not limited by the 48. It keeps the number it has (local.json) while no earlier own pack, community pack or
+    live catalogue entry (``reserved``) has it; else (none yet, a place of an older Studio, a clash) it gets the one
+    its pack id gives. At most ``unlimited.OWN_MAX`` own new fighters; the rest are left out. Changes ``packs`` in
+    place: a moved pack's ``fighter_fe_id``, ``place_problem`` (the sentence for the Content page) on one left out.
+    Returns [(pack id, old feID, new feID)] of the moves."""
     order = list(newfighter.PLACE_ORDER)
     valid = set(order)
     fighters = []
-    beyond = False
     for p in packs:
         op = new_fighter_op(p['folder']) if p.get('folder') else None
-        if op is not None:
+        if op is not None and not is_skin(p):
             place = p.get('fighter_fe_id') or op.get('fe_id')
-            if newfighter.is_logical(place):
-                beyond = True       # a community fighter beyond the places: no place, it needs the banks
-                continue
             fighters.append((p, place if isinstance(place, int) and not isinstance(place, bool) else None))
-    taken = {r for r in reserved if r in valid}
-    if beyond:
-        taken |= set(unlimited.BANKS)   # an own pack does not move onto a bank (a community pack there: finish_logical)
+    numbers = {r for r in reserved if newfighter.is_logical(r)}     # community numbers: never an own fighter's
     owner = {}
     for p, place in fighters:
         if p.get('local'):
+            continue
+        if newfighter.is_logical(place):
+            numbers.add(place)      # a community fighter beyond the places (finish_logical checks it)
             continue
         if place in owner:
             p['place_problem'] = "its place %d is the pack %s's already" % (place, owner[place])
             log('[compose] %s left out: %s' % (p['id'], p['place_problem']))
         elif place is not None:
             owner[place] = p['id']
+    own = [(p, place) for p, place in fighters if p.get('local')]
+    over = own[unlimited.OWN_MAX:]
+    own = own[:unlimited.OWN_MAX]
+    for p, _ in over:
+        p['place_problem'] = ('more than %d of your own new fighters are on; switch some of them off'
+                              % unlimited.OWN_MAX)
+        log('[compose] %s left out: %s' % (p['id'], p['place_problem']))
+    taken = set(numbers)
+    kept = set()
+    for p, place in own:            # first those whose own number is still theirs, so no other pack takes it
+        if unlimited.is_own_number(place) and place not in taken:
             taken.add(place)
+            kept.add(p['id'])
     moves = []
-    for p, place in fighters:
-        if not p.get('local'):
+    for p, place in own:
+        if p['id'] in kept:
             continue
-        if place in valid and place not in taken:
-            taken.add(place)
-            continue
-        free = next((f for f in order if f not in taken), None)
-        if free is None:
-            p['place_problem'] = ('every place for a new fighter is taken by the community fighters and your other '
-                                  'packs; switch one of your own packs off to make room')
+        try:
+            number = unlimited.own_number(p['id'], taken)
+        except newfighter.FighterError as error:
+            p['place_problem'] = str(error)
             log('[compose] %s left out: %s' % (p['id'], p['place_problem']))
             continue
-        why = ('the community pack %s has %s now' % (owner[place], place) if place in owner else
-               'place %s is taken' % place if place is not None else 'it had no place')
-        log('[compose] %s: new fighter moved from place %s to %d (%s)' % (p['id'], place, free, why))
-        p['fighter_fe_id'] = free
-        taken.add(free)
-        moves.append((p['id'], place, free))
+        taken.add(number)
+        why = ('another fighter has %s' % place if unlimited.is_own_number(place) else
+               'own new fighters play by number now (it had place %s)' % place if place in valid else
+               'it had none')
+        log('[compose] %s: own new fighter number %d (%s)' % (p['id'], number, why))
+        p['fighter_fe_id'] = number
+        moves.append((p['id'], place, number))
     return moves
 
 

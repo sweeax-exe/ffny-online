@@ -212,10 +212,10 @@ def test_names():
     assert nf.NEW_MODEL.match(nf.model_for("studio-doc-two"))
 
 
-def test_own_fighter_on_a_community_place_moves(tmp_path):
-    """A player's own new fighter (FFNY Studio's "Use in my game") at a place a community fighter now has: the
-    composed database gets both, each on its own feID (jackboy66, 2026-11-15: a local naruto at 117 beside the
-    community naruto at 117 was left out)."""
+def test_own_fighter_beside_a_community_one_plays_by_its_own_number(tmp_path):
+    """A player's own new fighter (FFNY Studio's "Use in my game") whose old place a community fighter has (jackboy66,
+    2026-11-15): from build 98 it plays by its own number through the banks, beside the community fighter at 117."""
+    from ffnycontent import unlimited
     community = make_pack(tmp_path / "packs" / "studio-naruto", "V2IP_7N1A", "Naruto")
     local = make_pack(tmp_path / "packs" / "my-studio-naruto", "V2IP_7N2A", "Naruto Two")
     data = tmp_path / "data"
@@ -225,9 +225,42 @@ def test_own_fighter_on_a_community_place_moves(tmp_path):
     assert got["applied"] == ["studio-naruto", "my-studio-naruto"] and not got["skipped"]
     rows = nf.characters(composed(data, nf.SOD_PATH).read_bytes())
     fes = [r["fe_id"] for r in rows]
-    assert len(fes) == len(set(fes))                                  # never two fighters on one feID
-    assert [(r["fe_id"], r["display"]) for r in rows[-2:]] == [(117, "Naruto"), (100, "Naruto Two")]
-    assert own["fighter_fe_id"] == 100
+    assert len(fes) == len(set(fes)) and 117 in fes                   # never two fighters on one feID
+    assert own["fighter_fe_id"] == unlimited.own_number("my-studio-naruto")
+    side = unlimited.read_side(composed(data, unlimited.SIDE_FILE).read_bytes(),
+                               composed(data, nf.SOD_PATH).read_bytes())
+    assert [(f["id"], f["name"]) for f in side["fighters"]] == [(own["fighter_fe_id"], "Naruto Two")]
+
+
+def test_sixty_own_fighters_with_live_community_ones(tmp_path):
+    """Build 98: 60 own new fighters (more than the 48 places) compose beside community fighters at places and by
+    number; every one is in the side file under its own number, none is left out."""
+    from ffnycontent import unlimited
+    data = tmp_path / "data"
+    packs = [record(make_pack(tmp_path / "packs" / "c-place", "V2IP_7C1A", "Com Place"), "c-place", 1, 101),
+             record(make_pack(tmp_path / "packs" / "c-num", "V2IP_7C2A", "Com Num"), "c-num", 2, 1000),
+             record(make_pack(tmp_path / "packs" / "c-num2", "V2IP_7C3A", "Com Num2"), "c-num2", 3, 1001)]
+    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    own = []
+    for i in range(60):
+        folder = make_pack(tmp_path / "packs" / ("my-own-%02d" % i), "V2IP_7%s%sA" % ("XYZ"[i // 36], alphabet[i % 36]),
+                           "Own %d" % i)
+        own.append(dict(record(folder, "my-own-%02d" % i, (1 << 20) + i), local=True))
+    got = content_compose.compose(data, GAME, packs + own, off=(), log=lambda t: None, languages=[],
+                                  reserved={101, 1000, 1001, 1002})
+    assert not got["skipped"] and len(got["applied"]) == 63
+    numbers = [p["fighter_fe_id"] for p in own]
+    assert all(unlimited.is_own_number(n) for n in numbers) and len(set(numbers)) == 60
+    side = unlimited.read_side(composed(data, unlimited.SIDE_FILE).read_bytes(),
+                               composed(data, nf.SOD_PATH).read_bytes())
+    assert sorted(f["id"] for f in side["fighters"]) == sorted([1000, 1001] + numbers)
+    assert 101 in [r["fe_id"] for r in nf.characters(composed(data, nf.SOD_PATH).read_bytes())]
+    assert content_compose.not_in_game(data / "mod-manager") == {}
+    # the next launch: the same numbers, nothing composed again
+    again = [dict(p) for p in own]
+    got = content_compose.compose(data, GAME, packs + again, off=(), log=lambda t: None, languages=[],
+                                  reserved={101, 1000, 1001, 1002})
+    assert got["unchanged"] and [p["fighter_fe_id"] for p in again] == numbers
 
 
 # -- build 85: skins (a new-fighter pack the team accepted as an extra outfit of its template) ----------------------

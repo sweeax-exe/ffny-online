@@ -923,6 +923,16 @@ class Manager:
                 self.progress(problem)
         self.progress('Removed managed mod; local folders were preserved')
 
+    def content_reasons(self):
+        """{pack id: reason} of the not_in_game= lines content.ini has now (build 98)."""
+        c = configparser.ConfigParser(interpolation=None)
+        try:
+            c.read(self.root / 'content.ini', encoding='utf-8')
+        except (OSError, configparser.Error):
+            return {}
+        return {name[5:]: c.get(name, 'not_in_game') for name in c.sections()
+                if name.startswith('pack.') and c.get(name, 'not_in_game', fallback='')}
+
     def content_revision(self):
         """The catalogue revision content.ini was last written for (0 when there is none)."""
         c = configparser.ConfigParser(interpolation=None)
@@ -1149,8 +1159,8 @@ class Manager:
         return out
 
     def catalogue_places(self):
-        """The new-fighter places of the cached signed catalogue (a live pack this PC has not synced yet holds its
-        place too); empty when there is none or it does not verify."""
+        """The new-fighter places and numbers of the cached signed catalogue (a live pack this PC has not synced yet
+        holds its place or number too); empty when there is none or it does not verify."""
         try:
             return {m['fighter_fe_id'] for m in self.trusted()['mods'] if isinstance(m.get('fighter_fe_id'), int)}
         except (ValueError, OSError, KeyError, TypeError):
@@ -1158,9 +1168,9 @@ class Manager:
 
     def compose(self):
         """Compose the fighter-body, clothing and venue packs into <data>/mod-manager/content-files (the game
-        serves them). Holds the runtime lock, so never while the game runs. A player's own new fighter whose place
-        a community fighter has now moves to a free one (content_compose.settle_places); its local.json keeps the
-        new place, so the next compose and the Content page agree."""
+        serves them). Holds the runtime lock, so never while the game runs. A player's own new fighter plays by its
+        own number (build 98, content_compose.settle_places); its local.json keeps the number, so the next compose
+        and the Content page agree. A pack the composition leaves out gets its reason in content.ini."""
         with file_lock(self.root / 'runtime.lock'):
             self.progress('Preparing community content')
             off = content_compose.read_off(self.data) | content_compose.read_own_off(self.data)
@@ -1168,10 +1178,13 @@ class Manager:
             moved = []
             result = content_compose.compose(self.data, self.game, packs, root=self.root, log=moved.append,
                                              reserved=self.catalogue_places())
-            if any([self.keep_local_place(p) for p in packs if p.get('local')]):
-                self.write_content(self.content_revision())     # the Content page and the game: the new place
+            kept = any([self.keep_local_place(p) for p in packs if p.get('local')])
+            # build 98: the Content page says why a pack is not in the game (content.ini not_in_game=), so content.ini
+            # follows a moved place or number and every change of those reasons
+            if kept or self.content_reasons() != content_compose.not_in_game(self.root):
+                self.write_content(self.content_revision())
             for line in moved:
-                if 'moved from place' in line or 'left out' in line:
+                if 'moved from place' in line or 'left out' in line or 'own new fighter number' in line:
                     self.progress(line.replace('[compose] ', ''))
             self.compose_own(off)
         skipped = '; '.join('%s: %s' % s for s in result['skipped'] + result.get('lang_skipped', []))
@@ -1231,6 +1244,8 @@ class Manager:
         lines = ['; FFNY Online community packs, written by setup/mods.py sync. Do not edit.',
                  '[content]', 'revision=%d' % revision]
         reviewed = self.reviewed_dates()
+        # build 98: why the last composition left a pack out ("Not in game: <reason>" on the Content page), never silent
+        reasons = content_compose.not_in_game(self.root)
         credits = self.credits_by_id()
         groups = self.groups_by_id()
         rows = [(r.get('order', 0), mod_id, r) for mod_id, r in self.state()['installed'].items() if r.get('synced')]
@@ -1275,6 +1290,8 @@ class Manager:
                 if template:
                     # build 83: the Content page says where the new fighter is ("in D-Mob's spot")
                     lines += ['template_fe_id=%d' % template, 'template_name=' + self.fighter_name(template)]
+            if mod_id in reasons:
+                lines.append('not_in_game=' + reasons[mod_id])
         for p in self.local_packs():
             # the player's own packs (FFNY Studio, "Use in my game"): local=1, never in the online content print;
             # online_ok=0 keeps the game offline while the pack is on (pc_content.c)
@@ -1291,6 +1308,8 @@ class Manager:
                 template = new_fighter_template_fe_id(p['folder'] / 'install.json')
                 if template:
                     lines += ['template_fe_id=%d' % template, 'template_name=' + self.fighter_name(template)]
+            if p['id'] in reasons:
+                lines.append('not_in_game=' + reasons[p['id']])
         atomic_bytes(self.root / 'content.ini', ('\n'.join(lines) + '\n').encode('utf-8'))
 
     def fighter_name(self, fe_id):
