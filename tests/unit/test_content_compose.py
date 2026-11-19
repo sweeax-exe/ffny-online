@@ -820,3 +820,17 @@ def test_all_36_new_venue_places_compose():
         names.append(name)
     assert len(set(names)) == 36
     assert sodmod._row_name("x", 0xFFFFF000) and sodmod.name_hash(sodmod._row_name("x", 0xFFFFF000)) > 0xFFFFF000
+
+
+def test_new_venue_entity_names_the_pack_s_own_stage_objects():
+    """FFNY Studio gives a template stage object the edit changed its own copy (V2BG_15A_H -> V2BG_29A_H.o, added
+    by the pack); the new entity must name that copy, the others stay the template's (Crow's Office Street was
+    black when the entity kept V2BG_15A_H, 2026-11-19)."""
+    block = ("<entity>\r\n\t\t<name>V2BG_29A</name>\r\n\t\t<model>\r\n\t\t\t<name>V2BG_29A</name>\r\n\t\t</model>"
+             "\r\n\t\t<model>\r\n\t\t\t<name>V2BG_15A_H</name>\r\n\t\t</model>\r\n\t\t<model>\r\n\t\t\t"
+             "<name>V2BG_15A_A</name>\r\n\t\t</model>\r\n\t\t<model>\r\n\t\t\t<name>V2BG_15A_A1</name>\r\n\t\t"
+             "</model>\r\n\t</entity>")
+    out = newvenue.own_entity_models(block, "V2BG_15A", "V2BG_29A", ["V2BG_29A_H.o", "V2BG_29A.o"])
+    assert "<name>V2BG_29A_H</name>" in out and "V2BG_15A_H" not in out
+    assert "<name>V2BG_15A_A</name>" in out and "<name>V2BG_15A_A1</name>" in out
+    assert newvenue.own_entity_models(block, "V2BG_15A", "V2BG_29A") == block

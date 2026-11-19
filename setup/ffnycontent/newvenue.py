@@ -123,6 +123,21 @@ def set_fighter_light(block, entity_text, venue):
     return out
 
 
+def own_entity_models(block, template_filename, filename, added=()):
+    """The entity block with each template stage model renamed to the new venue's own (``V2BG_15A_H`` ->
+    ``V2BG_29A_H``) when the pack adds that model (``added``: v2bg.viv entry names the pack adds). FFNY Studio
+    gives an edited template object its own copy under the new code and the copy's object XML names it; an
+    entity that kept the template's name drew none of the venue's objects (Crow's Office Street came out black,
+    2026-11-19)."""
+    added = {a.lower() for a in added}
+    pattern = re.compile(r"(<name>\s*)(%s)(_\w+)(\s*</name>)" % re.escape(template_filename), re.IGNORECASE)
+
+    def swap(m):
+        new = filename + m.group(3)
+        return m.group(1) + new + m.group(4) if (new + ".o").lower() in added else m.group(0)
+    return pattern.sub(swap, block)
+
+
 def drop_entity_models(block, main):
     """An ``entity.xml`` block with only the main model's ``<model>`` left."""
     def keep(m):
@@ -298,7 +313,7 @@ def _numbers(text, tag):
     return out
 
 
-def apply(venue_xml, entity_xml, sod_blob, op, taken_names=()):
+def apply(venue_xml, entity_xml, sod_blob, op, taken_names=(), added=()):
     """(venue.xml, entity.xml, djv2.sod) bytes with the op's venue added. ``taken_names`` are the v2bg.viv entry
     names that exist already (lower case): the new filename must be free there, in venue.xml and in the table."""
     filename, fe_id = op["filename"], int(op["fe_id"])
@@ -322,6 +337,7 @@ def apply(venue_xml, entity_xml, sod_blob, op, taken_names=()):
     venue_out = (text[:end].rstrip("\r\n") + "\r\n" + "\t" + record + "\r\n\r\n" + text[end:]).encode("latin-1")
     ent = entity_xml.decode("latin-1")
     block = entity_block(ent, template, filename)
+    block = own_entity_models(block, op["template"], filename, added)
     if op.get("drop_objects"):
         block = drop_entity_models(block, filename)
     if op.get("models"):
