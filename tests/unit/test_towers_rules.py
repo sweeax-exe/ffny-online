@@ -102,6 +102,43 @@ int main(void)
         uint32_t s = 7u, x = towers_next32(&s), y = towers_next32(&s);
         printf("gen|%u|%u|%u\n", x, y, s);
     }
+    {   /* T1: the account service's vectors (server relay/accounts/towers_test.go): the same run on both sides */
+        int p10[10], v5[5] = { 1, 3, 5, 8, 30 };
+        uint32_t s = 0x4F2A91C3u, x = towers_next32(&s), y = towers_next32(&s);
+        for (i = 0; i < 10; i++) p10[i] = i + 1;
+        towers_new_run(&b, TOWER_UPTOWN, 0x4F2A91C3u, 3, 0, p10, 10, v5, 5);
+        printf("srvgen|%08X|%08X|%08X\n", x, y, b.roster_hash);
+        printf("srvorder|");
+        for (i = 0; i < b.floors; i++) printf("%s%d", i ? "," : "", b.roster[i]);
+        printf("|");
+        for (i = 1; i <= 5; i++) printf("%s%d", i > 1 ? "," : "", towers_venue(&b, i));
+        printf("|");
+        for (i = 1; i <= 9; i++) { TowerFloorRules r; towers_floor_rules(TOWER_UPTOWN, i, 9, &r); printf("%s%d", i > 1 ? "," : "", r.cpu_level); }
+        printf("\n");
+    }
+    {   /* T1: a draw is fought again once per floor; a fight left open is a loss at the next start */
+        int beaten = -1, open;
+        printf("refight|%d|%d|%d\n", towers_draw_refights(0), towers_draw_refights(1), towers_draw_refights(2));
+        a.in_fight = 13;
+        open = towers_pending_is_loss(&a, &beaten);
+        printf("pending|%d|%d|", open, beaten);
+        a.in_fight = 0;
+        printf("%d\n", towers_pending_is_loss(&a, &beaten));
+    }
+    {   /* T1: the server's run id, the board flag and the floor's refights survive the file */
+        const TowerRun *runs[TOWER_COUNT] = { &a, NULL, NULL };
+        TowerRun back[TOWER_COUNT];
+        int have[TOWER_COUNT], best[TOWER_COUNT] = { 1, 0, 0 };
+        snprintf(a.run_id, sizeof a.run_id, "9f3c0a17be42d6e1");
+        a.board = 1;
+        a.refights = 1;
+        towers_file_write(runs, best, text, (int)sizeof text);
+        towers_file_read(text, back, have, best);
+        printf("net|%d|%s|%d|%d\n", have[0], back[0].run_id, back[0].board, back[0].refights);
+        snprintf(a.run_id, sizeof a.run_id, "bad\"id");     /* a quote cannot break the file */
+        towers_file_write(runs, best, text, (int)sizeof text);
+        printf("netbad|%d\n", towers_file_read(text, back, have, best) && have[0]);
+    }
     return 0;
 }
 '''
@@ -215,6 +252,26 @@ def test_generator_is_splitmix32(out):
     s, x = mix(7)
     s, y = mix(s)
     assert row(out, 'gen') == [str(x), str(y), str(s)]
+
+
+def test_the_server_computes_the_same_run(out):
+    # the vectors the account service's tests pin (server relay/accounts/towers_test.go): seed 0x4F2A91C3, pool 1..10,
+    # climber 3, venues 1,3,5,8,30 in Uptown (30 is a community venue: dropped)
+    assert row(out, 'srvgen') == ['AFAAAE8E', '4365412F', '68BD538D']
+    order, venues, levels = row(out, 'srvorder')
+    assert ids(order) == [8, 6, 5, 7, 4, 2, 1, 10, 9]
+    assert ids(venues) == [3, 8, 1, 1, 3]       # floors 3 and 4: the rule looks at the floor below's own draw
+    assert ids(levels) == [0, 1, 1, 2, 2, 2, 2, 2, 2]
+
+
+def test_draws_and_fights_left_open(out):
+    assert row(out, 'refight') == ['1', '0', '0']   # one refight per floor, then a draw is a loss
+    assert row(out, 'pending') == ['1', '12', '0']  # left in floor 13's fight: 12 beaten, the run is over
+
+
+def test_the_server_run_survives_the_file(out):
+    assert row(out, 'net') == ['1', '9f3c0a17be42d6e1', '1', '1']
+    assert row(out, 'netbad') == ['1']
 
 
 def test_the_game_side_is_wired():

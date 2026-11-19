@@ -145,6 +145,18 @@ void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
     }
 }
 
+int towers_draw_refights(int refights)
+{
+    return refights < 0 ? 1 : refights < TOWER_MAX_REFIGHTS;
+}
+
+int towers_pending_is_loss(const TowerRun *run, int *beaten)
+{
+    if (!run || run->in_fight < 1 || run->floors <= 0) return 0;
+    if (beaten) *beaten = run->in_fight - 1 < 0 ? 0 : run->in_fight - 1;
+    return 1;
+}
+
 int towers_health_after_win(int rule, int refill, int end_pct)
 {
     int h = end_pct < 1 ? 1 : end_pct > 100 ? 100 : end_pct;
@@ -186,9 +198,9 @@ int towers_file_write(const TowerRun *const runs[TOWER_COUNT], const int best[TO
         if (!r || r->floors <= 0) continue;
         PUT("%s\n{\"tower\":%d,\"seed\":%u,\"fighter\":%d,\"skin\":%d,\"floors\":%d,\"floor\":%d,\"hash\":%u,"
             "\"health\":%d,\"climb_ms\":%u,\"interrupted\":%d,\"in_fight\":%d,\"draws\":%d,\"skipped\":%d,"
-            "\"started\":%lld,",
+            "\"started\":%lld,\"refights\":%d,\"board\":%d,\"net_next\":%d,\"run\":\"%s\",",
             first ? "" : ",", r->tower, r->seed, r->fighter, r->skin, r->floors, r->floor, r->roster_hash, r->health_pct,
-            r->climb_ms, r->interrupted, r->in_fight, r->draws, r->skipped, r->started);
+            r->climb_ms, r->interrupted, r->in_fight, r->draws, r->skipped, r->started, r->refights, r->board, r->net_next, r->run_id);
         n = put_list(out, n, size, "venues", r->venues, r->venue_n);
         PUT(",");
         n = put_list(out, n, size, "roster", r->roster, r->floors);
@@ -283,6 +295,18 @@ int towers_file_read(const char *text, TowerRun runs[TOWER_COUNT], int have[TOWE
             read_int(p, close, "draws", &r.draws);
             read_int(p, close, "skipped", &r.skipped);
             if (read_ll(p, close, "started", &started)) r.started = started;
+            read_int(p, close, "refights", &r.refights);
+            read_int(p, close, "board", &r.board);
+            read_int(p, close, "net_next", &r.net_next);
+            {   /* the server's run id: letters and digits only */
+                const char *q = key_at(p, close, "run");
+                int k = 0;
+                if (q && *q == '"')
+                    for (q++; q < close && *q != '"' && k < TOWER_RUN_ID_MAX; q++)
+                        if ((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'z') || (*q >= 'A' && *q <= 'Z') || *q == '-')
+                            r.run_id[k++] = *q;
+                r.run_id[k] = 0;
+            }
             r.venue_n = read_list(p, close, "venues", r.venues, TOWER_MAX_VENUES);
             ok = r.venue_n > 0 && r.floors > 0 && r.floors <= TOWER_MAX_ROSTER &&
                  read_list(p, close, "roster", r.roster, TOWER_MAX_ROSTER) == r.floors &&

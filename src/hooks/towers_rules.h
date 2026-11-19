@@ -24,6 +24,9 @@ extern "C" {
 #define TOWER_MAX_VENUES    64
 #define TOWER_CHAPTER       10  /* Five Boroughs: a save point every 10 floors */
 #define TOWER_FIRST_COMMUNITY_VENUE 28   /* venue feIDs 28..63 are community venues (ONLINE_NEW_VENUE) */
+#define TOWER_RULES_VERSION 1   /* T1: what the account service checks a run's reports against (towers.go "rules") */
+#define TOWER_MAX_REFIGHTS  1   /* a draw is fought again once per floor; a second draw on that floor is a loss */
+#define TOWER_RUN_ID_MAX    40  /* the account service's run id (16 hex digits today) */
 
 /* Between fights: full health (the default, owner 2026-11-18), the health the fight ended with, or that plus a
  * refill (percentage points of the full bar). Per tower, from [towers] health<N> / refill<N> in the settings. */
@@ -49,6 +52,12 @@ typedef struct TowerRun {
     int draws;                  /* fights that ended in a draw (fought again) */
     int skipped;                /* floors whose opponent this PC no longer has (counted as passed) */
     long long started;          /* unix seconds */
+    /* T1: the account service's side (all 0 / "" for a run that was never on the server) */
+    char run_id[TOWER_RUN_ID_MAX + 1];  /* POST /api/towers/start's run; "" an offline run (never on the boards) */
+    int board;                  /* the service said this run can go on its boards (board=1) */
+    int refights;               /* draws on the floor fought next (TOWER_MAX_REFIGHTS) */
+    int net_next;               /* the floor the service expects next: Five Boroughs resumes at its chapter's start,
+                                   so the floors below this one are fought again without reports (0: as floor) */
 } TowerRun;
 
 /* What one floor's fight is set to (section 2.3 of the design): the CPU's game level and our own knobs past Hard. */
@@ -81,6 +90,13 @@ int towers_is_save_point(int tower, int beaten, int floors, int chapter);
 /* The floor a run resumes on when it was written after `beaten` floors: the next one. */
 /* The curve: p = floor / floors (Five Boroughs: floor / min(floors, 100), endless stays at the top row). */
 void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out);
+/* After a draw on a floor that had `refights` draws before it: 1 the floor is fought again (refights + 1 is then the
+ * floor's count), 0 the draw counts as a loss (the run ends). */
+int towers_draw_refights(int refights);
+/* A fight that was under way when the run file was last written (the game closed, crashed or was ended in the
+ * fight) is a loss on that floor at the next start: 1 when `run` holds such a fight (run->in_fight), and then the
+ * floors it beat (in_fight - 1) through *beaten. Quitting mid-fight never rerolls a floor. */
+int towers_pending_is_loss(const TowerRun *run, int *beaten);
 /* The climber's health going into the next fight after a win that ended with end_pct (1..100). */
 int towers_health_after_win(int rule, int refill, int end_pct);
 

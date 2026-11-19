@@ -467,6 +467,9 @@ void netplay_build_fingerprint(uint8_t out[8]);     /* HELLO's build field: room
 /* The fight files' print (fighters, moves, AI, database, animation archives), made once on a background
  * thread; main.c starts it at boot, the network thread waits for it only if it still runs. */
 void netplay_data_print_start(void);
+/* Appends ,"files":{"print":..,"override":..} (the online reports' fight-file facts) at n; returns the new length (n
+ * unchanged while the print is not made yet). Towers' reports (towers.c) carry it too. */
+int netplay_files_json(char *json, int size, int n);
 /* A room member's ping to the relay in ms, as it reports it (relay slot), -1 not known; this PC's
  * own slot gives netplay_rtt(). Players report it every two seconds in a room (builds from 30). */
 int netplay_room_ping(int slot);

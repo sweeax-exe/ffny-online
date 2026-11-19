@@ -398,3 +398,31 @@ def test_pc_label(tool, tmp_path):
     assert len(labels) == 6
     out = run(tool, 'label', '!!!', 1, tmp_path / 'empty.txt').splitlines()
     assert out[0] == '[]' and out[2] == '0 []'          # nothing usable: not written
+
+def test_the_towers_climbs_go_up_and_come_back(tool, tmp_path):
+    # build 97: <save>/ffny/towers.json (towers.c) is in the cloud save, checked by the same rule as the service's
+    # (relay/accounts/cloudsaves.go cloudSaveFile), and a restore puts it back beside a copy of this PC's own
+    a = save_area(tmp_path / 'A')
+    (a / 'ffny').mkdir()
+    climbs = b'{"version":1,"best":[12,3,0],"runs":[]}\n'
+    (a / 'ffny' / 'towers.json').write_bytes(climbs)
+    (a / 'ffny' / 'towers.json.tmp').write_bytes(b'{}')                  # its writer's temporary copy: never
+    out = run(tool, 'pack', a, tmp_path / 'cloud.zip')
+    names = [l.split()[1] for l in out.splitlines() if l.startswith('file ')]
+    assert 'ffny/towers.json' in names and not any('tmp' in n for n in names), out
+    b = tmp_path / 'B' / 'save'
+    (b / 'ffny').mkdir(parents=True)
+    (b / 'ffny' / 'towers.json').write_bytes(b'{"version":1,"best":[1,0,0],"runs":[]}\n')
+    out = run(tool, 'restore', tmp_path / 'cloud.zip', b, tmp_path / 'B' / 'save-backups', int(time.time()))
+    assert out.startswith('1 '), out
+    assert (b / 'ffny' / 'towers.json').read_bytes() == climbs
+    assert b'[1,0,0]' in (b / 'ffny' / 'towers.json.before-cloud').read_bytes()
+    # not a JSON file at that name: refused like any stranger in a cloud save
+    files = {'UserData/45410049/A/SaveMeta.xbx': b'\xff\xfeN\x00', 'UserData/45410049/A/A': b'20CMxyz',
+             'ffny/towers.json': b'MZ\x90\x00'}
+    write_zip(tmp_path / 'bad.zip', files)
+    assert fields(run(tool, 'unpack', tmp_path / 'bad.zip'))['ok'] == '0'
+    files['ffny/towers.json'] = b'{}'
+    files['ffny/other.json'] = b'{}'
+    write_zip(tmp_path / 'other.zip', files)
+    assert fields(run(tool, 'unpack', tmp_path / 'other.zip'))['ok'] == '0'

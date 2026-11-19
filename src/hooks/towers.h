@@ -6,8 +6,16 @@
  * applied in the fight (the CPU's damage through the health-change hook, its start momentum, its health as the
  * damage it takes). The fight's result is read from the game's own phase and result words; once the game is back on
  * the battle menu after the results, the overlay's TOWERS window (towers_ui.inc) shows the climb or the end of the
- * run. A loss ends the run (no continues). The run is written to <data>/towers.json at its save points. Never
- * online: every hook does nothing while netplay is active. Rules: towers_rules.h. */
+ * run. A loss ends the run (no continues). The run is written to <save>/ffny/towers.json at its save points (inside the
+ * cloud saves, build 97). Never online: every hook does nothing while netplay is active. Rules: towers_rules.h.
+ *
+ * T1 (build 97): signed in, a run starts on the account service (POST /api/towers/start gives the seed and the run's
+ * id) and each floor's fight is reported there (start, then the result with the fight's numbers and this PC's
+ * anti-cheat facts), in order, by one background thread; the service keeps the boards (server
+ * relay/accounts/towers.go). Signed out, or without an answer, the run is offline: playable, never on a board. The
+ * anti-quit rule: a fight is noted in the run file when it starts, so a game closed, crashed or quit in a fight ends
+ * the run on that floor at the next start (towers_pending_is_loss); a fight left from the pause menu is a loss at
+ * once. A draw is fought again once per floor (TOWER_MAX_REFIGHTS), a second draw there is a loss. */
 #ifndef DEFJAM_TOWERS_H
 #define DEFJAM_TOWERS_H
 
@@ -40,11 +48,17 @@ typedef struct TowersView {
     uint32_t seed, climb_ms;
     int fighter, skin;
     unsigned long long since;   /* GetTickCount64 when the state began */
+    /* T1 */
+    int online;                 /* the run is on the account service (its reports go there) */
+    int board;                  /* ... and can go on its boards */
+    char why[24];               /* off the boards: the service's reason ("created", "packs", "rules", "roster", "order") */
+    int draw_loss;              /* LOST: a second draw on the floor */
 } TowersView;
 
 /* A new run of `tower` (TOWER_UPTOWN or TOWER_FIVE_BOROUGHS) for the climber (Battle-mode ID, skin): any saved run of
  * that tower is replaced. The first floor's fight is asked for at once. 0 when the tower cannot be built (no
- * fighters or venues read from the dump). */
+ * fighters or venues read from the dump). Signed in it first asks the account service for the run (up to about 8 s:
+ * call it off the overlay's thread); without an answer the run starts offline. */
 int towers_start(int tower, int fighter, int skin);
 /* Resume the saved run of `tower` on its floor. 0 when there is none. */
 int towers_resume(int tower);
@@ -72,6 +86,15 @@ void towers_save_quit(void);
 void towers_done(void);
 /* The draw-only card over the load (the next opponent) is due: a floor's fight is asked for or loading. */
 int towers_card_wanted(void);
+
+/* T1: a fight left open when the game last closed (or crashed) ended its run at this start: 1 once with the tower and
+ * the floor, for the TOWERS page's note. */
+int towers_resolved_take(int *tower, int *floor);
+/* The run's link to the account service in a few words for the screens ("ON THE BOARD", "OFFLINE: NOT ON THE
+ * BOARD", ...); "" with no run. */
+void towers_net_text(char *out, int size);
+/* The climb's sound: the front end's own Audio.Play(id), played at the next front-end call on the game's thread. */
+void towers_play_sfx(int id);
 
 /* The hooks. */
 void towers_match_start(void);          /* sub_001A4D90's entry (openworld.c's ow_match_start) */

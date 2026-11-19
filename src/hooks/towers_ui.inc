@@ -14,14 +14,23 @@
 //   the card        the same scene, drawn only, while the next fight loads (and before the first floor).
 //   the end         KNOCKED OUT ON FLOOR n (a loss ends the run) or the tower CLEARED: the numbers and the run's
 //                   fighters; A BACK TO TOWERS (the hub opens on this page), B the battle menu.
-// No art files: every shape is drawn here in the hub's look (glass, the Anton titles), original to this mode.
+// The towers' art: scripts/tower-art.py renders the port's own three buildings at setup to
+// <data>/online-art/towers/tower<N>-512.png (towers.json says where the floor column goes); without them every shape
+// is drawn here in the hub's look (glass, the Anton titles), original to this mode.
+//
+// T1 (build 97): signed in, a climb is on the account service's boards (towers.c talks to it). X on the page opens
+// the BOARD of the chosen tower (LB / RB: this month or all time): the top 10 and your place. The page shows your
+// place under each tower and says whether your climbs go on the board. A start asks the service for the run first
+// (the card says so while it answers). The climb plays two of the front end's own sounds (Audio.Play).
 //
 // Tests: RECOMP_TEST_OPEN_ONLINE=towers opens the page; RECOMP_TEST_TOWERS_QUIT=<n> presses B on the climb after
 // floor n (a save point); RECOMP_TEST_TOWERS_END=a|b answers the end screen after 3 s. Gallery pages: hub-towers,
 // towers, towers-rules, towers-saved, towers-start, towers-climb-0..3, towers-card, towers-first, towers-draw,
-// towers-lost, towers-cleared.
+// towers-lost, towers-cleared, towers-board, towers-board-all, towers-art (the drawn fallback beside the art),
+// towers-starting.
 
 void open_fighters_for(bool towers);       // below: the hub's grid for a tower's climber
+bool G_towers_starting = false;            // the gallery's towers-starting page
 bool g_towers_close = false;               // the start card started a run: the online screens close
 std::atomic<int> g_towers_hub{0};          // the end screen's A: the next opening of the screens shows TOWERS
 
@@ -43,7 +52,133 @@ struct TowersUi {
     TowerRun gal_runs[TOWER_COUNT];
     bool gal_have[TOWER_COUNT] = { false, false, false };
     int gal_best[TOWER_COUNT] = { 0, 0, 0 };
+    // T1: the board, the start on the service, the climb's sounds
+    bool board = false;             // X: the BOARD panel over the page
+    int board_all = 0;              // 0 this month, 1 all time
+    std::atomic<int> starting{0};   // 1 a start is asking the service, 2 it started, 3 it could not start
+    bool sfx_move = false, sfx_land = false;
+    bool gal_drawn = false;         // towers-art: the drawn fallback even with the art there
 } TWU;
+
+// GET /api/towers/board?format=text (server relay/accounts/towers.go TowerBoardText), per season kind.
+struct TowerBoardRow { int place = 0; long long account = 0; std::string name; int floors = 0; int secs = 0; int fighter = -1; bool cleared = false; };
+struct TowerBoardTower { int entries = 0; std::vector<TowerBoardRow> rows; bool me = false; int me_place = 0, me_floors = 0, me_secs = 0; };
+struct TowerBoard {
+    bool valid = false;
+    std::string season;
+    long long ends = 0, now = 0;
+    TowerBoardTower t[TOWER_COUNT];
+    ULONGLONG got = 0;
+};
+struct TowerBoards {
+    std::mutex mu;
+    TowerBoard b[2];                // [0] this month, [1] all time
+    int status[2] = { 0, 0 };       // the last fetch: 200, 404 (the boards are off), 0 unreachable, -1 not yet
+    ULONGLONG at[2] = { 0, 0 };
+    std::atomic<int> busy[2];
+    TowerBoards() { busy[0] = busy[1] = 0; }
+} TWB;
+
+bool parse_tower_board(const char *text, TowerBoard &b)
+{
+    b = TowerBoard();
+    bool any = false;
+    for (auto &kv : turf_lines(text)) {
+        const std::string &k = kv.first, &v = kv.second;
+        auto fl = ring_fields(v);
+        if (k == "enabled") any = atoi(v.c_str()) != 0;
+        else if (k == "season") b.season = v;
+        else if (k == "ends") b.ends = atoll(v.c_str());
+        else if (k == "now") b.now = atoll(v.c_str());
+        else if (k == "tower" || k == "row" || k == "me") {
+            int t = (int)ring_num(fl, 0);
+            if (t < 1 || t > TOWER_COUNT) continue;
+            TowerBoardTower &bt = b.t[t - 1];
+            if (k == "tower") bt.entries = (int)ring_num(fl, 2);
+            else if (k == "row" && fl.size() >= 8) {
+                TowerBoardRow r;
+                r.place = (int)ring_num(fl, 1);
+                r.account = ring_num(fl, 2);
+                r.name = ring_str(fl, 3);
+                r.floors = (int)ring_num(fl, 4);
+                r.secs = (int)ring_num(fl, 5);
+                r.fighter = (int)ring_num(fl, 6);
+                r.cleared = ring_num(fl, 7) != 0;
+                bt.rows.push_back(r);
+            } else if (k == "me") {
+                bt.me = true;
+                bt.me_place = (int)ring_num(fl, 1);
+                bt.me_floors = (int)ring_num(fl, 2);
+                bt.me_secs = (int)ring_num(fl, 3);
+            }
+        }
+    }
+    b.valid = any;
+    return any;
+}
+
+// The gallery's sample board (and RECOMP_TEST_TOWERS_BOARD_FILE for tests without a service).
+const char *const TOWERS_BOARD_SAMPLE =
+    "enabled=1\nseason=2026-11\nends=1764547200\nnow=1763560000\n"
+    "tower=1|UPTOWN|41\n"
+    "row=1|1|12|Blaze|59|2712|22|1\nrow=1|2|51|Kaze|47|2380|9|0\nrow=1|3|34|Crow|41|2101|31|0\n"
+    "row=1|4|77|Rex|36|1922|4|0\nrow=1|5|90|Nia|33|1840|70|0\nrow=1|6|91|Sol|29|1701|12|0\n"
+    "row=1|7|92|Oz|24|1388|60|0\nrow=1|8|93|Tia|23|1290|18|0\nrow=1|9|94|Mo|19|1104|33|0\nrow=1|10|95|Vic|17|990|44|0\n"
+    "me=1|14|12|655\n"
+    "tower=2|FIVE BOROUGHS|17\n"
+    "row=2|1|51|Kaze|88|5120|9|0\nrow=2|2|12|Blaze|61|3302|22|0\nrow=2|3|77|Rex|30|1650|4|0\n"
+    "me=2|0|0|0\n";
+
+void towers_fetch_board(int which)
+{
+    if (gallery_on() || which < 0 || which > 1 || TWB.busy[which].exchange(1)) return;
+    TWB.at[which] = GetTickCount64();
+    std::thread([which]() {
+        std::vector<char> buf(16384);
+        int len = 0, status = 0;
+        const char *file = getenv("RECOMP_TEST_TOWERS_BOARD_FILE");
+        if (file && *file) {
+            FILE *fp = fopen(file, "rb");
+            if (fp) { len = (int)fread(buf.data(), 1, buf.size() - 1, fp); fclose(fp); buf[len] = 0; status = 200; }
+        } else {
+            // signed in: account_call sends the session, so the answer has our own place (me=)
+            status = account_state() == ACCOUNT_IN
+                         ? account_call("GET", which ? "/api/towers/board?format=text&n=10&season=all" : "/api/towers/board?format=text&n=10",
+                                        nullptr, buf.data(), (int)buf.size(), 8000, nullptr)
+                         : account_fetch(which ? "/api/towers/board?format=text&n=10&season=all" : "/api/towers/board?format=text&n=10",
+                                         buf.data(), (int)buf.size(), &len);
+            buf[buf.size() - 1] = 0;
+        }
+        TowerBoard b;
+        bool ok = status == 200 && parse_tower_board(buf.data(), b);
+        {
+            std::lock_guard<std::mutex> lock(TWB.mu);
+            if (ok) { b.got = GetTickCount64(); TWB.b[which] = b; }
+            else if (status == 404) TWB.b[which] = TowerBoard();
+            TWB.status[which] = ok ? 200 : status;
+        }
+        if (ok)
+            fprintf(stderr, "[TOWERS] board (%s): season %s, Uptown %d entries (you #%d), Five Boroughs %d (you #%d)\n",
+                    which ? "all time" : "month", b.season.c_str(), b.t[0].entries, b.t[0].me_place, b.t[1].entries, b.t[1].me_place);
+        else
+            fprintf(stderr, "[TOWERS] board (%s): %s (HTTP %d)\n", which ? "all time" : "month", status == 404 ? "off" : "not loaded", status);
+        TWB.busy[which] = 0;
+    }).detach();
+}
+
+// The board as the page knows it now (the gallery's sample, else the last fetch, fetched again after a minute).
+TowerBoard tw_board(int which)
+{
+    if (gallery_on()) {
+        TowerBoard b;
+        parse_tower_board(TOWERS_BOARD_SAMPLE, b);
+        if (which) b.season = "all";
+        return b;
+    }
+    if (GetTickCount64() - TWB.at[which] > 60000 || !TWB.at[which]) towers_fetch_board(which);
+    std::lock_guard<std::mutex> lock(TWB.mu);
+    return TWB.b[which];
+}
 
 const ImU32 TOWER_COL[TOWER_COUNT] = { IM_COL32(255, 150, 40, 255), IM_COL32(80, 190, 255, 255),
                                        IM_COL32(255, 60, 170, 255) };
@@ -99,11 +234,36 @@ bool window_lit(int kind, int col, int row)
 // Each in the 640x480 space: centre cx, ground at `base`, scale s (1 the page's size), dim 0..1 (1 full light).
 // Returns the floor column's box (x, top, bottom) through col_x / col_top / col_bottom.
 
+// The art's floor column (scripts/tower-art.py COLUMN, fractions of the 512 x 1024 picture: x centre, top, bottom,
+// width) and the size the picture is drawn at on the page (its ground line at the picture's bottom).
+const float TOWER_ART_COLUMN[TOWER_COUNT][4] = { { 0.50f, 0.20f, 0.90f, 0.13f }, { 0.50f, 0.16f, 0.96f, 0.11f },
+                                                 { 0.43f, 0.15f, 0.88f, 0.12f } };
+const float TOWER_ART_W = 128, TOWER_ART_H = 256;
+
+const Tex &tower_tex(int kind)
+{
+    static const char *const rel[TOWER_COUNT] = { "towers/tower1-512.png", "towers/tower2-512.png", "towers/tower3-512.png" };
+    if (kind < 1 || kind > TOWER_COUNT || TWU.gal_drawn) return no_tex();
+    return tex(rel[kind - 1]);
+}
+
 void draw_tower_shape(ImDrawList *dl, const Frame &f, int kind, float cx, float base, float s, float dim, float *col_top,
                       float *col_bottom, float *col_w)
 {
     ImU32 night = shade_col(IM_COL32(18, 16, 20, 255), 1);
     double now = ImGui::GetTime();
+    const Tex &art = tower_tex(kind);
+    if (art.srv) {      // the rendered building; the floor column is drawn over its marked zone
+        float w = TOWER_ART_W * s, h = TOWER_ART_H * s, x = cx - w / 2, y = base - h;
+        int k = (int)(255 * (0.45f + 0.55f * dim));
+        image_fit(dl, f, art, x, y, w, h, IM_COL32(k, k, k, 255));
+        const float *c = TOWER_ART_COLUMN[kind - 1];
+        *col_top = y + c[1] * h;
+        *col_bottom = y + c[2] * h;
+        *col_w = c[3] * w;
+        (void)night; (void)now;
+        return;
+    }
     if (kind == TOWER_UPTOWN) {
         // a brownstone tenement: brick, a cornice, a fire escape zigzag, a water tank on the roof, the stoop
         float w = 112 * s, h = 214 * s, x = cx - w / 2, y = base - h;
@@ -255,7 +415,16 @@ void open_towers()
     S.page = TOWERS;
     TWU.card = 0;
     TWU.rules = false;
+    TWU.board = false;
     S.towers_pick = false;
+    int t = 0, floor = 0;
+    if (!gallery_on() && towers_resolved_take(&t, &floor)) {     // the anti-quit rule (towers.c file_load)
+        char line[160];
+        snprintf(line, sizeof line, "Your %s climb ended on floor %d: the game closed during that fight, which counts as a loss.",
+                 towers_name(t), floor);
+        say(line, 8000);
+    }
+    if (!gallery_on() && account_state() == ACCOUNT_IN) { TWB.at[0] = TWB.at[1] = 0; }     // fetched again on the page
 }
 
 void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
@@ -268,20 +437,79 @@ void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
         "No continues: a loss ends the climb. Your best floor counts.",
         "The CPU climbs with you: Easy, Normal, then Hard, and past Hard it hits harder, starts with momentum "
         "and takes more to put down. Bosses hit hardest.",
-        "Leaving a fight from the pause menu counts as a loss.",
+        "Leaving a fight, or closing the game in one, counts as a loss. A draw is fought again once.",
+        "Signed in, your climbs go on the monthly and all-time boards. Rewards are looks only.",
     };
-    float y = 146;
+    float y = 140;
     for (const char *line : common) {
         text(dl, f, g_hand, 13, 140, y, ORANGE, "-", LEFT, 0.8f);
         text(dl, f, g_title, 12.5f, 154, y, WHITE, line, LEFT, 0.8f, 350);
-        y += text_width(f, g_title, 12.5f, line) > 350 ? 38 : 22;
+        y += text_width(f, g_title, 12.5f, line) > 350 ? 34 : 20;
     }
-    const char *own = tower == TOWER_UPTOWN ? "Uptown: the original fighters (and your created fighter as the climber); saved after every floor."
-                    : tower == TOWER_FIVE_BOROUGHS ? "Five Boroughs: community fighters and venues too. A save point at the end of each chapter of 10 floors."
+    const char *own = tower == TOWER_UPTOWN ? "Uptown: the original fighters; saved after every floor. Your created fighter may climb, but not onto the Uptown board."
+                    : tower == TOWER_FIVE_BOROUGHS ? "Five Boroughs: community fighters and venues too. A save point at the end of each chapter of 10 floors. The board counts official packs only."
                     : "The Weekly: 20 floors and one or two twists a week, from the server. Coming soon.";
-    text(dl, f, g_title, 12.5f, 140, y + 6, CREAM, own, LEFT, 0.8f, 370);
+    text(dl, f, g_title, 12, 140, y + 4, CREAM, own, LEFT, 0.8f, 370);
     float hx = 254;
     hint(dl, f, hx, 352, "y", "CLOSE");
+}
+
+// X: the chosen tower's board, this month or all time (LB / RB), the top 10 and the player's own place.
+void towers_board_panel(ImDrawList *dl, const Frame &f, int tower, int which, bool signed_now)
+{
+    glass(dl, f, 110, 78, 420, 324, 14, IM_COL32(10, 10, 13, 255), 0.94f);
+    ImU32 col = TOWER_COL[tower - 1];
+    text(dl, f, g_stencil, 22, 130, 88, CREAM, towers_name(tower), LEFT, 1.4f);
+    text(dl, f, g_title, 13, 510, 92, col, which ? "BOARD - ALL TIME" : "BOARD - THIS MONTH", RIGHT, 0.8f);
+    rect(dl, f, 130, 116, 380, 2, col);
+    TowerBoard b = tw_board(which);
+    int status;
+    {
+        std::lock_guard<std::mutex> lock(TWB.mu);
+        status = TWB.status[which];
+    }
+    if (tower == TOWER_WEEKLY) {
+        text(dl, f, g_hand, 14, 320, 220, ORANGE, "The Weekly's boards open with The Weekly.", CENTER, 0.8f);
+        return;
+    }
+    if (!b.valid) {
+        const char *why = gallery_on() ? "" : status == 404 ? "The boards are not open yet." :
+                          (status == 0 && TWB.at[which] && !TWB.busy[which]) ? "The boards could not be reached." : "Loading the board...";
+        text(dl, f, g_hand, 14, 320, 220, ORANGE, why, CENTER, 0.8f);
+        return;
+    }
+    const TowerBoardTower &bt = b.t[tower - 1];
+    char line[96];
+    text(dl, f, g_title, 9.5f, 150, 124, GREY, "#", CENTER, 0.6f);
+    text(dl, f, g_title, 9.5f, 168, 124, GREY, "CLIMBER", LEFT, 0.6f);
+    text(dl, f, g_title, 9.5f, 420, 124, GREY, "FLOORS", RIGHT, 0.6f);
+    text(dl, f, g_title, 9.5f, 500, 124, GREY, "TIME", RIGHT, 0.6f);
+    float y = 140;
+    if (bt.rows.empty()) text(dl, f, g_hand, 13, 320, 200, ORANGE, "Nobody on this board yet. Be the first.", CENTER, 0.8f);
+    for (const auto &r : bt.rows) {
+        bool mine = bt.me && bt.me_place == r.place;
+        if (mine) rect(dl, f, 132, y - 2, 376, 20, with_alpha(col, 0.22f), 3);
+        snprintf(line, sizeof line, "%d", r.place);
+        text(dl, f, g_title, 13, 150, y, r.place <= 3 ? GOLD : WHITE, line, CENTER, 0.8f);
+        if (r.fighter >= 0) portrait(dl, f, r.fighter, 166, y - 1, 14, 18);
+        text(dl, f, g_title, 13, 186, y, mine ? CREAM : WHITE, r.name.c_str(), LEFT, 0.8f, 180);
+        snprintf(line, sizeof line, r.cleared ? "%d  CLEARED" : "%d", r.floors);
+        text(dl, f, g_title, 13, 420, y, r.cleared ? GOLD : col, line, RIGHT, 0.8f);
+        snprintf(line, sizeof line, "%d:%02d", r.secs / 60, r.secs % 60);
+        text(dl, f, g_body, 11, 500, y + 1, GREY, line, RIGHT, 0);
+        y += 21;
+    }
+    // the player's own line
+    float my = 362;
+    rect(dl, f, 130, my - 6, 380, 1, with_alpha(GREY, 0.5f));
+    if (!signed_now) text(dl, f, g_hand, 12, 320, my, ORANGE, pad_text("Sign in to put your climb on the board: press {y} in the hub.").c_str(), CENTER, 0.8f);
+    else if (bt.me && bt.me_place > 0) {
+        snprintf(line, sizeof line, "YOU: #%d OF %d  -  %d FLOORS  -  %d:%02d", bt.me_place, bt.entries, bt.me_floors, bt.me_secs / 60, bt.me_secs % 60);
+        text(dl, f, g_title, 13, 320, my, CREAM, line, CENTER, 0.8f);
+    } else text(dl, f, g_hand, 12, 320, my, GREY, "You are not on this board yet: climb while signed in.", CENTER, 0.8f);
+    float hx = 214;
+    hx += hint(dl, f, hx, 382, "lb", which ? "THIS MONTH" : "ALL TIME");
+    hint(dl, f, hx, 382, "x", "CLOSE");
 }
 
 // The saved run's card (A CONTINUE, X NEW CLIMB) or the start card (A START THE CLIMB).
@@ -340,6 +568,8 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     tower = TWU.sel + 1;
     have = tw_saved(tower, &saved);
     float dt = std::min(0.1f, ImGui::GetIO().DeltaTime);
+    bool signed_now = gallery_on() || account_state() == ACCOUNT_IN;
+    TowerBoard month = signed_now ? tw_board(0) : TowerBoard();
     for (int k = 0; k < TOWER_COUNT; k++) {
         float want = k == TWU.sel ? 1.0f : 0.0f;
         TWU.grow[k] += (want - TWU.grow[k]) * std::min(1.0f, dt / 0.05f);     // about 150 ms to settle
@@ -357,20 +587,22 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
             dl->AddCircleFilled(f.p(cx, base - 120), 120 * f.s(), with_alpha(TOWER_COL[k], 0.10f * TWU.grow[k]), 48);
         float top, bottom, w;
         draw_tower_shape(dl, f, t, cx, base, s, dim, &top, &bottom, &w);
+        float ccx = tower_tex(t).srv ? cx - TOWER_ART_W * s / 2 + TOWER_ART_COLUMN[k][0] * TOWER_ART_W * s : cx;
         TowerRun r;
         bool hr = t != TOWER_WEEKLY && tw_saved(t, &r);
         int floors = hr ? r.floors : tw_floors(t), best = tw_best(t);
         if (t == TOWER_WEEKLY) floors = 20;
-        draw_floor_column(dl, f, t, cx, top, bottom, w, floors, hr ? r.floor - 1 : 0, best, hr ? r.floor : 0, dim);
+        draw_floor_column(dl, f, t, ccx, top, bottom, w, floors, hr ? r.floor - 1 : 0, best, hr ? r.floor : 0, dim);
         if (t == TOWER_WEEKLY) {    // the banner across it
             float by = base - 130;
             rect(dl, f, cx - 64, by, 128, 24, with_alpha(IM_COL32(150, 14, 30, 255), 0.92f * dim), 3);
             text(dl, f, g_title, 15, cx, by + 3, with_alpha(WHITE, dim), "COMING SOON", CENTER, 1.0f);
         }
         // the name plate
-        glass(dl, f, cx - 82, base + 8, 164, 44, 8, k == TWU.sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255),
+        float plate_h = signed_now && t != TOWER_WEEKLY ? 56.0f : 44.0f;     // T1: room for the board place
+        glass(dl, f, cx - 82, base + 8, 164, plate_h, 8, k == TWU.sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255),
               k == TWU.sel ? 0.8f : 0.55f);
-        if (k == TWU.sel && TWU.card == 0) selector(dl, f, cx - 82, base + 8, 164, 44);
+        if (k == TWU.sel && TWU.card == 0) selector(dl, f, cx - 82, base + 8, 164, plate_h);
         text(dl, f, g_title, 17, cx, base + 10, with_alpha(k == TWU.sel ? CREAM : GREY, dim), towers_name(t), CENTER, 1.2f);
         char line[64];
         if (t == TOWER_WEEKLY) snprintf(line, sizeof line, "20 FLOORS  -  SOON");
@@ -378,12 +610,25 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
         else if (best > 0) snprintf(line, sizeof line, "BEST %d  -  %d FLOORS", best, floors);
         else snprintf(line, sizeof line, "%d FLOORS", floors);
         text(dl, f, g_title, 11, cx, base + 32, with_alpha(hr ? TOWER_COL[k] : ORANGE, dim), line, CENTER, 0.8f);
+        if (t != TOWER_WEEKLY && signed_now) {     // T1: the player's place on this month's board
+            const TowerBoardTower &bt = month.t[k];
+            if (month.valid && bt.me && bt.me_place > 0) snprintf(line, sizeof line, "#%d OF %d THIS MONTH", bt.me_place, bt.entries);
+            else if (month.valid) snprintf(line, sizeof line, "%d ON THE BOARD", bt.entries);
+            else line[0] = 0;
+            if (line[0]) text(dl, f, g_title, 9.5f, cx, base + 47, with_alpha(k == TWU.sel ? GOLD : GREY, dim), line, CENTER, 0.6f);
+        }
     }
     // what the chosen tower is
-    text(dl, f, g_hand, 12, 320, 384, with_alpha(CREAM, 0.95f), tower_desc(tower).c_str(), CENTER, 0.8f, 560);
+    text(dl, f, g_hand, 11, 320, 394, with_alpha(CREAM, 0.95f), tower_desc(tower).c_str(), CENTER, 0.8f, 560);
     if (TWU.rules) {
         towers_rules_panel(dl, f, tower);
         if (pad.y || pad.b) TWU.rules = false;
+        return;
+    }
+    if (TWU.board) {
+        towers_board_panel(dl, f, tower, TWU.board_all, signed_now);
+        if (pad.lb || pad.rb) TWU.board_all ^= 1;
+        if (pad.x || pad.b) TWU.board = false;
         return;
     }
     if (TWU.card == 1 && have) {
@@ -402,13 +647,25 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     }
     if (TWU.card == 2) {
         towers_run_card(dl, f, tower, nullptr, TWU.pick, TWU.pick_skin);
+        int st = TWU.starting.load();
+        if (st == 1 || (gallery_on() && G_towers_starting)) {    // T1: the service deals the run (towers_start blocks)
+            float pulse = 0.5f + 0.5f * (float)sin(ImGui::GetTime() * 5.0);
+            text(dl, f, g_title, 12, 320, 336, with_alpha(CREAM, 0.5f + 0.5f * pulse), "ASKING THE SERVER FOR YOUR CLIMB...", CENTER, 0.8f);
+            return;
+        }
+        if (st == 2) { TWU.starting = 0; say("Into the tower..."); g_towers_close = true; return; }
+        if (st == 3) { TWU.starting = 0; say("This tower cannot be built on this PC: no fighters or venues were read from the game."); }
+        bool signed_now = gallery_on() || account_state() == ACCOUNT_IN;
+        text(dl, f, g_hand, 11, 320, 318, signed_now ? GOLD : GREY, signed_now ? "Signed in: this climb goes on the board." :
+             "Signed out: an offline climb, not on the board.", CENTER, 0.8f);
         float hx = 196;
         hx += hint(dl, f, hx, 336, "a", "START THE CLIMB");
         hint(dl, f, hx, 336, "b", "BACK");
         if (pad.b) TWU.card = 0;
         else if (pad.a && !gallery_on()) {
-            if (towers_start(tower, TWU.pick, TWU.pick_skin)) { say("Into the tower..."); g_towers_close = true; }
-            else say("This tower cannot be built on this PC: no fighters or venues were read from the game.");
+            int t = tower, pick = TWU.pick, skin = TWU.pick_skin;
+            TWU.starting = 1;
+            std::thread([t, pick, skin]() { TWU.starting = towers_start(t, pick, skin) ? 2 : 3; }).detach();
         }
         return;
     }
@@ -419,13 +676,15 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
         hint(dl, f, hx, 424, "b", "BACK");
     } else {
         hx += hint(dl, f, hx, 424, "a", have ? "CONTINUE" : "CLIMB");
-        if (have) hx += hint(dl, f, hx, 424, "x", "NEW CLIMB");
+        hx += hint(dl, f, hx, 424, "x", "BOARD");
         hx += hint(dl, f, hx, 424, "y", "RULES");
         hint(dl, f, hx, 424, "b", "BACK");
     }
-    text(dl, f, g_hand, 10, 590, 428, with_alpha(GREY, 0.9f), "OFFLINE  -  BOARDS COME LATER", RIGHT, 0.8f);
+    text(dl, f, g_hand, 10, 590, 428, with_alpha(signed_now ? GOLD : GREY, 0.9f),
+         signed_now ? "SIGNED IN  -  YOUR CLIMBS GO ON THE BOARD" : "SIGN IN TO PUT YOUR CLIMB ON THE BOARD", RIGHT, 0.8f);
     if (pad.y) { TWU.rules = true; return; }
     if (pad.b) { S.page = HUB; return; }
+    if (pad.x && tower != TOWER_WEEKLY) { TWU.board = true; TWU.board_all = 0; return; }
     if (tower == TOWER_WEEKLY) {
         if (pad.a) say("The Weekly opens soon: a new tower every week, the same for everyone.");
         return;
@@ -433,8 +692,6 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     if (pad.a) {
         if (have) TWU.card = 1;
         else open_fighters_for(true);
-    } else if (pad.x && have) {
-        open_fighters_for(true);
     }
 }
 
@@ -592,7 +849,8 @@ int towers_end_screen(ImDrawList *dl, const Frame &f, ImVec2 display, const Towe
     char line[96];
     text(dl, f, g_stencil, 22, 50, 22, CREAM, towers_name(tower), LEFT, 1.4f);
     if (cleared) snprintf(line, sizeof line, "TOWER CLEARED");
-    else snprintf(line, sizeof line, v.left_fight ? "LEFT THE FIGHT ON FLOOR %d" : "KNOCKED OUT ON FLOOR %d", v.last_floor);
+    else snprintf(line, sizeof line, v.left_fight ? "LEFT THE FIGHT ON FLOOR %d" : v.draw_loss ? "A SECOND DRAW ON FLOOR %d" :
+                                                                                  "KNOCKED OUT ON FLOOR %d", v.last_floor);
     text(dl, f, g_stencil, 34, 320, 58, cleared ? GOLD : WHITE, line, CENTER, 1.8f);
     int beaten = cleared ? v.floors : std::max(0, v.last_floor - 1);
     glass(dl, f, 120, 112, 400, 120, 12, IM_COL32(12, 10, 14, 255), 0.85f);
@@ -608,6 +866,12 @@ int towers_end_screen(ImDrawList *dl, const Frame &f, ImVec2 display, const Towe
         float x = 145 + k * 95;
         text(dl, f, g_title, 10, x + 38, 124, GREY, facts[k].k, CENTER, 0.6f);
         text(dl, f, g_title, k == 3 ? 15 : 22, x + 38, 140, k == 2 && v.new_best ? GOLD : WHITE, facts[k].val.c_str(), CENTER, 1.0f);
+    }
+    {   // T1: whether the climb is on the board
+        char net[64];
+        if (gallery_on()) snprintf(net, sizeof net, "ON THE BOARD");
+        else towers_net_text(net, sizeof net);
+        if (net[0]) text(dl, f, g_title, 9, 320, 236, v.online && v.board ? GOLD : GREY, net, CENTER, 0.6f);
     }
     if (v.new_best) text(dl, f, g_hand, 15, 320, 184, GOLD, "NEW BEST!", CENTER, 1.0f);
     else if (!cleared) text(dl, f, g_hand, 13, 320, 186, ORANGE, "One loss ends the climb. The next one starts from the bottom.", CENTER, 0.8f);
@@ -634,7 +898,7 @@ int towers_end_screen(ImDrawList *dl, const Frame &f, ImVec2 display, const Towe
         text(dl, f, g_title, 9, x + pw / 2, y + ph + 2, GREY, line, CENTER, 0.6f);
     }
     float hx = 214;
-    hx += hint(dl, f, hx, 400, "a", "BACK TO TOWERS");
+    hx += hint(dl, f, hx, 400, "a", "BACK TO TOWERS");    // (TOWERS' X shows the board)
     hint(dl, f, hx, 400, "b", "CLOSE");
     if (pad.a) return 1;
     if (pad.b) return 2;
@@ -652,6 +916,7 @@ bool towers_take_request_impl()
     TWU.armed = false;
     TWU.closing = false;
     TWU.win_t0 = GetTickCount64();
+    TWU.sfx_move = TWU.sfx_land = false;
     fprintf(stderr, "[TOWERS] window: state %d, floor %d of %d%s\n", TWU.v.state, TWU.v.floor, TWU.v.floors,
             TWU.v.save_point ? " (a save point)" : "");
     return true;
@@ -686,6 +951,17 @@ bool towers_window_impl(ImVec2 display)
             TWU.armed = true;
         }
         if (pad.a) TWU.win_t0 = now - 3500;     // A: to the end
+        // the front end's own sounds: the marker climbs (0.5 s), the floor plate lands (2.8 s); RECOMP_TOWERS_SFX=a,b
+        if (v.state == TOWERS_WON) {
+            static int sfx[2] = { -2, -2 };
+            if (sfx[0] == -2) {
+                const char *e = getenv("RECOMP_TOWERS_SFX");
+                sfx[0] = 5; sfx[1] = 1;
+                if (e && *e) { sfx[0] = atoi(e); sfx[1] = strchr(e, ',') ? atoi(strchr(e, ',') + 1) : -1; }
+            }
+            if (!TWU.sfx_move && t >= 0.5f) { TWU.sfx_move = true; if (t < 1.5f) towers_play_sfx(sfx[0]); }
+            if (!TWU.sfx_land && t >= 2.8f) { TWU.sfx_land = true; if (t < 3.4f) towers_play_sfx(sfx[1]); }
+        }
         bool quit = v.state == TOWERS_WON && v.save_point && !TWU.armed &&
                     (pad.b || (quit_at && atoi(quit_at) == v.last_floor && t > 1.0f));
         towers_scene(dl, f, display, v, TWU.run, std::min(t, 3.5f), false);
@@ -764,6 +1040,7 @@ void towers_gallery_view(TowersView &v, int state, int last_floor)
     v.seed = 0x4F2A91C3u;
     v.climb_ms = 1000u * (19 * 60 + 42);
     v.fighter = 55;
+    v.online = v.board = 1;
 }
 
 // Sets the page up; true when it is one of the TOWERS pages.
@@ -774,6 +1051,9 @@ bool towers_gallery(const std::string &p)
     towers_gallery_samples();
     TWU.rules = false;
     TWU.card = 0;
+    TWU.board = false;
+    TWU.gal_drawn = false;
+    G_towers_starting = false;
     S.towers_pick = false;
     if (p == "hub-towers") { S.page = HUB; S.hub_sel = HUB_TOWERS; return true; }
     S.page = TOWERS;
@@ -781,6 +1061,9 @@ bool towers_gallery(const std::string &p)
     if (p == "towers-t2") TWU.sel = 1;
     else if (p == "towers-weekly") TWU.sel = 2;
     else if (p == "towers-rules") TWU.rules = true;
+    else if (p == "towers-board" || p == "towers-board-all") { TWU.board = true; TWU.board_all = p == "towers-board-all"; }
+    else if (p == "towers-art") TWU.gal_drawn = true;      // the drawn fallback (no art files)
+    else if (p == "towers-starting") { TWU.sel = 0; TWU.card = 2; TWU.pick = 22; TWU.pick_skin = 0; G_towers_starting = true; }
     else if (p == "towers-saved") TWU.card = 1;
     else if (p == "towers-start") { TWU.sel = 1; TWU.card = 2; TWU.pick = 22; TWU.pick_skin = 0; }
     else if (!p.compare(0, 13, "towers-climb-")) {      // the climb at 0.3, 1.0, 2.2 and 3.5 s
@@ -841,6 +1124,6 @@ const char *towers_shot_label_impl()
         return TWU.v.state == TOWERS_WON || TWU.v.state == TOWERS_DRAW ? "towers-climb" : "towers-end";
     }
     if (GetTickCount64() - TWU.card_seen < 200) return "towers-card";
-    if (S.page == TOWERS) return TWU.card == 2 ? "towers-start" : TWU.card == 1 ? "towers-saved" : "towers";
+    if (S.page == TOWERS) return TWU.board ? "towers-board" : TWU.card == 2 ? "towers-start" : TWU.card == 1 ? "towers-saved" : "towers";
     return nullptr;
 }

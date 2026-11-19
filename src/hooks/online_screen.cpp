@@ -5936,6 +5936,7 @@ void gallery_step()
                                          "hub-towers", "towers", "towers-t2", "towers-weekly", "towers-rules", "towers-saved",
                                          "towers-start", "towers-climb-0", "towers-climb-1", "towers-climb-2", "towers-climb-3",
                                          "towers-boss", "towers-card", "towers-first", "towers-draw", "towers-lost", "towers-cleared",
+                                         "towers-board", "towers-board-all", "towers-art", "towers-starting",
                                          // build 86: RUN THE STREETS (closed test): the hub entry, the page, its CPU count
                                          "hub-rts", "rts", "rts-online",
                                          // build 87: VS CPU's set-up, a new room's and a room's round rules
@@ -7689,7 +7690,11 @@ bool draw_pages(ImVec2 display)
     {   // tests: RECOMP_TEST_OPEN_ONLINE=towers opens TOWERS itself, connected or not
         static int once;
         const char *v = getenv("RECOMP_TEST_OPEN_ONLINE");
-        if (!once && v && !strcmp(v, "towers") && !gallery_on()) { once = 1; open_towers(); }
+        if (!once && v && !strcmp(v, "towers") && !gallery_on()) {
+            once = 1;
+            open_towers();
+            if (getenv("RECOMP_TEST_TOWERS_BOARD")) TWU.board = true;     // tests: the BOARD over the page
+        }
     }
     // TOWERS needs no relay either: the page, its fighter pick and its cards (towers_ui.inc).
     if (!room.in_room && (S.page == TOWERS || (S.page == FIGHTERS && S.towers_pick))) {

@@ -2965,7 +2965,8 @@ def gallery(page_ms=1500, timeout=300, lock_timeout=None, log=None, keep_roots=F
 # ---- towers (T0) -----------------------------------------------------------------------------------
 
 TOWERS_WATCH = ["[CRASH]", "[WATCHDOG]", "[TOWERS] window:", "[TOWERS] run saved", " won (", " lost: the run",
-                "save and quit", "set up: slot levels", "[TOWERS] run start", "[TOWERS] run resumed"]
+                "save and quit", "set up: slot levels", "[TOWERS] run start", "[TOWERS] run resumed",
+                "the game ends in floor 3", "[TOWERS] board (month)", "fight?format=text floor 3"]
 
 
 def _towers_overlay_pngs(folder, prefix, out_dir, shots, per_label=3):
@@ -3028,6 +3029,72 @@ def _towers_phase(s, i, env, until, shots, shot_plan, timeout):
             pass
     _towers_overlay_pngs(env["RECOMP_OVERLAY_SHOT_DIR"], "p%d" % (i + 1), s.dir, shots)
     return c, reached
+
+
+def _towers_signed_in(s, h, base, script, extra_env, shots, phases, problems, timeout):
+    """T1 (build 97), signed in against a local account service with Towers on (accounts -towers, a test session):
+    5. Uptown: the service deals the seed and the run; two floors won (15 s knockouts, past the plausibility check),
+       then the game ends 4 s into floor 3's fight (RECOMP_TEST_TOWERS_EXIT_IN_FIGHT: a closed or crashed game).
+    6. The next start opens TOWERS: the fight left open is a loss (the run ends with 2 floors, its "left" report goes
+       to the service), the page's note, and the BOARD (X) with the player's place: pictures. The service's board is
+       read back: Copy 0 on Uptown with 2 floors, the run ended."""
+    import urllib.request
+    acc_port = 18900 + (os.getpid() % 50) * 2
+    name = "Copy 0"
+    try:
+        tokens = s.accounts(acc_port, [name], extra=["-towers"])
+    except (OSError, RuntimeError, SystemExit) as error:
+        phases.append({"phase": "signed-in", "skipped": str(error)})
+        return
+    towers_file = os.path.join(s.dir, "towers-signed.json")
+    signed = dict(base, RECOMP_TOWERS_FILE=towers_file, RECOMP_ACCOUNT_SERVER="127.0.0.1:%d" % acc_port,
+                  RECOMP_ACCOUNT_TEST_TOKEN=tokens[name])
+    signed.pop("RECOMP_TEST_TOWERS_SEED", None)
+    # 5: two floors won, the game ends in floor 3's fight
+    env = dict(signed, RECOMP_TEST_TOWERS="1,55", RECOMP_TEST_KO_STEP="900,0", RECOMP_PAD_SCRIPT=script(4),
+               RECOMP_TEST_TOWERS_EXIT_IN_FIGHT="3")
+    env.update(extra_env or {})
+    c, ok = _towers_phase(s, 4, env, (1, "the game ends in floor 3"), shots, [("set up: slot levels", 1, 8, "p5-fight1")],
+                          timeout or 900)
+    text = logparse.read_text(c.log)
+    run = re.search(r"service: run (\w+), seed ([0-9A-F]+), (\d+) floors[^\n]*?(on the board|off the board: \w*)", text)
+    reports = re.findall(r"service /api/towers/fight\?format=text floor (\d+): HTTP (\d+)", text)
+    phases.append({"phase": "signed-in-climb", "reached": ok, "run": run and run.group(1), "board": run and run.group(4),
+                   "reports": reports, "log": _relpath(c.log)})
+    if not run:
+        problems.append("signed in: the service dealt no run")
+    elif "on the board" not in run.group(4):
+        problems.append("signed in: the Uptown run is off the board (%s)" % run.group(4))
+    if not ok:
+        problems.append("signed in: the game did not end in floor 3's fight")
+    if [r for r in reports if r[1] != "200"]:
+        problems.append("signed in: a report was refused: %s" % reports)
+    # 6: the next start: the fight left open is a loss; TOWERS with the note and the board
+    env = dict(signed, RECOMP_TEST_OPEN_ONLINE="towers", RECOMP_TEST_TOWERS_BOARD="1",
+               RECOMP_PAD_SCRIPT=h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"]))
+    env.update(extra_env or {})
+    c, ok = _towers_phase(s, 5, env, (1, "fight?format=text floor 3"), shots,
+                          [("[TOWERS] board (month)", 1, 3.0, "p6-board")], timeout or 300)
+    time.sleep(1)
+    text = logparse.read_text(c.log)
+    left = re.search(r"UPTOWN: the game closed during floor (\d+)'s fight: a loss, the run ends with (\d+)", text)
+    sent = re.findall(r"service /api/towers/fight\?format=text floor 3: HTTP (\d+)[^\n]*", text)
+    board = ""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/api/towers/board?format=text&tower=1&season=all" % acc_port,
+                                    timeout=5) as r:
+            board = r.read().decode("utf-8", "replace")
+    except OSError as error:
+        board = "unreachable: %s" % error
+    row = re.search(r"row=1\|1\|\d+\|%s\|(\d+)\|" % re.escape(name), board)
+    phases.append({"phase": "left-open-is-a-loss", "reached": ok, "left": left and left.groups(), "sent": sent,
+                   "board": board.strip().splitlines()[:8], "log": _relpath(c.log)})
+    if not left or left.group(1) != "3" or left.group(2) != "2":
+        problems.append("signed in: the fight left open was not a loss on floor 3")
+    if not sent or not sent[0].startswith("200"):
+        problems.append("signed in: the left fight's report did not reach the service (%s)" % sent)
+    if not row or row.group(1) != "2":
+        problems.append("signed in: the service's board has not Copy 0 with 2 floors (%s)" % board.strip()[:200])
 
 
 def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_env=None, content=None):
@@ -3132,6 +3199,8 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
             problems.append("uptown: the loss did not end the run")
         if not data or data.get("best", [0])[0] != 3:
             problems.append("uptown: best floor is not 3 (%s)" % (data and data.get("best")))
+        if not os.environ.get("DJ_TOWERS_NO_SERVER"):
+            _towers_signed_in(s, h, base, script, extra_env, shots, phases, problems, timeout)
         for p in phases:
             crashes = _faults(logparse.read_text(os.path.join(machine.REPO, p["log"])))
             if crashes:
