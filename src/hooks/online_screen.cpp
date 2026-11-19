@@ -2280,7 +2280,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         "The official rings, always open: step into the line or watch. Win 5 counted fights in a row to be crowned "
         "King; whoever beats a king claims the bounty. Roster fighters only. Sign in with Discord for your wins to count.",
         "Fight your way up a tower, one CPU fighter per floor, each stronger than the last. Uptown has every original "
-        "fighter, Five Boroughs the whole city with community fighters too. One loss and the climb is over. Offline.",
+        "fighter, Five Boroughs the whole city with community fighters too. One loss and the climb is over. Sign in for the leaderboards.",
     };
     std::vector<int> quick_modes = mode_cycle();     // King of the Hill last, when the relay has it
     int mode_count = (int)quick_modes.size();
