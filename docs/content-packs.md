@@ -164,9 +164,21 @@ the folder and composes again. The `my-` prefix never takes a community pack's i
 - Launcher, Content page, Installed tab: **MY PACKS** below the community packs, one card each with Offline only /
   Online too and an On/Off switch (composes again at once); while an offline-only pack is on, the line above and
   **Turn them off**, which switches every offline-only pack off.
-- New fighters: Studio picks a free place (100..127, not used by community or own packs or the game) and writes it
-  as `fighter_fe_id` in local.json; a new venue keeps the fe_id of its op (a clash with a community venue skips the
-  own pack, listed as not applied).
+- New fighters (build 98): an own new fighter takes no place. It plays through the four per-slot banks like a
+  community fighter beyond the places (`docs/research/unlimited-fighters-phase1.md`), under an **own number** in
+  60000..99999 (`setup/ffnycontent/unlimited.py` `own_number`, the same file as Studio's `ffnystudio/unlimited.py`):
+  the FNV-1a of its folder name picks the first number, the next free one when another fighter has it. The account
+  service counts community numbers up from 1000, and the composer also moves an own fighter off any community or
+  catalogue number. Studio's Use in my game writes the number as `fighter_fe_id` in local.json; the launcher's
+  compose (`content_compose.settle_places`) keeps a stored own number while it is free, gives one to a pack with
+  none or with a place (an older Studio), and writes it back (`keep_local_place`). At most `unlimited.OWN_MAX`
+  (250) own new fighters are on at once; the composer leaves the rest out with the reason and Studio refuses the
+  next one with a sentence. Own numbers stay offline: such a pack is offline only (above), so they never reach a
+  relay. A new venue keeps the fe_id of its op (a clash with a community venue skips the own pack).
+- **Not in game** (build 98): every pack the last composition left out has `not_in_game=<reason>` in content.ini
+  (from the composition's state, `content_compose.not_in_game`); the Content page's card says
+  "Not in game: <reason>" (MY PACKS and the community rows), and Studio's Use in my game says the same after its
+  compose. Nothing is left out silently.
 
 ## Packs of several mods (bundles)
 

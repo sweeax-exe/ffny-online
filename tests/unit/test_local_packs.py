@@ -127,49 +127,79 @@ def fighter_folder(root, name, fe_id=None):
     return folder
 
 
-def test_settle_places_moves_own_fighters_off_community_places(tmp_path):
+def test_settle_places_gives_own_fighters_own_numbers(tmp_path):
+    """Build 98: a player's own new fighter plays by an own number (unlimited.own_number), never a place: community
+    places and numbers stay as they are, an own fighter keeps the number it has, a place of an older Studio becomes
+    a number, and no two fighters ever share a feID."""
     cc = mods.content_compose
-    first, last = cc.newfighter.FIRST_NEW_FE_ID, cc.newfighter.LAST_NEW_FE_ID
+    unl = cc.unlimited
     community = [dict(id='studio-%d' % fe, folder=fighter_folder(tmp_path, 'c%d' % fe), fighter_fe_id=fe)
-                 for fe in (101, 112, 115, 116, 117)]
+                 for fe in (101, 112, 115, 1000, 1001)]
     venue = dict(id='a-venue', folder=own_pack(tmp_path, 'v', install=install_json()), fighter_fe_id=0)
     jimmy = dict(id='my-studio-jimmy', folder=fighter_folder(tmp_path, 'j'), fighter_fe_id=100, local=True)
-    naruto = dict(id='my-studio-naruto', folder=fighter_folder(tmp_path, 'n'), fighter_fe_id=117, local=True)
-    neo = dict(id='my-studio-neo', folder=fighter_folder(tmp_path, 'o'), fighter_fe_id=121, local=True)
-    scotty = dict(id='my-studio-scotty', folder=fighter_folder(tmp_path, 's', fe_id=100), local=True)
+    kept = unl.own_number('my-studio-naruto') + 1 if unl.own_number('my-studio-naruto') < unl.OWN_LAST else unl.OWN_FIRST
+    naruto = dict(id='my-studio-naruto', folder=fighter_folder(tmp_path, 'n'), fighter_fe_id=kept, local=True)
+    scotty = dict(id='my-studio-scotty', folder=fighter_folder(tmp_path, 's', fe_id=127), local=True)
     lines = []
-    packs = community + [venue, jimmy, naruto, neo, scotty]
-    moves = cc.settle_places(packs, reserved={101, 112, 115, 116, 117, 121}, log=lines.append)
-    # jimmy keeps 100; naruto's 117 is the community naruto's now, neo's 121 a live pack's not synced yet, scotty's
-    # 100 (its op's) is jimmy's: each moves to the first free place
-    assert moves == [('my-studio-naruto', 117, 102), ('my-studio-neo', 121, 103), ('my-studio-scotty', 100, 104)]
-    assert [p['fighter_fe_id'] for p in (jimmy, naruto, neo, scotty)] == [100, 102, 103, 104]
-    assert [p['fighter_fe_id'] for p in community] == [101, 112, 115, 116, 117]
-    assert 'fighter_fe_id' in venue and venue['fighter_fe_id'] == 0 and not any('place_problem' in p for p in packs)
-    assert any('my-studio-naruto: new fighter moved from place 117 to 102 (the community pack studio-117 has 117 now)'
-               in line for line in lines)
-    # never two fighters on one feID
-    places = [p['fighter_fe_id'] for p in packs if p is not venue]
-    assert len(places) == len(set(places))
-    # every place taken: an own fighter is left out with a sentence, a community fighter keeps its place
+    packs = community + [venue, jimmy, naruto, scotty]
+    moves = cc.settle_places(packs, reserved={101, 112, 115, 1000, 1001, 1002}, log=lines.append)
+    assert [p['fighter_fe_id'] for p in community] == [101, 112, 115, 1000, 1001]
+    assert naruto['fighter_fe_id'] == kept                          # its number stays its own
+    assert jimmy['fighter_fe_id'] == unl.own_number('my-studio-jimmy', {kept})
+    assert scotty['fighter_fe_id'] == unl.own_number('my-studio-scotty', {kept, jimmy['fighter_fe_id']})
+    assert all(unl.is_own_number(p['fighter_fe_id']) for p in (jimmy, naruto, scotty))
+    assert [m[0] for m in moves] == ['my-studio-jimmy', 'my-studio-scotty'] and moves[1][1] == 127
+    assert venue['fighter_fe_id'] == 0 and not any('place_problem' in p for p in packs)
+    assert any('my-studio-jimmy: own new fighter number' in line and 'it had place 100' in line for line in lines)
+    ids = [p['fighter_fe_id'] for p in packs if p is not venue]
+    assert len(ids) == len(set(ids))
+    # every community place taken (the 48 and beyond): own fighters still go in, all of them
     full = [dict(id='c-%d' % fe, folder=community[0]['folder'], fighter_fe_id=fe) for fe in cc.newfighter.PLACE_ORDER]
-    assert len(full) == 48
-    # with 100..127 taken an own fighter goes on at the first low place (PLACE_ORDER after 123: 5)
-    upper = [dict(id='u-%d' % fe, folder=community[0]['folder'], fighter_fe_id=fe) for fe in range(first, last + 1)]
-    low = dict(id='my-low', folder=fighter_folder(tmp_path, 'low'), fighter_fe_id=110, local=True)
-    assert cc.settle_places(upper + [low], log=lambda t: None) == [('my-low', 110, cc.newfighter.LOW_PLACES[0])]
-    late = dict(id='my-late', folder=fighter_folder(tmp_path, 'late'), fighter_fe_id=110, local=True)
-    assert cc.settle_places(full + [late], log=lambda t: None) == []
-    assert 'every place for a new fighter is taken' in late['place_problem']
+    mine = [dict(id='my-f%02d' % i, folder=fighter_folder(tmp_path, 'f%02d' % i), local=True) for i in range(60)]
+    cc.settle_places(full + mine, log=lambda t: None)
+    assert not any('place_problem' in p for p in full + mine)
+    assert len({p['fighter_fe_id'] for p in mine}) == 60 and all(unl.is_own_number(p['fighter_fe_id']) for p in mine)
     # a second community pack on a place given already (the server never does it) is left out
     twice = dict(id='c-twice', folder=community[0]['folder'], fighter_fe_id=101)
     cc.settle_places([community[0], twice], log=lambda t: None)
     assert 'place_problem' in twice and 'place_problem' not in community[0]
 
 
-def test_compose_moves_an_own_fighter_and_keeps_the_new_place(tmp_path, monkeypatch):
-    """The launcher's compose: the moved place goes into the pack's local.json and content.ini, and the line into
-    the progress; the composer's own skip of a left-out pack says why."""
+def test_own_numbers_are_stable_and_never_clash(tmp_path):
+    cc = mods.content_compose
+    unl = cc.unlimited
+    assert unl.OWN_FIRST > 1000 and unl.OWN_LAST < cc.newfighter.MORE_ID and len(str(unl.OWN_LAST)) == 5
+    ids = ['my-studio-fighter-%d' % i for i in range(500)]
+    first = [unl.own_number(i) for i in ids]
+    assert first == [unl.own_number(i) for i in ids]                # the same on every launch and PC
+    assert all(unl.is_own_number(n) for n in first)
+    # in any order and with community numbers around, the compose gives each pack the same number as long as nothing
+    # holds it: settle_places in folder order, then once more with the stored numbers (the next launch)
+    packs = [dict(id=i, folder=fighter_folder(tmp_path, 'p%03d' % k), local=True) for k, i in enumerate(ids[:60])]
+    community = [dict(id='c%d' % n, folder=packs[0]['folder'], fighter_fe_id=n) for n in range(1000, 1200)]
+    cc.settle_places(community + packs, reserved=range(1000, 1300), log=lambda t: None)
+    got = {p['id']: p['fighter_fe_id'] for p in packs}
+    assert len(set(got.values())) == 60 and not set(got.values()) & set(range(1000, 1300))
+    again = [dict(p, fighter_fe_id=got[p['id']]) for p in reversed(packs)]
+    assert cc.settle_places(community + again, log=lambda t: None) == []
+    assert {p['id']: p['fighter_fe_id'] for p in again} == got
+    # a community number that happens to be an own pack's (the service never gives one): the own pack moves
+    holder = dict(id='c-own', folder=packs[0]['folder'], fighter_fe_id=got[ids[0]])
+    moved = [dict(p, fighter_fe_id=got[p['id']]) for p in packs]
+    cc.settle_places([holder] + moved, log=lambda t: None)
+    assert moved[0]['fighter_fe_id'] != got[ids[0]] and unl.is_own_number(moved[0]['fighter_fe_id'])
+    assert [p['fighter_fe_id'] for p in moved[1:]] == [got[i] for i in ids[1:60]]
+    # more than OWN_MAX on: the rest are left out with the reason, never silently
+    many = [dict(id='my-m%03d' % i, folder=packs[0]['folder'], local=True) for i in range(unl.OWN_MAX + 3)]
+    cc.settle_places(many, log=lambda t: None)
+    out = [p for p in many if 'place_problem' in p]
+    assert [p['id'] for p in out] == [p['id'] for p in many[unl.OWN_MAX:]]
+    assert 'more than %d of your own new fighters are on' % unl.OWN_MAX in out[0]['place_problem']
+
+
+def test_compose_gives_an_own_fighter_its_number_and_keeps_it(tmp_path, monkeypatch):
+    """The launcher's compose: the own number goes into the pack's local.json and content.ini, and the line into the
+    progress; a pack the composition leaves out has not_in_game=<reason> in content.ini."""
     data = tmp_path / 'data'
     folder = own_pack(data, 'my-studio-naruto', kind='content', type_='new-fighter',
                       install=install_json('new-fighter', ops=[{'op': 'new-fighter', 'template_fe_id': 55,
@@ -182,16 +212,22 @@ def test_compose_moves_an_own_fighter_and_keeps_the_new_place(tmp_path, monkeypa
     def compose(d, game, packs, root=None, log=print, reserved=(), portraits=True):
         mods.content_compose.settle_places(packs, reserved, log)
         seen['packs'] = packs
-        return {'applied': [p['id'] for p in packs], 'skipped': [], 'files': [], 'unchanged': False}
+        state = {'skipped': [['my-studio-naruto', 'the model V2IP_7AAA is\nanother fighter\'s already']]}
+        (Path(root) / mods.content_compose.STATE).write_text(json.dumps(state), encoding='utf-8')
+        return {'applied': [], 'skipped': [tuple(s) for s in state['skipped']], 'files': [], 'unchanged': False}
     monkeypatch.setattr(mods.content_compose, 'compose', compose)
     monkeypatch.setattr(manager, 'catalogue_places', lambda: {117})
     said = []
     monkeypatch.setattr(manager, 'progress', said.append)
     manager.compose()
-    assert seen['packs'][0]['fighter_fe_id'] == 100
-    assert json.loads((folder / 'local.json').read_text(encoding='utf-8'))['fighter_fe_id'] == 100
-    assert 'fighter_fe_id=100' in (data / 'mod-manager' / 'content.ini').read_text(encoding='utf-8')
-    assert any('moved from place 117 to 100' in s for s in said)
+    number = mods.content_compose.unlimited.own_number('my-studio-naruto')
+    assert seen['packs'][0]['fighter_fe_id'] == number
+    assert json.loads((folder / 'local.json').read_text(encoding='utf-8'))['fighter_fe_id'] == number
+    ini = (data / 'mod-manager' / 'content.ini').read_text(encoding='utf-8')
+    assert 'fighter_fe_id=%d' % number in ini
+    assert "not_in_game=the model V2IP_7AAA is another fighter's already" in ini
+    assert manager.content_reasons() == {'my-studio-naruto': "the model V2IP_7AAA is another fighter's already"}
+    assert any('own new fighter number %d' % number in s for s in said)
 
 
 def test_compose_also_builds_the_own_packs_alone_for_offline_play_without_community_content(tmp_path, monkeypatch):

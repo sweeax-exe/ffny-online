@@ -519,6 +519,7 @@ static int list_all(PcContentPack *out, int max)
             else if (!strcmp(k, "rts_map")) p->rts_map = atoi(v) == 1;
             CONTENT_TEXT(venue_code);
             CONTENT_TEXT(character); CONTENT_TEXT(version_name);     /* build 96: character groups */
+            CONTENT_TEXT(not_in_game);                              /* build 98: why it is not in the game */
 #undef CONTENT_TEXT
         }
     }

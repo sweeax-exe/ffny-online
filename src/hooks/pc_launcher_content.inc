@@ -218,9 +218,14 @@ static float my_packs_view(ImDrawList *ld, PcContentPack *packs, int count, floa
                  p.online_ok ? "only changes how things look, so it can stay on online"
                              : "adds or changes more than looks: online is off while it is on");
         ld->AddText(ImGui::GetFont(), 13 * s, ImVec2(ra.x + 18 * s, ra.y + 34 * s), col(ImVec4(0.80f, 0.80f, 0.82f, 1)), line);
-        if (p.composed && !p.applied && on)
+        if (p.composed && !p.applied && on) {
+            // build 98: the composition's own reason (content.ini not_in_game=), never a silent drop
+            char why[320];
+            if (p.not_in_game[0]) snprintf(why, sizeof why, "Not in game: %s", p.not_in_game);
             ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 53 * s), col(k_gold),
-                        "Not applied to your game files (it does not fit them, or the launcher has not prepared it yet).");
+                        p.not_in_game[0] ? why
+                                         : "Not applied to your game files (it does not fit them, or the launcher has not prepared it yet).");
+        }
         ld->PopClipRect();
         char id[128];
         snprintf(id, sizeof id, "##content_mine_%s", p.id);
@@ -672,7 +677,12 @@ static void content_dialog(ImVec2 o, float w, float h, float s)
                  p.authors[0] ? "  \xC2\xB7  by " : "", p.authors);
         ld->PushClipRect(ra, ImVec2(rb.x - 150 * s, rb.y), true);
         ld->AddText(ImGui::GetFont(), 13 * s, ImVec2(ra.x + 18 * s, ra.y + 34 * s), col(ImVec4(0.80f, 0.80f, 0.82f, 1)), line);
-        if (!strcmp(p.type, "language"))
+        if (on && p.composed && !p.applied && p.not_in_game[0]) {
+            // build 98: a community pack the composition left out says why
+            char why[320];
+            snprintf(why, sizeof why, "Not in game: %s", p.not_in_game);
+            ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 53 * s), col(k_gold), why);
+        } else if (!strcmp(p.type, "language"))
             ld->AddText(ImGui::GetFont(), 12.5f * s, ImVec2(ra.x + 18 * s, ra.y + 53 * s), col(k_gold),
                         on ? "Choose it under Settings > General > Game language." : "Off: not offered as a game language.");
         else if (!strcmp(p.type, "new-fighter") && p.template_name[0]) {

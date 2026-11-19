@@ -60,6 +60,8 @@ typedef struct PcContentPack {
     char character[64];     /* build 96: a new fighter's character group (index-v7.json's "character"; char_groups.h),
                                "" none. Never part of the content print */
     char version_name[64];  /* ... the version's name in the hub's version window, "" the pack's name */
+    char not_in_game[256];  /* build 98: why the launcher's last composition left it out (content.ini not_in_game=,
+                               setup/content_compose.py not_in_game); the Content page says "Not in game: <it>" */
 } PcContentPack;
 
 /* Build 85, skins: a new-fighter pack the team accepted as an extra outfit of a stock fighter (same gameplay, new
