@@ -77,7 +77,11 @@ each clip with a PCM frame as the stock clips do.
 * **Installer** (`newfighter.apply_op` -> `fightervoice.voice_files`): every bank keeps the template's entry table
   (lines, events, order, trailer); a group's own clips fill its entries in turn; a group left empty keeps the
   template's own clips (read from the player's dump, so no game audio is in a pack); a template without that bank
-  takes voice 025's layout with silence. Intro/extro: the own clip or the template's stream. The eight files are
+  takes voice 025's layout with silence. A group with more own clips than the template has entries of it (or none) gets entries
+  added after the template's (`bank_layout`, within the stock sizes: Character 103, Taunts 7, Enviro 20), and the
+  header is rebuilt in the stock layout (`make_hdr`: per field a u32 mask with bit v set for each value v its
+  entries use, then 0x00 and 0xFF per entry; it reproduces all 214 stock headers). Before 2026-11-19 such lines
+  never played (a creator's report; e.g. taunts 5..7 on a four-taunt template). Intro/extro: the own clip or the template's stream. The eight files are
   added to `audio/speech2.viv` **unwrapped** (the sound code reads its archives' entries in place; every other
   archive keeps literal RefPack), and word 21 of the row = N. Same pack + same dump = same bytes on every PC
   (unit test); the pack is a content pack, so it is in the content print.

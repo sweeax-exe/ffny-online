@@ -342,3 +342,44 @@ def test_c_file_check_agrees(checker):
     assert out[12:] == fv.voice_entries(40)
     # the same numbers as the installer's
     assert [fv.voice_number(f) for f in (100, 127, 5, 37, 97)] == [40, 67, 68, 71, 87]
+
+
+# -- every own line gets a slot (2026-11-19: lines beyond the template's entries of their group never played) --
+
+def test_every_own_line_gets_an_entry():
+    speech = synthetic_speech()          # Doc: 2 taunts, Character Blazin/weapon/special, no environment lines
+    pack = {"voice/taunt-%d.sch" % i: fv.encode_clip(speechlike(0.3, fv.BANK_RATE, seed=20 + i)) for i in range(1, 6)}
+    pack["voice/environment-1.sch"] = fv.encode_clip(speechlike(0.3, fv.BANK_RATE, seed=30))
+    lines = {"taunt": sorted(p for p in pack if "taunt" in p), "environment": ["voice/environment-1.sch"]}
+    got = dict(fv.voice_files(speech.__getitem__, lambda: list(speech), 55, 25, 100, lines, pack.__getitem__))
+    th = got[fv.bank_entry("Taunts", 40, "hdr")]
+    info = fv.parse_hdr(th)
+    assert info["count"] == 5 and [f for _, f in info["entries"]][:2] == [(4, 0, 1), (4, 0, 0)]
+    assert [trim(c) for c in fv.bank_clips(th, got[fv.bank_entry("Taunts", 40, "dat")])] == \
+        [pack[p] for p in lines["taunt"]]                                  # each once, in the order recorded
+    ch = got[fv.bank_entry("Character", 40, "hdr")]
+    info = fv.parse_hdr(ch)
+    assert [f[0] for _, f in info["entries"]] == [0, 1, 3, 2]
+    assert struct.unpack_from("<I", ch, 12 + 4 * 4)[0] == 0x0F            # the environment bit is set
+    assert trim(fv.bank_clips(ch, got[fv.bank_entry("Character", 40, "dat")])[3]) == pack["voice/environment-1.sch"]
+    assert len(fv.bank_layout("Taunts", [(4, 0, 1)] * 3, {"taunt": 9})) == fv.BANK_MAX_ENTRIES["Taunts"]
+
+
+@needs_dump
+def test_stock_headers_rebuild_the_same():
+    arc = viv.Archive(str(GAME / "audio" / "speech2.viv"))
+    n = 0
+    for v in list(range(40)) + list(range(500, 539)):
+        for bank in fv.BANKS:
+            e = fv.bank_entry(bank, v, "hdr")
+            if not arc.has(e):
+                continue
+            h = arc.raw(e)
+            info = fv.parse_hdr(h)
+            es = info["fields"] + 2
+            z = bytearray(h)
+            for k in range(info["count"]):
+                z[12 + es * k:14 + es * k] = b"\0\0"
+            assert fv.make_hdr(h, [f for _, f in info["entries"]]) == bytes(z), e
+            n += 1
+    assert n > 200

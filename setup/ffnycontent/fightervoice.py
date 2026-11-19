@@ -26,7 +26,8 @@ it. The pack holds only the modder's own clips (``voice/*.sch`` bank lines at 24
 
 The installer (``voice_files``) builds the five files at N on the player's PC: every bank keeps the template's
 entry table (the same lines, events and order) with the modder's clips in it, a group's clips taking its entries
-in turn; a group the modder left empty keeps the template's own clips (from the player's own dump, so no game
+in turn (a group with more clips than the template has entries of it, or none, gets entries added after the
+template's, ``bank_layout``, so every line plays); a group the modder left empty keeps the template's own clips (from the player's own dump, so no game
 audio is ever in a pack). The result depends only on the pack and the stock dump, so every PC composes the same
 bytes (the pack is in the content print). The fighter's Character row word 21 (speechID, never read by the speech
 code) says N; the game's hook (``src/hooks/fighter_voice.h``) then uses N for the slot when all five files are
@@ -455,6 +456,58 @@ def build_bank(template_hdr, bank, voice, clips):
     return bytes(h), bytes(dat)
 
 
+# The most entries a stock bank holds (Character 103, Taunts 7, Enviro 20): a table grown for the modder's lines
+# stays within what the game already loads.
+BANK_MAX_ENTRIES = {"Character": 103, "Taunts": 7, "Enviro": 20}
+# The fields of an entry added for a group the template has no entry of (the stock banks' own values).
+GROUP_FIELDS = {"taunt": ((4, 0, 1), (4, 0, 0)), "blazin": ((0, 0),), "weapon": ((1, 0),), "environment": ((2, 0),),
+                "special": ((3, 0),), "crowd": ((1, 0),)}
+
+
+def make_hdr(template_hdr, fields_list):
+    """A bank header with the template's first 12 bytes and the entries ``fields_list`` (offsets 0, set by
+    ``build_bank``), in the stock layout: the entries, 0x70 to 4 bytes, per field a u32 mask of the values its
+    entries use (bit v for value v; the speech code skips an event whose bit is clear), 0x00, 0xFF per entry,
+    0x70 to 4 bytes. ``make_hdr(h, fields of h)`` gives every stock header back."""
+    info = parse_hdr(template_hdr)
+    nf = info["fields"]
+    if not 0 < len(fields_list) <= 0xFF:
+        raise VoiceError("a bank holds 1 to 255 entries")
+    h = bytearray(template_hdr[:12])
+    h[5] = h[6] = len(fields_list)
+    masks = [0] * nf
+    for f in fields_list:
+        f = tuple(f[:nf]) + (0,) * (nf - len(f))
+        h += b"\0\0" + bytes(f)
+        for j, value in enumerate(f):
+            masks[j] |= 1 << value
+    h += b"\x70" * (-len(h) % 4)
+    h += struct.pack("<%dI" % nf, *masks) + b"\0" + b"\xff" * len(fields_list)
+    h += b"\x70" * (-len(h) % 4)
+    return bytes(h)
+
+
+def bank_layout(bank, template_entries, own_counts):
+    """The entry fields of ``bank`` for a voice whose own lines are ``own_counts`` {group: clips}: the template's
+    entries in its order, then, for each own group with more clips than the template has entries of it (or none),
+    added entries so that every own line has one (the fields of the template's entries of that group in turn, else
+    ``GROUP_FIELDS``), as long as the bank stays within ``BANK_MAX_ENTRIES``. Before this, a line beyond the
+    template's entries (a fifth taunt on a four-taunt template, any weapon line on a template without weapon
+    lines) was never played."""
+    fields = [tuple(f) for f in template_entries]
+    for key in GROUP_KEYS:
+        want = own_counts.get(key, 0)
+        mine = [f for f in fields if group_of(bank, f) == key]
+        if not want or len(mine) >= want:
+            continue
+        pool = mine or [f for f in GROUP_FIELDS.get(key, ()) if group_of(bank, f) == key]
+        if not pool:
+            continue
+        add = min(want - len(mine), BANK_MAX_ENTRIES[bank] - len(fields))
+        fields += [pool[i % len(pool)] for i in range(len(mine), len(mine) + max(0, add))]
+    return fields
+
+
 def group_of(bank, fields):
     """The modder's group of a bank entry (its first field is the event)."""
     for key, _, where, _, _ in GROUPS:
@@ -549,15 +602,19 @@ def voice_files(current, names, template_fe_id, template_speech, fe_id, lines, r
         hdr = current(bank_entry(bank, layout, "hdr"))
         info = parse_hdr(hdr)
         stock = bank_clips(hdr, current(bank_entry(bank, layout, "dat"))) if layout == tvoice else None
+        entries = [f for _, f in info["entries"]]
+        fields_list = bank_layout(bank, entries, {k: len(own[k]) for k in GROUP_KEYS if own.get(k)})
+        if fields_list != entries:
+            hdr = make_hdr(hdr, fields_list)
         turn, clips = {}, []
-        for i, (_, fields) in enumerate(info["entries"]):
+        for i, fields in enumerate(fields_list):
             key = group_of(bank, fields)
             mine = own.get(key) or []
             if mine:
                 k = turn.get(key, 0)
                 clips.append(mine[k % len(mine)])
                 turn[key] = k + 1
-            elif stock is not None:
+            elif stock is not None and i < len(stock):
                 clips.append(stock[i])
             else:
                 clips.append(silence_clip())
