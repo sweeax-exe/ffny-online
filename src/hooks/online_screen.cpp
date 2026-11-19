@@ -79,6 +79,7 @@
 #include "music_library.h"
 #include "pc_launcher_music.h"
 #include "towers.h"
+#include "hub_grid.h"            // build 98: the tile hub's layout and grid moves
 #include <time.h>
 
 namespace {
@@ -1905,6 +1906,13 @@ void open_servers()
 
 const int HUB_ITEMS = 14, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9, HUB_CREW = 10,
           HUB_RTS = 11, HUB_COMPLEX = 12, HUB_TOWERS = 13;
+// Build 98: the tile hub (hub_tiles.inc) has MY MUSIC as a chip of its bar (RB still opens it from the whole hub).
+const int HUB_MUSIC = 14;
+bool hub_tiles_on();    // hub_tiles.inc: the tiles (RECOMP_HUB_LIST=1: the list of build 97)
+void hub_tiles_draw(ImDrawList *dl, const Frame &f, const Pad &pad, const int *shown, int count,
+                    const std::vector<int> &quick_modes, bool ranked_elsewhere, int ranked_at, const char *const *items,
+                    const char *const *subs, const char *const *descs);
+void open_music();      // music_ui.inc
 // The hub's order: TURF WAR (stage 4) after MY STATS; it shows while the account service answers the map.
 // TOURNAMENT MATCH after RANKED MATCH; it shows while signed in on a relay that offers tournament sets.
 // MY CREW (build 77) after TURF WAR (after MY STATS when TURF WAR is hidden): the chat window's CREW tab
@@ -2297,13 +2305,16 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             (i != HUB_RTS || rts) && (i != HUB_COMPLEX || rings_on))
             shown[count++] = i;
     }
-    for (int k = 0; k < count; k++) if (shown[k] == S.hub_sel) at = k;
-    if (pad.up) at = (at + count - 1) % count;
-    if (pad.down) at = (at + 1) % count;
-    S.hub_sel = shown[at];
+    bool tiles = hub_tiles_on();    // build 98: the tiles move in 2D themselves (hub_tiles_draw)
+    if (!tiles) {
+        for (int k = 0; k < count; k++) if (shown[k] == S.hub_sel) at = k;
+        if (pad.up) at = (at + count - 1) % count;
+        if (pad.down) at = (at + 1) % count;
+        S.hub_sel = shown[at];
+    }
     // build 66: no wraparound at the ends (one tap left from One on One went to King of the Hill, the last
     // entry, and stayed there for every later Quick Match)
-    if (S.hub_sel == 0 && (pad.left || pad.right) && mode_count)
+    if (!tiles && S.hub_sel == 0 && (pad.left || pad.right) && mode_count)
         S.quick_mode = std::max(0, std::min(mode_count - 1, S.quick_mode + (pad.right ? 1 : -1)));
     // build 86: LB switches who this quick match meets (remembered per type, so it is one press next time)
     if (S.hub_sel == 0 && pad.lb && mode_count) {
@@ -2378,6 +2389,9 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             say("Your browser opens: sign in with Discord, then come back.");
         }
     }
+    if (tiles) {    // build 98: the tiles, the bar and the chosen entry's words in place of the list and the door
+        hub_tiles_draw(dl, f, pad, shown, count, quick_modes, ranked_elsewhere, ranked_at, items, subs, descs);
+    } else {
     {   // the items on one glass panel
         float bottom = count > 12 ? 75 + (count - 1) * 25.2f + 24 : count > 11 ? 76 + (count - 1) * 27.2f + 26 : count > 10 ? 77 + (count - 1) * 29.5f + 28 : count > 9 ? 78 + (count - 1) * 33 + 31 : count > 8 ? 80 + (count - 1) * 37 + 35
                      : count > 7 ? 84 + (count - 1) * 41 + 39 : count > 6 ? 84 + (count - 1) * 45 + 42 : 88 + (count - 1) * 53 + 46;
@@ -2453,6 +2467,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         }
     }
 
+    }   // the list (RECOMP_HUB_LIST=1)
+
     if (pad.a) {
         bool needs_account = S.hub_sel == 0 || S.hub_sel == 2 || S.hub_sel == 3 || S.hub_sel == HUB_TSET;
         if ((needs_account || S.hub_sel == 1) && outdated) {
@@ -2520,6 +2536,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         case HUB_RTS: open_rts(); break;
         case HUB_COMPLEX: open_complex(HUB, 0); break;
         case HUB_TOWERS: open_towers(); break;
+        case HUB_MUSIC: open_music(); break;
         case HUB_LEAVE: break;      // handled by the caller (closes)
         }
     }
@@ -5971,6 +5988,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "milestones_ui.inc"
 #include "music_ui.inc"
 #include "towers_ui.inc"
+#include "hub_tiles.inc"         // build 98: the tile hub
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -6100,6 +6118,8 @@ void gallery_step()
                                          "towers-board", "towers-board-all", "towers-art", "towers-starting",
                                          // build 86: RUN THE STREETS (closed test): the hub entry, the page, its CPU count
                                          "hub-rts", "rts", "rts-online",
+                                         // build 98: the tile hub (MY MUSIC chosen in the bar; every tile and chip shown)
+                                         "hub-music", "hub-all",
                                          // build 87: VS CPU's set-up, a new room's and a room's round rules
                                          "rts-cpu", "rts-cpu-none", "create-rts", "room-rts",
                                          // build 86: Run the Streets' social layer (rts_social_ui.inc): the docked
@@ -6308,6 +6328,11 @@ void gallery_step()
         if (p == "hub-crew-signin") G.account = ACCOUNT_OUT;
     }
     else if (p == "hub-rts") { S.page = HUB; S.hub_sel = HUB_RTS; G.rts = true; G.ranked = true; }
+    else if (p == "hub-music") { S.page = HUB; S.hub_sel = HUB_MUSIC; S.quick_mode = 0; }
+    else if (p == "hub-all") {      // build 98: RUN THE STREETS, TURF WAR, MY CREW and TOURNAMENT MATCH too
+        S.page = HUB; S.hub_sel = 0; S.quick_mode = 0; G.rts = true; G.ranked = true; G.my_crew = true;
+        TW.gallery_entry = TS.gallery_entry = RU.gallery_entry = true;
+    }
     else if (p == "rts") { S.page = RTS; S.rts_sel = 0; S.rts_cpus = 3; G.rts = true; }
     else if (p == "rts-online") { S.page = RTS; S.rts_sel = 2; G.rts = true; }
     else if (p == "rts-cpu" || p == "rts-cpu-none") {     // VS CPU's set-up: the defaults; none: 5 knockouts, no time limit
@@ -7843,6 +7868,7 @@ bool draw_pages(ImVec2 display)
     }
     backdrop(dl, f, display, S.page == FIGHTERS || S.page == NAME || S.page == STATS || S.page == RANKED_BOARD || S.page == TURF || S.page == PLAYERS ||
              S.page == COMPLEX ||
+             (S.page == HUB && hub_tiles_on()) ||   // build 98: the tiles use the whole menu, not beside the game's door
              room.in_room ||
              st == NETPLAY_CONNECTED ||
              !g_menu_up.load(), page_look(room, st));
