@@ -86,7 +86,7 @@ def own_packs(game, data, count, stats_every=7, log=print):
             pack_id = "my-synth-own-%03d" % i
             folder = Path(data) / "mods" / pack_id
             (folder / "deltas").mkdir(parents=True, exist_ok=True)
-            model = "V2IP_7%s%sA" % ("XYZ"[(i // 36) % 3], ALPHABET[i % 36])
+            model = "V2IP_7%s%sA" % ("GHIJKLMNOPQRSTUVWXYZ"[(i // 36) % 20], ALPHABET[i % 36])
             originals = {s: models.read(tpl["model"] + s) for s in nf.MODEL_SUFFIXES if models.has(tpl["model"] + s)}
             entries = []
             for entry, base_entry, base, result in nf.model_entries(tpl["model"], model, originals):
