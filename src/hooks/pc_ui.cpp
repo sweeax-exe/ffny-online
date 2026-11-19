@@ -254,7 +254,7 @@ static const char *friendly(const char *section, const char *key)
         {"launcher", "skip", "Skip the launcher at start"},
         {"content", "community_offline", "Community content in offline play"},
         {"ui", "scale", "Text and control size"},
-        {"debug", "unlock_all", "Unlock all fighters and venues"},
+        {"debug", "unlock_all", "Unlock everything (offline)"},
         {"debug", "skip_intro", "Skip startup movies and legal screen"},
         {"ui", "overlay_pad", "Overlay pad buttons"},
         {"ui", "overlay_key", "Overlay key"},

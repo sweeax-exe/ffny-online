@@ -64,6 +64,21 @@ int main(int argc, char **argv) {
         counts(c);
         return 0;
     }
+    if (cmd == "slot") {                            // <sod> <in> <out> <fault>: the slot in memory (file + 0x80)
+        if (!unlock_layout(slurp(argv[2]), l, &error)) { std::cout << "error " << error << "\n"; return 1; }
+        Bytes b = slurp(argv[3]);
+        uint32_t items[6], states[6], at = 0x4DC4;
+        for (int k = 0; k < 6; k++) { items[k] = l.items[k]; states[k] = at; at += l.items[k] / 4 + 1; }
+        int fault = atoi(argv[5]);
+        if (fault == 1) items[3]++;             // the game holds another clothing count
+        if (fault == 2) states[2] += 4;         // the jewellery states elsewhere
+        UnlockCounts c;
+        bool ok = unlock_profile_slot(b.data() + 0x80, fault == 3 ? 0x100 : b.size() - 0x80, items, states, l, c, &error);
+        spit(argv[4], b);
+        if (!ok) { std::cout << "error " << error << "\n"; return 1; }
+        counts(c);
+        return 0;
+    }
     if (cmd == "unlock") {                          // <save> <backups> <folder> <sod> <cash> <now>
         UnlockResult r = unlock_everything(fs::u8path(argv[2]), fs::u8path(argv[3]), argv[4], slurp(argv[5]),
                                            atoi(argv[6]) != 0, atoll(argv[7]));
@@ -281,6 +296,23 @@ def test_profile_unlocks_every_item_and_nothing_else(tool, sod, tmp_path):
     assert out['items'] == '6 30 8 10 82 5' and out['cash'] == '0'
     # padding past each kind's last item is left alone: hair has 9 items, so byte 2 keeps bits 2..7
     assert after[states + 2] & 0xFC == 0
+
+
+def test_slot_in_memory_is_the_profile_edit_without_cash(tool, sod, tmp_path):
+    """[debug] unlock_all on the current profile (dev_unlock.c): the same bytes as the Saves page's edit
+    without the cash box, again and again; refused with nothing changed when the game's arrays differ."""
+    src, by_file, by_slot, again = (tmp_path / n for n in ('p', 'f', 's', 'a'))
+    before = profile_blob(cash=500)
+    src.write_bytes(before)
+    run(tool, 'profile', sod, src, by_file, 0)
+    out = parse(run(tool, 'slot', sod, src, by_slot, 0))
+    assert by_slot.read_bytes() == by_file.read_bytes()
+    assert out['items'] == '6 30 8 10 82 5' and out['cash'] == '0' and out['dev'] == '0'
+    assert parse(run(tool, 'slot', sod, by_slot, again, 0))['items'] == '0 0 0 0 0 0'
+    assert again.read_bytes() == by_slot.read_bytes()
+    for fault in (1, 2, 3):
+        result = run(tool, 'slot', sod, src, again, fault, check=False)
+        assert result.startswith('error ') and again.read_bytes() == before
 
 
 def test_cash_box_raises_only(tool, sod, tmp_path):

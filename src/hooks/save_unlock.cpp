@@ -234,19 +234,20 @@ uint32_t training_cost(const uint32_t stats[5])
     return cost;
 }
 
-bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, UnlockCounts &counts, std::string *error)
+namespace
 {
-    if (b.size() != kProfileFile || !header_fault(b).empty() || !identity_is(b, "DJFFNY::User")) {
-        if (error) *error = "it is not a profile file of this game";
-        return false;
-    }
-    size_t at = kProfileAt + kItemStates;
-    uint32_t moves_cost = 0;            // the Blazin moves it does not own (state below 2), at the gym's prices
+// The item part of Unlock all on a profile's bytes (offsets from the profile start, as kItemStates): every item
+// state's Unlocked bit set, the shops' row counters raised to the totals. Never lowers anything, so running it
+// again changes nothing. `moves_cost` gets what the Blazin moves it did not own cost at the gym.
+void unlock_items(uint8_t *s, const UnlockLayout &layout, UnlockCounts &counts, uint32_t &moves_cost)
+{
+    size_t at = kItemStates;
+    moves_cost = 0;
     for (int k = 0; k < 6; k++) {
         uint32_t n = layout.items[k];
         counts.items[k] = 0;
         for (uint32_t i = 0; i < n; i++) {
-            uint8_t &byte = b[at + i / 4];
+            uint8_t &byte = s[at + i / 4];
             int shift = (int)(i % 4) * 2;
             if (k == 4 && ((byte >> shift) & 3) < 2 && i < layout.blazin_cost.size()) moves_cost += layout.blazin_cost[i];
             if (!((byte >> shift) & 3)) counts.items[k]++;
@@ -257,14 +258,45 @@ bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, Unloc
     // The shops' counts of unlocked rows: every row now (never lowered).
     for (int k = 0; k < 6; k++) {
         if (!kRowCounter[k]) continue;
-        size_t o = kProfileAt + kRowCounter[k];
-        uint32_t have = b[o] | b[o + 1] << 8, want = std::min<uint32_t>(layout.rows[k], 0xFFFF);
-        if (have < want) { b[o] = (uint8_t)want; b[o + 1] = (uint8_t)(want >> 8); }
+        uint8_t *o = s + kRowCounter[k];
+        uint32_t have = o[0] | o[1] << 8, want = std::min<uint32_t>(layout.rows[k], 0xFFFF);
+        if (have < want) { o[0] = (uint8_t)want; o[1] = (uint8_t)(want >> 8); }
     }
     for (int t = 0; t < 16; t++) {
-        size_t o = kProfileAt + kClothingTypeCounters + 4 * t;
-        if (rd(b, o) < layout.clothing_type_rows[t]) wr(b, o, layout.clothing_type_rows[t]);
+        uint8_t *o = s + kClothingTypeCounters + 4 * t;
+        uint32_t have = o[0] | o[1] << 8 | o[2] << 16 | (uint32_t)o[3] << 24, want = layout.clothing_type_rows[t];
+        if (have < want) { o[0] = (uint8_t)want; o[1] = (uint8_t)(want >> 8); o[2] = (uint8_t)(want >> 16); o[3] = (uint8_t)(want >> 24); }
     }
+}
+} // namespace
+
+bool unlock_profile_slot(uint8_t *slot, size_t size, const uint32_t items[6], const uint32_t states[6],
+                         const UnlockLayout &layout, UnlockCounts &counts, std::string *error)
+{
+    auto fail = [&](const char *why) { if (error) *error = why; return false; };
+    if (!slot || size < kProfileEnd) return fail("the profile slot is too small");
+    size_t at = kItemStates;
+    for (int k = 0; k < 6; k++) {
+        if (items[k] != layout.items[k]) return fail("the game holds other item counts than the database");
+        if (states[k] != at) return fail("the game keeps the item states elsewhere");
+        at += layout.items[k] / 4 + 1;
+    }
+    if (at > kProfileEnd) return fail("the items do not fit a profile");
+    uint32_t moves_cost;
+    unlock_items(slot, layout, counts, moves_cost);
+    counts.cash = false;
+    counts.dev_points = 0;
+    return true;
+}
+
+bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, UnlockCounts &counts, std::string *error)
+{
+    if (b.size() != kProfileFile || !header_fault(b).empty() || !identity_is(b, "DJFFNY::User")) {
+        if (error) *error = "it is not a profile file of this game";
+        return false;
+    }
+    uint32_t moves_cost;                // the Blazin moves it does not own (state below 2), at the gym's prices
+    unlock_items(b.data() + kProfileAt, layout, counts, moves_cost);
     counts.cash = false;
     if (cash && rd(b, kProfileAt + kCash) < kUnlockCash) {
         wr(b, kProfileAt + kCash, kUnlockCash);

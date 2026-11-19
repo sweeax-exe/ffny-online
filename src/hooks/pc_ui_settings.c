@@ -23,9 +23,11 @@ size_t pc_ui_settings(RecompSetting *out, size_t max)
         "Skip the launcher and start the game at once. Hold Shift while the game starts, start it with "
         "--launcher, or turn this off in the in-game overlay to see the launcher again.");
     ADD("debug", "unlock_all", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_UNLOCK_ALL", RECOMP_SETTING_RESTART,
-        "Debug: every fighter and venue is available on any profile, through the developers' own unlock "
-        "routine in the game. Meant for testing; it changes the profile in memory and asks the game to save "
-        "it, so do not use it on a save you care about.");
+        "Debug: every fighter and venue, and on every profile, including one created later, every "
+        "clothing item, hair style, tattoo, piece of jewellery, Blazin move and fighting style, once it is "
+        "the profile in use. No cash or development points (the launcher's Saves page has those). Offline "
+        "only: nothing changes while online. Meant for testing; it changes the profile in memory and asks "
+        "the game to save it, so do not use it on a save you care about.");
     ADD("debug", "skip_intro", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_SKIP_INTRO", RECOMP_SETTING_RESTART,
         "Start at Press Start, skipping the startup legal screen and movies. Story cutscenes still play. "
         "Applies when starting the game; changing it in the overlay requires a restart.");

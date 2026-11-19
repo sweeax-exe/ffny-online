@@ -67,6 +67,12 @@ constexpr uint32_t kStylePrice = 2500;
 // they know (nothing is changed then). `cash` also tops up the development points (training_cost).
 bool unlock_profile_bytes(Bytes &profile, const UnlockLayout &layout, bool cash, UnlockCounts &counts,
                           std::string *error);
+// The same item edit (no cash, no development points) on a profile slot as the game holds it in memory, for
+// [debug] unlock_all (src/patches/dev_unlock.c): `slot` is the slot's first `size` bytes (offsets as above),
+// `items` and `states` the item count and the slot offset of the state array of each kind as the game's six
+// containers hold them. Refused, with nothing changed, unless they are exactly what the layout gives.
+bool unlock_profile_slot(uint8_t *slot, size_t size, const uint32_t items[6], const uint32_t states[6],
+                         const UnlockLayout &layout, UnlockCounts &counts, std::string *error);
 bool unlock_options_bytes(Bytes &options, const UnlockLayout &layout, UnlockCounts &counts, std::string *error);
 
 struct UnlockResult
@@ -81,3 +87,7 @@ struct UnlockResult
 UnlockResult unlock_everything(const fs::path &save_dir, const fs::path &backups, const std::string &folder,
                                const Bytes &sod, bool cash, int64_t now);
 } // namespace saves
+
+// For the game (src/patches/dev_unlock.c): unlock_profile_slot with the layout of the game's database
+// (pcsaves::game_database, read once). The items it unlocked, or -1 when refused (logged once).
+extern "C" int saves_unlock_profile_slot(uint8_t *slot, uint32_t size, const uint32_t items[6], const uint32_t states[6]);
