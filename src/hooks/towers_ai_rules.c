@@ -1,0 +1,70 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 sweeax-exe (FFNY Online) */
+/* Towers: the CPU past Hard, the pure rules. See towers_ai_rules.h. */
+#include "towers_ai_rules.h"
+#include "towers_rules.h"
+
+/* Measured, not guessed (open question 1 of the study): 1 is the better defender. The defence actions' weight takes
+ * eff = min(100, skill * {1.5, 1.25, 1.0, 0.75, 0.5}[p - 1]) in place of the skill, so p = 1 lets the designed
+ * weights rule (as a high skill does) and p = 5 adds the flat prior back. Bot (test_bot.c, aggression 60) against
+ * Magic on floor 30 (skill 92, holds and the repeat counter off), 3 fights each (build 101, logs/dj/20261121-*-
+ * tower-measure): p = 1: the bot's attacks landed 58.2 %, the CPU took 6.4 damage per bot attack (236.8 a fight);
+ * p = 5: 56.1 % landed but 7.9 damage per attack (299.9 a fight, longer fights). A small sample: the difference is
+ * modest, and in the direction the table suggests. */
+const int TOWER_AI_DEFENCE_BEST = 1;
+
+void towers_ai_floor(int tower, int floor, int floors, TowerAiFloor *out)
+{
+    float t;
+    out->on = 0;
+    out->t = 0.0f;
+    out->boss = towers_is_boss(tower, floor, floors);
+    out->defence = TOWER_AI_DEFENCE_BEST;
+    if (floor < TOWER_AI_FIRST_FLOOR) return;
+    t = (float)(floor - TOWER_AI_FIRST_FLOOR) / (float)(TOWER_AI_RAMP_TOP - TOWER_AI_FIRST_FLOOR);
+    if (t > 1.0f) t = 1.0f;
+    if (out->boss) t += TOWER_AI_BOSS_EXTRA;
+    if (t > 1.0f) t = 1.0f;
+    out->on = 1;
+    out->t = t;
+}
+
+int towers_ai_skill(const TowerAiFloor *f, int own)
+{
+    int s;
+    if (!f->on || own < 1 || own > 100) return own;
+    s = own + (int)((float)(100 - own) * f->t + 0.5f);
+    if (f->boss) s += TOWER_AI_BOSS_SKILL;
+    return s > 100 ? 100 : s < own ? own : s;
+}
+
+/* Each tendency the ramp moves, and the end it moves toward. Distance, attack/defend, strike/grapple, punch/kick,
+ * the strong/normal mixes, shove/grapple, sticky grapple, climbing, running attacks and submissions stay the
+ * fighter's own: they are its style, not its strength. */
+static int target_of(const TowerAiFloor *f, int k)
+{
+    switch (k) {
+    case TAI_COUNTER_ATTEMPT: case TAI_COUNTER_USE:     /* counters over plain blocks, and often */
+    case TAI_COMBO: case TAI_BLAZIN:                    /* strings and Blazin moves */
+    case TAI_ENV_GRAPPLE: case TAI_ENV_ATTACK: case TAI_WEAPON: case TAI_ENVIRONMENT:   /* walls, objects, weapons */
+    case TAI_DISTANCE_USE:
+        return 5;
+    case TAI_GRAPPLE_DEFENCE: case TAI_STRIKE_DEFENCE:
+        return f->defence;
+    case TAI_APPEAL:                                    /* taunts: the fewest */
+        return 1;
+    }
+    return 0;
+}
+
+int towers_ai_tendency(const TowerAiFloor *f, int k, int own)
+{
+    int target, v;
+    float d;
+    if (!f->on || k < 0 || k >= TOWER_AI_TENDENCIES || own < 1 || own > 5) return own;
+    target = target_of(f, k);
+    if (!target) return own;
+    d = (float)(target - own) * f->t;
+    v = own + (int)(d < 0.0f ? d - 0.5f : d + 0.5f);
+    return v < 1 ? 1 : v > 5 ? 5 : v;
+}

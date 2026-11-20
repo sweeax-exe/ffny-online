@@ -13,6 +13,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "recomp_settings.h"
 #include "towers.h"
+#include "towers_ai.h"
 #include "account.h"
 #include "anticheat.h"
 #include "automatch.h"
@@ -711,6 +712,27 @@ static void test_overrides(void)
         g_run.roster_hash = towers_roster_hash(g_run.roster, g_run.floors);
         fprintf(stderr, "[TOWERS] test: the tower is %d floors tall\n", cap);
     }
+    {   /* tests (the CPU measurements): RECOMP_TEST_TOWERS_FLOOR=<n> starts the climb on floor n */
+        int at = env_int("RECOMP_TEST_TOWERS_FLOOR", 0);
+        if (at > 1 && at <= g_run.floors) {
+            g_run.floor = at;
+            fprintf(stderr, "[TOWERS] test: the climb starts on floor %d\n", at);
+        }
+    }
+}
+
+/* Tests (the CPU measurements): RECOMP_TEST_TOWERS_REPEAT=<n>: the first n fights of the session end like a draw
+ * whatever their result (the same floor again, nothing counted), then the run goes on as usual. 1 when this fight
+ * was such a repeat. */
+static int test_repeat(int beaten)
+{
+    static int fights;
+    int n = env_int("RECOMP_TEST_TOWERS_REPEAT", 0);
+    if (n <= 0 || fights >= n) return 0;
+    fights++;
+    fprintf(stderr, "[TOWERS] test: repeat %d of %d on floor %d%s\n", fights, n, beaten, fights == n ? " (repeats done)" : "");
+    set_state(TOWERS_DRAW);
+    return 1;
 }
 
 /* The floor's fight: skip floors whose fighter this PC cannot set up, then ask automatch for it. */
@@ -906,6 +928,7 @@ void towers_match_start(void)
         g_results_on = 0;
         g_log_pairs = 0;
         g_log_count = 0;
+        towers_ai_begin(g_run.tower, g_run.floor, g_run.floors);     /* the CPU past Hard (towers_ai.c) */
         ac_start();
         net_fight(&g_run, g_run.floor, "start", NULL, 0, 0, 0, 0);
         /* the CPU's level for this floor and the climber's fixed one, after the set-up copied the words and before
@@ -935,6 +958,7 @@ void towers_step(void)
     if (g_state != TOWERS_FIGHTING) { unlock(); return; }
     g_step++;
     if (!g_decided && MEM32(me + F_SLOT) != 0xFFFFFFFFu) log_step(MEM32(me + F_PAD_HELD) & 0xFFFFFu);
+    towers_ai_step(g_step, g_decided);      /* the CPU slot's AI words for this floor, before the step's AI pass */
     {   /* tests: RECOMP_TEST_TOWERS_EXIT_IN_FIGHT=<floor> ends the game 4 s into that floor's fight (a closed or crashed
          * game: the next start must count it as a loss) */
         static int exit_floor = -2;
@@ -977,6 +1001,7 @@ void towers_step(void)
             if (g_cpu_end_health > 100) g_cpu_end_health = 100;
             if (g_cpu_end_health < -1) g_cpu_end_health = 0;
             log_flush();
+            towers_ai_end(d ? -1 : w, g_step);
             fprintf(stderr, "[TOWERS] floor %d decided at step %u: %s; the climber's health %d%%\n", g_run.floor,
                     g_step, d ? "a draw" : w == 0 ? "the climber won" : "the CPU won", g_end_health);
         }
@@ -994,6 +1019,7 @@ void towers_health_change(void)
     if (delta >= 0.0f) return;
     if (r == ACTORS && g_rules.cpu_damage != 1.0f) MEMF(g_esp + 8) = delta * g_rules.cpu_damage;
     else if (r == ACTORS + STRIDE && g_rules.cpu_health > 1.0f) MEMF(g_esp + 8) = delta / g_rules.cpu_health;
+    towers_ai_health(r, MEMF(g_esp + 8));
 }
 
 /* Back on a menu after the floor's fight: the result counts. */
@@ -1019,7 +1045,10 @@ static void finish_fight(void)
                   (unsigned)(ms > 3600000ull ? 3600000ull : ms));
     }
     g_draw_loss = g_decided && d && !towers_draw_refights(g_run.refights);
-    if (g_decided && d && !g_draw_loss) {
+    if (test_repeat(beaten)) {
+        g_draw_loss = 0;
+        file_store();
+    } else if (g_decided && d && !g_draw_loss) {
         g_run.draws++;
         g_run.refights++;
         if (g_have[g_run.tower - 1] && g_saved[g_run.tower - 1].seed == g_run.seed) g_saved[g_run.tower - 1].refights = g_run.refights;
