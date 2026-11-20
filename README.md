@@ -267,7 +267,7 @@ The [release notes](docs/releases) record what each version changed.
 ## Credits and licensing
 
 **FFNY Online** (online play, the in-game online screens, the update service and the relay) is
-maintained by **sweeax-exe**, with development assistance from Claude Code. Since 2026-11-02 the
+maintained by **Oliver Vincent Sommerburg (sweeax-exe)**, with development assistance from Claude Code. Since 2026-11-02 the
 server side (the relay, the account service and the Discord bot) is developed in a separate,
 private repository and is not part of this one. The launcher's PS2 save import is a port of the
 PS2 to Xbox save converter by **hK**, used with his permission.
