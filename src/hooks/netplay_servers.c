@@ -506,6 +506,18 @@ static struct {         /* a join or quick match waiting for the hub to reach it
     ULONGLONG since;
 } A;
 
+/* A join or watch by a typed code (ticket #200): a private room shows in no relay's list, and players of the two
+ * coasts sit on different relays, so the relay the hub is on answers "no room". The other relays are asked in turn
+ * (the hub moves to each and sends the JOIN again) until one has the code. */
+#define CODE_SEARCH_MS  90000
+static struct {
+    int active, kind;       /* kind: 1 join, 4 watch */
+    int miss;               /* the relay said no room (set on the network thread, handled in netservers_tick) */
+    unsigned tried;         /* relays asked (1 << NETSERVER_*) */
+    char code[7], name[40];
+    ULONGLONG since;
+} CS_;
+
 /* One ask of every wanted relay: a ROOMLIST padded to a full datagram (the relay answers with no more
  * bytes than it was sent) for this build's public rooms, King of the Hill included. */
 static void list_round(void)
@@ -970,11 +982,86 @@ int netservers_players(NetServerPlayer *out, int max, int *online)
     return heard ? n : -1;
 }
 
+static void move_to(int kind, int server, const char *code, int mode, int max, const char *name);
+
+void netservers_code_begin(int kind, const char *code, const char *name)
+{
+    int cur = netservers_connected(), i;
+    init();
+    EnterCriticalSection(&g_cs);
+    memset(&CS_, 0, sizeof(CS_));
+    CS_.kind = kind;
+    for (i = 0; i < 6 && code && code[i]; i++) CS_.code[i] = (char)toupper((unsigned char)code[i]);
+    snprintf(CS_.name, sizeof(CS_.name), "%s", name && *name ? name : "Player");
+    CS_.since = GetTickCount64();
+    if (cur >= 0 && cur < NETSERVER_COUNT) { CS_.active = 1; CS_.tried = 1u << cur; }     /* a custom address: no search */
+    LeaveCriticalSection(&g_cs);
+}
+
+/* The relay answered "no room" to the join or watch of this code (network thread). 1: the search goes on (a
+ * status line is wanted), 2: every relay has been asked, none has it, 0: no search was under way. */
+int netservers_code_miss(const char *code)
+{
+    int on = 0;
+    init();
+    EnterCriticalSection(&g_cs);
+    if (CS_.active && GetTickCount64() - CS_.since < CODE_SEARCH_MS && (!code || !strncmp(code, CS_.code, 6))) {
+        unsigned left = netservers_up() & ~CS_.tried;
+        if (left) { CS_.miss = 1; on = 1; }
+        else { CS_.active = 0; on = 2; }
+    }
+    LeaveCriticalSection(&g_cs);
+    return on;
+}
+
+/* The next relay of the search, once the miss is known (called by netservers_tick, not on the network thread). */
+static int code_search_step(void)
+{
+    NetServerInfo info[NETSERVER_COUNT];
+    int n = netservers_get(info, NETSERVER_COUNT), i, best = -1, kind;
+    unsigned left;
+    char code[7], name[40];
+    EnterCriticalSection(&g_cs);
+    if (!CS_.active || !CS_.miss) { LeaveCriticalSection(&g_cs); return 0; }
+    CS_.miss = 0;
+    left = netservers_up() & ~CS_.tried;
+    for (i = 0; i < n && i < NETSERVER_COUNT; i++)
+        if ((left & (1u << i)) && (best < 0 || (info[i].ping_ms >= 0 && (info[best].ping_ms < 0 || info[i].ping_ms < info[best].ping_ms)))) best = i;
+    if (best < 0) { CS_.active = 0; LeaveCriticalSection(&g_cs); return 0; }
+    CS_.tried |= 1u << best;
+    kind = CS_.kind;
+    memcpy(code, CS_.code, sizeof(code));
+    snprintf(name, sizeof(name), "%s", CS_.name);
+    LeaveCriticalSection(&g_cs);
+    fprintf(stderr, "[SERVERS] code %s: not on the relay the hub was on; asking %s\n", code, P.s[best].name);
+    move_to(kind == 4 ? 4 : 1, best, code, 0, 0, name);
+    return 1;
+}
+
+int netservers_code_searching(void)
+{
+    int on;
+    init();
+    EnterCriticalSection(&g_cs);
+    on = CS_.active && CS_.miss;
+    LeaveCriticalSection(&g_cs);
+    return on || (CS_.active && A.kind && !strcmp(A.code, CS_.code) && GetTickCount64() - CS_.since < CODE_SEARCH_MS);
+}
+
+void netservers_code_end(void)
+{
+    init();
+    EnterCriticalSection(&g_cs);
+    CS_.active = 0;
+    LeaveCriticalSection(&g_cs);
+}
+
 /* Sends the pending join or quick match when the hub is in its relay's lobby. */
 int netservers_tick(int *mode)
 {
     NetRoom r;
     int kind, cur;
+    if (CS_.miss) code_search_step();
     if (!A.kind) return 0;
     init();
     cur = netservers_connected();
@@ -1423,6 +1510,10 @@ void netservers_quick_on(int server, int mode, int max, const char *name) { (voi
 int netservers_tick(int *mode) { (void)mode; return 0; }
 int netservers_ranked_move(const char *name) { (void)name; return 0; }
 int netservers_moving(void) { return 0; }
+void netservers_code_begin(int kind, const char *code, const char *name) { (void)kind; (void)code; (void)name; }
+int netservers_code_miss(const char *code) { (void)code; return 0; }
+int netservers_code_searching(void) { return 0; }
+void netservers_code_end(void) {}
 int netservers_quick_move(int mode, int search_s, int alone_s, const char *code, int *waiting, int *ping,
                           unsigned *scope)
 {

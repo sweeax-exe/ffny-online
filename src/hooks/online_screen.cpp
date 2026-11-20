@@ -3176,8 +3176,8 @@ void draw_code(ImDrawList *dl, const Frame &f, const Pad &pad)
         }
         if (mouse_click(f, x, y, 40, 56)) S.code_pos = i;
     }
-    if (pad.a) { netplay_lobby_join(S.code); say(std::string("Joining ") + S.code + "..."); S.page = HUB; }
-    if (pad.rb && can_watch()) { netplay_lobby_spectate(S.code); say(std::string("Watching ") + S.code + "..."); S.page = HUB; }
+    if (pad.a) { netservers_code_begin(1, S.code, hub_name().c_str()); netplay_lobby_join(S.code); say(std::string("Joining ") + S.code + "..."); S.page = HUB; }
+    if (pad.rb && can_watch()) { netservers_code_begin(4, S.code, hub_name().c_str()); netplay_lobby_spectate(S.code); say(std::string("Watching ") + S.code + "..."); S.page = HUB; }
     if (pad.b) S.page = ROOMS;
 }
 

@@ -159,6 +159,15 @@ int netservers_ranked_move(const char *name);
 /* 1 while a join, quick match or watch waits for the move to its relay. */
 int netservers_moving(void);
 
+/* A join (kind 1) or watch (kind 4) by a typed code (ticket #200). Call code_begin just before netplay_lobby_join /
+ * netplay_lobby_spectate: when the relay answers "no room", netplay.c calls code_miss, and netservers_tick then asks
+ * the other relays (best ping first) by moving the hub to each and sending the request again. code_searching: 1 while
+ * that goes on (the screens say "Looking on other servers..."); code_end drops the search. */
+void netservers_code_begin(int kind, const char *code, const char *name);
+int netservers_code_miss(const char *code);     /* 0 no search, 1 goes on, 2 no relay has the code */
+int netservers_code_searching(void);
+void netservers_code_end(void);
+
 /* The staged quick-match search (build 38), this PC alone in its quick room `code` of match type
  * `mode`, searching for `search_s` seconds (since it was first alone in a quick room of this QUICK
  * MATCH, kept across moves) and alone in this room for `alone_s`: the relay to move to, or -1.

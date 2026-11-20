@@ -5004,6 +5004,13 @@ static void on_packet(const uint8_t *b, int len)
                     fprintf(stderr, "[NETPLAY] refused: %s (a created fighter's record, RECGET)\n", text);
                 break;
             }
+            if (N.lobby && code == 1 && N.pend_len && (N.pend[5] == T_JOIN || N.pend[5] == T_SPECTATE)) {
+                /* ticket #200: a join or watch by a typed code that this relay does not know; the other relays are asked
+                 * (netservers_tick moves the hub there), with a short status meanwhile */
+                int more = netservers_code_miss((const char *)N.pend + 14);
+                if (more == 1) text = "Looking on other servers...";
+                else if (more == 2) text = "No server has a room with that code.";
+            }
             if (N.lobby && (code == 1 || code == 2 || code == 3 || code == 8 || code == 9 || code == 10 || code == 13 ||
                             code == 15)) {
                 /* refused, but the session goes on */
@@ -7490,7 +7497,14 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                         repick, want, kept);
             }
         }
-        if (listed && *listed) {
+        if (getenv("RECOMP_TEST_JOIN_CODE") && *getenv("RECOMP_TEST_JOIN_CODE")) {
+            /* RECOMP_TEST_JOIN_CODE=<code> (tests, ticket #200): JOIN BY CODE as the hub's page does it; a relay that does
+             * not know the room is followed by the others (netservers_code_begin / netservers_tick) */
+            const char *jc = getenv("RECOMP_TEST_JOIN_CODE");
+            fprintf(stderr, "[NETPLAY] tests: joining room %s by its code on %s\n", jc, netservers_short(netservers_connected()));
+            netservers_code_begin(1, jc, who);
+            netplay_lobby_join(jc);
+        } else if (listed && *listed) {
             /* RECOMP_TEST_JOIN_LISTED=<s>: no quick match; join the first open room the room list shows
              * (with RECOMP_NETPLAY_SERVER=all the other relays' rooms too, moving there to join), as a
              * player does from FIND A ROOM. Every change of the list is logged; nothing is joined when

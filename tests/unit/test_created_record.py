@@ -92,3 +92,14 @@ def test_a_changed_created_fighter_is_read_again_between_matches():
     assert "N.match_live" in body and "memcard_save_busy()" in body
     assert "created_fighter_reload();" in body and "cp_mine_set(" in body
     assert netplay.count("cp_tick_refresh();") == 1
+
+
+def test_a_join_by_code_asks_the_other_relays():
+    # ticket #200: a private room is on one relay only; "no room" on this relay sends the hub to the next one
+    netplay = (ROOT / "src/hooks/netplay.c").read_text(encoding="utf-8")
+    servers = (ROOT / "src/hooks/netplay_servers.c").read_text(encoding="utf-8")
+    ui = (ROOT / "src/hooks/online_screen.cpp").read_text(encoding="utf-8")
+    assert "netservers_code_miss((const char *)N.pend + 14)" in netplay and "Looking on other servers..." in netplay
+    assert "No server has a room with that code." in netplay
+    assert "if (CS_.miss) code_search_step();" in servers and "move_to(kind == 4 ? 4 : 1, best" in servers
+    assert ui.count("netservers_code_begin(") == 2
