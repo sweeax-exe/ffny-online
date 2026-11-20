@@ -10,6 +10,10 @@
  * block takes the fighter's own values from it, and every step after writes the floor's values again (a restart of
  * the fight reloads them).
  *
+ * The adaptive repeat counter (step 3) reads only the climber's fighter record on the step his state changed (the
+ * attack state, the move word at +0xF50): what the CPU's brain sees on that step anyway, never the pad or its queue.
+ * RECOMP_TEST_TOWERS_ADAPT=0 turns it off.
+ *
  * Gating: towers.c calls in only during a tower fight offline; the CPU slot must be flagged as one (0x3B9088) and the
  * climber's must not, or nothing is written. Tests: RECOMP_TEST_TOWERS_AI=off (only the numbers, the game's own
  * data), def=<1..5> (the defence proficiencies' target), skill=<1..100> (the skill, every floor from 7). */
@@ -46,6 +50,9 @@ static int g_own[TOWER_AI_SETS][TOWER_AI_TENDENCIES], g_want[TOWER_AI_SETS][TOWE
 static unsigned g_writes;
 static int g_hold_prev[2], g_hold_seen;
 static unsigned g_hold_cuts;
+static TowerAiAdapt g_adapt;
+static int g_adapt_on, g_boost;         /* the counter runs; the climber's attack under way is a read one */
+static unsigned g_reads, g_boost_writes, g_read_cuts;
 
 /* the fight's numbers */
 #define ATTACK_WINDOW 40u
@@ -68,6 +75,7 @@ static int attack_state(uint32_t st)
 
 static void close_attack(void)
 {
+    g_boost = 0;
     if (!g_s.open) return;
     if (g_s.cpu_hurt) g_s.landed++;
     else if (g_s.me_hurt) g_s.countered++;
@@ -92,6 +100,11 @@ void towers_ai_begin(int tower, int floor, int floors)
     g_hold_seen = 0;
     g_hold_cuts = 0;
     g_on = g_f.on && !g_mode_off;
+    towers_ai_adapt_reset(&g_adapt);
+    g_adapt_on = g_on && towers_ai_adapt_on(&g_f, floor) && !(getenv("RECOMP_TEST_TOWERS_ADAPT") &&
+                                                               *getenv("RECOMP_TEST_TOWERS_ADAPT") == '0');
+    g_boost = 0;
+    g_reads = g_boost_writes = g_read_cuts = 0;
     g_loaded = 0;
     g_writes = 0;
     memset(&g_s, 0, sizeof g_s);
@@ -132,23 +145,35 @@ static void take_own(void)
             g_mode_off ? ", test: the game's own data" : !g_f.on ? ", the game's own data (below floor 7)" : "", line);
 }
 
+/* The floor's values; while a read attack is under way (step 3) the counter and defence words at their strongest
+ * and the skill half way up to 100 on top. */
 static void write_floor(void)
 {
-    int set, k;
-    if ((int)MEM32(AI_SKILL(CPU)) != g_skill) { MEM32(AI_SKILL(CPU)) = (uint32_t)g_skill; g_writes++; }
+    int set, k, skill = g_boost ? towers_ai_adapt_skill(g_skill) : g_skill;
+    if ((int)MEM32(AI_SKILL(CPU)) != skill) { MEM32(AI_SKILL(CPU)) = (uint32_t)skill; g_writes++; }
     for (set = 0; set < TOWER_AI_SETS; set++)
-        for (k = 0; k < TOWER_AI_TENDENCIES; k++)
-            if ((int)MEM32(AI_TEND(CPU, set, k)) != g_want[set][k]) {
-                MEM32(AI_TEND(CPU, set, k)) = (uint32_t)g_want[set][k];
-                g_writes++;
+        for (k = 0; k < TOWER_AI_TENDENCIES; k++) {
+            int v = g_want[set][k];
+            if (g_boost && g_own[set][k] >= 1 && g_own[set][k] <= 5) {
+                if (k == TAI_COUNTER_ATTEMPT || k == TAI_COUNTER_USE) v = 5;
+                else if (k == TAI_GRAPPLE_DEFENCE || k == TAI_STRIKE_DEFENCE) v = g_f.defence;
             }
+            if ((int)MEM32(AI_TEND(CPU, set, k)) != v) {
+                MEM32(AI_TEND(CPU, set, k)) = (uint32_t)v;
+                g_writes++;
+                if (g_boost) g_boost_writes++;
+            }
+        }
 }
 
-static void count_step(int decided)
+/* The step's numbers; 1 when the climber started an attack on this step (its key in *key: the attack state and the
+ * move word the game set for it, read from his record, as the CPU sees it). */
+static int count_step(int decided, uint32_t *key)
 {
     uint32_t me = ACTORS + STRIDE * ME, cpu = ACTORS + STRIDE * CPU;
     uint32_t ms = MEM32(me + F_STATE), cs = MEM32(cpu + F_STATE);
-    if (decided) return;
+    int began = 0;
+    if (decided) return 0;
     if (cs != g_s.cpu_state) {
         if (g_s.cpu_state != 0xFFFFFFFFu) g_s.cpu_changes++;
         if (attack_state(cs) && !attack_state(g_s.cpu_state)) g_s.cpu_attacks++;
@@ -158,8 +183,10 @@ static void count_step(int decided)
     if (++g_s.cpu_run > g_s.cpu_longest) g_s.cpu_longest = g_s.cpu_run;
     if (g_s.open && g_now - g_s.at > ATTACK_WINDOW) close_attack();
     if (ms != g_s.me_state) {
-        if (attack_state(ms) && (!attack_state(g_s.me_state) || ms != g_s.me_state)) {
+        if (attack_state(ms)) {         /* a new attack (the next hit of a string too) */
             close_attack();
+            began = 1;
+            *key = ms << 16 | (MEM32(me + F_MOVE) & 0xFFFFu);
             g_s.attacks++;
             g_s.open = 1;
             g_s.at = g_now;
@@ -167,7 +194,9 @@ static void count_step(int decided)
         }
         g_s.me_state = ms;
     }
+    if (g_boost && !attack_state(ms)) g_boost = 0;      /* the read attack is over */
     if (g_s.open && (cs == 2u || cs == 3u)) g_s.saw_block = 1;
+    return began;
 }
 
 /* Step 2: the brain's fresh long holds cut to the floor's cap (towers_ai_hold), before the step's AI pass. */
@@ -190,11 +219,32 @@ static void cut_holds(void)
     g_hold_seen = 1;
 }
 
+/* A read attack starts (step 3): the CPU's output hold and think wait, if longer, are cut to TOWER_AI_READ_HOLD so it
+ * answers the attack it has seen too often within a few steps (at the top floors the tendencies are at their
+ * strongest already, so this is what the read adds there). Never below TOWER_AI_READ_HOLD steps: no frame-perfect
+ * answer (the study's "broken" list), and only for read attacks. */
+static void read_cut(void)
+{
+    static const uint32_t off[2] = { B_HOLD, B_THINK };
+    int i, cut = 0;
+    for (i = 0; i < 2; i++) {
+        int now = (int)MEM32(BRAIN(CPU) + off[i]);
+        if (now > TOWER_AI_READ_HOLD && now <= 10000) {
+            MEM32(BRAIN(CPU) + off[i]) = (uint32_t)TOWER_AI_READ_HOLD;
+            g_hold_prev[i] = TOWER_AI_READ_HOLD;
+            cut = 1;
+        }
+    }
+    g_read_cuts += (unsigned)cut;
+}
+
 void towers_ai_step(unsigned step, int decided)
 {
+    uint32_t key = 0;
+    int began;
     g_now = step;
     if (MEM32(ACTORS + STRIDE * CPU + F_SLOT) == 0xFFFFFFFFu) return;
-    count_step(decided);
+    began = count_step(decided, &key);
     if (!g_loaded) {
         if (!block_loaded()) return;
         g_loaded = 1;
@@ -202,6 +252,12 @@ void towers_ai_step(unsigned step, int decided)
     }
     /* the CPU slot must be a CPU, the climber's not (online rooms never get here: towers.c) */
     if (!g_on || !MEM32(G_CPU_FLAG(CPU)) || MEM32(G_CPU_FLAG(ME))) return;
+    if (began && g_adapt_on && towers_ai_adapt_note(&g_adapt, key, step)) {
+        if (++g_reads <= 3)
+            fprintf(stderr, "[TOWERS-AI] floor %d: the climber's attack %08X is read (step %u)\n", g_floor, key, step);
+        g_boost = 1;
+        read_cut();
+    }
     write_floor();
     if (g_f.hold_cap > 0 && !decided) cut_holds();
 }
@@ -226,10 +282,10 @@ void towers_ai_end(int winner, unsigned steps)
     fprintf(stderr, "[TOWERS-AI] fight {\"tower\":%d,\"floor\":%d,\"boss\":%d,\"mode\":\"%s\",\"skill\":%d,\"own_skill\":%d,"
             "\"defence\":%d,\"winner\":%d,\"steps\":%u,\"attacks\":%u,\"landed\":%u,\"blocked\":%u,\"countered\":%u,"
             "\"hits_on_cpu\":%u,\"dmg_on_cpu\":%.1f,\"hits_on_me\":%u,\"dmg_on_me\":%.1f,\"cpu_attacks\":%u,"
-            "\"cpu_changes_per_s\":%.2f,\"cpu_longest\":%u,\"writes\":%u,\"hold_cap\":%d,\"hold_cuts\":%u}\n",
+            "\"cpu_changes_per_s\":%.2f,\"cpu_longest\":%u,\"writes\":%u,\"hold_cap\":%d,\"hold_cuts\":%u,\"adapt\":%d,\"reads\":%u,\"read_writes\":%u,\"read_cuts\":%u}\n",
             g_tower, g_floor, g_f.boss, g_mode_off ? "off" : g_on ? "ramp" : "stock", g_on ? g_skill : g_own_skill,
             g_own_skill, g_f.defence, winner, steps, g_s.attacks, g_s.landed, g_s.blocked, g_s.countered,
             g_s.hits_on_cpu, (double)g_s.dmg_on_cpu, g_s.hits_on_me, (double)g_s.dmg_on_me, g_s.cpu_attacks,
             steps ? (double)g_s.cpu_changes * 60.0 / (double)steps : 0.0, g_s.cpu_longest, g_writes, g_on ? g_f.hold_cap : 0,
-            g_hold_cuts);
+            g_hold_cuts, g_adapt_on, g_reads, g_boost_writes, g_read_cuts);
 }

@@ -7,6 +7,8 @@
  *   - the tendencies (1..5): counter, combo, Blazin, environment and defence toward their strongest values, taunts
  *     toward the fewest,
  *   - the brain's long output holds (fresh ones of 20 steps and more) cut, down to 5 steps at the top (step 2),
+ *   - an attack the climber threw three times in a short window met with the strongest counter/defence values
+ *     whenever he throws it again for a while (the adaptive repeat counter, step 3),
  * All by the ABSOLUTE floor (as towers_floor_rules): floors 1..6 keep the game's own data, the ramp runs from floor 7
  * to TOWER_AI_RAMP_TOP, a boss takes the top of its floor's ramp plus TOWER_AI_BOSS_EXTRA. No game or host state:
  * compiled natively by tests/unit/test_towers_ai_rules.py. */
@@ -64,6 +66,35 @@ int towers_ai_tendency(const TowerAiFloor *f, int k, int own);
 #define TOWER_AI_HOLD_TOP       5
 /* One countdown: `prev` its value after our last look, `now` before this step. Returns the value to keep. */
 int towers_ai_hold(int prev, int now, int cap);
+
+/* ---- the adaptive repeat counter (step 3) --------------------------------------------------------------------------
+ * The game has no memory of the climber's habits; this is ours. One key per attack the climber starts: the attack
+ * state and the move word the game set for it, read from his fighter record on the step the state changed (what the
+ * CPU sees on that step anyway; never the pad). When one key starts TOWER_AI_REPEAT_COUNT times within
+ * TOWER_AI_REPEAT_WINDOW steps it is "read" until TOWER_AI_READ_STEPS after its last use: each time it is thrown in
+ * that time (the third one included) the CPU meets that attack with the strongest counter and defence values and a
+ * higher skill, and its output hold and think wait cut to TOWER_AI_READ_HOLD steps (towers_ai.c: what a read adds
+ * on the top floors, where the values are at their strongest already), until the attack is over. Other attacks
+ * keep the floor's values. A new fight starts empty. On from TOWER_AI_ADAPT_FLOOR and on every boss. */
+#define TOWER_AI_REPEAT_COUNT   3
+#define TOWER_AI_REPEAT_WINDOW  720     /* steps (12 s) */
+#define TOWER_AI_READ_STEPS     1200    /* steps (20 s) since its last use */
+#define TOWER_AI_ADAPT_MOVES    24
+#define TOWER_AI_ADAPT_FLOOR    12
+#define TOWER_AI_READ_HOLD      4       /* a read attack: the CPU's hold and think wait cut to this many steps */
+
+typedef struct TowerAiAdapt {
+    int n;
+    struct { uint32_t key, last, read_until; uint32_t seen[TOWER_AI_REPEAT_COUNT]; int count; } m[TOWER_AI_ADAPT_MOVES];
+} TowerAiAdapt;
+
+/* Whether the counter runs on this floor. */
+int towers_ai_adapt_on(const TowerAiFloor *f, int floor);
+void towers_ai_adapt_reset(TowerAiAdapt *a);
+/* An attack with `key` started at `step`: 1 when it is read now (this use made it read, or it was already). */
+int towers_ai_adapt_note(TowerAiAdapt *a, uint32_t key, uint32_t step);
+/* The skill the CPU meets a read attack with: at least half way from the floor's skill to 100. */
+int towers_ai_adapt_skill(int skill);
 
 #ifdef __cplusplus
 }

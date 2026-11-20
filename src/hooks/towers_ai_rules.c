@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Towers: the CPU past Hard, the pure rules. See towers_ai_rules.h. */
+#include <string.h>
 #include "towers_ai_rules.h"
 #include "towers_rules.h"
 
@@ -78,4 +79,45 @@ int towers_ai_tendency(const TowerAiFloor *f, int k, int own)
     d = (float)(target - own) * f->t;
     v = own + (int)(d < 0.0f ? d - 0.5f : d + 0.5f);
     return v < 1 ? 1 : v > 5 ? 5 : v;
+}
+
+int towers_ai_adapt_on(const TowerAiFloor *f, int floor)
+{
+    return f->on && (f->boss || floor >= TOWER_AI_ADAPT_FLOOR);
+}
+
+void towers_ai_adapt_reset(TowerAiAdapt *a)
+{
+    memset(a, 0, sizeof *a);
+}
+
+int towers_ai_adapt_note(TowerAiAdapt *a, uint32_t key, uint32_t step)
+{
+    int i, at = -1, oldest = 0, k;
+    for (i = 0; i < a->n; i++) {
+        if (a->m[i].key == key) at = i;
+        if (a->m[i].last < a->m[oldest].last) oldest = i;
+    }
+    if (at < 0) {           /* a new key: a free entry, else the one used longest ago */
+        at = a->n < TOWER_AI_ADAPT_MOVES ? a->n++ : oldest;
+        memset(&a->m[at], 0, sizeof a->m[at]);
+        a->m[at].key = key;
+    }
+    /* the last uses, newest first */
+    for (k = TOWER_AI_REPEAT_COUNT - 1; k > 0; k--) a->m[at].seen[k] = a->m[at].seen[k - 1];
+    a->m[at].seen[0] = step;
+    if (a->m[at].count < TOWER_AI_REPEAT_COUNT) a->m[at].count++;
+    a->m[at].last = step;
+    if (a->m[at].count >= TOWER_AI_REPEAT_COUNT &&
+        step - a->m[at].seen[TOWER_AI_REPEAT_COUNT - 1] <= TOWER_AI_REPEAT_WINDOW)
+        a->m[at].read_until = step + TOWER_AI_READ_STEPS;
+    else if (a->m[at].read_until && step <= a->m[at].read_until)
+        a->m[at].read_until = step + TOWER_AI_READ_STEPS;     /* still read: its time starts again */
+    return a->m[at].read_until && step <= a->m[at].read_until;
+}
+
+int towers_ai_adapt_skill(int skill)
+{
+    int s = skill + (100 - skill + 1) / 2;
+    return s > 100 ? 100 : s;
 }

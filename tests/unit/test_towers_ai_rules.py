@@ -56,6 +56,22 @@ int main(void)
     }
     printf("hold|%d|%d|%d|%d|%d|%d|%d\n", towers_ai_hold(0, 40, 5), towers_ai_hold(0, 20, 5), towers_ai_hold(0, 16, 5),
            towers_ai_hold(5, 4, 5), towers_ai_hold(30, 29, 5), towers_ai_hold(0, 40, 0), towers_ai_hold(4, 40, 12));
+    {   /* the repeat counter: key 7 three times in 12 s is read; key 9 spread out never is */
+        static TowerAiAdapt ad;
+        TowerAiFloor a;
+        towers_ai_adapt_reset(&ad);
+        static const uint32_t key[8] = { 7, 7, 7, 7, 7, 9, 9, 9 }, at[8] = { 100, 300, 700, 1800, 3100, 1000, 2000, 3000 };
+        printf("adapt|");
+        for (f = 0; f < 8; f++) printf("%d|", towers_ai_adapt_note(&ad, key[f], at[f]));     /* in this order */
+        for (f = 0; f < 40; f++) towers_ai_adapt_note(&ad, 1000u + (uint32_t)f, 4000u + (uint32_t)f);   /* the table rolls */
+        printf("%d|%d\n", ad.n, towers_ai_adapt_skill(60));
+        for (f = 1; f <= 72; f++) {
+            towers_ai_floor(TOWER_UPTOWN, f, 72, &a);
+            printf("adapton|%d|%d\n", f, towers_ai_adapt_on(&a, f));
+        }
+        towers_ai_floor(TOWER_FIVE_BOROUGHS, 10, 130, &a);
+        printf("adaptboss|%d\n", towers_ai_adapt_on(&a, 10));
+    }
     return 0;
 }
 '''
@@ -166,3 +182,21 @@ def test_the_hold_cap_cuts_only_fresh_long_holds(out):
     assert int(rows(out, 'bosscap')[0][0]) == 4
     # a fresh 40 and a fresh 20 are cut; a fresh 16 (an attack's own hold), a countdown going down and no cap are not
     assert rows(out, 'hold')[0] == ['5', '5', '16', '4', '29', '40', '12']
+
+
+def test_the_repeat_counter_reads_a_move_used_three_times_in_a_short_window(out):
+    # key 7 at steps 100, 300, 700: the third use in 12 s is read; again at 1800 (in its 20 s): still read; at 3100
+    # (more than 20 s after the last use): no longer. Key 9 once every 1000 steps is never read. The table rolls.
+    assert rows(out, 'adapt')[0] == ['0', '0', '1', '1', '0', '0', '0', '0', '24', '80']
+    on = {int(r[0]): r[1] == '1' for r in rows(out, 'adapton')}
+    assert not any(on[f] for f in range(1, 12)) and all(on[f] for f in range(12, 73))
+    assert rows(out, 'adaptboss')[0] == ['1']                  # every boss, also below floor 12
+
+
+def test_the_repeat_counter_reads_the_game_state_never_the_pad():
+    ai = (HOOKS / 'towers_ai.c').read_text(encoding='utf-8')
+    count = ai[ai.index('static int count_step('):]
+    count = count[:count.index('\n}\n')]
+    assert 'F_STATE' in count and 'F_MOVE' in count
+    for pad in ('0x9E0', '0x9E4', '0x9F0', '0x9EC', 'F_PAD', '0x3B8F48', 'PAD_TABLE'):
+        assert pad not in ai, pad                                 # no pad words, no pad table, no queue
