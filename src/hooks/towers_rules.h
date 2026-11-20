@@ -94,6 +94,12 @@ int towers_is_save_point(int tower, int beaten, int floors, int chapter);
 /* The floor a run resumes on when it was written after `beaten` floors: the next one. */
 /* The curve: p = floor / floors (Five Boroughs: floor / min(floors, 100), endless stays at the top row). */
 void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out);
+
+/* Build 98 (owner): who may start a NEW climb of the tower. Uptown takes standard fighters only (stock IDs 0..98; never
+ * the created fighter 99, a new fighter's place (new_place) or a numbered community / own fighter); Five Boroughs any.
+ * A saved Uptown run with a created fighter still continues (off the board, as the service says). */
+#define TOWER_CREATED_FIGHTER 99
+int towers_climber_ok(int tower, int fighter, int new_place);
 /* After a draw on a floor that had `refights` draws before it: 1 the floor is fought again (refights + 1 is then the
  * floor's count), 0 the draw counts as a loss (the run ends). */
 int towers_draw_refights(int refights);

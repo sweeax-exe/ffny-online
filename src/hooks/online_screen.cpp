@@ -3750,7 +3750,7 @@ bool grid_style_matches(const std::vector<OnlineFighter> &list, int i, const std
     return fighter_style_matches(list[i].style ? list[i].style : "", filter);     // no row: fighter.xml's one style
 }
 
-bool towers_ui_originals_only();   // towers_ui.inc: Uptown's climber is an original (or created) fighter
+bool towers_ui_originals_only();   // towers_ui.inc: Uptown's climber is a standard fighter (build 98: never a created one)
 // "Original fighters only" where this pick counts: the room's STANDARD ONLY, else the search's choice (ranked, or
 // the hub's Quick Match type); Run the Streets' offline VS CPU has none.
 bool grid_originals_only(const NetRoom &r)
@@ -3861,7 +3861,10 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     bool originals = grid_originals_only(rules_room);
     int counts[FTAB_COUNT] = {}, offered[FTAB_COUNT] = {};
     for (int i = 0; i < n; i++) if (list[i].id != FIGHTER_RANDOM) counts[grid_tab(list, i)]++;
-    for (int t = 0; t < FTAB_COUNT; t++) offered[t] = counts[t] > 0 && !(t == FTAB_COMMUNITY && originals);
+    // build 98: Uptown's climber is a standard fighter: no CREATED tab either (towers_climber_ok)
+    bool uptown = !rules_room.in_room && S.towers_pick && towers_ui_originals_only();
+    for (int t = 0; t < FTAB_COUNT; t++)
+        offered[t] = counts[t] > 0 && !(t == FTAB_COMMUNITY && originals) && !(t == FTAB_CREATED && uptown);
     if (S.ftab < 0) S.ftab = gallery_on() ? FTAB_FFNY : recomp_settings_get("online", "fighter_tab", FTAB_FFNY);
     int tab = fighter_tab_shown(S.ftab, offered);
     auto go_tab = [&](int to) {

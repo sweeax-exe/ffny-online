@@ -753,6 +753,11 @@ int towers_start(int tower, int fighter, int skin)
     char run[TOWER_RUN_ID_MAX + 1] = "", why[24] = "";
     g_start_error[0] = 0;
     if (netplay_active() || (tower != TOWER_UPTOWN && tower != TOWER_FIVE_BOROUGHS)) return 0;
+    if (!towers_climber_ok(tower, fighter, ONLINE_NEW_FIGHTER(fighter))) {     /* build 98: Uptown, standard fighters only */
+        snprintf(g_start_error, sizeof g_start_error, "Uptown takes standard fighters only: pick one of the game's own fighters.");
+        fprintf(stderr, "[TOWERS] %s: fighter %d is not a standard fighter: no new climb\n", towers_name(tower), fighter);
+        return 0;
+    }
     n = pool_of(tower, pool, TOWER_MAX_ROSTER);
     vn = venues_of(venues, TOWER_MAX_VENUES);
     /* T1: signed in, the service deals the seed (no lock held while it answers) */

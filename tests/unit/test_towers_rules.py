@@ -63,6 +63,11 @@ int main(void)
             printf("curve|%d|%d|%d|%.4f|%.4f|%.4f|%d|%d\n", t, f, r.cpu_level, r.cpu_damage, r.cpu_momentum,
                    r.cpu_health, r.boss, towers_is_save_point(t, f, floors, TOWER_CHAPTER));
         }
+    printf("climber|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d\n", towers_climber_ok(TOWER_UPTOWN, 55, 0), towers_climber_ok(TOWER_UPTOWN, 0, 0),
+           towers_climber_ok(TOWER_UPTOWN, 98, 0), towers_climber_ok(TOWER_UPTOWN, TOWER_CREATED_FIGHTER, 0),
+           towers_climber_ok(TOWER_UPTOWN, 100, 1), towers_climber_ok(TOWER_UPTOWN, 80, 1), towers_climber_ok(TOWER_UPTOWN, 1000, 0),
+           towers_climber_ok(TOWER_UPTOWN, 65168, 0), towers_climber_ok(TOWER_FIVE_BOROUGHS, TOWER_CREATED_FIGHTER, 0),
+           towers_climber_ok(TOWER_FIVE_BOROUGHS, 1000, 0) + towers_climber_ok(TOWER_FIVE_BOROUGHS, 100, 1));
     printf("health|%d|%d|%d|%d|%d|%d\n", towers_health_after_win(TOWER_HEALTH_FULL, 30, 12),
            towers_health_after_win(TOWER_HEALTH_CARRY, 30, 12), towers_health_after_win(TOWER_HEALTH_REFILL, 30, 12),
            towers_health_after_win(TOWER_HEALTH_REFILL, 30, 90), towers_health_after_win(TOWER_HEALTH_CARRY, 0, 0),
@@ -237,6 +242,12 @@ def test_the_curve_climbs_by_the_absolute_floor(out):
     assert [int(c[1]) for c in t2 if c[7] == '1'] == list(range(10, 131, 10))   # ... and is its save point
     endless = [c for c in t2 if 60 <= int(c[1]) and c[6] == '0']
     assert endless and all(c[3:6] == endless[0][3:6] for c in endless)      # past floor 60 the top row stays
+
+
+def test_uptown_takes_standard_fighters_only(out):
+    # build 98 (owner): a new Uptown climb only with a stock fighter (0..98); never the created fighter 99, a new
+    # fighter's place (also those below 98) or a numbered community / own fighter. Five Boroughs takes them all.
+    assert row(out, 'climber') == ['1', '1', '1', '0', '0', '0', '0', '0', '1', '2']
 
 
 def test_health_rules(out):

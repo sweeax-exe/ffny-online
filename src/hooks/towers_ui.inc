@@ -401,7 +401,7 @@ std::string tower_desc(int tower)
     if (tower == TOWER_UPTOWN)
         return "Every original fighter of the game, one per floor, in an order of your own: the run's seed shuffles "
                "them and picks a venue for each fight. The CPU starts on Easy and gets stronger up the tower. One loss "
-               "and the climb is over. Your climb is saved after every floor.";
+               "and the climb is over. Your climb is saved after every floor. Standard fighters only.";
     if (tower == TOWER_FIVE_BOROUGHS)
         return "Uptown's fighters plus every community fighter and venue you have, as tall as your roster. Chapters of "
                "10 floors, each ending on a boss: save there and come back later. One loss and the climb is over.";
@@ -446,7 +446,7 @@ void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
         text(dl, f, g_title, 12.5f, 154, y, WHITE, line, LEFT, 0.8f, 350);
         y += text_width(f, g_title, 12.5f, line) > 350 ? 34 : 20;
     }
-    const char *own = tower == TOWER_UPTOWN ? "Uptown: the original fighters; saved after every floor. Your created fighter may climb, but not onto the Uptown board."
+    const char *own = tower == TOWER_UPTOWN ? "Uptown: the original fighters; saved after every floor. Standard fighters only: no created or community fighter climbs it."
                     : tower == TOWER_FIVE_BOROUGHS ? "Five Boroughs: community fighters and venues too. A save point at the end of each chapter of 10 floors. The board counts official packs only."
                     : "The Weekly: 20 floors and one or two twists a week, from the server. Coming soon.";
     text(dl, f, g_title, 12, 140, y + 4, CREAM, own, LEFT, 0.8f, 370);
@@ -720,6 +720,10 @@ void open_fighters_for(bool towers)
 // The grid's pick for a climber: the start card.
 void towers_fighter_chosen(int fighter)
 {
+    if (!towers_climber_ok(TWU.sel + 1, fighter, ONLINE_NEW_FIGHTER(fighter))) {     // build 98: Uptown, standard only
+        say("Uptown takes standard fighters only.", 4000);
+        return;
+    }
     S.towers_pick = false;
     TWU.pick = fighter;
     TWU.pick_skin = S.pick_skin;

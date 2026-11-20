@@ -140,6 +140,12 @@ void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
     }
 }
 
+int towers_climber_ok(int tower, int fighter, int new_place)
+{
+    if (tower != TOWER_UPTOWN) return 1;
+    return !new_place && fighter >= 0 && fighter < TOWER_CREATED_FIGHTER;     /* the service's towerStockFighter */
+}
+
 int towers_draw_refights(int refights)
 {
     return refights < 0 ? 1 : refights < TOWER_MAX_REFIGHTS;
