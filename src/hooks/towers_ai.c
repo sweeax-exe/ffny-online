@@ -33,6 +33,9 @@
 #define F_SLOT              0x28u
 #define F_STATE             0x30u
 #define F_MOVE              0xF50u      /* the attacker's move word (combo-log.md) */
+#define BRAIN(s)            (0x003BF990u + 0xB8u * (uint32_t)(s))
+#define B_HOLD              0x34u       /* the output held while > 0 */
+#define B_THINK             0x38u       /* the think cooldown */
 #define CPU                 1
 #define ME                  0
 
@@ -41,6 +44,8 @@ static int g_tower, g_floor, g_on, g_loaded, g_mode_off, g_skill_test;
 static int g_own_skill, g_skill;
 static int g_own[TOWER_AI_SETS][TOWER_AI_TENDENCIES], g_want[TOWER_AI_SETS][TOWER_AI_TENDENCIES];
 static unsigned g_writes;
+static int g_hold_prev[2], g_hold_seen;
+static unsigned g_hold_cuts;
 
 /* the fight's numbers */
 #define ATTACK_WINDOW 40u
@@ -80,6 +85,12 @@ void towers_ai_begin(int tower, int floor, int floors)
     g_skill_test = 0;
     if (test && !strncmp(test, "def=", 4)) g_f.defence = atoi(test + 4) < 1 ? 1 : atoi(test + 4) > 5 ? 5 : atoi(test + 4);
     if (test && !strncmp(test, "skill=", 6)) g_skill_test = atoi(test + 6);
+    {   /* tests: RECOMP_TEST_TOWERS_HOLD=<cap> (0: none) for every floor from 7 */
+        const char *h = getenv("RECOMP_TEST_TOWERS_HOLD");
+        if (h && *h && g_f.on) g_f.hold_cap = atoi(h);
+    }
+    g_hold_seen = 0;
+    g_hold_cuts = 0;
     g_on = g_f.on && !g_mode_off;
     g_loaded = 0;
     g_writes = 0;
@@ -159,6 +170,26 @@ static void count_step(int decided)
     if (g_s.open && (cs == 2u || cs == 3u)) g_s.saw_block = 1;
 }
 
+/* Step 2: the brain's fresh long holds cut to the floor's cap (towers_ai_hold), before the step's AI pass. */
+static void cut_holds(void)
+{
+    static const uint32_t off[2] = { B_HOLD, B_THINK };
+    int i;
+    for (i = 0; i < 2; i++) {
+        int now = (int)MEM32(BRAIN(CPU) + off[i]), keep;
+        if (now < 0 || now > 10000) { g_hold_prev[i] = now; continue; }      /* not a countdown: leave it */
+        keep = g_hold_seen ? towers_ai_hold(g_hold_prev[i], now, g_f.hold_cap) : now;
+        if (keep != now) {
+            MEM32(BRAIN(CPU) + off[i]) = (uint32_t)keep;
+            if (++g_hold_cuts <= 3)
+                fprintf(stderr, "[TOWERS-AI] floor %d: the CPU's %s of %d steps cut to %d\n", g_floor, i ? "think wait" : "hold",
+                        now, keep);
+        }
+        g_hold_prev[i] = keep;
+    }
+    g_hold_seen = 1;
+}
+
 void towers_ai_step(unsigned step, int decided)
 {
     g_now = step;
@@ -172,6 +203,7 @@ void towers_ai_step(unsigned step, int decided)
     /* the CPU slot must be a CPU, the climber's not (online rooms never get here: towers.c) */
     if (!g_on || !MEM32(G_CPU_FLAG(CPU)) || MEM32(G_CPU_FLAG(ME))) return;
     write_floor();
+    if (g_f.hold_cap > 0 && !decided) cut_holds();
 }
 
 void towers_ai_health(uint32_t record, float delta)
@@ -194,9 +226,10 @@ void towers_ai_end(int winner, unsigned steps)
     fprintf(stderr, "[TOWERS-AI] fight {\"tower\":%d,\"floor\":%d,\"boss\":%d,\"mode\":\"%s\",\"skill\":%d,\"own_skill\":%d,"
             "\"defence\":%d,\"winner\":%d,\"steps\":%u,\"attacks\":%u,\"landed\":%u,\"blocked\":%u,\"countered\":%u,"
             "\"hits_on_cpu\":%u,\"dmg_on_cpu\":%.1f,\"hits_on_me\":%u,\"dmg_on_me\":%.1f,\"cpu_attacks\":%u,"
-            "\"cpu_changes_per_s\":%.2f,\"cpu_longest\":%u,\"writes\":%u}\n",
+            "\"cpu_changes_per_s\":%.2f,\"cpu_longest\":%u,\"writes\":%u,\"hold_cap\":%d,\"hold_cuts\":%u}\n",
             g_tower, g_floor, g_f.boss, g_mode_off ? "off" : g_on ? "ramp" : "stock", g_on ? g_skill : g_own_skill,
             g_own_skill, g_f.defence, winner, steps, g_s.attacks, g_s.landed, g_s.blocked, g_s.countered,
             g_s.hits_on_cpu, (double)g_s.dmg_on_cpu, g_s.hits_on_me, (double)g_s.dmg_on_me, g_s.cpu_attacks,
-            steps ? (double)g_s.cpu_changes * 60.0 / (double)steps : 0.0, g_s.cpu_longest, g_writes);
+            steps ? (double)g_s.cpu_changes * 60.0 / (double)steps : 0.0, g_s.cpu_longest, g_writes, g_on ? g_f.hold_cap : 0,
+            g_hold_cuts);
 }

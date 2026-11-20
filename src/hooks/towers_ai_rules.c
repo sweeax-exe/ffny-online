@@ -20,6 +20,7 @@ void towers_ai_floor(int tower, int floor, int floors, TowerAiFloor *out)
     out->t = 0.0f;
     out->boss = towers_is_boss(tower, floor, floors);
     out->defence = TOWER_AI_DEFENCE_BEST;
+    out->hold_cap = 0;
     if (floor < TOWER_AI_FIRST_FLOOR) return;
     t = (float)(floor - TOWER_AI_FIRST_FLOOR) / (float)(TOWER_AI_RAMP_TOP - TOWER_AI_FIRST_FLOOR);
     if (t > 1.0f) t = 1.0f;
@@ -27,6 +28,16 @@ void towers_ai_floor(int tower, int floor, int floors, TowerAiFloor *out)
     if (t > 1.0f) t = 1.0f;
     out->on = 1;
     out->t = t;
+    out->hold_cap = TOWER_AI_HOLD_BOTTOM - (int)((float)(TOWER_AI_HOLD_BOTTOM - TOWER_AI_HOLD_TOP) * t + 0.5f);
+    if (out->boss) out->hold_cap--;
+    if (out->hold_cap < TOWER_AI_HOLD_TOP - 1) out->hold_cap = TOWER_AI_HOLD_TOP - 1;
+    if (out->hold_cap >= TOWER_AI_HOLD_BOTTOM) out->hold_cap = 0;     /* the bottom: nothing is cut */
+}
+
+int towers_ai_hold(int prev, int now, int cap)
+{
+    if (cap <= 0 || now <= prev || now < TOWER_AI_LONG_HOLD || now <= cap) return now;
+    return cap;
 }
 
 int towers_ai_skill(const TowerAiFloor *f, int own)

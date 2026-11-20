@@ -44,6 +44,18 @@ int main(void)
         }
     }
     printf("defence|%d\n", TOWER_AI_DEFENCE_BEST);
+    for (f = 1; f <= 72; f++) {
+        TowerAiFloor a;
+        towers_ai_floor(TOWER_UPTOWN, f, 72, &a);
+        printf("cap|%d|%d\n", f, a.hold_cap);
+    }
+    {
+        TowerAiFloor a;
+        towers_ai_floor(TOWER_FIVE_BOROUGHS, 40, 130, &a);
+        printf("bosscap|%d\n", a.hold_cap);
+    }
+    printf("hold|%d|%d|%d|%d|%d|%d|%d\n", towers_ai_hold(0, 40, 5), towers_ai_hold(0, 20, 5), towers_ai_hold(0, 16, 5),
+           towers_ai_hold(5, 4, 5), towers_ai_hold(30, 29, 5), towers_ai_hold(0, 40, 0), towers_ai_hold(4, 40, 12));
     return 0;
 }
 '''
@@ -142,3 +154,15 @@ def test_the_ai_is_gated_on_a_live_offline_tower_fight_and_the_cpu_slot():
 def test_no_ai_data_files_are_touched():
     ai = (HOOKS / 'towers_ai.c').read_text(encoding='utf-8')
     assert 'ai.viv' not in ai.replace('ai.viv, so nothing', '') and 'override' not in ai.lower()
+
+
+def test_the_hold_cap_cuts_only_fresh_long_holds(out):
+    caps = {int(r[0]): int(r[1]) for r in rows(out, 'cap')}
+    assert all(caps[f] == 0 for f in range(1, 8))             # floors 1..7: nothing is cut
+    on = [caps[f] for f in range(8, 72)]
+    assert all(c > 0 for c in on) and on == sorted(on, reverse=True)   # tighter further up
+    assert caps[20] in range(20, 30) and caps[40] == 5 and caps[71] == 5
+    assert caps[72] == 4                                        # the boss: one step less
+    assert int(rows(out, 'bosscap')[0][0]) == 4
+    # a fresh 40 and a fresh 20 are cut; a fresh 16 (an attack's own hold), a countdown going down and no cap are not
+    assert rows(out, 'hold')[0] == ['5', '5', '16', '4', '29', '40', '12']

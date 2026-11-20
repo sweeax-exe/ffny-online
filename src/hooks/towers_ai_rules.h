@@ -6,6 +6,7 @@
  *   - the skill (AI_difficulty, 1..100) from the fighter's own Hard value toward 100,
  *   - the tendencies (1..5): counter, combo, Blazin, environment and defence toward their strongest values, taunts
  *     toward the fewest,
+ *   - the brain's long output holds (fresh ones of 20 steps and more) cut, down to 5 steps at the top (step 2),
  * All by the ABSOLUTE floor (as towers_floor_rules): floors 1..6 keep the game's own data, the ramp runs from floor 7
  * to TOWER_AI_RAMP_TOP, a boss takes the top of its floor's ramp plus TOWER_AI_BOSS_EXTRA. No game or host state:
  * compiled natively by tests/unit/test_towers_ai_rules.py. */
@@ -42,6 +43,7 @@ typedef struct TowerAiFloor {
     float t;            /* how far up the ramp, 0..1 (a boss's extra included) */
     int boss;
     int defence;        /* the defence proficiencies' target (TOWER_AI_DEFENCE_BEST; tests may set another) */
+    int hold_cap;       /* a fresh output hold of TOWER_AI_LONG_HOLD steps or more is cut to this (0: none) */
 } TowerAiFloor;
 
 /* The floor's settings: tower and floors only for the boss floors (towers_is_boss). */
@@ -51,6 +53,17 @@ int towers_ai_skill(const TowerAiFloor *f, int own);
 /* Tendency k's value for a fighter whose own value is `own` (1..5): own -> the strongest value along t, rounded;
  * an index the ramp does not move, or an own value outside 1..5, stays as it is. */
 int towers_ai_tendency(const TowerAiFloor *f, int k, int own);
+
+/* ---- the hold cap (step 2) ---------------------------------------------------------------------------------------
+ * The brain holds its output while brain+0x34 counts down and thinks again once brain+0x38 does (sub_001B0290); the
+ * behaviour code writes them as literals (1, 2, 7, 10, 16, 20, 40). A fresh write (now > the value after our last
+ * look) of TOWER_AI_LONG_HOLD steps or more is cut to the floor's cap: TOWER_AI_HOLD_BOTTOM at floor 7 (no cut) down
+ * to TOWER_AI_HOLD_TOP at the ramp's top, a boss one step less. The short holds (an attack's own few steps) stay. */
+#define TOWER_AI_LONG_HOLD      20
+#define TOWER_AI_HOLD_BOTTOM    40
+#define TOWER_AI_HOLD_TOP       5
+/* One countdown: `prev` its value after our last look, `now` before this step. Returns the value to keep. */
+int towers_ai_hold(int prev, int now, int cap);
 
 #ifdef __cplusplus
 }
