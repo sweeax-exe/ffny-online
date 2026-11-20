@@ -34,6 +34,9 @@ void cheats_start_game_done(uint32_t gamedata) { (void)gamedata; }
 void new_fighters_start_game_done(uint32_t gamedata) { (void)gamedata; }
 void fighter_skins_start_game_done(uint32_t gd) { (void)gd; }      /* src/hooks/fighter_skins.c (build 85) */
 int content_update_restarted(void) { return 0; }    /* src/hooks/content_update.c (build 86): no UPDATE NOW restart */
+/* src/hooks/save_unlock_live.cpp (build 98): the current profile's items; this fixture has no profile. */
+int saves_unlock_profile_slot(uint8_t *slot, uint32_t size, const uint32_t items[6], const uint32_t states[6])
+{ (void)slot; (void)size; (void)items; (void)states; return 0; }
 /* FFNY Online: dev_unlock.c asks whether a session is open (src/patches/online_guard.h). */
 #include "hooks/netplay.h"
 int netplay_active(void) { return 0; }
@@ -102,7 +105,8 @@ def startup_tool(tmp_path_factory):
         'extern uint32_t g_eax, g_ecx, g_edx, g_esp;\n'
         'typedef void (*recomp_func_t)(void);\n'
         '#define MEM32(a) (*(uint32_t *)(memory + (a)))\n'
-        '#define MEM8(a) (*(uint8_t *)(memory + (a)))\n')
+        '#define MEM8(a) (*(uint8_t *)(memory + (a)))\n'
+        '#define XBOX_PTR(a) ((uintptr_t)(memory + (uint32_t)(a)))\n')
     (folder / 'host.h').write_text('/* No host APIs needed by this fixture. */\n')
     driver = folder / 'driver.c'
     driver.write_text(DRIVER)
