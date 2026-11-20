@@ -3222,7 +3222,9 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
        root has one: two floors won, SAVE AND QUIT on the climb after floor 2; the hub opens on TOWERS (picture).
     3. Five Boroughs resumed: floor 3 against the community fighter (a bank), won.
     4. Uptown resumed on floor 4 and lost (the CPU's test knockout): the run ends, the end screen (picture), A back
-       to TOWERS. The run file is checked after each copy. content: a content root with community fighters
+       to TOWERS. The run file is checked after each copy.
+    4b. Build 101 (report #204): a won and a lost floor whose REMATCH? prompt gets no press at all: the run must go on
+       by itself (the prompt answered from the game's update). content: a content root with community fighters
        (DJ_CONTENT, e.g. one setup/mods.py filled; ffny_fighters.bin in its composed files)."""
     t0 = time.time()
     s = copies.Session("towers", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
@@ -3320,6 +3322,31 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
             problems.append("uptown: the loss did not end the run")
         if not data or data.get("best", [0])[0] != 3:
             problems.append("uptown: best floor is not 3 (%s)" % (data and data.get("best")))
+        # 4b (build 101, report #204): the results' REMATCH? prompt with NO press on it: the pad presses only through
+        # the summary and the rewards (a win: the earnings page and its save, 3 presses; a loss opens the rewards
+        # screen on the prompt, 2 presses) and then nothing; the run must go on by itself (win: floor 2's window,
+        # loss: the run over), the prompt answered from the game's update
+        for k, (winner, presses, until) in enumerate((("0", 3, " won ("), ("1", 2, " lost: the run"))):
+            idle_file = os.path.join(s.dir, "towers-idle-%d.json" % k)
+            keys = ";".join("a@%d" % (4 + 3 * n) for n in range(presses))
+            env = dict(base, RECOMP_TOWERS_FILE=idle_file, RECOMP_TEST_TOWERS="1,55", RECOMP_TEST_KO_STEP="600," + winner,
+                       RECOMP_PAD_SCRIPT=h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5",
+                                                             "game.getmatchsummary(0=" + keys], ""))
+            env.update(extra_env or {})
+            c, ok = _towers_phase(s, 6 + k, env, (1, until), shots, [("answered by itself", 1, 0.5, "p4b-idle-%d" % k)],
+                                  timeout or 420)
+            text = logparse.read_text(c.log)
+            a = text.find("Game.GetMatchSummary(0)")
+            presses_after = len(re.findall(r"\[PAD\] script: a sampled", text[a:])) if a >= 0 else -1
+            answered = "no rematch prompt in a run: answered by itself" in text
+            phases.append({"phase": "rematch-idle-" + ("win" if winner == "0" else "loss"), "reached": ok,
+                           "answered": answered, "presses": presses_after, "log": _relpath(c.log)})
+            if not ok or not answered:
+                problems.append("rematch prompt (%s, no press on it): the run did not go on by itself" %
+                                ("win" if winner == "0" else "loss"))
+            if presses_after > presses:
+                problems.append("rematch prompt: the pad pressed %d times after the summary (only %d meant)" %
+                                (presses_after, presses))
         if not os.environ.get("DJ_TOWERS_NO_SERVER"):
             _towers_signed_in(s, h, base, script, extra_env, shots, phases, problems, timeout)
         for p in phases:

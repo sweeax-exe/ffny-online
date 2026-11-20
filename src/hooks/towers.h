@@ -111,6 +111,9 @@ void towers_on_funccall(const char *text);  /* after each front-end call (automa
 /* The results' Rematch during a tower fight: the menu goes on as No does (a floor is never fought twice by it).
  * 1 when it took the call. */
 int towers_rematch_request(void);
+/* Once per game update, on the game thread between two updates (netplay_on_update, sub_0002C530's entry): the results' Rematch prompt
+ * answered by itself when due, also while the player presses nothing (build 101, report #204). */
+void towers_on_update(void);
 
 #ifdef __cplusplus
 }

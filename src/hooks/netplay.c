@@ -68,6 +68,7 @@
 #include "fighter_banks.h"
 #include "start_countdown.h"
 #include "detmath/detmath.h"
+#include "towers.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -203,7 +204,7 @@ int netplay_match_abandoned(void) { return 0; }
 void netplay_on_match_start(void) { start_countdown_match_start(); fight_hud_match_start(); }
 void netplay_on_pad_pass(void) {}
 void netplay_on_step(void) { start_countdown_step(0); fight_hud_step(); }
-void netplay_on_update(void) {}
+void netplay_on_update(void) { towers_on_update(); }     /* Towers: the results' Rematch prompt (towers.c) */
 extern void sub_00137010(void);
 void netplay_sound_command(void) { sub_00137010(); }
 void *netplay_sound_handler(uint32_t va) { (void)va; return NULL; }
@@ -10867,6 +10868,7 @@ void netplay_on_update(void)
     uint32_t t, f = 0;
     int i, rb_stays;
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
+    if (!N.resim) towers_on_update();   /* Towers (offline): the results' Rematch prompt answered by itself (towers.c) */
     if (!N.resim) spec_tick();
     if (!N.resim) hill_leave_tick();
     /* A rollback match that went out of sync leaves for the room at once. Its desync can come from a

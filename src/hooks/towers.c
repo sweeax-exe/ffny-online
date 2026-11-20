@@ -56,6 +56,20 @@ static int g_momentum_done;
 static int g_draw_loss;                 /* the run ended on a second draw on its floor */
 static int g_cpu_end_health;            /* the CPU's health % when the fight was decided (the report) */
 
+/* The results' Rematch prompt (YES / NO) has no place in a run. Build 100 armed its answer at the reward save and
+ * sent it from the NEXT front-end call: a player who sat on the prompt made none, so it never came (report #204).
+ * Build 101: armed when the rewards screen opens (Game.UpdateMatchRewardsPoints: after a loss it opens on the prompt,
+ * no save, no further call; seen in a test with no presses) unless it asks for its text at once (Game.GetLanguage:
+ * earnings to show first), and at the reward save (the prompt follows it after a win); sent from the game's update
+ * (towers_on_update, on the game thread between two updates, which runs while the prompt waits for input)
+ * TOWERS_REMATCH_AUTO_MS later, never while a screen loads; through the menu's own
+ * Game.Rematch() path, which towers_rematch_request turns into No (win: the next floor, loss: the run is over).
+ * Disarmed when the results go on by another way (No chosen: Game.GetHeroFighterNumber, Game.Quit, Game.Rematch). */
+#define TOWERS_REMATCH_AUTO_MS 1200ull      /* the Rematch menu is up by then */
+static volatile ULONGLONG g_rematch_at;     /* when the results' Rematch menu is answered by itself (0: not due) */
+static int g_results_on;                    /* the floor's results are up (its summary was asked for) */
+static ULONGLONG g_rewards_at;              /* the rewards screen opened then (0: not just now) */
+
 /* the file */
 static TowerRun g_saved[TOWER_COUNT];
 static int g_have[TOWER_COUNT], g_best[TOWER_COUNT], g_loaded;
@@ -888,6 +902,8 @@ void towers_match_start(void)
         g_step = 0;
         g_momentum_done = 0;
         g_fight_t0 = GetTickCount64();
+        g_rematch_at = g_rewards_at = 0;
+        g_results_on = 0;
         g_log_pairs = 0;
         g_log_count = 0;
         ac_start();
@@ -1075,14 +1091,12 @@ static void test_start(void)
     if (!towers_start(tower, fighter, skin)) fprintf(stderr, "[TOWERS] test: the run did not start\n");
 }
 
-#define TOWERS_REMATCH_AUTO_MS 1200ull      /* the Rematch menu is up by then */
-static ULONGLONG g_rematch_at;              /* when the results' Rematch menu is answered by itself (0: not due) */
 unsigned int defjam_menu_call(const char *text);    /* automatch.c */
 
 void towers_on_funccall(const char *text)
 {
     int menu;
-    static int in_sfx, in_rematch;
+    static int in_sfx;
     if (netplay_active()) return;
     if (!in_sfx && g_sfx_due) {     /* the climb's sound (towers_play_sfx), on the game's thread like every FE call */
         char call[32];
@@ -1095,25 +1109,32 @@ void towers_on_funccall(const char *text)
         }
     }
     if (in_sfx) return;
-    /* The results' Rematch prompt (YES / NO) has no place in a run: the menu comes up after the reward save, and
-     * a moment later it is answered as No (towers_rematch_request, through the menu's own Game.Rematch() path). */
-    if (!strncmp(text, "MemCard.Save( battle/rewardun", 29)) {
+    /* the results' Rematch prompt: armed here, answered from towers_on_update (above the function) */
+    if (!strncmp(text, "Game.GetMatchSummary(", 21)) {
         lock();
-        if (g_state == TOWERS_FIGHTING && g_match_seen) g_rematch_at = GetTickCount64() + TOWERS_REMATCH_AUTO_MS;
+        if (g_state == TOWERS_FIGHTING && g_match_seen) g_results_on = 1;
         unlock();
-    } else if (g_rematch_at && !in_rematch && GetTickCount64() >= g_rematch_at) {
-        int due;
+    } else if (!strcmp(text, "Game.UpdateMatchRewardsPoints()") || !strncmp(text, "MemCard.Save( battle/rewardun", 29)) {
+        /* the rewards screen opens (UpdateMatchRewardsPoints): with nothing to show (a loss) it opens on the prompt;
+         * with earnings it shows them first (it asks for its text at once: Game.GetLanguage, below), and the prompt
+         * follows its save */
         lock();
-        due = g_state == TOWERS_FIGHTING && g_match_seen;
-        g_rematch_at = 0;
-        unlock();
-        if (due) {
-            fprintf(stderr, "[TOWERS] no rematch prompt in a run: answered by itself\n");
-            in_rematch = 1;
-            defjam_menu_call("Game.Rematch()");
-            in_rematch = 0;
-            return;
+        if (g_state == TOWERS_FIGHTING && g_match_seen && g_results_on) {
+            g_rematch_at = GetTickCount64() + TOWERS_REMATCH_AUTO_MS;
+            g_rewards_at = text[0] == 'G' ? GetTickCount64() : 0;
+            fprintf(stderr, "[TOWERS] the results' Rematch prompt is due (%s): answered by itself in %llu ms\n",
+                    text[0] == 'G' ? "the rewards screen" : "the reward save", TOWERS_REMATCH_AUTO_MS);
         }
+        unlock();
+    } else if (!strcmp(text, "Game.GetLanguage()") && g_rewards_at && GetTickCount64() - g_rewards_at < 1000) {
+        lock();
+        if (g_rematch_at) fprintf(stderr, "[TOWERS] the rewards screen shows earnings first: the prompt follows its save\n");
+        g_rematch_at = g_rewards_at = 0;
+        unlock();
+    } else if (!strncmp(text, "Game.GetHeroFighterNumber(", 26) || !strcmp(text, "Game.Quit()") ||
+               !strcmp(text, "Game.Rematch()")) {
+        g_rematch_at = g_rewards_at = 0;     /* the results go on by themselves: No chosen, or quit */
+        g_results_on = 0;
     }
     menu = strstr(text, "GetScreenInfo(battle/cmtype") != NULL || strstr(text, "GetScreenInfo(intMain/mainMenu.swf") != NULL;
     if (!menu) return;
@@ -1121,6 +1142,26 @@ void towers_on_funccall(const char *text)
     lock();
     if (g_state == TOWERS_FIGHTING && g_match_seen) finish_fight();
     unlock();
+}
+
+void towers_on_update(void)
+{
+    static int in_rematch;
+    ULONGLONG due = g_rematch_at;
+    uint32_t sm;
+    int go;
+    if (!due || in_rematch || GetTickCount64() < due || netplay_active()) return;
+    sm = MEM32(0x002FB148u + 0x17u * 4u);
+    if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;     /* a screen loads: later */
+    lock();
+    go = g_state == TOWERS_FIGHTING && g_match_seen && g_rematch_at;
+    g_rematch_at = 0;
+    unlock();
+    if (!go) return;
+    fprintf(stderr, "[TOWERS] no rematch prompt in a run: answered by itself\n");
+    in_rematch = 1;
+    defjam_menu_call("Game.Rematch()");     /* towers_rematch_request: No */
+    in_rematch = 0;
 }
 
 int towers_rematch_request(void)

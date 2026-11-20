@@ -308,6 +308,14 @@ def test_the_game_side_is_wired():
     assert 'towers_on_funccall(text);' in am and 'towers_rematch_request()' in am
     tw = (HOOKS / 'towers.c').read_text(encoding='utf-8')     # no Rematch prompt in a run: answered as No by itself
     assert 'MemCard.Save( battle/rewardun' in tw and 'defjam_menu_call("Game.Rematch()")' in tw
+    # report #204: the answer comes from the game's update (it runs while the prompt waits for input), never only
+    # from the next front-end call; a loss opens the rewards screen on the prompt (UpdateMatchRewardsPoints)
+    upd = tw[tw.index('void towers_on_update(void)'):]
+    upd = upd[:upd.index('\n}\n')]
+    assert 'defjam_menu_call("Game.Rematch()")' in upd and 'netplay_active()' in upd and 'sm + 0x24u' in upd
+    assert '"Game.UpdateMatchRewardsPoints()"' in tw
+    net = (HOOKS / 'netplay.c').read_text(encoding='utf-8')
+    assert net.count('towers_on_update();') == 2         # netplay_on_update and its no-netplay stub
     ui = (HOOKS / 'pc_ui.cpp').read_text(encoding='utf-8')
     assert 'take_towers_request' in ui and 'towers_card_wanted' in ui
     hub = (HOOKS / 'online_screen.cpp').read_text(encoding='utf-8')
