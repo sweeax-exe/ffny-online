@@ -113,10 +113,12 @@ int towers_is_save_point(int tower, int beaten, int floors, int chapter)
 void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
 {
     /* Build 98 (owner's retune): by the ABSOLUTE floor in both towers, not the share of the tower (Uptown's 72
-     * floors stayed Easy to floor 10). Floors 1-2 Easy, 3-6 Normal, 7 on Hard; from floor 7 to floor 60 the CPU's
-     * damage 1.00 -> 1.50, its starting momentum 0 -> 0.75 and its health 1.00 -> 1.50, the same after 60; a boss
-     * floor adds its extra on top (the momentum stays at most 0.75, a share of the bar).
-     * The account service's TowerCPULevel (server relay/accounts/towers.go) is the same level rule. */
+     * floors stayed Easy to floor 10). Floors 1-2 Easy, 3-6 Normal, 7 on Hard. Build 101 (players had cleared the
+     * towers): a steeper top, from floor 7 to floor 40 the CPU's damage 1.00 -> 1.60, its starting momentum
+     * 0 -> 0.75 and its health 1.00 -> 1.75, the same after 40; a boss floor adds its extra on top (the momentum
+     * stays at most 0.75, a share of the bar). The CPU's brain ramps over the same floors (towers_ai_rules.c).
+     * The account service's TowerCPULevel (server relay/accounts/towers.go) is the same level rule; the knobs past
+     * Hard are this PC's only (the service never sees them). */
     float t;
     memset(out, 0, sizeof *out);
     out->cpu_damage = out->cpu_health = 1.0f;
@@ -126,9 +128,9 @@ void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
         t = (float)(floor - TOWER_HARD_FLOOR) / (float)(TOWER_RAMP_TOP - TOWER_HARD_FLOOR);
         if (t > 1.0f) t = 1.0f;
         out->cpu_level = 2;
-        out->cpu_damage = 1.0f + 0.50f * t;
-        out->cpu_momentum = 0.75f * t;
-        out->cpu_health = 1.0f + 0.50f * t;
+        out->cpu_damage = 1.0f + TOWER_TOP_DAMAGE * t;
+        out->cpu_momentum = TOWER_MAX_MOMENTUM * t;
+        out->cpu_health = 1.0f + TOWER_TOP_HEALTH * t;
     }
     if (towers_is_boss(tower, floor, floors)) {
         out->boss = 1;
