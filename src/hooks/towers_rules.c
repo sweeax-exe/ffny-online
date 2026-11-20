@@ -112,29 +112,23 @@ int towers_is_save_point(int tower, int beaten, int floors, int chapter)
 
 void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
 {
-    float p, t;
-    int span = floors;
+    /* Build 98 (owner's retune): by the ABSOLUTE floor in both towers, not the share of the tower (Uptown's 72
+     * floors stayed Easy to floor 10). Floors 1-2 Easy, 3-6 Normal, 7 on Hard; from floor 7 to floor 60 the CPU's
+     * damage 1.00 -> 1.50, its starting momentum 0 -> 0.75 and its health 1.00 -> 1.50, the same after 60; a boss
+     * floor adds its extra on top (the momentum stays at most 0.75, a share of the bar).
+     * The account service's TowerCPULevel (server relay/accounts/towers.go) is the same level rule. */
+    float t;
     memset(out, 0, sizeof *out);
     out->cpu_damage = out->cpu_health = 1.0f;
-    if (tower == TOWER_FIVE_BOROUGHS && span > 100) span = 100;
-    if (span < 1) span = 1;
-    p = (float)floor / (float)span;
-    if (p > 1.0f) p = 1.0f;
-    if (p < 0.15f) {
-        out->cpu_level = 0;
-    } else if (p < 0.40f) {
-        out->cpu_level = 1;
-    } else if (p < 0.70f) {
-        t = (p - 0.40f) / 0.30f;
-        out->cpu_level = 2;
-        out->cpu_damage = 1.0f + 0.10f * t;
-        out->cpu_momentum = 0.25f * t;
+    if (floor < TOWER_HARD_FLOOR) {
+        out->cpu_level = floor < TOWER_NORMAL_FLOOR ? 0 : 1;
     } else {
-        t = (p - 0.70f) / 0.30f;
+        t = (float)(floor - TOWER_HARD_FLOOR) / (float)(TOWER_RAMP_TOP - TOWER_HARD_FLOOR);
+        if (t > 1.0f) t = 1.0f;
         out->cpu_level = 2;
-        out->cpu_damage = 1.10f + 0.20f * t;
-        out->cpu_momentum = 0.25f + 0.25f * t;
-        out->cpu_health = 1.0f + 0.15f * t;
+        out->cpu_damage = 1.0f + 0.50f * t;
+        out->cpu_momentum = 0.75f * t;
+        out->cpu_health = 1.0f + 0.50f * t;
     }
     if (towers_is_boss(tower, floor, floors)) {
         out->boss = 1;
@@ -142,6 +136,7 @@ void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
         out->cpu_damage += 0.10f;
         out->cpu_momentum += 0.25f;
         out->cpu_health *= 1.25f;
+        if (out->cpu_momentum > TOWER_MAX_MOMENTUM) out->cpu_momentum = TOWER_MAX_MOMENTUM;
     }
 }
 

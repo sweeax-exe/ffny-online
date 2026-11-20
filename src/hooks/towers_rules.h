@@ -23,6 +23,10 @@ extern "C" {
 #define TOWER_MAX_ROSTER    600
 #define TOWER_MAX_VENUES    64
 #define TOWER_CHAPTER       10  /* Five Boroughs: a save point every 10 floors */
+#define TOWER_NORMAL_FLOOR  3   /* build 98: Normal from floor 3, Hard from floor 7, the ramp to floor 60 */
+#define TOWER_HARD_FLOOR    7
+#define TOWER_RAMP_TOP      60
+#define TOWER_MAX_MOMENTUM  0.75f /* the CPU's starting momentum, a share of its bar, boss extra included */
 #define TOWER_FIRST_COMMUNITY_VENUE 28   /* venue feIDs 28..63 are community venues (ONLINE_NEW_VENUE) */
 #define TOWER_RULES_VERSION 1   /* T1: what the account service checks a run's reports against (towers.go "rules") */
 #define TOWER_MAX_REFIGHTS  1   /* a draw is fought again once per floor; a second draw on that floor is a loss */
@@ -63,9 +67,9 @@ typedef struct TowerRun {
 /* What one floor's fight is set to (section 2.3 of the design): the CPU's game level and our own knobs past Hard. */
 typedef struct TowerFloorRules {
     int cpu_level;          /* the CPU slot's difficulty word: 0 Easy, 1 Normal, 2 Hard */
-    float cpu_damage;       /* damage the CPU deals, as a factor (1.00 .. 1.40) */
+    float cpu_damage;       /* damage the CPU deals, as a factor (1.00 .. 1.60) */
     float cpu_momentum;     /* the CPU's momentum at the start, a share of its bar (0 .. 0.75) */
-    float cpu_health;       /* the CPU's health, as a factor (1.00 .. 1.44): the damage it takes is divided by it */
+    float cpu_health;       /* the CPU's health, as a factor (1.00 .. 1.875): the damage it takes is divided by it */
     int boss;               /* a boss floor (the top of Uptown, each chapter's 10th floor in Five Boroughs) */
 } TowerFloorRules;
 

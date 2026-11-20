@@ -200,27 +200,43 @@ def test_five_boroughs_takes_community_venues(out):
     assert row(out, 'empty') == ['0', '0']               # no opponents or no venues: no run
 
 
-def test_the_curve_climbs_and_stays_mild(out):
+def test_the_curve_climbs_by_the_absolute_floor(out):
+    # build 98 (owner's retune): floors 1-2 Easy, 3-6 Normal, 7 on Hard in both towers, whatever the tower's height;
+    # from floor 7 to 60 damage 1.00 -> 1.50, momentum 0 -> 0.75, health 1.00 -> 1.50, then the same; a boss adds
+    # +0.10 damage, +0.25 momentum (at most 0.75 in all) and x1.25 health
     curve = rows(out, 'curve')
     t1 = [c for c in curve if c[0] == '1']
-    levels = [int(c[2]) for c in t1]
-    assert levels == sorted(levels)                       # never easier further up
-    assert levels[0] == 0 and 1 in levels and levels[-1] == 2
-    assert [int(c[2]) for c in t1[:8]] == [0] * 8         # p < 0.15 of 60 floors: Easy
+    t2 = [c for c in curve if c[0] == '2']
+    for t in (t1, t2):
+        levels = [int(c[2]) for c in t]
+        assert levels == sorted(levels)                   # never easier further up
+        assert levels[:7] == [0, 0, 1, 1, 1, 1, 2] and set(levels[6:]) == {2}
+    knobs = {(c[0], int(c[1])): (float(c[3]), float(c[4]), float(c[5])) for c in curve}
+    ramp = lambda f: min(max((f - 7) / 53, 0), 1)       # noqa: E731
+    for t in ('1', '2'):
+        assert knobs[(t, 1)] == knobs[(t, 6)] == (1.0, 0.0, 1.0)
+        assert knobs[(t, 7)] == pytest.approx((1.0, 0.0, 1.0))
+        for f in (8, 20, 33, 59):
+            if (t, f) != ('2', 20):                     # floor 20 of Five Boroughs is a boss
+                r = ramp(f)
+                assert knobs[(t, f)] == pytest.approx((1 + 0.5 * r, 0.75 * r, 1 + 0.5 * r), abs=1e-4)
+    assert knobs[('2', 61)] == knobs[('2', 129)] == pytest.approx((1.50, 0.75, 1.50))   # capped after 60
     for c in t1:
         f, dmg, mom, hp, boss = int(c[1]), float(c[3]), float(c[4]), float(c[5]), c[6] == '1'
-        assert 1.0 <= dmg <= 1.4001 and 0 <= mom <= 0.7501 and 1.0 <= hp <= 1.4376
+        assert 1.0 <= dmg <= 1.6001 and 0 <= mom <= 0.7501 and 1.0 <= hp <= 1.8751
         assert boss == (f == 60)                          # Uptown: the top floor is the boss
         if not boss:
-            assert dmg <= 1.3001 and mom <= 0.5001 and hp <= 1.1501
+            assert dmg <= 1.5001 and mom <= 0.7501 and hp <= 1.5001
         assert c[7] == '1'                                # Uptown saves after every floor
     top = t1[-1]
-    assert (float(top[3]), float(top[4]), float(top[5])) == pytest.approx((1.40, 0.75, 1.4375))
-    t2 = [c for c in curve if c[0] == '2']
+    assert (float(top[3]), float(top[4]), float(top[5])) == pytest.approx((1.60, 0.75, 1.875))   # + the boss's extra
+    r = ramp(10)
+    assert knobs[('2', 10)] == pytest.approx((1 + 0.5 * r + 0.10, 0.75 * r + 0.25, (1 + 0.5 * r) * 1.25), abs=1e-4)
+    assert knobs[('2', 50)][1] == pytest.approx(0.75)   # a boss's momentum stays at most 0.75 (0.61 + 0.25)
     assert [int(c[1]) for c in t2 if c[6] == '1'] == list(range(10, 131, 10))   # a boss closes each chapter
     assert [int(c[1]) for c in t2 if c[7] == '1'] == list(range(10, 131, 10))   # ... and is its save point
-    endless = [c for c in t2 if 100 <= int(c[1]) and c[6] == '0']
-    assert endless and all(c[3:6] == endless[0][3:6] for c in endless)      # past floor 100 the top row stays
+    endless = [c for c in t2 if 60 <= int(c[1]) and c[6] == '0']
+    assert endless and all(c[3:6] == endless[0][3:6] for c in endless)      # past floor 60 the top row stays
 
 
 def test_health_rules(out):
@@ -261,7 +277,7 @@ def test_the_server_computes_the_same_run(out):
     order, venues, levels = row(out, 'srvorder')
     assert ids(order) == [8, 6, 5, 7, 4, 2, 1, 10, 9]
     assert ids(venues) == [3, 8, 1, 1, 3]       # floors 3 and 4: the rule looks at the floor below's own draw
-    assert ids(levels) == [0, 1, 1, 2, 2, 2, 2, 2, 2]
+    assert ids(levels) == [0, 0, 1, 1, 1, 1, 2, 2, 2]  # build 98: by the absolute floor (TowerCPULevel the same)
 
 
 def test_draws_and_fights_left_open(out):
