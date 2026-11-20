@@ -36,6 +36,9 @@
 //             before anyone goes down (openworld.c holds everyone for those 3 s). All from the fight's steps, so
 //             every PC shows them at the same point of the fight.
 //
+//   BOSS      build 101: in a tower's boss fight (offline), a gold BOSS plate at the CPU's name on the HUD (towers.c
+//             towers_boss_fight); drawing only, nothing goes to the fight.
+//
 // Tests: RECOMP_TEST_NAME_TAGS=A,B,C,D names the fighters of an offline fight (the tags' pictures
 // without four copies of the game); RECOMP_TEST_PERFECT=1 is fight_hud.c's.
 
@@ -51,7 +54,7 @@ struct FightHudUi {
     // the banner
     uint32_t round = 0, mask = 0, shown_round = 0;
     unsigned long long mask_at = 0;
-    bool banner = false, tags = false;
+    bool banner = false, tags = false, boss = false;
     // the start countdown: 3, 2, 1, 0 for FIGHT!, -1 none; how far into it (0..1)
     int count = -1;
     float count_t = 0;
@@ -272,6 +275,27 @@ void fh_countdown(ImDrawList *dl, const Frame &f, int n, float t)
     text(dl, f, g_stencil, size, 320, ty, with_alpha(GOLD, alpha), "FIGHT!", CENTER, 2.8f);
 }
 
+// Build 101: the tower boss's BOSS plate, at the CPU's (slot 1) name tag place, the name line's height.
+void fh_boss_tag(ImDrawList *dl, ImVec2 display)
+{
+    FightPicture pic;
+    pic.w = display.x;
+    pic.h = display.y;
+    pic.wide = ws_aspect();
+    pic.stretch = pic.wide <= 0.0f && pc_display("aspect", 0) == 1;
+    pic.hud_centred = ws_hud_mode() == WS_HUD_CENTERED;
+    FightTag t;
+    if (!fight_tag_place(&pic, 2, 1, &t)) return;
+    ImFont *font = font_or_default(g_stencil);
+    float px = t.size * 1.45f;
+    ImVec2 sz = font->CalcTextSizeA(px, FLT_MAX, 0, "BOSS");
+    float padx = px * 0.35f, pady = px * 0.12f;
+    float x0 = t.right ? t.x - sz.x - 2 * padx : t.x, y0 = t.y + t.size - px - pady;
+    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + sz.x + 2 * padx, y0 + px + 2 * pady), IM_COL32(120, 90, 10, 235), px * 0.18f);
+    dl->AddRect(ImVec2(x0, y0), ImVec2(x0 + sz.x + 2 * padx, y0 + px + 2 * pady), GOLD, px * 0.18f, 0, std::max(1.0f, px * 0.08f));
+    dl->AddText(font, px, ImVec2(x0 + padx, y0 + pady), IM_COL32(255, 244, 214, 255), "BOSS");
+}
+
 void fh_tags(ImDrawList *dl, ImVec2 display)
 {
     FightPicture pic;
@@ -334,7 +358,7 @@ float fh_arena_notice_t(const OwHudView &a)
 bool fight_hud_wanted()
 {
     unsigned long long now = GetTickCount64();
-    FH.banner = FH.tags = false;
+    FH.banner = FH.tags = FH.boss = false;
     if (gallery_on()) return false;
     fh_test_names();
     fight_hud_view(&FH.view);
@@ -382,6 +406,16 @@ bool fight_hud_wanted()
             }
         }
     }
+    // build 101: a tower boss fight: the BOSS plate at the CPU's name while the HUD is up
+    {
+        int opp = -1;
+        FH.boss = hud_up && towers_boss_fight(&opp) && !netplay_active();
+        static uint32_t logged_round;
+        if (FH.boss && logged_round != FH.view.round + 1) {
+            logged_round = FH.view.round + 1;
+            fprintf(stderr, "[FIGHTHUD] BOSS tag up (fighter %d)\n", opp);
+        }
+    }
     // the plate while the steps run; the winner a few seconds on, through the game's own last knockout
     bool arena = ow_hud_view(&FH.arena) != 0;
     FH.arena_on = arena && (hud_up || steps_run);
@@ -403,7 +437,7 @@ bool fight_hud_wanted()
                     FH.arena.score_limit);
         }
     }
-    return FH.banner || FH.tags || FH.count >= 0 || FH.arena_on || FH.arena_won;
+    return FH.banner || FH.tags || FH.boss || FH.count >= 0 || FH.arena_on || FH.arena_won;
 }
 
 // A call-out on the band at cy: slammed in (large to its size over the first 0.16 of t), held, faded over the last
@@ -523,6 +557,7 @@ void draw_fight_hud(ImDrawList *dl, ImVec2 display)
 {
     if (FH.arena_on || FH.arena_won) fh_arena(dl, display);
     if (FH.tags) fh_tags(dl, display);
+    if (FH.boss) fh_boss_tag(dl, display);
     if (FH.count >= 0) fh_countdown(dl, menu_frame(display), FH.count, FH.count_t);
     if (FH.banner) {
         // online: whose perfect it is (the winner's name; a Team side's two)

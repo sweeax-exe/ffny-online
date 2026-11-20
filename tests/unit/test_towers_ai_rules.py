@@ -15,6 +15,7 @@ HOOKS = ROOT / 'src/hooks'
 
 DRIVER = r'''
 #include <stdio.h>
+#include <string.h>
 #include "towers_ai_rules.h"
 #include "towers_rules.h"
 
@@ -44,6 +45,34 @@ int main(void)
         }
     }
     printf("defence|%d\n", TOWER_AI_DEFENCE_BEST);
+    {   /* the fixed bosses */
+        static TowerRun r, plain;
+        static int pool[200], venues[3] = { 1, 2, 3 };
+        int n = 0, i, placed, climbers[2] = { 55, 58 }, c;
+        for (i = 0; i <= 85; i++) pool[n++] = i;                 /* stock-like IDs, the story bosses among them */
+        for (c = 0; c < 2; c++) {
+            towers_new_run(&plain, TOWER_UPTOWN, 4242u, climbers[c], 0, pool, n, venues, 3);
+            r = plain;
+            placed = towers_place_bosses(&r);
+            printf("up|%d|%d|%d|%d|%u|%u|", climbers[c], placed, r.floors, r.roster[r.floors - 1], r.roster_hash,
+                   towers_roster_hash(r.roster, r.floors));
+            for (i = 0; i < r.floors; i++) printf("%s%d", i ? "," : "", r.roster[i]);
+            printf("|");
+            for (i = 0; i < plain.floors; i++) printf("%s%d", i ? "," : "", plain.roster[i]);
+            printf("\n");
+        }
+        for (i = 0; i < 60; i++) pool[n++] = 1000 + i;           /* community fighters: 145 floors, 14 chapters */
+        towers_new_run(&r, TOWER_FIVE_BOROUGHS, 77u, 55, 0, pool, n, venues, 3);
+        placed = towers_place_bosses(&r);
+        printf("fb|%d|%d|", placed, r.floors);
+        for (i = 10; i <= r.floors; i += 10) printf("%s%d", i > 10 ? "," : "", r.roster[i - 1]);
+        printf("|%u|%u\n", r.roster_hash, towers_roster_hash(r.roster, r.floors));
+        n = 0;
+        for (i = 0; i < 25; i++) pool[n++] = 1000 + i;           /* no story boss: nothing placed, nothing moved */
+        towers_new_run(&plain, TOWER_FIVE_BOROUGHS, 77u, 55, 0, pool, n, venues, 3);
+        r = plain;
+        printf("none|%d|%d\n", towers_place_bosses(&r), memcmp(r.roster, plain.roster, sizeof r.roster) == 0);
+    }
     for (f = 1; f <= 72; f++) {
         TowerAiFloor a;
         towers_ai_floor(TOWER_UPTOWN, f, 72, &a);
@@ -200,3 +229,45 @@ def test_the_repeat_counter_reads_the_game_state_never_the_pad():
     assert 'F_STATE' in count and 'F_MOVE' in count
     for pad in ('0x9E0', '0x9E4', '0x9F0', '0x9EC', 'F_PAD', '0x3B8F48', 'PAD_TABLE'):
         assert pad not in ai, pad                                 # no pad words, no pad table, no queue
+
+
+def test_the_bosses_are_fixed_as_in_the_story(out):
+    up = {int(r[0]): r for r in rows(out, 'up')}
+    placed, floors, top, h1, h2, order, drawn = up[55][1:]
+    assert placed == '1' and top == '58'                       # Uptown: Crow on the top floor
+    assert h1 == h2                                            # the same roster set: the hash is unchanged
+    order, drawn = [int(x) for x in order.split(',')], [int(x) for x in drawn.split(',')]
+    assert sorted(order) == sorted(drawn)
+    assert sum(a != b for a, b in zip(order, drawn)) <= 2       # one swap, nothing else moved
+    assert up[58][3] == '82'                                   # a climb with Crow: the strongest other story boss
+    fb = rows(out, 'fb')[0]
+    bosses = [int(x) for x in fb[2].split(',')]
+    assert fb[0] == '9' and fb[1] == '145'
+    assert bosses[:8] == [59, 57, 56, 83, 80, 81, 84, 82]      # D-Mob, Sticky, Blaze, then their later versions
+    assert bosses[13] == 58                                     # the last chapter's boss: Crow
+    assert fb[3] == fb[4]
+    assert rows(out, 'none')[0] == ['0', '1']
+
+
+def test_fixed_bosses_wait_for_the_service_on_an_online_run():
+    # the account service shuffles the order itself and freezes a run that meets another opponent (towers.go Fight):
+    # an online run places the bosses only when the service says it does too (bosses=1)
+    towers = (HOOKS / 'towers.c').read_text(encoding='utf-8')
+    assert 'g_net_bosses = kv_int(reply, "bosses");' in towers
+    assert 'if (!online || g_net_bosses) place_bosses();' in towers
+    ui = (HOOKS / 'towers_ui.inc').read_text(encoding='utf-8')
+    assert 'towers_boss_banner(dl, f, v, pt);' in ui and '"BOSS FIGHT"' in ui
+    hud = (HOOKS / 'fight_hud_ui.inc').read_text(encoding='utf-8')
+    assert 'FH.boss = hud_up && towers_boss_fight(&opp) && !netplay_active();' in hud
+
+
+def test_a_read_attack_is_answered_within_a_few_steps_never_frame_perfect():
+    # the study's "broken" list: no frame-perfect answers; a read attack cuts the CPU's hold to 4 steps at least
+    rules = (HOOKS / 'towers_ai_rules.h').read_text(encoding='utf-8')
+    hold = int(re.search(r'#define TOWER_AI_READ_HOLD\s+(\d+)', rules).group(1))
+    top = int(re.search(r'#define TOWER_AI_HOLD_TOP\s+(\d+)', rules).group(1))
+    assert hold >= 4 and top - 1 >= 4
+    ai = (HOOKS / 'towers_ai.c').read_text(encoding='utf-8')
+    cut = ai[ai.index('static void read_cut(void)'):]
+    cut = cut[:cut.index('\n}\n')]
+    assert 'now > TOWER_AI_READ_HOLD' in cut and '(uint32_t)TOWER_AI_READ_HOLD' in cut

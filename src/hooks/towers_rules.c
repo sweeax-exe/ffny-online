@@ -324,3 +324,55 @@ int towers_file_read(const char *text, TowerRun runs[TOWER_COUNT], int have[TOWE
     }
     return 1;
 }
+
+/* ---------------------------------------------------------------- the fixed bosses (build 101) */
+
+/* The story's boss characters, in the versions the story fights them in (fighter.xml's numbered story fighters:
+ * D-Mob 59/83/84, Sticky 57/80, Blaze 56/81/82; Battle-mode IDs, every one with a Character row). Five Boroughs'
+ * chapter bosses in this order; Crow (58), the story's final boss, closes both towers. */
+static const int k_chapter_bosses[] = { 59, 57, 56, 83, 80, 81, 84, 82 };
+/* The last boss: Crow, else (a climb with Crow himself) the strongest story boss the roster has. */
+static const int k_final_bosses[] = { 58, 82, 84, 81, 83 };
+
+static int roster_at(const TowerRun *run, int id)
+{
+    int i;
+    for (i = 0; i < run->floors; i++) if (run->roster[i] == id) return i;
+    return -1;
+}
+
+static void put_on_floor(TowerRun *run, int id, int floor)
+{
+    int i = roster_at(run, id), t;
+    if (i < 0 || floor < 1 || floor > run->floors) return;
+    t = run->roster[floor - 1];
+    run->roster[floor - 1] = id;
+    run->roster[i] = t;
+}
+
+int towers_place_bosses(TowerRun *run)
+{
+    int i, chapters, final_id = -1, placed = 0, next = 0, c;
+    if (!run || run->floors <= 0) return 0;
+    for (i = 0; i < (int)(sizeof k_final_bosses / sizeof k_final_bosses[0]) && final_id < 0; i++)
+        if (roster_at(run, k_final_bosses[i]) >= 0) final_id = k_final_bosses[i];
+    if (run->tower == TOWER_UPTOWN) {
+        if (final_id >= 0) { put_on_floor(run, final_id, run->floors); placed++; }
+        return placed;
+    }
+    if (run->tower != TOWER_FIVE_BOROUGHS) return 0;
+    chapters = run->floors / TOWER_CHAPTER;
+    if (chapters < 1) return 0;
+    if (final_id >= 0) { put_on_floor(run, final_id, chapters * TOWER_CHAPTER); placed++; }
+    for (c = 1; c < chapters; c++) {
+        int id = -1;
+        while (next < (int)(sizeof k_chapter_bosses / sizeof k_chapter_bosses[0]) && id < 0) {
+            int cand = k_chapter_bosses[next++];
+            if (cand != final_id && roster_at(run, cand) >= 0) id = cand;
+        }
+        if (id < 0) break;          /* the list is used up: the chapters above keep their drawn boss */
+        put_on_floor(run, id, c * TOWER_CHAPTER);
+        placed++;
+    }
+    return placed;
+}

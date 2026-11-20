@@ -594,6 +594,7 @@ static void net_end(const TowerRun *run, const char *why)
 }
 
 static char g_start_error[200];         /* why the last start or resume was refused ("" none) */
+static int g_net_bosses;                /* the service's last start answer said bosses=1 (it places them too) */
 
 const char *towers_start_error(void) { return g_start_error; }
 
@@ -621,7 +622,7 @@ static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, c
     char v[48];
     int n, i, status;
     if (!net_on()) return 0;
-    n = snprintf(json, sizeof json, "{\"tower\":%d,\"fighter\":%d,\"skin\":%d,\"rules\":%d,\"pool\":[", tower, fighter, skin,
+    n = snprintf(json, sizeof json, "{\"tower\":%d,\"fighter\":%d,\"skin\":%d,\"rules\":%d,\"bosses\":1,\"pool\":[", tower, fighter, skin,
                  TOWER_RULES_VERSION);
     for (i = 0; i < *pool_n && n < (int)sizeof json - 16; i++) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", i ? "," : "", pool[i]);
     n += snprintf(json + n, sizeof json - (size_t)n, "],\"venues\":[");
@@ -646,6 +647,7 @@ static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, c
     }
     *seed = (uint32_t)strtoul(v, NULL, 10);
     *board = kv_int(reply, "board");
+    g_net_bosses = kv_int(reply, "bosses");     /* build 101: the service places the fixed bosses as towers_rules.c */
     kv(reply, "why", why, why_size);
     {   /* Five Boroughs: keep exactly the community fighters the service keeps (the live ones at this start) */
         static char community[TOWER_MAX_ROSTER * 6];
@@ -688,10 +690,20 @@ void towers_net_text(char *out, int size)
 
 /* ---------------------------------------------------------------- the fights */
 
-static void test_overrides(void)
+/* Build 101: the fixed bosses (towers_place_bosses), for an offline run or when the service does the same. */
+static void place_bosses(void)
 {
-    /* tests: RECOMP_TEST_TOWERS_FLOORS=<n> makes the tower n floors tall (the top within reach of a short test);
-     * RECOMP_TEST_TOWERS_OPPONENT=<floor>:<id> puts fighter id on that floor (swapped with its own floor) */
+    int n = towers_place_bosses(&g_run);
+    fprintf(stderr, "[TOWERS] %s: %d fixed boss%s placed (top floor: fighter %d)\n", towers_name(g_run.tower), n,
+            n == 1 ? "" : "es", towers_opponent(&g_run, g_run.tower == TOWER_UPTOWN ? g_run.floors :
+                                                         g_run.floors / TOWER_CHAPTER * TOWER_CHAPTER));
+}
+
+static void test_overrides(int fixed_bosses)
+{
+    /* tests: RECOMP_TEST_TOWERS_OPPONENT=<floor>:<id> puts fighter id on that floor (swapped with its own floor);
+     * RECOMP_TEST_TOWERS_FLOORS=<n> then makes the tower n floors tall (the top within reach of a short test; the
+     * fixed bosses are placed again in it, so a boss put on the new top floor by the first stays there) */
     const char *v = getenv("RECOMP_TEST_TOWERS_OPPONENT");
     int cap = env_int("RECOMP_TEST_TOWERS_FLOORS", 0);
     if (v && strchr(v, ':')) {
@@ -711,6 +723,7 @@ static void test_overrides(void)
         g_run.floors = cap;
         g_run.roster_hash = towers_roster_hash(g_run.roster, g_run.floors);
         fprintf(stderr, "[TOWERS] test: the tower is %d floors tall\n", cap);
+        if (fixed_bosses) place_bosses();
     }
     {   /* tests (the CPU measurements): RECOMP_TEST_TOWERS_FLOOR=<n> starts the climb on floor n */
         int at = env_int("RECOMP_TEST_TOWERS_FLOOR", 0);
@@ -799,6 +812,7 @@ int towers_start(int tower, int fighter, int skin)
     n = pool_of(tower, pool, TOWER_MAX_ROSTER);
     vn = venues_of(venues, TOWER_MAX_VENUES);
     /* T1: signed in, the service deals the seed (no lock held while it answers) */
+    g_net_bosses = 0;
     online = n > 0 && vn > 0 ? net_start(tower, fighter, skin, pool, &n, venues, vn, &seed, run, &board, why, (int)sizeof why) : 0;
     if (online < 0) return 0;      /* this PC's content is behind: g_start_error says so */
     lock();
@@ -819,7 +833,11 @@ int towers_start(int tower, int fighter, int skin)
         snprintf(g_net_why, sizeof g_net_why, "%s", why);
     } else
         g_net_why[0] = 0;
-    test_overrides();
+    /* build 101: the fixed bosses, unless the service keeps this run and orders it without them (it freezes a run
+     * that meets another opponent than its own order: towers.go Fight, "order") */
+    if (!online || g_net_bosses) place_bosses();
+    else fprintf(stderr, "[TOWERS] the service orders this run without fixed bosses: the drawn bosses stay\n");
+    test_overrides(!online || g_net_bosses);
     g_best_before = g_best[tower - 1];
     g_new_best = 0;
     g_last_floor = 0;
@@ -1284,6 +1302,13 @@ void towers_done(void)
     lock();
     if (g_state == TOWERS_LOST || g_state == TOWERS_CLEARED) set_state(TOWERS_IDLE);
     unlock();
+}
+
+int towers_boss_fight(int *opponent)
+{
+    int on = g_state == TOWERS_FIGHTING && g_match_seen && !g_decided && g_rules.boss && !netplay_active();
+    if (on && opponent) *opponent = towers_opponent(&g_run, g_run.floor);
+    return on;
 }
 
 int towers_card_wanted(void)

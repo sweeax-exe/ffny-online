@@ -447,8 +447,9 @@ void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
         "One on One against a CPU fighter on every floor.",
         "Full health at the start of every fight.",
         "No continues: a loss ends the climb. Your best floor counts.",
-        "The CPU climbs with you: Easy, Normal, then Hard, and past Hard it hits harder, starts with momentum "
-        "and takes more to put down. Bosses hit hardest.",
+        "The CPU climbs with you: Easy, Normal, then Hard. Past Hard it fights smarter, punishes the same trick "
+        "thrown again and again, hits harder, starts with momentum and takes more to put down.",
+        "Bosses are the story's own, the same every climb, and Crow waits at the top. They hit hardest.",
         "Leaving a fight, or closing the game in one, counts as a loss. A draw is fought again once.",
         "Signed in, your climbs go on the monthly and all-time boards. Rewards are looks only.",
     };
@@ -752,6 +753,34 @@ void towers_fighter_chosen(int fighter)
 
 const char *cpu_level_word(int level) { return level <= 0 ? "EASY" : level == 1 ? "NORMAL" : "HARD"; }
 
+const ImU32 BOSS_FILL = IM_COL32(120, 90, 10, 255);     // the boss frame's gold, darkened (the floor plate's boss colour)
+
+// Build 101: the BOSS FIGHT banner before a boss floor's fight (the climb's end and the card over the load): a gold band
+// under the next fighter, slammed in as the floor plate is (pt 0..1), the boss's name and floor on it.
+void towers_boss_banner(ImDrawList *dl, const Frame &f, const TowersView &v, float pt)
+{
+    float sc = 0.85f + 0.15f * ease_out_back(pt), a = clamp01(pt * 1.4f);
+    float x = 118, w = 512, h = 58 * sc, y = 400 - h / 2;
+    float pulse = 0.75f + 0.25f * (float)sin(ImGui::GetTime() * 4.0);
+    rect(dl, f, x, y, w, h, with_alpha(BOSS_FILL, 0.95f * a), 5);
+    rect(dl, f, x, y, w, 3, with_alpha(GOLD, a), 2);
+    rect(dl, f, x, y + h - 3, w, 3, with_alpha(GOLD, a), 2);
+    frame_rect(dl, f, x + 4, y + 6, w - 8, h - 12, with_alpha(GOLD, 0.55f * a * pulse), 1.2f);
+    text(dl, f, g_stencil, 34 * sc, x + 18, y + 8 * sc, with_alpha(WHITE, a), "BOSS FIGHT", LEFT, 1.4f);
+    std::string name = upper(fighter_label(v.next_opponent).c_str());
+    while (name.size() > 1 && name.back() >= '0' && name.back() <= '9') name.pop_back();     // the story versions: "CROW", not "CROW1"
+    text(dl, f, g_title, std::min(20.0f, fit_size(f, g_title, 20, name.c_str(), 230)), x + w - 18, y + 9 * sc,
+         with_alpha(GOLD, a), name.c_str(), RIGHT, 1.0f, 230);
+    char line[48];
+    snprintf(line, sizeof line, "FLOOR %d", v.floor);
+    text(dl, f, g_title, 11, x + w - 18, y + h - 22 * sc, with_alpha(CREAM, a), line, RIGHT, 0.6f);
+    static int logged_floor = -1;
+    if (logged_floor != v.floor) {
+        logged_floor = v.floor;
+        fprintf(stderr, "[TOWERS] BOSS FIGHT banner: %s, floor %d\n", name.c_str(), v.floor);
+    }
+}
+
 // The scene at time t (seconds since the window opened; 3.5 and later: all of it). card: drawn only, over the load.
 void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersView &v, const TowerRun &run, float t, bool card)
 {
@@ -779,11 +808,16 @@ void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersVi
         if (floor < 1 || floor > v.floors || y < top - 2 || y > bottom - slot + 2) continue;
         bool beaten = floor < v.floor || (won && floor == v.last_floor && climb >= 0.99f);
         bool lit = floor < v.last_floor || (won && floor == v.last_floor && t > 1.2f) || (!won && floor < v.floor);
-        ImU32 c = lit ? col : IM_COL32(64, 64, 70, 255);
-        rect(dl, f, colx - 24, y + 2, 48, slot - 4, with_alpha(c, lit ? 0.85f : 0.6f), 3);
-        if (towers_is_boss(tower, floor, v.floors)) frame_rect(dl, f, colx - 24, y + 2, 48, slot - 4, GOLD, 1.2f);
+        bool boss = towers_is_boss(tower, floor, v.floors) != 0;
+        ImU32 c = lit ? col : boss ? BOSS_FILL : IM_COL32(64, 64, 70, 255);
+        rect(dl, f, colx - 24, y + 2, 48, slot - 4, with_alpha(c, lit ? 0.85f : boss ? 0.95f : 0.6f), 3);
+        if (boss) {     // build 101: a boss floor in gold, wider, with its tag on the left
+            float pulse = 0.65f + 0.35f * (float)sin(ImGui::GetTime() * 3.0);
+            frame_rect(dl, f, colx - 27, y + 1, 54, slot - 2, with_alpha(GOLD, beaten ? 0.6f : pulse), 2.0f);
+            text(dl, f, g_title, 8, colx - 30, y + slot / 2 - 5, with_alpha(GOLD, beaten ? 0.5f : 0.95f), "BOSS", RIGHT, 0.6f);
+        }
         snprintf(line, sizeof line, "%d", floor);
-        text(dl, f, g_title, 13, colx, y + slot / 2 - 8, beaten ? BLACK : WHITE, line, CENTER, beaten ? 0 : 0.8f);
+        text(dl, f, g_title, 13, colx, y + slot / 2 - 8, beaten ? BLACK : boss ? GOLD : WHITE, line, CENTER, beaten ? 0 : 0.8f);
     }
     {   // the marker: a chevron at the climber's floor
         float y = bottom - (at - centre + 4.5f) * slot - slot * 0.5f + slot / 2;
@@ -839,7 +873,7 @@ void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersVi
             text(dl, f, g_title, 10, x + 138, cy, with_alpha(RED, a), line, LEFT, 0.6f); cy += 13;
         }
         if (v.next_rules.cpu_momentum > 0.005f) {
-            snprintf(line, sizeof line, "STARTS WITH %d%% MOMENTUM", (int)(v.next_rules.cpu_momentum * 100 + 0.5f));
+            snprintf(line, sizeof line, "MOMENTUM %d%%", (int)(v.next_rules.cpu_momentum * 100 + 0.5f));
             text(dl, f, g_title, 10, x + 138, cy, with_alpha(RED, a), line, LEFT, 0.6f, 124); cy += 13;
         }
         if (v.next_rules.cpu_health > 1.005f) {
@@ -858,9 +892,11 @@ void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersVi
         text(dl, f, g_title, 14, x + 138, vy + 30, with_alpha(WHITE, a), upper(online_venue_name(v.next_venue)).c_str(), LEFT, 0.8f, 124);
     }
 
-    // the floor plate
+    // the floor plate; build 101: before a boss floor's fight the BOSS FIGHT banner with the boss's name instead
     float pt = won ? clamp01((t - 2.8f) / 0.4f) : 1.0f;
-    if (pt > 0) {
+    if (pt > 0 && v.next_rules.boss && v.next_opponent >= 0) {
+        towers_boss_banner(dl, f, v, pt);
+    } else if (pt > 0) {
         float sc = 0.8f + 0.2f * ease_out_back(pt);
         snprintf(line, sizeof line, "FLOOR %d", v.floor);
         float w = 190 * sc, h = 40 * sc, x = 465 - w / 2, y = 376;
@@ -1111,6 +1147,7 @@ bool towers_gallery(const std::string &p)
         TWU.gal_t = 3.5f;
         towers_gallery_view(TWU.v, TOWERS_WON, 58);
         TWU.v.floor = 59;
+        TWU.v.next_opponent = 58;       // Crow, the fixed top boss (build 101)
         towers_floor_rules(TOWER_UPTOWN, 59, 59, &TWU.v.next_rules);
     } else if (p == "towers-card" || p == "towers-first") {
         TWU.gal_window = 2;

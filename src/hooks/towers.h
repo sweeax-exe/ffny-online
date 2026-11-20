@@ -90,6 +90,9 @@ void towers_save_quit(void);
 void towers_done(void);
 /* The draw-only card over the load (the next opponent) is due: a floor's fight is asked for or loading. */
 int towers_card_wanted(void);
+/* Build 101: a boss floor's fight is under way (offline, set up, not decided yet): 1 with the boss's Battle-mode ID in
+ * *opponent, for the fight overlay's BOSS tag at the CPU's name (drawing only). */
+int towers_boss_fight(int *opponent);
 
 /* T1: a fight left open when the game last closed (or crashed) ended its run at this start: 1 once with the tower and
  * the floor, for the TOWERS page's note. */

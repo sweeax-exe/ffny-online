@@ -90,6 +90,15 @@ int towers_opponent(const TowerRun *run, int floor);
 int towers_venue(const TowerRun *run, int floor);
 /* A boss floor: Uptown's last floor; every TOWER_CHAPTER-th floor of Five Boroughs. */
 int towers_is_boss(int tower, int floor, int floors);
+/* Build 101: the bosses are fixed, as in the story (and the towers of fighting games): after the shuffle, Uptown's
+ * last floor gets Crow (58, the story's final boss; a climb with Crow himself the strongest other story boss), and
+ * Five Boroughs' last chapter's 10th floor too, its earlier chapters' 10th floors the story's bosses in order (D-Mob,
+ * Sticky, Blaze, D-Mob 2, Sticky 2, Blaze 2, D-Mob 3, Blaze 3; the chapters past the list keep their drawn boss).
+ * Each is swapped in from its own floor, so the roster (and its hash) stays the same set. Only a boss the roster has
+ * is placed. Returns the bosses placed. The account service computes the order itself (towers.go TowerOrder) and
+ * freezes a run that meets another opponent: towers.c places them only for an offline run, or when the service
+ * says it does the same (its start answer's bosses=1). */
+int towers_place_bosses(TowerRun *run);
 /* After floor `beaten` was won, the run is written (a save point): every floor in Uptown, at each chapter's end in
  * Five Boroughs (chapter = TOWER_CHAPTER, tests may pass less). The top floor is always one. */
 int towers_is_save_point(int tower, int beaten, int floors, int chapter);
