@@ -398,6 +398,8 @@ static int net_on(void)
     return account_state() == ACCOUNT_IN && !(off && *off && *off != '0');
 }
 
+int towers_signed_in(void) { return net_on(); }
+
 /* key=value line `key` of a text answer into out; 1 when present. */
 static int kv(const char *text, const char *key, char *out, int size)
 {

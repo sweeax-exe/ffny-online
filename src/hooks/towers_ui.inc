@@ -69,6 +69,7 @@ struct TowerBoard {
     long long ends = 0, now = 0;
     TowerBoardTower t[TOWER_COUNT];
     ULONGLONG got = 0;
+    bool with_session = false;      // build 99: asked with the session, so the me= lines (the player's place) are in it
 };
 struct TowerBoards {
     std::mutex mu;
@@ -136,21 +137,25 @@ void towers_fetch_board(int which)
     std::thread([which]() {
         std::vector<char> buf(16384);
         int len = 0, status = 0;
+        bool with_session = false;
         const char *file = getenv("RECOMP_TEST_TOWERS_BOARD_FILE");
         if (file && *file) {
             FILE *fp = fopen(file, "rb");
-            if (fp) { len = (int)fread(buf.data(), 1, buf.size() - 1, fp); fclose(fp); buf[len] = 0; status = 200; }
+            if (fp) { len = (int)fread(buf.data(), 1, buf.size() - 1, fp); fclose(fp); buf[len] = 0; status = 200; with_session = true; }
         } else {
-            // signed in: account_call sends the session, so the answer has our own place (me=)
-            status = account_state() == ACCOUNT_IN
-                         ? account_call("GET", which ? "/api/towers/board?format=text&n=10&season=all" : "/api/towers/board?format=text&n=10",
-                                        nullptr, buf.data(), (int)buf.size(), 8000, nullptr)
-                         : account_fetch(which ? "/api/towers/board?format=text&n=10&season=all" : "/api/towers/board?format=text&n=10",
-                                         buf.data(), (int)buf.size(), &len);
+            // signed in: account_call sends the session, so the answer has our own place (me=). Build 99: the same rule
+            // as the page's SIGNED IN (towers_signed_in); account_call also takes a session being checked, and the
+            // board without the session is only the fallback (it never has the player's place).
+            const char *path = which ? "/api/towers/board?format=text&n=10&season=all" : "/api/towers/board?format=text&n=10";
+            status = towers_signed_in() || account_state() == ACCOUNT_CHECKING
+                         ? account_call("GET", path, nullptr, buf.data(), (int)buf.size(), 8000, nullptr) : -1;
+            with_session = status == 200;
+            if (status < 0) status = account_fetch(path, buf.data(), (int)buf.size(), &len);
             buf[buf.size() - 1] = 0;
         }
         TowerBoard b;
         bool ok = status == 200 && parse_tower_board(buf.data(), b);
+        b.with_session = ok && with_session;
         {
             std::lock_guard<std::mutex> lock(TWB.mu);
             if (ok) { b.got = GetTickCount64(); TWB.b[which] = b; }
@@ -175,7 +180,14 @@ TowerBoard tw_board(int which)
         if (which) b.season = "all";
         return b;
     }
-    if (GetTickCount64() - TWB.at[which] > 60000 || !TWB.at[which]) towers_fetch_board(which);
+    bool stale = false;
+    {
+        std::lock_guard<std::mutex> lock(TWB.mu);
+        // build 99: a board asked without the session (before the sign-in was through) has no place for the player:
+        // signed in now, it is asked again at once (at most every 5 s), not after the minute
+        stale = TWB.b[which].valid && !TWB.b[which].with_session && towers_signed_in() && GetTickCount64() - TWB.at[which] > 5000;
+    }
+    if (stale || GetTickCount64() - TWB.at[which] > 60000 || !TWB.at[which]) towers_fetch_board(which);
     std::lock_guard<std::mutex> lock(TWB.mu);
     return TWB.b[which];
 }
@@ -424,7 +436,7 @@ void open_towers()
                  towers_name(t), floor);
         say(line, 8000);
     }
-    if (!gallery_on() && account_state() == ACCOUNT_IN) { TWB.at[0] = TWB.at[1] = 0; }     // fetched again on the page
+    if (!gallery_on() && towers_signed_in()) { TWB.at[0] = TWB.at[1] = 0; }     // fetched again on the page
 }
 
 void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
@@ -503,6 +515,7 @@ void towers_board_panel(ImDrawList *dl, const Frame &f, int tower, int which, bo
     float my = 362;
     rect(dl, f, 130, my - 6, 380, 1, with_alpha(GREY, 0.5f));
     if (!signed_now) text(dl, f, g_hand, 12, 320, my, ORANGE, pad_text("Sign in to put your climb on the board: press {y} in the hub.").c_str(), CENTER, 0.8f);
+    else if (!b.with_session && !gallery_on()) text(dl, f, g_hand, 12, 320, my, GREY, "Loading your place...", CENTER, 0.8f);
     else if (bt.me && bt.me_place > 0) {
         snprintf(line, sizeof line, "YOU: #%d OF %d  -  %d FLOORS  -  %d:%02d", bt.me_place, bt.entries, bt.me_floors, bt.me_secs / 60, bt.me_secs % 60);
         text(dl, f, g_title, 13, 320, my, CREAM, line, CENTER, 0.8f);
@@ -568,7 +581,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     tower = TWU.sel + 1;
     have = tw_saved(tower, &saved);
     float dt = std::min(0.1f, ImGui::GetIO().DeltaTime);
-    bool signed_now = gallery_on() || account_state() == ACCOUNT_IN;
+    bool signed_now = gallery_on() || towers_signed_in();     // build 99: the rule towers.c posts runs by
     TowerBoard month = signed_now ? tw_board(0) : TowerBoard();
     for (int k = 0; k < TOWER_COUNT; k++) {
         float want = k == TWU.sel ? 1.0f : 0.0f;
@@ -668,7 +681,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
             const char *why = towers_start_error();
             say(why && *why ? why : "This tower cannot be built on this PC: no fighters or venues were read from the game.", 8000);
         }
-        bool signed_now = gallery_on() || account_state() == ACCOUNT_IN;
+        bool signed_now = gallery_on() || towers_signed_in();     // build 99: the rule towers.c posts runs by
         text(dl, f, g_hand, 11, 320, 318, signed_now ? GOLD : GREY, signed_now ? "Signed in: this climb goes on the board." :
              "Signed out: an offline climb, not on the board.", CENTER, 0.8f);
         float hx = 196;
@@ -697,7 +710,11 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
          signed_now ? "SIGNED IN  -  YOUR CLIMBS GO ON THE BOARD" : "SIGN IN TO PUT YOUR CLIMB ON THE BOARD", RIGHT, 0.8f);
     if (pad.y) { TWU.rules = true; return; }
     if (pad.b) { S.page = HUB; return; }
-    if (pad.x && tower != TOWER_WEEKLY) { TWU.board = true; TWU.board_all = 0; return; }
+    if (pad.x && tower != TOWER_WEEKLY) {     // build 99: the board as it is now (a climb may have gone on it since)
+        TWU.board = true; TWU.board_all = 0;
+        if (!gallery_on() && towers_signed_in()) TWB.at[0] = TWB.at[1] = 0;
+        return;
+    }
     if (tower == TOWER_WEEKLY) {
         if (pad.a) say("The Weekly opens soon: a new tower every week, the same for everyone.");
         return;

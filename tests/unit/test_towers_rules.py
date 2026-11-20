@@ -318,3 +318,14 @@ def test_the_game_side_is_wired():
     cloud = (HOOKS / 'pc_launcher_cloud.cpp').read_text(encoding='utf-8')
     assert cloud.count('files=ffny') == 3        # list, upload, download: the service sends ffny/towers.json
 
+
+def test_the_board_page_signs_in_as_the_runs_post():
+    # build 99: the board's "your place" and the page's SIGNED IN follow the rule runs are posted by (towers.c net_on)
+    towers = (HOOKS / 'towers.c').read_text(encoding='utf-8')
+    assert 'int towers_signed_in(void) { return net_on(); }' in towers
+    ui = (HOOKS / 'towers_ui.inc').read_text(encoding='utf-8')
+    assert 'account_state() == ACCOUNT_IN' not in ui
+    assert ui.count('bool signed_now = gallery_on() || towers_signed_in();') == 2
+    # a board asked without the session has no me= line: it is asked again once signed in, never shown as 'not on it'
+    assert 'b.with_session = ok && with_session;' in ui and '!TWB.b[which].with_session && towers_signed_in()' in ui
+    assert 'Loading your place...' in ui

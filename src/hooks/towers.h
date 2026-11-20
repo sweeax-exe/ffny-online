@@ -97,6 +97,9 @@ int towers_resolved_take(int *tower, int *floor);
 /* The run's link to the account service in a few words for the screens ("ON THE BOARD", "OFFLINE: NOT ON THE
  * BOARD", ...); "" with no run. */
 void towers_net_text(char *out, int size);
+/* Build 99: the climbs go on the boards: signed in to the account service (and not RECOMP_TOWERS_OFFLINE). The one
+ * rule for posting runs (towers.c) and for the TOWERS page and its board (towers_ui.inc: SIGNED IN, the player's place). */
+int towers_signed_in(void);
 /* The climb's sound: the front end's own Audio.Play(id), played at the next front-end call on the game's thread. */
 void towers_play_sfx(int id);
 
