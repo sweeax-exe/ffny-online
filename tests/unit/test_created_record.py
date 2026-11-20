@@ -82,3 +82,13 @@ def test_part_limits_agree():
     assert _int(game, r"#define R_RECIPE\s+(0x[0-9A-Fa-f]+)") == _int(go, r"recRecipe = (0x[0-9A-Fa-f]+)")
     assert _int(game, r"#define R_MOVES\s+\(R_PROFILE \+ (0x[0-9A-Fa-f]+)\)") == _int(go, r"recMoves\s+= recProfile \+ (0x[0-9A-Fa-f]+)")
     assert "MAX_TOTAL_BASE" not in game and "MaxTotalBase" not in go
+
+
+def test_a_changed_created_fighter_is_read_again_between_matches():
+    # Lukio, build 99: the list was read once per session, so edited moves stayed old online until a restart
+    netplay = (ROOT / "src/hooks/netplay.c").read_text(encoding="utf-8")
+    assert "MemCard.Save(" in netplay and "InterlockedExchange(&g_cp_dirty, 1)" in netplay
+    body = netplay.split("static void cp_tick_refresh(void)", 1)[1].split("\n}\n", 1)[0]
+    assert "N.match_live" in body and "memcard_save_busy()" in body
+    assert "created_fighter_reload();" in body and "cp_mine_set(" in body
+    assert netplay.count("cp_tick_refresh();") == 1

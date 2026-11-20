@@ -1272,9 +1272,12 @@ int netplay_rematch_request(void)
  * then Game.GetTips and Game.Quit). Said at once, not when the room is reached a few seconds and a
  * press later: a player who chose Rematch first hears it before it starts, and one whose rematch
  * already started stops waiting for this PC (the fight's wait below). */
+static volatile LONG g_cp_dirty;     /* a profile was saved: the created fighter may have changed (cp_tick_refresh) */
+
 void netplay_results_funccall(const char *text)
 {
     if (!strcmp(text, "Game.Quit()")) rollback_off_leaving("Game.Quit()");
+    if (!strncmp(text, "MemCard.Save(", 13) && strncmp(text, "MemCard.Save( battle/rewardun", 29)) InterlockedExchange(&g_cp_dirty, 1);
     /* where a hill fight's results are (hill_results_tick); also while a WATCH waits for the menus (a deferred
      * watch: the results are still this PC's own; build 71, the lingering copy of 20261110-061821-online never
      * had its summary noted, so its next fight's START never took it off them and the king gave up) */
@@ -4231,26 +4234,50 @@ int netplay_created_available(void)
            ((N.cp_acked && N.cp_acked == cp_record_crc(N.cp_mine)) || (N.cp_prev_crc && N.cp_tries < RETRIES));
 }
 
+/* The record this PC uploads becomes `rec` (g_cs held); the one the relay has stays valid for START until the new one is kept. */
+static void cp_mine_set(const uint8_t *rec, const char *why)
+{
+    if (N.cp_mine_state > 0 && !memcmp(rec, N.cp_mine, CP_REC_LEN)) return;
+    if (N.cp_mine_state > 0 && N.cp_acked && N.cp_acked == cp_record_crc(N.cp_mine)) {
+        memcpy(N.cp_prev, N.cp_mine, CP_REC_LEN);
+        N.cp_prev_crc = N.cp_acked;
+    }
+    memcpy(N.cp_mine, rec, CP_REC_LEN);
+    if (N.cp_mine_state) N.cp_mine_state = 1;     /* not read yet (0): the session reads the pick */
+    N.cp_tries = 0;
+    N.cp_sent = 0;      /* the upload goes out with the next pass */
+    N.roomv.version++;
+    fprintf(stderr, "[NETPLAY] created fighter %s: record %08X\n", why, cp_record_crc(rec));
+}
+
 int netplay_created_pick(int index)
 {
     uint8_t rec[CP_REC_LEN];
     if (!cp_local_set_pick(index) || !cp_local_record(rec)) return 0;
     InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
     EnterCriticalSection(&g_cs);
-    if (N.cp_mine_state <= 0 || memcmp(rec, N.cp_mine, CP_REC_LEN)) {
-        if (N.cp_mine_state > 0 && N.cp_acked && N.cp_acked == cp_record_crc(N.cp_mine)) {
-            memcpy(N.cp_prev, N.cp_mine, CP_REC_LEN);
-            N.cp_prev_crc = N.cp_acked;
-        }
-        memcpy(N.cp_mine, rec, CP_REC_LEN);
-        if (N.cp_mine_state) N.cp_mine_state = 1;     /* not read yet (0): the session reads the pick */
-        N.cp_tries = 0;
-        N.cp_sent = 0;      /* the upload goes out with the next pass */
-        N.roomv.version++;
-        fprintf(stderr, "[NETPLAY] created fighter picked: record %08X\n", cp_record_crc(rec));
-    }
+    cp_mine_set(rec, "picked");
     LeaveCriticalSection(&g_cs);
     return 1;
+}
+
+/* The game saved a profile (MemCard.Save): the player may have changed the created fighter (its moves, its look).
+ * The list was read once per session and the upload kept the old record, so online fights used the old moves until
+ * the game was restarted (Lukio, build 99). cp_tick_refresh reads the saves again once the save has been written
+ * and sends the changed record, between matches only: both PCs play the record the relay holds for the START. */
+static int memcard_save_busy(void);
+
+static void cp_tick_refresh(void)
+{
+    uint8_t rec[CP_REC_LEN];
+    int have;
+    if (!g_cp_dirty || N.match_live || N.cp_waiting || memcard_save_busy()) return;
+    InterlockedExchange(&g_cp_dirty, 0);
+    created_fighter_reload();
+    have = cp_local_record(rec);        /* outside g_cs: it reads files */
+    EnterCriticalSection(&g_cs);
+    if (have && N.cp_mine_state != 0) cp_mine_set(rec, "changed in the game's menus");
+    LeaveCriticalSection(&g_cs);
 }
 
 static void on_start_as(const uint8_t *b, int len, int watching)
@@ -5290,6 +5317,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
         if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && N.relay_caps > 0 && (N.relay_caps & CAPS_CREATED)) {
             uint8_t fb[6 + 8 + 2 + CP_REC_LEN];
             int n = 0;
+            cp_tick_refresh();
             if (!N.cp_mine_state) {
                 uint8_t rec[CP_REC_LEN];
                 int have = cp_local_record(rec);    /* the player's pick (outside g_cs: it reads files) */
