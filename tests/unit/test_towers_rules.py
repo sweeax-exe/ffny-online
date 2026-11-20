@@ -306,6 +306,8 @@ def test_the_game_side_is_wired():
     assert 'towers_match_start();' in ow and 'towers_step();' in ow and 'towers_health_change();' in ow
     am = (HOOKS / 'automatch.c').read_text(encoding='utf-8')
     assert 'towers_on_funccall(text);' in am and 'towers_rematch_request()' in am
+    tw = (HOOKS / 'towers.c').read_text(encoding='utf-8')     # no Rematch prompt in a run: answered as No by itself
+    assert 'MemCard.Save( battle/rewardun' in tw and 'defjam_menu_call("Game.Rematch()")' in tw
     ui = (HOOKS / 'pc_ui.cpp').read_text(encoding='utf-8')
     assert 'take_towers_request' in ui and 'towers_card_wanted' in ui
     hub = (HOOKS / 'online_screen.cpp').read_text(encoding='utf-8')
