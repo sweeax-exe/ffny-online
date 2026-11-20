@@ -107,6 +107,34 @@ void sub_000B54E0(void)
     if (!keep && ow_rts_active()) { g_esp += 4; return; }
     sub_000B54E0_gen();
 }
+/* Build 99, recording mode (src/hooks/recording_mode.h): the fight HUD's per-frame draw (thiscall (hud), no
+ * stack arguments; called from the fight modes' render, sub_000796A0 at 0x797FA and two other modes). It draws
+ * each fighter's panel (bars, name, combo and points texts, sub_000B2350), the centre lettering (KO, FIGHT;
+ * 0x39C1E0, sub_000B3C30) and the clock (sub_000B54E0) when the HUD's show byte 0x39C1D8 and hud+0x61C are
+ * set; 0x39C1D8 has no other reader. The HUD's update (sub_000B5710) and the step run as before: only the
+ * picture changes, so online matches stay in step (the render already runs a different number of times on
+ * each PC). */
+#include "hooks/recording_mode.h"
+extern void sub_000B5AD0_gen(void);
+void sub_000B5AD0(void)
+{
+    if (recording_mode_on()) { g_esp += 4; return; }
+    sub_000B5AD0_gen();
+}
+/* Build 99, [gameplay] slow_motion (recording_mode.h): the fight's per-step time scale. sub_001A4900 (cdecl,
+ * one float: the match scale CLogic+4 = 0x349764, which the camera director sub_000AC1F0 lowers for big hits
+ * and Blazin moves) stores it as 0x3B8F2C, multiplied by the knockout ramp (0x2F0580..88) while bit 0x04 of
+ * 0x3B9054 is set. 98 functions read 0x3B8F2C (animation, timers, regeneration, the round clock), so it is
+ * simulation, not only the camera. Off and offline: a slow value (0 < v < 1) becomes 1 before and after; the
+ * pause (0) stays. Online it is always the game's own. */
+extern void sub_001A4900_gen(void);
+void sub_001A4900(void)
+{
+    int allowed = recording_slow_motion_allowed_now();
+    if (!allowed) MEMF(g_esp + 4) = recording_slow_motion_scale(MEMF(g_esp + 4), 0);
+    sub_001A4900_gen();
+    if (!allowed) MEMF(0x3B8F2C) = recording_slow_motion_scale(MEMF(0x3B8F2C), 0);
+}
 void sub_001A6870_enter(void)
 {
     if (defjam_test_observations_enabled())

@@ -253,6 +253,18 @@ static RecompSetting g_display_settings[] = {
       "The 3 - 2 - 1 - FIGHT! start countdown in offline fights too, with the fighters held until FIGHT. "
       "Online matches always have it. Off (the default): offline fights start at once, as in the original "
       "game." },
+    /* Build 99 (src/hooks/recording_mode.h): the fight's slow motion, offline only. */
+    { "gameplay", "slow_motion", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_SLOW_MOTION", 0,
+      "The game's slow motion in offline fights (big hits, Blazin moves, the knockout). Off, offline fights "
+      "stay at full speed. Online matches always have it, whatever this says: it slows the fight itself, so "
+      "every PC must do the same. Applies from the next fight." },
+    { "recording", "key", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "The key that turns recording mode on and off: the fight's HUD and the overlay's own drawings over the "
+      "fight (name tags, banners, chat, ping, notices) are hidden on this PC only. One key name, as in "
+      "[keyboard]. Empty for none.", "F10" },
+    { "recording", "pad", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "Controller buttons that turn recording mode on and off, as in [ui] overlay_pad (buttons joined with + "
+      "are held for half a second). Empty (the default) for none.", "" },
     /* Open-world phase 1 (src/hooks/openworld.c): Big Arena, offline only until the room option (milestone 2). */
     { "openworld", "big_arena", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_OW_BIGARENA", 0,
       "Big Arena (preview): offline free-for-all fights where a knocked-out fighter comes back after a few seconds "

@@ -59,6 +59,7 @@
 extern "C" {
 #include "recomp_settings.h"
 #include "recorder.h"
+#include "recording_mode.h"
 #include "scene_launcher.h"
 #include "dev_module.h"
 #include "input_host.h"
@@ -266,6 +267,9 @@ static const char *friendly(const char *section, const char *key)
         {"online", "p2p_direct", "Direct connection (P2P) in 1v1 fights"},
         {"online", "quick_max_ping", "Quick Match max ping"},
         {"gameplay", "offline_countdown", "Start countdown in offline fights"},
+        {"gameplay", "slow_motion", "Slow motion in offline fights"},
+        {"recording", "key", "Recording mode key"},
+        {"recording", "pad", "Recording mode pad buttons"},
         {"online", "voice", "Voice chat"},
         {"online", "voice_key", "Push-to-talk key"},
         {"audio", "next_song_key", "Next song key"},
@@ -898,6 +902,9 @@ static void offline_countdown_setting()
 {
     settings_group("gameplay", { "offline_countdown" });
     ImGui::TextDisabled("Online matches always have the countdown. Applies from the next fight.");
+    // Build 99: the slow motion of big hits, Blazin moves and knockouts, offline only (recording_mode.h)
+    settings_group("gameplay", { "slow_motion" });
+    ImGui::TextDisabled("Online matches always have slow motion. Applies from the next fight.");
 }
 
 static void crossplay_setting()
@@ -2126,6 +2133,10 @@ static void page_general(UiMode mode)
     }
     ImGui::SeparatorText("Gameplay");
     offline_countdown_setting();
+    ImGui::SeparatorText("Recording mode");
+    settings_group("recording", { "key", "pad" });
+    ImGui::TextWrapped("The key or the buttons hide the fight's HUD and everything the overlay draws over the fight, "
+                       "on this PC only (offline and online). Press again to show them.");
     ImGui::SeparatorText("Language and subtitles");
     game_language_combo();
     settings_group("language", { "story_subtitles" });
@@ -3817,6 +3828,8 @@ std::vector<Chord> g_song_chords;   // [audio] next_song_pad (next_song.h)
 std::atomic<int> g_next_song_vk{'M'};   // [audio] next_song_key (0: none)
 std::vector<Chord> g_prev_song_chords;   // [audio] prev_song_pad
 std::atomic<int> g_prev_song_vk{'N'};   // [audio] prev_song_key (0: none)
+std::vector<Chord> g_rec_chords;    // [recording] pad (recording_mode.h)
+std::atomic<int> g_rec_vk{0x79};    // [recording] key, VK_F10 by default (0: none)
 
 void parse_chord_list(const std::string &text, std::vector<Chord> &chords)
 {
@@ -3847,6 +3860,7 @@ void parse_chords()
     parse_chord_list(get_text("debug", "mark_pad"), g_mark_chords);
     parse_chord_list(get_text("audio", "next_song_pad"), g_song_chords);
     parse_chord_list(get_text("audio", "prev_song_pad"), g_prev_song_chords);
+    parse_chord_list(get_text("recording", "pad"), g_rec_chords);
 }
 
 // [audio] next_song_pad: a chord acts at once, when its last button goes down, on any pad, while the
@@ -3941,6 +3955,9 @@ void pad_mark_poll()
 {
     if (recorder_on() && !g_mark_chords.empty() && !ui_capturing() && chords_pressed(g_mark_chords))
         recorder_mark("pad");
+    // [recording] pad (build 99): recording mode, while the overlay is shut
+    if (!g_rec_chords.empty() && !ui_capturing() && chords_pressed(g_rec_chords) && !g_open.load())
+        recording_mode_toggle((unsigned long long)ui_ticks());
 }
 
 void set_open(bool open)
@@ -4541,6 +4558,10 @@ extern "C" void pc_ui_apply_settings(void)
     std::string prev_key = get_text("audio", "prev_song_key");
     int prev_vk = prev_key.empty() ? 0 : xbox_InputMap_KeyFromName(prev_key.c_str());
     g_prev_song_vk = prev_vk > 0 && prev_vk != g_overlay_vk && prev_vk != g_next_song_vk.load() ? prev_vk : 0;
+    std::string rec_key = get_text("recording", "key");
+    int rec_vk = rec_key.empty() ? 0 : xbox_InputMap_KeyFromName(rec_key.c_str());
+    g_rec_vk = rec_vk > 0 && rec_vk != g_overlay_vk && rec_vk != 0x78 /* F9 */ ? rec_vk : 0;
+    recording_slow_motion_apply_settings();
     parse_chords();
     if (g_ready) ui_apply_scale(g_window);
     ui_unlock();
@@ -4604,6 +4625,17 @@ extern "C" int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp)
         ui_unlock();
         if (!capturing) {
             recorder_mark("key");
+            return 1;
+        }
+    }
+    // [recording] key (build 99): recording mode, unless something is typed in; the game does not see it
+    if (!note && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30)) && g_rec_vk.load() &&
+        (int)wp == g_rec_vk.load()) {
+        ui_lock();
+        bool typing = ui_capturing() || g_fc_typing.load() || (g_ready && ImGui::GetIO().WantTextInput);
+        ui_unlock();
+        if (!typing) {
+            recording_mode_toggle((unsigned long long)ui_ticks());
             return 1;
         }
     }
@@ -4801,6 +4833,9 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     // Towers: the next floor's card over the load (towers_ui.inc), drawing only; over the main menu's decor too
     bool towerscard = !g_open.load() && !versus && online_screen::towers_card_wanted();
     if (towerscard) decor = false;
+    // Build 99: recording mode (recording_mode.h) leaves out everything drawn over the fight, this PC only
+    bool rec = recording_mode_on() != 0;
+    if (rec) fightchat = hillhud = hillres = fighthud = delayhud = rtsworld = false;
     static bool fc_held;
     auto fight_chat_hold = [&](bool typing) {
         if (typing && !fc_held) {
@@ -4821,7 +4856,10 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     char notice[160];
     // F9's notice shows over everything, the online screens and the settings included (pressed in
     // the online menu, it was hidden there); the netplay notices are for the fight only.
+    // Recording mode: only F9's notice and its own note ("Recording mode on: F10", 2 s) while the overlay is shut.
     bool toast = bug_report_toast(notice, sizeof(notice)) ||
+                 recording_mode_toast(notice, (int)sizeof(notice), (unsigned long long)ui_ticks()) != 0;
+    if (!toast && !(rec && !g_open.load())) toast =
                  (!g_open.load() && netplay_toast(notice, sizeof(notice))) ||  // online: a wait, a desync
                  next_song_toast(notice, (int)sizeof(notice), (unsigned long long)ui_ticks()) ||  // "Now playing: ..."
                  (!g_open.load() && online_screen::milestone_toast(notice, sizeof(notice))) ||  // a milestone reached
@@ -4844,7 +4882,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     if (g_note.open) toast = false;     // F9's "taking a picture" would sit over the box
     char talk[160];
     bool talking = voice_overlay(talk, sizeof(talk)) != 0;               // voice chat: who talks
-    if (rtsworld) talking = false;      // Run the Streets: the speaker icons over the fighters say it (and the dock is there)
+    if (rtsworld || rec) talking = false;      // Run the Streets: the speaker icons over the fighters say it (and the dock is there)
     if (!g_open.load() && !decor && !versus && !toast && !talking && !g_note.open && !fightchat && !hillhud && !hillres && !fighthud && !delayhud && !mschip && !offer && !rtsworld && !towerscard) { ui_unlock(); return; }
 
     ID3D11Device *dev = (ID3D11Device *)device;
@@ -5245,6 +5283,16 @@ extern "C" int pc_ui_sdl_event(const void *event, float window_width, float wind
         bool typing = ui_capturing() || (g_ready && ImGui::GetIO().WantTextInput);
         ui_unlock();
         if (!typing) next_song_back_request("key");
+    }
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && g_rec_vk.load() &&
+        host_posix_vk_from_scancode(e->key.scancode) == g_rec_vk.load()) {
+        ui_lock();
+        bool typing = ui_capturing() || (g_ready && ImGui::GetIO().WantTextInput);
+        ui_unlock();
+        if (!typing) {
+            recording_mode_toggle((unsigned long long)ui_ticks());
+            return 1;
+        }
     }
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && recorder_mark_vk() &&
         host_posix_vk_from_scancode(e->key.scancode) == recorder_mark_vk() &&
