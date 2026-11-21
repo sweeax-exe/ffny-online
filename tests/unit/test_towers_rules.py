@@ -274,7 +274,7 @@ def test_the_curve_climbs_by_the_absolute_floor(out):
     assert knobs[('2', 10)] == pytest.approx((1 + 0.6 * r + 0.10, 0.75 * r + 0.25, (1 + 0.75 * r) * 1.25), abs=1e-4)
     assert knobs[('2', 30)][1] == pytest.approx(0.75)   # a boss's momentum stays at most 0.75 (0.52 + 0.25)
     assert [int(c[1]) for c in t2 if c[6] == '1'] == list(range(10, 131, 10))   # a boss closes each chapter
-    assert [int(c[1]) for c in t2 if c[7] == '1'] == list(range(10, 131, 10))   # ... and is its save point
+    assert all(c[7] == '1' for c in t2)                                     # every floor saves (build 104)
     endless = [c for c in t2 if 40 <= int(c[1]) and c[6] == '0']
     assert endless and all(c[3:6] == endless[0][3:6] for c in endless)      # past floor 40 the top row stays
 
