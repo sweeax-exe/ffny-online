@@ -30,7 +30,7 @@ extern "C" {
 #define TOWER_TOP_HEALTH    0.75f   /* ... its health (build 98: 0.50 at 60) */
 #define TOWER_MAX_MOMENTUM  0.75f /* the CPU's starting momentum, a share of its bar, boss extra included */
 #define TOWER_FIRST_COMMUNITY_VENUE 28   /* venue feIDs 28..63 are community venues (ONLINE_NEW_VENUE) */
-#define TOWER_RULES_VERSION 1   /* T1: what the account service checks a run's reports against (towers.go "rules") */
+#define TOWER_RULES_VERSION 2   /* build 102: the harder towers (AI ramp, fixed bosses); T1: what the account service checks a run's reports against (towers.go "rules") */
 #define TOWER_MAX_REFIGHTS  1   /* a draw is fought again once per floor; a second draw on that floor is a loss */
 #define TOWER_RUN_ID_MAX    40  /* the account service's run id (16 hex digits today) */
 
