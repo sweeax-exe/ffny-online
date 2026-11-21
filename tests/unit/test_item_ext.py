@@ -11,6 +11,7 @@ retail item has the position it has with the base, and that the slot layout from
 so a profile's bytes mean the same with and without the new items. With the user's own dump present the same on
 the real database plus an Eyepatch row (the official new item), a pack-style colour and enough items to cross
 an array's padding."""
+import os
 from pathlib import Path
 import random
 import shutil
@@ -251,3 +252,111 @@ def test_dump_with_the_eyepatch_keeps_the_retail_layout(tool, tmp_path):
     rnd = random.Random(7)
     bits = bytes(rnd.getrandbits(8) for _ in range(want_off[5] + 2))
     assert states_of(got, got_off, bits) == states_of(want, want_off, bits)
+
+
+# ---- whole saves: a retail profile read and written back through item_ext ----------------------------------------
+#
+# A profile file (0x5990 bytes, 'DJFFNY::User ...') holds the slot from +0x80; its item states start at slot +0x4DC4
+# (test_save_unlock.profile_blob). The game reads and writes a state through the container methods only
+# (item_ext.h); these helpers do what item_ext's m_get / m_set do, on the file's bytes.
+
+SLOT = 0x80
+STATES = SLOT + 0x4DC4
+
+
+def read_states(kinds, offsets, blob, new_state=2):
+    """{id: state} of every item as an item_ext build reads it (new items: owned, no bits)."""
+    out = {}
+    for k, (count, retail, ids) in kinds.items():
+        for i, item in enumerate(ids):
+            out[item] = (blob[STATES + offsets[k] + i // 4] >> (i % 4 * 2)) & 3 if i < retail else new_state
+    return out
+
+
+def write_states(kinds, offsets, blob, states):
+    """The bytes after an item_ext build set every item of `states` (m_set: mask, then OR; new items dropped)."""
+    b = bytearray(blob)
+    for k, (count, retail, ids) in kinds.items():
+        for i, item in enumerate(ids[:retail]):
+            if item in states:
+                at, sh = STATES + offsets[k] + i // 4, i % 4 * 2
+                b[at] = (b[at] & ~(3 << sh) & 0xFF) | (states[item] << sh)
+    return bytes(b)
+
+
+def synthetic_profiles():
+    """test_save_unlock's profiles with random item states (every array, its padding bits too)."""
+    out = []
+    for seed in (1, 2, 3):
+        b = bytearray(su.profile_blob(seed=seed))
+        rnd = random.Random(seed)
+        b[STATES:STATES + 0x220] = bytes(rnd.getrandbits(8) for _ in range(0x220))
+        out.append(bytes(b))
+    return out
+
+
+def real_profiles():
+    """Copies of real profiles (FFNY_TEST_SAVES: a folder; every 0x5990-byte 'DJFFNY::User' file below it). Never the
+    player's own save area: point it at a copy (dj.py roots, a converted PS2 save)."""
+    folder = os.environ.get('FFNY_TEST_SAVES')
+    if not folder or not Path(folder).is_dir():
+        return []
+    out = []
+    for p in sorted(Path(folder).rglob('*')):
+        if p.is_file() and p.stat().st_size == 0x5990:
+            blob = p.read_bytes()
+            if blob[:4] == b'20CM' and blob[0x4C:0x58] == b'DJFFNY::User':
+                out.append((p.name, blob))
+    return out
+
+
+def roundtrip_checks(tool, tmp_path, base_blob, cur_blob, profiles):
+    base = write(tmp_path, 'base.sod', base_blob)
+    cur = write(tmp_path, 'cur.sod', cur_blob)
+    want, want_off = layout(tool, base, base)          # the retail game (and every build before item_ext)
+    got, got_off = layout(tool, base, cur)             # an item_ext build with the new items
+    new_ids = [i for k in got for i in got[k][2][got[k][1]:]]
+    assert new_ids, 'the composed database has no new item'
+    end = STATES + want_off[5] + want[5][0] // 4 + 1
+    for name, blob in profiles:
+        # 1. loaded and saved again, unchanged: byte for byte the file it was
+        held = read_states(got, got_off, blob)
+        assert write_states(got, got_off, blob, held) == blob, name
+        # 2. every retail item reads in the item_ext build what the retail game reads; the new ones read as owned
+        retail = read_states(want, want_off, blob)
+        assert {i: s for i, s in held.items() if i in retail} == retail, name
+        assert all(held[i] == 2 for i in new_ids), name
+        # 3. the item_ext build buys a retail item and 'buys' the new ones: only that item's two bits change, the
+        #    retail game reads the purchase, and reading back in the item_ext build gives what it held
+        kinds3 = got[3][2][:got[3][1]]
+        item = next(i for i in kinds3 if held[i] != 3)
+        change = dict({n: 1 for n in new_ids}, **{item: 3})
+        saved = write_states(got, got_off, blob, change)
+        diff = [i for i in range(len(blob)) if saved[i] != blob[i]]
+        assert len(diff) == 1 and STATES <= diff[0] < end, (name, diff)
+        after = read_states(want, want_off, saved)
+        assert after == dict(retail, **{item: 3}), name
+        assert read_states(got, got_off, saved) == dict(held, **{item: 3}), name
+        # 4. and without item_ext the same profile reads other states (what the test guards against)
+        plain, plain_off = layout(tool, base, cur, plain=True)
+        assert {i: s for i, s in read_states(plain, plain_off, blob).items() if i in retail} != retail, name
+
+
+def test_retail_profiles_round_trip_byte_identical_with_new_items(tool, tmp_path):
+    """Synthetic database and profiles: load + save is the identity, purchases touch only their bits."""
+    roundtrip_checks(tool, tmp_path, su.make_sod(su.sample_tables()), su.make_sod(grown_tables(extra_rows=9)),
+                     [('synthetic-%d' % k, b) for k, b in enumerate(synthetic_profiles())])
+
+
+@pytest.mark.skipif(dump_sod() is None, reason="the user's own dump (game/assets/djv2.sod) is not here")
+def test_dump_profiles_round_trip_byte_identical_with_the_eyepatch(tool, tmp_path):
+    """The dump's database plus the Eyepatch (and four more new items); synthetic profiles, and with
+    FFNY_TEST_SAVES copies of real ones."""
+    blob = dump_sod().read_bytes()
+    roundtrip_checks(tool, tmp_path, blob, eyepatch_sod(blob),
+                     [('synthetic-%d' % k, b) for k, b in enumerate(synthetic_profiles())] + real_profiles())
+
+
+@pytest.mark.skipif(dump_sod() is None or not real_profiles(), reason='needs the dump and FFNY_TEST_SAVES')
+def test_real_profiles_are_found():
+    assert real_profiles()

@@ -306,7 +306,7 @@ def validate_install(folder):
     if any(isinstance(op, dict) and op.get('op') == 'new-venue' and 'models' in op for op in info.get('ops', [])):
         capabilities.append('venue-models-v1')      # a new venue's breakable objects (launchers from build 83)
     if info.get('type') == 'clothing':
-        # build 106: new rows and colours keep the profile's item-state layout only with item_ext (game build 106+;
+        # build 108: new rows and colours keep the profile's item-state layout only with item_ext (game build 108+;
         # src/hooks/item_ext.h); an older game moved every profile's states (community/clothing-packs-test.md)
         capabilities.append('items-v1')
     return {'capabilities': capabilities, 'texture_ids': [], 'wide_ids': []}

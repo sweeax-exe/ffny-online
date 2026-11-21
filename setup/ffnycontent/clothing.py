@@ -81,7 +81,7 @@ def apply_ops(sod_blob, parts_xml, name_tables, ops):
             words[7] = words[7] + 1
             model = op.get("model")
             if model:
-                # an item with a part of its own (build 106: the Eyepatch): the row's model number names the new
+                # an item with a part of its own (build 108: the Eyepatch): the row's model number names the new
                 # part V2CP_<cat>_<num>_C, which goes into the parts list as a model of its own with the item's
                 # textures (the template's mesh is not used)
                 num, name = int(model["num"]), str(model["name"])

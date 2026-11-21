@@ -293,7 +293,7 @@ def test_clothing_adds_and_ops(game, data):
 
 
 def test_clothing_item_with_a_part_of_its_own(game, data):
-    """Build 106 (the Eyepatch): an item op's "model" names a part the pack adds; the row takes its number and the
+    """Build 108 (the Eyepatch): an item op's "model" names a part the pack adds; the row takes its number and the
     parts list gets it as a model of its own with the item's texture, the template's model untouched."""
     item = item_op("Eyepatch", "Y01", clothing_floor(game))
     item.update({"model": {"num": 6, "name": "V2CP_114_0006_C"}, "variants": [],
@@ -838,7 +838,7 @@ def test_validate_install_asks_for_venue_models_v1(tmp_path):
 
 
 def test_validate_install_asks_clothing_for_items_v1(tmp_path, game):
-    """Build 106: a clothing pack needs a game whose item_ext keeps the save layout (items-v1)."""
+    """Build 108: a clothing pack needs a game whose item_ext keeps the save layout (items-v1)."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import test_mod_manager  # noqa: E402  (the loaded mods module)
     sys.path.pop(0)
