@@ -242,6 +242,14 @@ moves and fighting styles are **per profile**.
   `0xC2E12E98`, or one for an empty list, `sub_000153D0`). For the USA dump: 93, 30, 405, 1454, 82, 5, so the
   arrays end at `S+0x4FCD`. Two played profiles (the PS2 samples, converted) agree: every padding bit is 0 and
   the bytes after the last array are 0; a finished one has no clothing or hair locked.
+- **Owned = 3** (2026-11-21, `feat/own-everything`). A store purchase (the clothing and jewellery buys,
+  `sub_0004D6xx` / `sub_0004E6xx`, which also call the spend `sub_00013640`) calls the container's set method at
+  vtable `+0x1C` with value 2, which **ORs** it into the item's bits (`sub_00017480`/`sub_00017410`); an item the
+  shop showed was state 1, so a bought item is `1 | 2 = 3`. The developers' unlock `sub_00016040` with flag 4
+  writes 3 as well. 2 also reads as Owned (`sub_00017260` masks the bits, `sub_00048810` maps 2 and 3 to the
+  same string), but 3 is what a play-through leaves, so the launcher's **Own everything** writes 3 to every
+  hair style, tattoo, jewellery and clothing item that is below 2 (a 2 or 3 is kept), raises the same row
+  counters as Make items buyable, and does not touch the Blazin or fighting-style states or counters.
 - **Row counters.** Beside the states the slot keeps how many rows of each kind are unlocked: words at
   `S+0xA8` (hair), `S+0xAA` (tattoos), `S+0xAC` (clothing), `S+0xAE` (jewellery), `S+0xB0` (Blazin moves;
   `S+0xB2` looks like the owned Blazins) and sixteen dwords from `S+0xB8`, one per clothing type (the row's

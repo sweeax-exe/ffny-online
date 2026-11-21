@@ -65,8 +65,10 @@ uint32_t training_cost(const uint32_t stats[5]);
 constexpr uint32_t kStylePrice = 2500;
 // The edits on the file bytes, unsigned (resign() after). False with *error when the file is not one
 // they know (nothing is changed then). `cash` also tops up the development points (training_cost).
+// `own` = Own everything: hair, tattoos, jewellery and clothing become Owned (state 3, the closet) instead of
+// buyable, and the Blazin moves and fighting styles are left exactly as they are (no gym points for them).
 bool unlock_profile_bytes(Bytes &profile, const UnlockLayout &layout, bool cash, UnlockCounts &counts,
-                          std::string *error);
+                          std::string *error, bool own = false);
 // The same item edit (no cash, no development points) on a profile slot as the game holds it in memory, for
 // [debug] unlock_all (src/patches/dev_unlock.c): `slot` is the slot's first `size` bytes (offsets as above),
 // `items` and `states` the item count and the slot offset of the state array of each kind as the game's six
@@ -85,7 +87,7 @@ struct UnlockResult
 // The profile in UserData/45410049/<folder> and the Options file: backup (reason "unlock"), edit, sign,
 // write. Refused, with nothing changed, when either file is missing or not as expected.
 UnlockResult unlock_everything(const fs::path &save_dir, const fs::path &backups, const std::string &folder,
-                               const Bytes &sod, bool cash, int64_t now);
+                               const Bytes &sod, bool cash, int64_t now, bool own = false);
 } // namespace saves
 
 // For the game (src/patches/dev_unlock.c): unlock_profile_slot with the layout of the game's database
