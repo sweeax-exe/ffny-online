@@ -153,6 +153,7 @@ static void run_fe_queue(void)
     }
 }
 
+extern void defjam_occluder_note_call(const char *text);
 static void call(const char *format, ...)
 {
     char command[160];
@@ -163,6 +164,7 @@ static void call(const char *format, ...)
     va_end(args);
     if (!netplay_hill_watch_quiet())    /* a pad script can wait for these as for the front end's own (not for a */
         xbox_NoteAnchorEvent(command);  /* hill fight only watched, build 70) */
+    defjam_occluder_note_call(command);    /* the chosen venue (camera occluder fade, visual only) */
     result = defjam_fe_call(command);
     fprintf(stderr, "[AUTOMATCH] %s -> %s\n", command, result ? "ok" : "0");
 }
@@ -418,6 +420,7 @@ void recorder_event_text(const char *kind, const char *key, const char *text);  
  * after as the FuncCall hook in recomp_manual.c (held calls, created fighters' links, this file's
  * sequence). Online, a Rematch that the others accepted while this PC's was held starts with it
  * (netplay.c, netplay_rematch_tick). Registers and the x87 state are put back. */
+extern void defjam_occluder_note_call(const char *text);
 unsigned int defjam_menu_call(const char *text)
 {
     uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
@@ -427,6 +430,7 @@ unsigned int defjam_menu_call(const char *text)
     unsigned int r = 0;
     memcpy(fp, g_fp_stack, sizeof(fp));
     fprintf(stderr, "[FUNCCALL] %s (for the menu)\n", text);
+    defjam_occluder_note_call(text);    /* the chosen venue (camera occluder fade, visual only) */
     recorder_event_text("fe", "text", text);
     if (!netplay_hill_watch_quiet()) xbox_NoteAnchorEvent(text);
     if (!automatch_hold_funccall(text)) {

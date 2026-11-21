@@ -158,6 +158,7 @@ int  watchpoint_handle_trap(void *ctx);
 int  d3d11_translator_init(void);
 void d3d11_translator_pump(void);
 void d3d11_translator_frame_end(void);
+void defjam_occluder_install(void);
 
 /* ── VEH crash handler ─────────────────────────────────────── */
 
@@ -897,6 +898,7 @@ static int host_main(void)
     if (!getenv("RECOMP_PAD_SCRIPT_FORMAT"))
         _putenv_s("RECOMP_PAD_SCRIPT_FORMAT", "seconds");
     d3d11_translator_init();
+    defjam_occluder_install();
 #ifdef RECOMP_PGRAPH_FRAME_END_CALLBACK
     pgraph_d3d11_set_frame_end_callback(d3d11_translator_frame_end);
 #endif

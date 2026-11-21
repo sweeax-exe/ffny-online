@@ -679,8 +679,10 @@ static void log_display_pacing(void)
  * is also where the window has to be pumped and the counters read. Without
  * this every frame is rendered correctly and then discarded, which looks
  * exactly like a renderer that does nothing. */
+void defjam_occluder_frame_end(void);
 void d3d11_translator_frame_end(void)
 {
+    defjam_occluder_frame_end();
     IDirect3DDevice8 *dev;
 
     if (!s_ready)

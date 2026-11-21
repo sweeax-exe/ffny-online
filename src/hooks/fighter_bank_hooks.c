@@ -335,8 +335,10 @@ static void put_guest(uint32_t buf, const char *text)
     MEM8(buf + i) = 0;
 }
 
+extern void defjam_occluder_note_call(const char *text);
 void fighter_banks_funccall_before(char *text, size_t text_size)
 {
+    defjam_occluder_note_call(text);   /* the chosen venue for the camera occluder fade (visual only) */
     static uint32_t command_buf;
     char bound[192];
     uint32_t buf;
