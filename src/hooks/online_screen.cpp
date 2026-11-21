@@ -6155,6 +6155,8 @@ void gallery_step()
                                          // rules, a saved climb, the start card), the climb at four moments, a boss
                                          // floor, the card over the load (the first floor too), a draw, the ends
                                          "hub-towers", "towers", "towers-t2", "towers-weekly", "towers-rules", "towers-saved",
+                                         // build 108: The Weekly (the gallery's sample week)
+                                         "towers-weekly-rules", "towers-weekly-board", "towers-weekly-start", "towers-weekly-climb",
                                          "towers-start", "towers-climb-0", "towers-climb-1", "towers-climb-2", "towers-climb-3",
                                          "towers-boss", "towers-card", "towers-first", "towers-draw", "towers-lost", "towers-cleared",
                                          "towers-board", "towers-board-all", "towers-art", "towers-starting",

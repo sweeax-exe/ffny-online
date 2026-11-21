@@ -62,6 +62,14 @@ typedef struct TowersView {
  * fighters or venues read from the dump). Signed in it first asks the account service for the run (up to about 8 s:
  * call it off the overlay's thread); without an answer the run starts offline. */
 int towers_start(int tower, int fighter, int skin);
+/* Build 108, The Weekly (tower 3, towers_start with TOWER_WEEKLY): the account service's tower of the week. The
+ * definition (GET /api/towers/weekly, towers_rules.h TowerWeekly) is fetched in the background; this copies the
+ * last one into *out (its now: the service's clock now) and returns 1 when there is a Weekly. 0 (hidden) while the
+ * service says 404 (its switch off), without an answer, or with RECOMP_TOWERS_OFFLINE. Never blocks. A start reads it
+ * again (blocks), plays exactly the week's order, venues and twist and reports to the board of tower 3 with the week;
+ * a saved Weekly climb resumes only in its own week. */
+int towers_weekly(TowerWeekly *out);
+int towers_weekly_status(void);         /* the last fetch: 200, 404 (off), 0 (no answer), -1 (not yet) */
 /* Build 106: a new run of a team tower (TOWER_TEAM: standard fighters only, as Uptown; TOWER_TEAM_COMMUNITY): player 1
  * on pad 0 (slot 0), player 2 on pad 1 (slot 1), against two CPUs a floor (slots 2 and 3, both ramped). Otherwise as
  * towers_start (signed in, the host's account holds the run; RECOMP_TOWERS_PARTNER_TOKEN, a second account's session,

@@ -358,7 +358,11 @@ void hub_tiles_draw(ImDrawList *dl, const Frame &f, const Pad &pad, const int *s
                     on = !live.empty() && live != "NO KING YET";
                 } else if (id == HUB_TOWERS) {
                     int best = hub_towers_best();
-                    if (best > 0) { live = "YOUR BEST: FLOOR " + std::to_string(best); on = true; }
+                    TowerWeekly wk;
+                    if (!gallery_on() && towers_weekly(&wk)) {     // build 108: this week's Weekly and its twist
+                        live = std::string("THE WEEKLY: ") + (wk.title[0] ? wk.title : "ON");
+                        on = true;
+                    } else if (best > 0) { live = "YOUR BEST: FLOOR " + std::to_string(best); on = true; }
                 } else if (id == 2 && rooms >= 0) {
                     live = std::to_string(rooms) + (rooms == 1 ? " OPEN ROOM" : " OPEN ROOMS");
                     on = rooms > 0;

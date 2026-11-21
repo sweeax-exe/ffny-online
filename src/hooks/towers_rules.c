@@ -149,7 +149,7 @@ int towers_venue(const TowerRun *run, int floor)
 int towers_is_boss(int tower, int floor, int floors)
 {
     if (floor < 1 || floor > floors) return 0;
-    if (tower == TOWER_UPTOWN) return floor == floors;
+    if (tower == TOWER_UPTOWN || tower == TOWER_WEEKLY) return floor == floors;     /* the Weekly: Crow on top */
     if (tower == TOWER_FIVE_BOROUGHS) return floor % TOWER_CHAPTER == 0;
     if (TOWER_IS_TEAM(tower)) return floor == floors || floor % TOWER_CHAPTER == 0;
     return 0;
@@ -160,6 +160,17 @@ int towers_is_save_point(int tower, int beaten, int floors, int chapter)
     if (beaten < 1) return 0;
     (void)tower; (void)floors; (void)chapter;
     return 1;       /* build 104 (owner): every won floor is a save point in both towers; a loss still ends the climb */
+}
+
+/* a boss floor's extras on top of the floor's ramp */
+static void boss_extras(TowerFloorRules *out)
+{
+    out->boss = 1;
+    out->cpu_level = 2;
+    out->cpu_damage += 0.10f;
+    out->cpu_momentum += 0.25f;
+    out->cpu_health *= 1.25f;
+    if (out->cpu_momentum > TOWER_MAX_MOMENTUM) out->cpu_momentum = TOWER_MAX_MOMENTUM;
 }
 
 void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
@@ -174,6 +185,7 @@ void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
     float t;
     memset(out, 0, sizeof *out);
     out->cpu_damage = out->cpu_health = 1.0f;
+    out->hit_scale = out->max_health = 1.0f;
     if (floor < TOWER_HARD_FLOOR) {
         out->cpu_level = floor < TOWER_NORMAL_FLOOR ? 0 : 1;
     } else {
@@ -184,19 +196,12 @@ void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
         out->cpu_momentum = TOWER_MAX_MOMENTUM * t;
         out->cpu_health = 1.0f + TOWER_TOP_HEALTH * t;
     }
-    if (towers_is_boss(tower, floor, floors)) {
-        out->boss = 1;
-        out->cpu_level = 2;
-        out->cpu_damage += 0.10f;
-        out->cpu_momentum += 0.25f;
-        out->cpu_health *= 1.25f;
-        if (out->cpu_momentum > TOWER_MAX_MOMENTUM) out->cpu_momentum = TOWER_MAX_MOMENTUM;
-    }
+    if (towers_is_boss(tower, floor, floors)) boss_extras(out);
 }
 
 int towers_climber_ok(int tower, int fighter, int new_place)
 {
-    if (tower != TOWER_UPTOWN && tower != TOWER_TEAM) return 1;    /* build 106: the standard Team Tower as Uptown */
+    if (tower != TOWER_UPTOWN && tower != TOWER_TEAM && tower != TOWER_WEEKLY) return 1;  /* build 106: the standard Team Tower as Uptown */
     return !new_place && fighter >= 0 && fighter < TOWER_CREATED_FIGHTER;     /* the service's towerStockFighter */
 }
 
@@ -261,6 +266,7 @@ int towers_file_write(const TowerRun *const runs[TOWER_COUNT], const int best[TO
             first ? "" : ",", r->tower, r->seed, r->fighter, r->skin, r->floors, r->floor, r->roster_hash, r->health_pct,
             r->climb_ms, r->interrupted, r->in_fight, r->draws, r->skipped, r->started, r->refights, r->board, r->net_next, r->run_id,
             r->fighter2, r->skin2, towers_roster_len(r));
+        if (r->tower == TOWER_WEEKLY) PUT("\"twist\":%d,\"week\":\"%s\",\"week_end\":%lld,", r->twist, r->week, r->week_end);
         n = put_list(out, n, size, "venues", r->venues, r->venue_n);
         PUT(",");
         n = put_list(out, n, size, "roster", r->roster, towers_roster_len(r));
@@ -365,6 +371,16 @@ int towers_file_read(const char *text, TowerRun runs[TOWER_COUNT], int have[TOWE
             read_int(p, close, "skin2", &r.skin2);
             read_int(p, close, "roster_n", &r.roster_n);
             if (!TOWER_IS_TEAM(tower)) r.roster_n = 0;
+            if (tower == TOWER_WEEKLY) {    /* build 108: the week's twist, the week and its end */
+                const char *q = key_at(p, close, "week");
+                int k = 0;
+                read_int(p, close, "twist", &r.twist);
+                read_ll(p, close, "week_end", &r.week_end);
+                if (q && *q == '"')
+                    for (q++; q < close && *q != '"' && k < (int)sizeof r.week - 1; q++)
+                        if ((*q >= '0' && *q <= '9') || *q == 'W' || *q == '-') r.week[k++] = *q;
+                r.week[k] = 0;
+            }
             {   /* the server's run id: letters and digits only */
                 const char *q = key_at(p, close, "run");
                 int k = 0;
@@ -379,7 +395,8 @@ int towers_file_read(const char *text, TowerRun runs[TOWER_COUNT], int have[TOWE
                  (!TOWER_IS_TEAM(tower) || r.roster_n == 2 * r.floors) &&
                  read_list(p, close, "roster", r.roster, TOWER_MAX_ROSTER) == towers_roster_len(&r) &&
                  r.floor >= 1 && r.floor <= r.floors && r.health_pct >= 1 && r.health_pct <= 100 &&
-                 towers_roster_hash(r.roster, towers_roster_len(&r)) == r.roster_hash;
+                 towers_roster_hash(r.roster, towers_roster_len(&r)) == r.roster_hash &&
+                 (tower != TOWER_WEEKLY || (r.week[0] && r.twist > 0 && r.twist < TOWER_TWIST_COUNT));
         }
         if (ok) {
             runs[tower - 1] = r;
@@ -474,4 +491,164 @@ int towers_place_bosses(TowerRun *run)
         placed++;
     }
     return placed;
+}
+
+/* ---------------------------------------------------------------- The Weekly (build 108) */
+
+static const struct { const char *key, *text; } k_twists[TOWER_TWIST_COUNT] = {
+    { "", "" },
+    { "low_health", "No healing between floors: every fight starts with the health your last win ended with." },
+    { "double_damage", "Every hit does double damage, yours and the CPU's." },
+    { "cpu_momentum", "The CPU's momentum meter stays full: it can go Blazin' whenever it wants." },
+    { "glass_jaw", "Both fighters have half their health: every fight is over fast." },
+    { "all_bosses", "Every floor is a boss fight: the boss AI and the boss extras on all 20." },
+    { "one_venue", "All 20 floors at one venue." },
+};
+
+int towers_twist_id(const char *key)
+{
+    int i;
+    if (!key || !*key) return TOWER_TWIST_NONE;
+    for (i = 1; i < TOWER_TWIST_COUNT; i++) if (!strcmp(key, k_twists[i].key)) return i;
+    return TOWER_TWIST_NONE;
+}
+
+const char *towers_twist_key(int twist) { return twist > 0 && twist < TOWER_TWIST_COUNT ? k_twists[twist].key : ""; }
+const char *towers_twist_text(int twist) { return twist > 0 && twist < TOWER_TWIST_COUNT ? k_twists[twist].text : ""; }
+
+/* line `key=` of text: its value into out (size), the end of the line through *next; 1 when found from `from` on */
+static const char *wk_line(const char *from, const char *key, char *out, int size)
+{
+    size_t k = strlen(key);
+    const char *p = from;
+    while (p && *p) {
+        if (!strncmp(p, key, k) && p[k] == '=') {
+            int n = 0;
+            p += k + 1;
+            while (*p && *p != '\n' && *p != '\r' && n < size - 1) out[n++] = *p++;
+            out[n] = 0;
+            return p;
+        }
+        p = strchr(p, '\n');
+        if (p) p++;
+    }
+    if (size > 0) out[0] = 0;
+    return NULL;
+}
+
+int towers_weekly_parse(const char *text, TowerWeekly *out)
+{
+    char v[256], *bar;
+    const char *p;
+    int f = 0, i;
+    memset(out, 0, sizeof *out);
+    out->spare = -1;
+    if (!text || !wk_line(text, "enabled", v, sizeof v) || atoi(v) != 1) return 0;
+    if (!wk_line(text, "week", out->week, (int)sizeof out->week) || strlen(out->week) != 8) return 0;
+    wk_line(text, "name", out->name, (int)sizeof out->name);
+    if (wk_line(text, "twist", v, sizeof v)) {      /* id|TITLE */
+        bar = strchr(v, '|');
+        if (bar) {
+            *bar = 0;
+            snprintf(out->title, sizeof out->title, "%s", bar + 1);
+        }
+        snprintf(out->twist_key, sizeof out->twist_key, "%s", v);
+        out->twist = towers_twist_id(out->twist_key);
+    }
+    if (wk_line(text, "rules", v, sizeof v)) out->rules = atoi(v);
+    if (!wk_line(text, "seed", v, sizeof v)) return 0;
+    out->seed = (uint32_t)strtoul(v, NULL, 10);
+    if (!wk_line(text, "floors", v, sizeof v)) return 0;
+    out->floors = atoi(v);
+    if (wk_line(text, "starts", v, sizeof v)) out->starts = strtoll(v, NULL, 10);
+    if (wk_line(text, "ends", v, sizeof v)) out->ends = strtoll(v, NULL, 10);
+    if (wk_line(text, "now", v, sizeof v)) out->now = strtoll(v, NULL, 10);
+    if (wk_line(text, "roster", v, sizeof v)) out->roster_hash = (uint32_t)strtoul(v, NULL, 16);
+    if (wk_line(text, "spare", v, sizeof v)) out->spare = atoi(v);
+    if (wk_line(text, "venues", v, sizeof v)) {
+        int tmp[TOWER_MAX_VENUES], n = 0;
+        for (p = v; *p && n < TOWER_MAX_VENUES; ) {
+            char *end;
+            long x = strtol(p, &end, 10);
+            if (end == p) break;
+            tmp[n++] = (int)x;
+            p = *end == '|' ? end + 1 : end;
+        }
+        out->venue_n = clean_list(out->venues, tmp, n, TOWER_MAX_VENUES, -1);
+    }
+    if (out->floors < 1 || out->floors > TOWER_WEEKLY_MAX_FLOORS || out->venue_n < 1) return 0;
+    for (p = text; (p = wk_line(p, "floor", v, sizeof v)) != NULL; ) {   /* floor=<n>|<opponent>|<venue>|<level>|<boss> */
+        int n = 0, opp = -1, ven = -1, lvl = 0, boss = 0;
+        if (sscanf(v, "%d|%d|%d|%d|%d", &n, &opp, &ven, &lvl, &boss) < 3 || n != f + 1 || f >= out->floors) return 0;
+        out->opponent[f] = opp;
+        out->venue[f] = ven;
+        out->level[f] = lvl;
+        out->boss[f] = boss;
+        f++;
+    }
+    if (f != out->floors) return 0;
+    for (i = 0; i < f; i++) if (out->opponent[i] < 0) return 0;
+    out->valid = 1;
+    return 1;
+}
+
+int towers_new_weekly_run(TowerRun *run, const TowerWeekly *w, int fighter, int skin)
+{
+    int i;
+    memset(run, 0, sizeof *run);
+    if (!w || !w->valid || w->twist == TOWER_TWIST_NONE || w->rules != TOWER_WEEKLY_RULES) return 0;
+    run->tower = TOWER_WEEKLY;
+    run->seed = w->seed;
+    run->fighter = fighter;
+    run->skin = skin;
+    run->floors = w->floors;
+    for (i = 0; i < w->floors; i++) run->roster[i] = w->opponent[i] == fighter ? w->spare : w->opponent[i];
+    for (i = 0; i < w->floors; i++) if (run->roster[i] < 0) { run->floors = 0; return 0; }
+    for (i = 0; i < w->venue_n; i++) run->venues[i] = w->venues[i];
+    run->venue_n = w->venue_n;
+    run->roster_hash = towers_roster_hash(run->roster, run->floors);
+    run->floor = 1;
+    run->health_pct = 100;
+    run->twist = w->twist;
+    snprintf(run->week, sizeof run->week, "%s", w->week);
+    run->week_end = w->ends;
+    return run->floors;
+}
+
+int towers_run_is_boss(const TowerRun *run, int floor)
+{
+    if (!run || floor < 1 || floor > run->floors) return 0;
+    if (run->tower == TOWER_WEEKLY && run->twist == TOWER_TWIST_ALL_BOSSES) return 1;
+    return towers_is_boss(run->tower, floor, run->floors);
+}
+
+void towers_run_floor_rules(const TowerRun *run, int floor, TowerFloorRules *out)
+{
+    towers_floor_rules(run->tower, floor, run->floors, out);
+    if (run->tower != TOWER_WEEKLY) return;
+    switch (run->twist) {
+    case TOWER_TWIST_LOW_HEALTH: out->carry_health = 1; break;
+    case TOWER_TWIST_DOUBLE_DAMAGE: out->hit_scale = 2.0f; break;
+    case TOWER_TWIST_CPU_MOMENTUM: out->momentum_hold = 1; break;
+    case TOWER_TWIST_GLASS_JAW: out->max_health = 0.5f; break;
+    case TOWER_TWIST_ALL_BOSSES: if (!out->boss) boss_extras(out); break;
+    default: break;
+    }
+}
+
+void towers_iso_week(long long unix_secs, char *out, int size)
+{
+    /* days since 1970-01-01 (a Thursday); the ISO year is the year of the week's Thursday */
+    long long days = unix_secs >= 0 ? unix_secs / 86400 : (unix_secs - 86399) / 86400;
+    int wd = (int)(((days + 3) % 7 + 7) % 7);           /* 0 Monday .. 6 Sunday */
+    long long thu = days - wd + 3, d = thu;
+    int y = 1970, week;
+    for (;;) {      /* the Thursday's year and its day of the year */
+        int len = (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)) ? 366 : 365;
+        if (d < 0) { y--; d += (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)) ? 366 : 365; continue; }
+        if (d >= len) { d -= len; y++; continue; }
+        break;
+    }
+    week = (int)(d / 7) + 1;
+    snprintf(out, (size_t)size, "%04d-W%02d", y, week);
 }

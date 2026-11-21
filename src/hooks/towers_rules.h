@@ -17,7 +17,7 @@ extern "C" {
 
 #define TOWER_UPTOWN        1   /* every stock fighter, standard venues */
 #define TOWER_FIVE_BOROUGHS 2   /* stock + the community fighters and venues this PC has, chapters of 10 floors */
-#define TOWER_WEEKLY        3   /* the server's weekly event tower (T2 of the design): "coming soon" in T0 */
+#define TOWER_WEEKLY        3   /* build 108: The Weekly, the account service's tower of the week (TowerWeekly below) */
 /* Build 106: the Team Tower, two players on one PC (pads 0 and 1, slots 0 and 1) against CPU teams (slots 2 and 3),
  * 2 vs 2 (Game.SetMatchType(1)). Two towers so the rules never mix on a board: standard fighters and venues only, or
  * with the community fighters this PC has. Floor f's opponents are roster[2f-2] and roster[2f-1]; venues: only the
@@ -75,6 +75,11 @@ typedef struct TowerRun {
     int refights;               /* draws on the floor fought next (TOWER_MAX_REFIGHTS) */
     int net_next;               /* the floor the service expects next: Five Boroughs resumes at its chapter's start,
                                    so the floors below this one are fought again without reports (0: as floor) */
+    /* build 108, The Weekly (tower 3): the week's twist (TOWER_TWIST_*), the ISO week ("2026-W47") and its end (unix);
+     * a weekly run of another week than the service's is over (the service ended it at the week's end) */
+    int twist;
+    char week[12];
+    long long week_end;
 } TowerRun;
 
 /* What one floor's fight is set to (section 2.3 of the design): the CPU's game level and our own knobs past Hard. */
@@ -84,6 +89,11 @@ typedef struct TowerFloorRules {
     float cpu_momentum;     /* the CPU's momentum at the start, a share of its bar (0 .. 0.75) */
     float cpu_health;       /* the CPU's health, as a factor (1.00 .. 2.1875): the damage it takes is divided by it */
     int boss;               /* a boss floor (the top of Uptown, each chapter's 10th floor in Five Boroughs) */
+    /* build 108, The Weekly's twists (towers_run_floor_rules; 1 / 0 in every other tower) */
+    float hit_scale;        /* double_damage: every hit, both ways, times this (on top of cpu_damage / cpu_health) */
+    float max_health;       /* glass_jaw: both fighters' maximum health times this, both start full of it */
+    int momentum_hold;      /* cpu_momentum: the CPU's momentum meter (+0x364) held full, Blazin' ready */
+    int carry_health;       /* low_health: the climber starts with the health the last win ended with */
 } TowerFloorRules;
 
 /* splitmix32: the generator every seeded choice uses (the server can recompute it later). */
@@ -133,7 +143,8 @@ int towers_is_save_point(int tower, int beaten, int floors, int chapter);
 /* The curve: p = floor / floors (Five Boroughs: floor / min(floors, 100), endless stays at the top row). */
 void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out);
 
-/* Build 98 (owner): who may start a NEW climb of the tower. Uptown takes standard fighters only (stock IDs 0..98; never
+/* Build 98 (owner): who may start a NEW climb of the tower. Uptown (and The Weekly, build 108: the service takes stock
+ * climbers only on its board, "created") takes standard fighters only (stock IDs 0..98; never
  * the created fighter 99, a new fighter's place (new_place) or a numbered community / own fighter); Five Boroughs any.
  * A saved Uptown run with a created fighter still continues (off the board, as the service says). */
 #define TOWER_CREATED_FIGHTER 99
@@ -157,6 +168,66 @@ int towers_file_read(const char *text, TowerRun runs[TOWER_COUNT], int have[TOWE
 
 /* The tower's names, for logs and screens ("UPTOWN"). */
 const char *towers_name(int tower);
+
+/* ---------------------------------------------------------------- The Weekly (tower 3, build 108)
+ * The account service's tower of the week (server relay/accounts/towers_weekly.go): every ISO week (Monday 00:00 UTC
+ * to the next) one tower of 20 floors with one twist, the same for everyone: a fixed seed, a fixed order of opponents
+ * (the spare stands in on the floor of the climber's own fighter), a fixed venue list (one with Home Turf), Crow on
+ * the top floor. GET /api/towers/weekly?format=text gives it (404 while the service's switch is off: no Weekly). The
+ * twists and exactly what the game does for them (weekly rules version TOWER_WEEKLY_RULES, the service's
+ * WeeklyRulesVersion; the start sends it, another version climbs off the board): */
+#define TOWER_WEEKLY_RULES      1
+#define TOWER_WEEKLY_MAX_FLOORS 40
+enum {
+    TOWER_TWIST_NONE = 0,       /* unknown to this build: the Weekly cannot be climbed (a newer game knows it) */
+    TOWER_TWIST_LOW_HEALTH,     /* IRON MAN: from floor 2 the climber starts with the health the last win ended with
+                                   (regeneration's ceiling too: no refill); the CPU always starts full */
+    TOWER_TWIST_DOUBLE_DAMAGE,  /* HEAVY HANDS: every hit does twice the damage, both ways, on top of the ramp */
+    TOWER_TWIST_CPU_MOMENTUM,   /* BLAZIN' HOUR: the CPU's momentum meter held full (Blazin' ready) from 5 s of
+                                   fighting on (one given in the walk-in stopped the match: cheats.c max_blazin) */
+    TOWER_TWIST_GLASS_JAW,      /* GLASS JAW: both fighters' maximum health halved, both start full */
+    TOWER_TWIST_ALL_BOSSES,     /* BOSS RUSH: every floor a boss floor (banner, name tag, boss AI and extras) */
+    TOWER_TWIST_ONE_VENUE,      /* HOME TURF: all floors at the week's one venue (the service's list has one) */
+    TOWER_TWIST_COUNT
+};
+
+typedef struct TowerWeekly {
+    int valid;                  /* enabled=1 and a complete tower */
+    char week[12];              /* "2026-W47" */
+    char name[96];              /* "The Weekly 2026-W47: HEAVY HANDS" */
+    char twist_key[24];         /* the service's twist id ("double_damage") */
+    char title[32];             /* its title ("HEAVY HANDS") */
+    int twist;                  /* TOWER_TWIST_*: 0 a twist this build does not know */
+    int rules;                  /* the service's weekly rules version */
+    uint32_t seed;
+    int floors;
+    long long starts, ends, now;    /* unix seconds; now: the service's clock at the answer */
+    uint32_t roster_hash;       /* the service's roster= (the order and the spare) */
+    int spare;                  /* fights the floor whose opponent is the climber's own fighter (-1: none) */
+    int venue_n;
+    int venues[TOWER_MAX_VENUES];   /* sorted */
+    int opponent[TOWER_WEEKLY_MAX_FLOORS], venue[TOWER_WEEKLY_MAX_FLOORS], level[TOWER_WEEKLY_MAX_FLOORS],
+        boss[TOWER_WEEKLY_MAX_FLOORS];  /* floor f: [f - 1], the week's own order (before the spare) */
+} TowerWeekly;
+
+/* Reads WeeklyText's key=value lines: 1 when it is a complete tower (enabled=1, the week, floors 1..40 with every
+ * floor line in order, venues). */
+int towers_weekly_parse(const char *text, TowerWeekly *out);
+/* A twist's TOWER_TWIST_* from the service's id (0: unknown) and back ("" for 0). */
+int towers_twist_id(const char *key);
+const char *towers_twist_key(int twist);
+/* The week's twist in plain words for the screens ("Every hit does double damage, yours and the CPU's."). */
+const char *towers_twist_text(int twist);
+/* A new Weekly run for the climber: the week's seed, its order (the spare on the climber's own floor, never shuffled:
+ * the service holds this order), its venues; floor 1, full health, the twist and the week kept. Returns the floors
+ * (0: no tower, or a twist or rules version this build cannot play). */
+int towers_new_weekly_run(TowerRun *run, const TowerWeekly *w, int fighter, int skin);
+/* Floor n of a run is a boss floor (towers_is_boss, and every floor of a BOSS RUSH Weekly). */
+int towers_run_is_boss(const TowerRun *run, int floor);
+/* A run's floor rules: towers_floor_rules, then the Weekly's twist (all_bosses: the boss extras on every floor). */
+void towers_run_floor_rules(const TowerRun *run, int floor, TowerFloorRules *out);
+/* The ISO week ("2026-W47") of a unix time (UTC), for the last week's board. */
+void towers_iso_week(long long unix_secs, char *out, int size);
 
 #ifdef __cplusplus
 }

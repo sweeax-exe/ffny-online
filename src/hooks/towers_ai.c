@@ -113,12 +113,15 @@ static void close_attack(void)
     g_s.open = 0;
 }
 
+static int g_boss_all;             /* build 108: The Weekly's BOSS RUSH */
+void towers_ai_boss_all(int on) { g_boss_all = on != 0; }
+
 static void ai_begin_one(int tower, int floor, int floors)
 {
     const char *test = getenv("RECOMP_TEST_TOWERS_AI");
     g_tower = tower;
     g_floor = floor;
-    towers_ai_floor(tower, floor, floors, &g_f);
+    towers_ai_floor_ex(tower, floor, floors, g_boss_all, &g_f);
     g_mode_off = test && !strcmp(test, "off");
     g_skill_test = 0;
     if (test && !strncmp(test, "def=", 4)) g_f.defence = atoi(test + 4) < 1 ? 1 : atoi(test + 4) > 5 ? 5 : atoi(test + 4);
