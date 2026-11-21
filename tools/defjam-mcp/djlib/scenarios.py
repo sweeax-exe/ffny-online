@@ -1743,6 +1743,24 @@ def online_tail(matches, per, p2, last_presses=12):
     return ",".join(parts)
 
 
+def towers_tail(matches):
+    """online_tail for the solo towers: the A presses after each floor's summary end on the next match-type menu
+    (battle/cmtype#m, which every won floor's Game.Quit opens under the climb window). The presses go into the
+    game's report, past the overlay's input hold: one that reached that menu as the tower's automatch began opened
+    options/battleID.swf under the fight's load and crashed it in sub_00142D20 (logs/dj/20261121-194009-towers,
+    the signed-in phase; the b105 "floor 2 not started" flake). A player's pad is held while the window is up."""
+    h = harness()
+    fight = h.FIGHT_TAIL
+    parts = [fight]
+    for m in range(1, matches + 1):
+        nth = "#%d" % m if m > 1 else ""
+        parts.append(h.raw_stages(["game.getmatchsummary(0%s=a@4+3x12" % nth]))
+        parts.append("@getscreeninfo(battle/cmtype%s" % nth)
+        if m < matches:
+            parts.append(fight.replace("@game.startgame(", "@game.startgame(#%d" % (m + 1)))
+    return ",".join(parts)
+
+
 def crew_tail(fights, p2):
     """Pad presses for a crew battle's fights (turf): crew battles run King of the Hill style, so a copy fights
     0, 1 or 2 times and online_tail's count of matches is off. After the Nth fight an A every 3 s on each of
@@ -3237,7 +3255,7 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
                 "RECOMP_TEST_TOWERS_SEED": "1234", "RECOMP_OVERLAY_SHOT_MS": "500"}
 
         def script(matches):
-            return h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(matches, 2, False))
+            return h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], towers_tail(matches))
 
         def read_file():
             try:
