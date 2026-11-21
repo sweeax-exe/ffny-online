@@ -69,6 +69,7 @@ static int g_cpu_end_health;            /* the CPU's health % when the fight was
 #define TOWERS_REMATCH_AUTO_MS 1200ull      /* the Rematch menu is up by then */
 static volatile ULONGLONG g_rematch_at;     /* when the results' Rematch menu is answered by itself (0: not due) */
 static int g_results_on;                    /* the floor's results are up (its summary was asked for) */
+static int g_results_left;                  /* ... and answered (their Game.Quit() sent): never twice */
 static ULONGLONG g_rewards_at;              /* the rewards screen opened then (0: not just now) */
 
 /* the file */
@@ -944,6 +945,7 @@ void towers_match_start(void)
         g_fight_t0 = GetTickCount64();
         g_rematch_at = g_rewards_at = 0;
         g_results_on = 0;
+        g_results_left = 0;
         g_log_pairs = 0;
         g_log_count = 0;
         towers_ai_begin(g_run.tower, g_run.floor, g_run.floors);     /* the CPU past Hard (towers_ai.c) */
@@ -1191,24 +1193,51 @@ void towers_on_funccall(const char *text)
     unlock();
 }
 
+static int g_test_second;              /* tests: the player's own Rematch is due */
+
 void towers_on_update(void)
 {
     static int in_rematch;
     ULONGLONG due = g_rematch_at;
     uint32_t sm;
     int go;
+    if (g_test_second && !in_rematch) {
+        /* tests: RECOMP_TEST_TOWERS_DOUBLE_REMATCH=1, the player's own YES on the prompt (it stays up while the game
+         * goes to the menu) once the answer's screen loads, as in the crash reports of builds 100-102 */
+        uint32_t m = MEM32(0x002FB148u + 0x17u * 4u);
+        if (m >= 0x10000u && MEM32(m + 0x24u) == 2u) {
+            g_test_second = 0;
+            fprintf(stderr, "[TOWERS] test: the player's own Rematch on the prompt as well (a screen loads)\n");
+            in_rematch = 1;
+            defjam_menu_call("Game.Rematch()");
+            in_rematch = 0;
+        }
+    }
     if (!due || in_rematch || GetTickCount64() < due || netplay_active()) return;
     sm = MEM32(0x002FB148u + 0x17u * 4u);
     if (sm >= 0x10000u && MEM32(sm + 0x24u) != 0) return;     /* a screen loads: later */
     lock();
-    go = g_state == TOWERS_FIGHTING && g_match_seen && g_rematch_at;
+    go = g_state == TOWERS_FIGHTING && g_match_seen && g_rematch_at && !g_results_left;
     g_rematch_at = 0;
     unlock();
     if (!go) return;
     fprintf(stderr, "[TOWERS] no rematch prompt in a run: answered by itself\n");
     in_rematch = 1;
     defjam_menu_call("Game.Rematch()");     /* towers_rematch_request: No */
+    if (env_int("RECOMP_TEST_TOWERS_DOUBLE_REMATCH", 0)) g_test_second = 1;
     in_rematch = 0;
+}
+
+/* Build 103 (crash reports from builds 100-102, all with sub_00087AF0+0x1CF at the next floor's fight load): the
+ * answer is sent once per fight's results. The prompt stays on screen while the first Game.Quit() takes the game to
+ * the menu, so a player's own YES there (or build 100's stale call) came here a second time, and that second
+ * Game.Quit() landed while the first one's screen loaded ("[SCREEN] screen 9 requested ... while state 2"); the next
+ * floor's Game.StartGame() then crashed. A second Rematch on the same results is now dropped, and none is sent while
+ * a screen loads (the answer is tried again a moment later). */
+static int screen_loading(void)
+{
+    uint32_t sm = MEM32(0x002FB148u + 0x17u * 4u);
+    return sm >= 0x10000u && MEM32(sm + 0x24u) != 0;
 }
 
 int towers_rematch_request(void)
@@ -1219,6 +1248,15 @@ int towers_rematch_request(void)
     if (g_state == TOWERS_FIGHTING && g_match_seen) {
         unsigned saved;
         took = 1;
+        if (g_results_left || screen_loading()) {
+            if (!g_results_left) g_rematch_at = GetTickCount64() + TOWERS_REMATCH_AUTO_MS;   /* again, once it loaded */
+            unlock();
+            fprintf(stderr, "[TOWERS] Rematch on the results dropped: %s\n",
+                    g_results_left ? "they were answered already (the game is on its way to the menu)" : "a screen loads");
+            return took;
+        }
+        g_results_left = 1;
+        g_rematch_at = 0;
         unlock();
         fprintf(stderr, "[TOWERS] Rematch on the results goes on as No (the tower decides the next fight)\n");
         saved = defjam_fe_call("MemCard.QuerySave( battle/rewardun.swf )");

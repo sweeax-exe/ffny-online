@@ -3347,6 +3347,33 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
             if presses_after > presses:
                 problems.append("rematch prompt: the pad pressed %d times after the summary (only %d meant)" %
                                 (presses_after, presses))
+        # 4c (build 103, crash reports of builds 100-102): Five Boroughs, three floors in a row, and on each floor's
+        # results the player's own YES on the REMATCH? prompt right after it was answered by itself (it stays up while
+        # the game goes to the menu; RECOMP_TEST_TOWERS_DOUBLE_REMATCH sends it, a timed press cannot hit that frame):
+        # the second Rematch must be dropped, never a second Game.Quit() during the screen load (the next floor's fight
+        # load crashed in sub_00087AF0)
+        if not os.environ.get("DJ_TOWERS_SKIP_DOUBLE"):
+            dbl_file = os.path.join(s.dir, "towers-double.json")
+            fight_presses = h.build_pad_script(
+                ["getscreeninfo(intmain/mainmenu=lt@0.5"] +
+                ["game.getmatchsummary(0%s=a@4;a@7;a@10" % ("#%d" % m if m > 1 else "") for m in (1, 2, 3)], "")
+            env = dict(base, RECOMP_TOWERS_FILE=dbl_file, RECOMP_TEST_TOWERS="2,55", RECOMP_TEST_KO_STEP="600,0",
+                       RECOMP_PAD_SCRIPT=fight_presses, RECOMP_TEST_TOWERS_DOUBLE_REMATCH="1",
+                       RECOMP_TEST_HELP_CARDS_SEEN="1")     # a first-time help card holds a fight until A
+            env.update(extra_env or {})
+            c, ok = _towers_phase(s, 8, env, (4, "set up: slot levels"), shots, [], timeout or 600)
+            text = logparse.read_text(c.log)
+            dropped = text.count("Rematch on the results dropped")
+            quits = len(re.findall(r"MemCard\.QuerySave -> [0-9A-F]+; Game\.Quit\(\)", text))
+            won = len(re.findall(r"floor \d+ won \(", text))
+            phases.append({"phase": "five-boroughs-double-rematch", "reached": ok, "won": won, "quits": quits,
+                           "dropped": dropped, "log": _relpath(c.log)})
+            if dropped < 3:
+                problems.append("five boroughs: the player's second Rematch was not dropped (%d of 3)" % dropped)
+            if not ok or won < 3:
+                problems.append("five boroughs, A on the answered prompt: the climb did not reach floor 4 (won %d)" % won)
+            if quits > won:
+                problems.append("five boroughs: %d Game.Quit() for %d results (one per results)" % (quits, won))
         if not os.environ.get("DJ_TOWERS_NO_SERVER"):
             _towers_signed_in(s, h, base, script, extra_env, shots, phases, problems, timeout)
         for p in phases:

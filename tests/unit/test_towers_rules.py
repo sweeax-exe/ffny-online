@@ -315,6 +315,12 @@ def test_the_game_side_is_wired():
     upd = upd[:upd.index('\n}\n')]
     assert 'defjam_menu_call("Game.Rematch()")' in upd and 'netplay_active()' in upd and 'sm + 0x24u' in upd
     assert '"Game.UpdateMatchRewardsPoints()"' in tw
+    # build 103 (crash reports of builds 100-102): one Game.Quit() per results; a second Rematch (the player's YES on
+    # the prompt that stays up while the game leaves) is dropped, and none is sent while a screen loads
+    req = tw[tw.index('int towers_rematch_request(void)'):]
+    req = req[:req.index('\n}\n')]
+    assert req.index('if (g_results_left || screen_loading())') < req.index('defjam_fe_call("Game.Quit()")')
+    assert 'g_results_left = 1;' in req and '!g_results_left' in upd
     net = (HOOKS / 'netplay.c').read_text(encoding='utf-8')
     assert net.count('towers_on_update();') == 2         # netplay_on_update and its no-netplay stub
     ui = (HOOKS / 'pc_ui.cpp').read_text(encoding='utf-8')
