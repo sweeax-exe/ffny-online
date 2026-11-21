@@ -32,6 +32,9 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario turf [--off] [--out logs/turf-e2e]   (Turf War: a local account service
            with turf on and a relay, four copies in two crews of two; the hub's TURF WAR, CLAIM on an open venue,
            the crew battle there, the new holder on the map; protection, a member's read-only page; --off: hidden)
+    python tools/defjam-mcp/dj.py scenario factionwar [--size 1|2] [--matches N] [--out D:/DefJam/community/faction-war-shots]
+           (build 108: Faction War on a local account service with -factions: the first-time picker with Crow closed by
+           the balance rule, the FACTION WAR page's live totals, 1 ON 1 (or 2 ON 2 with four copies) and the board)
     python tools/defjam-mcp/dj.py scenario towersteam [--out D:/DefJam/community/team-tower-shots]   (build 106: the
            Team Tower, 2 vs 2 with two pads, signed in on a local account service: 3 floors won and saved, resumed and
            lost, a new climb on floor 1, the community Team Tower; both boards with both names)
@@ -132,6 +135,10 @@ def cmd_scenario(a):
         r = scenarios.towers(timeout=a.timeout, extra_env=env, **common)
     elif a.kind == "towersteam":
         r = scenarios.towers_team(timeout=a.timeout, extra_env=env, out_dir=a.out, **common)
+    elif a.kind == "factionwar":
+        r = scenarios.faction_war(size=a.size, matches=a.matches if a.matches != 3 else (2 if a.size == 1 else 1),
+                                  timeout=a.timeout, relay_port=a.relay_port, extra_env=env,
+                                  out_dir=a.out or scenarios.FACTION_SHOTS, fast_ko=a.fast_ko, **common)
     elif a.kind == "towerrewards":
         r = scenarios.tower_rewards(timeout=a.timeout or 150, relay_port=a.relay_port, extra_env=env, out_dir=a.out, **common)
     else:
@@ -240,7 +247,9 @@ def main(argv=None):
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
                                               "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers",
-                                              "towerrewards", "towersteam"])
+                                              "towerrewards", "towersteam", "factionwar"])
+    sc.add_argument("--size", type=int, default=1, choices=[1, 2], help="factionwar: 1 ON 1 (with the observer, the picker "
+                    "and the lock) or 2 ON 2 (four fighters)")
     sc.add_argument("--case", default="kick", help="lobby97 (build 97): kick, quick, quickmax or afk")
     sc.add_argument("--via", default="voice", choices=["voice", "chat"], help="mute: the VOICE CHAT page's call, or the chat window's MUTE IN ROOM")
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")

@@ -38,6 +38,15 @@ const TrwStyle &trw_style(int kind)
           IM_COL32(230, 233, 239, 255), IM_COL32(232, 195, 74, 255), IM_COL32(255, 255, 255, 255) },
         { IM_COL32(255, 90, 67, 255), IM_COL32(168, 24, 15, 255), IM_COL32(86, 8, 5, 255),                // lacquer
           IM_COL32(212, 166, 42, 255), IM_COL32(240, 179, 58, 255), IM_COL32(255, 243, 200, 255) },
+        // build 108, Faction War: D-Mob's green and gold, Crow's red and black (the winners' frames, the top scorers' too)
+        { IM_COL32(120, 230, 160, 255), IM_COL32(28, 150, 84, 255), IM_COL32(6, 52, 30, 255),             // D-Mob
+          IM_COL32(255, 206, 72, 255), IM_COL32(255, 206, 72, 255), IM_COL32(255, 246, 200, 255) },
+        { IM_COL32(255, 96, 96, 255), IM_COL32(190, 20, 36, 255), IM_COL32(30, 4, 8, 255),                // Crow
+          IM_COL32(232, 228, 224, 255), IM_COL32(236, 60, 72, 255), IM_COL32(255, 230, 230, 255) },
+        { IM_COL32(120, 230, 160, 255), IM_COL32(28, 150, 84, 255), IM_COL32(6, 52, 30, 255),             // D-Mob, top
+          IM_COL32(255, 206, 72, 255), IM_COL32(255, 206, 72, 255), IM_COL32(255, 246, 200, 255) },
+        { IM_COL32(255, 96, 96, 255), IM_COL32(190, 20, 36, 255), IM_COL32(30, 4, 8, 255),                // Crow, top
+          IM_COL32(232, 228, 224, 255), IM_COL32(236, 60, 72, 255), IM_COL32(255, 230, 230, 255) },
     };
     return k[kind > 0 && kind < TRW_KINDS ? kind : 0];
 }
@@ -259,6 +268,27 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
         }
         trw_crown(dl, f, cx, y, u * 0.3f, pulse, a);
         break;
+    case TRW_FW_DMOB: case TRW_FW_CROW: case TRW_FW_TOP_DMOB: case TRW_FW_TOP_CROW: {
+        // Faction War: the side's metal inside its trim line, the trim inside, the ribbon (who won, which month); the top
+        // scorers wear the crown too
+        bool top = kind == TRW_FW_TOP_DMOB || kind == TRW_FW_TOP_CROW;
+        if (!top)       // the winners' side glow, breathing (the pulse)
+            for (int k = 3; k >= 1; k--)
+                dl->AddRect(f.p(x - 2.5f - k * 1.6f, y - 2.5f - k * 1.6f), f.p(x + w + 2.5f + k * 1.6f, y + h + 2.5f + k * 1.6f),
+                            with_alpha(s.mid, a * (0.10f + 0.22f * pulse) / k), 2 * f.s(), 0, 2.0f * f.s());
+        dl->AddRect(f.p(x - 2.5f, y - 2.5f), f.p(x + w + 2.5f, y + h + 2.5f), with_alpha(s.trim, a), 0, 0, 1.6f * f.s());
+        trw_metal(dl, f, x, y, w, h, b, s, a);
+        dl->AddRect(f.p(x + b + 0.5f, y + b + 0.5f), f.p(x + w - b - 0.5f, y + h - b - 0.5f), with_alpha(s.trim, a), 0, 0,
+                    1.4f * f.s());
+        {
+            char line[64];
+            if (!tower_reward_ribbon(id, line, (int)sizeof(line))) snprintf(line, sizeof(line), "FACTION WAR");
+            trw_ribbon(dl, f, x, y + foot - std::max(11.0f, w * 0.06f) - 4, w, line, a);
+        }
+        if (top) trw_crown(dl, f, cx, y, u * 0.3f, pulse, a);
+        else trw_plate(dl, f, cx, y, u * 1.4f, kind == TRW_FW_DMOB ? "D-MOB" : "CROW", s, a);
+        break;
+    }
     case TRW_BOROUGHS:
         trw_metal(dl, f, x, y, w, h, b, s, a);
         trw_gems(dl, f, cx, y + h, u, a);

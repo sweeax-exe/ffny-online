@@ -7334,6 +7334,11 @@ static int test_vote(const NetRoom *r, int want_random)
     return 0;
 }
 
+/* build 108: FACTION WAR's search for tests (online_screen.cpp, faction_ui.inc) */
+void faction_test_search(int size);
+void faction_test_tick(void);
+int faction_test_seated(void);
+
 static DWORD WINAPI autostart_thread(LPVOID unused)
 {
     const char *mode = getenv("RECOMP_NETPLAY"), *server = getenv("RECOMP_NETPLAY_SERVER");
@@ -7415,7 +7420,8 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         }
         return 0;
     }
-    if (!strcmp(mode, "quick") || !strcmp(mode, "ranked") || !strcmp(mode, "crew") || !strcmp(mode, "tset")) {
+    if (!strcmp(mode, "quick") || !strcmp(mode, "ranked") || !strcmp(mode, "crew") || !strcmp(mode, "tset") ||
+        !strcmp(mode, "faction")) {
         const char *f = getenv("RECOMP_NETPLAY_FIGHTER"), *name = getenv("RECOMP_NETPLAY_NAME");
         const char *delay = getenv("RECOMP_NETPLAY_READY_DELAY_MS");
         /* RECOMP_TEST_READY_PLAYERS=<n> (tests of three or four copies): ready (or, on the hill, answer
@@ -7561,6 +7567,21 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 Sleep(250);
             }
             if (!joined) fprintf(stderr, "[NETPLAY] tests: no ring listed within %s s; joining nothing\n", join_ring);
+        } else if (!strcmp(mode, "faction")) {
+            /* RECOMP_NETPLAY=faction (tests, build 108): FACTION WAR's search (RECOMP_TEST_FACTION_SIZE 1 or 2) as its
+             * page's A starts it; its legs (open the match's room, or join it by code, and tell the service) run here
+             * until this copy sits in the match's room, up to 5 minutes; then the room as any other */
+            const char *fs = getenv("RECOMP_TEST_FACTION_SIZE");
+            NetRoom fr;
+            faction_test_search(fs && *fs == '2' ? 2 : 1);
+            for (i = 0; i < 3000 && !N.stop; i++) {
+                netservers_tick(NULL);
+                faction_test_tick();
+                netplay_lobby_room(&fr);
+                if (fr.in_room && faction_test_seated()) break;
+                Sleep(100);
+            }
+            fprintf(stderr, "[NETPLAY] tests: faction match: %s\n", fr.in_room ? fr.code : "no room");
         } else if (!strcmp(mode, "ranked")) {
             /* RECOMP_TEST_RANKED_MODES="open" or "classic,open": the modes, the first the primary
              * (default Classic); the found set is accepted (RECOMP_TEST_RANKED_ACCEPT=0 declines) */
@@ -7995,7 +8016,7 @@ void netplay_autostart(void)
     HANDLE t;
     if (InterlockedExchange(&once, 1)) return;
     if (!mode || !server || (strcmp(mode, "host") && strcmp(mode, "join") && strcmp(mode, "quick") && strcmp(mode, "ranked") && strcmp(mode, "lobby") &&
-                               strcmp(mode, "spectate") && strcmp(mode, "crew") && strcmp(mode, "tset"))) return;
+                               strcmp(mode, "spectate") && strcmp(mode, "crew") && strcmp(mode, "tset") && strcmp(mode, "faction"))) return;
     t = CreateThread(NULL, 0, autostart_thread, NULL, 0, NULL);
     if (t) CloseHandle(t);
 }
