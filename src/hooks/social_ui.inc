@@ -2915,6 +2915,13 @@ void chat_test_step()
         NetRoomSettings rs;
         default_settings(rs);
         netplay_lobby_create(&rs);
+    } else if (what == "locker") {                  // build 104: the Locker on a slot (locker_ui.inc)
+        C.open = C.kb = C.menu = false;
+        locker_test(arg);
+    } else if (what == "hub") {                     // build 104: back on the hub (from the Locker)
+        C.open = C.kb = C.menu = false;
+        S.page = HUB;
+        locker_test("");
     } else if (what == "leaveroom") {               // out of the room (a crew battle's, after it): the hub
         C.open = C.kb = C.menu = false;
         NetRoom r;

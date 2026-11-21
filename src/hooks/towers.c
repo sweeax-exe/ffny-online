@@ -508,6 +508,10 @@ static DWORD WINAPI net_thread(LPVOID unused)
             fprintf(stderr, "[TOWERS] service %s floor %d: HTTP %d%s%s%s%s\n", it.path, it.floor, status,
                     kv_int(reply, "ended") ? ", run ended" : "", kv_int(reply, "held") ? ", held" : "",
                     why[0] ? ", why " : "", why);
+            {   /* build 104: the frames and titles this floor earned (the Locker shows them) */
+                char got[160];
+                if (kv(reply, "rewards", got, sizeof got) && got[0]) fprintf(stderr, "[TOWERS] new rewards: %s\n", got);
+            }
             if (status == 409 || status == 404 || (status == 200 && !strcmp(why, "order")))
                 net_drop_run(it.run, status == 404 ? "offline" : why);
             if (status == 200 && it.result && kv_int(reply, "log") && it.log && it.log_n > 0) net_send_inputs(&it);

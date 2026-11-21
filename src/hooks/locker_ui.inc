@@ -21,6 +21,7 @@ struct LockerUi {
     int rewards_mode = NETRANK_CLASSIC, rewards_sel = 0;
     Page back = STATS;
     unsigned long long asked = 0;
+    bool sheet = false;             // tests (locker=sheet): every Towers frame side by side (build 104)
 } LK;
 const char *const k_slot_ids[4] = { "color", "frame", "title", "emblem" };
 const char *const k_slot_names[4] = { "NAME COLOUR", "FRAME", "TITLE", "EMBLEM" };
@@ -130,8 +131,11 @@ social::Look look_from_locker(const social::Locker &L, int try_slot = -1, const 
         const social::LockerItem *it = s == try_slot && try_item ? try_item : locker_item(L, equipped_id(L, s));
         if (!it) continue;
         if (s == 0) l.color = it->tier;
-        else if (s == 1) { l.frame = it->tier; l.pulse = it->tier == 7; }
-        else if (s == 2) l.title = it->title;
+        else if (s == 1) { l.frame = it->tier; l.pulse = it->tier == 7; if (it->tower) l.frame_id = it->id; }
+        else if (s == 2) {
+            l.title = it->title;
+            if (it->tower) { l.title_id = it->id; l.title_rarity = it->rarity; }     // build 104: a Towers title
+        }
         else if (it->id == "crew:crown_emblem") { l.emblem_mode = -2; l.emblem_tier = 0; }
         else if (it->tier >= 0) { l.emblem_mode = 0; l.emblem_tier = it->tier; l.emblem_division = it->division; }
     }
@@ -156,7 +160,10 @@ std::vector<LockerRow> locker_rows(const social::Locker &L, int slot)
     for (auto &it : L.items) {
         std::string g;
         bool crew = it.id.compare(0, 5, "crew:") == 0, pre = it.id.compare(0, 4, "pre-") == 0;
-        if (pre) {                                  // the preseason's title (build 52)
+        if (it.tower) {                             // build 104: the Towers rewards, frame and title
+            if (!item_fits(it, slot)) continue;
+            g = "TOWER REWARDS";
+        } else if (pre) {                                  // the preseason's title (build 52)
             if (!item_fits(it, slot)) continue;
             g = "PRESEASON";
         } else if (it.current) {
@@ -182,6 +189,7 @@ std::vector<LockerRow> locker_rows(const social::Locker &L, int slot)
             LockerRow h;
             h.header = g;
             if (crew) h.right = "FOR THE WHOLE CREW";
+            else if (it.tower) h.right = "KEPT FOREVER";
             else if (pre) h.right = "ONE RANKED SET IN THE TEST WEEK";
             else if (it.season >= L.season && !it.current) h.right = "FINISH TO UNLOCK";
             rows.push_back(h);
@@ -194,10 +202,35 @@ std::vector<LockerRow> locker_rows(const social::Locker &L, int slot)
     return rows;
 }
 
+// Tests (RECOMP_TEST_SOCIAL_UI locker=frame|title|color|emblem): the Locker on that slot, its worn item chosen (the
+// preview shows it), and a line with the Towers rows the service sent (build 104).
+void locker_test(const std::string &slot)
+{
+    LK.sheet = slot == "sheet";
+    if (slot.empty()) return;       // the hub step: the sheet off
+    open_locker();
+    LK.slot = slot == "title" ? 2 : slot == "color" ? 0 : slot == "emblem" ? 3 : 1;
+    const social::Locker &L = look_view().locker;
+    std::vector<LockerRow> rows = locker_rows(L, LK.slot);
+    int k = 0, towers = 0, unlocked = 0;
+    for (auto &r : rows) {
+        if (!r.item) continue;
+        if (r.item->id == equipped_id(L, LK.slot)) LK.sel = k;
+        if (r.item->tower) { towers++; if (r.item->unlocked) unlocked++; }
+        k++;
+    }
+    fprintf(stderr, "[LOCKER] test: slot %s, %d items, %d tower (%d unlocked), worn %s\n", k_slot_ids[LK.slot], k, towers,
+            unlocked, equipped_id(L, LK.slot).c_str());
+}
+
 // The row's icon: the tier's emblem, or a crew reward's mark.
 void item_icon(ImDrawList *dl, const Frame &f, float cx, float cy, float size, const social::LockerItem &it, float alpha)
 {
-    if (it.id == "crew:gold_tag") {
+    if (it.tower) {     // build 104: a little player card in the reward's frame
+        float w = size * 0.62f, h = size * 0.92f;
+        rect(dl, f, cx - w / 2, cy - h / 2, w, h, with_alpha(IM_COL32(13, 12, 11, 255), alpha), 2);
+        tower_card_frame(dl, f, cx - w / 2, cy - h / 2, w, h, it.id.c_str(), h * 0.7f, alpha);
+    } else if (it.id == "crew:gold_tag") {
         frame_rect(dl, f, cx - size * 0.45f, cy - size * 0.25f, size * 0.9f, size * 0.5f, with_alpha(GOLD, alpha), 1.2f);
         const std::string &tag = look_view().crew_tag;
         text(dl, f, g_title, size * 0.3f, cx, cy - size * 0.19f, with_alpha(GOLD, alpha), tag.empty() ? "TAG" : tag.c_str(), CENTER, 0);
@@ -221,6 +254,7 @@ std::string item_name(const social::LockerItem &it)
 ImU32 item_col(const social::LockerItem &it)
 {
     if (it.id.compare(0, 5, "crew:") == 0) return GOLD;
+    if (it.tower) return rarity_col(it.rarity);     // build 104: the rarity's colour
     return it.tier >= 0 ? tier_col(it.tier) : CREAM;
 }
 
@@ -261,7 +295,8 @@ void draw_look_preview(ImDrawList *dl, const Frame &f, float x, float y, float w
     // versus card
     float vy = fy + 60, vh = 104;
     rect(dl, f, x, vy, w, vh, IM_COL32(40, 8, 14, 230), 8);
-    frame_rect(dl, f, x, vy, w, vh, with_alpha(l.frame >= 0 ? tier_col(l.frame) : GOLD, 0.6f), 1.2f);
+    if (!tower_card_frame(dl, f, x, vy, w, vh, l.frame_id.c_str(), vh - 8))     // build 104: a Towers frame
+        frame_rect(dl, f, x, vy, w, vh, with_alpha(l.frame >= 0 ? tier_col(l.frame) : GOLD, 0.6f), 1.2f);
     text(dl, f, g_title, 7.5f, x + 6, vy + 4, GREY, "VERSUS CARD", LEFT, 0);
     draw_avatar(dl, f, x + 42, vy + 58, 28, me, name);
     avatar_frame(dl, f, x + 42, vy + 58, 28, l.frame, l.pulse);
@@ -275,14 +310,38 @@ void draw_look_preview(ImDrawList *dl, const Frame &f, float x, float y, float w
         }
     }
     text(dl, f, g_title, fit_size(f, g_title, 20, up.c_str(), w - 90), tx, vy + 44, col, up.c_str(), LEFT, 0.8f);
-    if (!l.title.empty()) text(dl, f, g_title, 10, tx, vy + 68, col, upper(l.title.c_str()).c_str(), LEFT, 0.5f);
-    text(dl, f, g_body, 8.5f, tx, vy + 84, GREY, "The versus screen, the room's cards, the results.", LEFT, 0, w - 90);
+    if (!l.title.empty() && !tower_title_text(dl, f, tx + (w - 90) / 2, vy + 68, 10, l.title.c_str(), l.title_id.c_str(), w - 92))
+        text(dl, f, g_title, 10, tx, vy + 68, col, upper(l.title.c_str()).c_str(), LEFT, 0.5f);
+    if (l.frame_id.empty())     // a Towers frame's ribbon and gems use the card's foot (build 104)
+        text(dl, f, g_body, 8.5f, tx, vy + 84, GREY, "The versus screen, the room's cards, the results.", LEFT, 0, w - 90);
 }
 
 // ---- LOCKER -----------------------------------------------------------------------------------------------
 
+// Tests: the seven Towers frames and their titles side by side, as the room's cards draw them (the design's sheet).
+void draw_tower_sheet(ImDrawList *dl, const Frame &f, const Pad &pad)
+{
+    static const char *const ids[7][2] = { { "tw-floor25", "Floor 25 Survivor" }, { "tw-floor50", "Floor 50 Survivor" },
+        { "tw-uptown", "Uptown Champion" }, { "tw-untouchable", "Untouchable" }, { "tw-weekly", "Weekly Conqueror" },
+        { "tw-boroughs", "King of the Five Boroughs" }, { "tw-legend-1-2026-11", "Tower Legend" } };
+    page_title(dl, f, "TOWER REWARDS");
+    const float w = 78, h = 150, gap = 7, x0 = 320 - (7 * w + 6 * gap) / 2, y = 120;
+    for (int i = 0; i < 7; i++) {
+        float x = x0 + i * (w + gap);
+        int kind = tower_reward_kind(ids[i][0], nullptr, nullptr, nullptr), rarity = tower_reward_rarity(kind);
+        glass(dl, f, x, y, w, h, 6, IM_COL32(10, 10, 13, 255), 0.62f);
+        portrait(dl, f, i == 5 ? 21 : i * 3, x + 4, y + 4, w - 8, (w - 8) * 1.5f);
+        tower_card_frame(dl, f, x, y, w, h, ids[i][0], (w - 8) * 1.5f + 4);
+        text(dl, f, g_hand, 11, x + w / 2, y + 112, CREAM, "PLAYER", CENTER, 1.0f);
+        tower_title_text(dl, f, x + w / 2, y + 128, 7.5f, ids[i][1], ids[i][0], w - 8);
+        text(dl, f, g_title, 8, x + w / 2, y + h + 14, rarity_col(rarity), tower_reward_rarity_name(rarity), CENTER, 0.5f);
+    }
+    if (pad.b) { LK.sheet = false; S.page = HUB; }
+}
+
 void draw_locker(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
+    if (LK.sheet) { draw_tower_sheet(dl, f, pad); return; }
     locker_refresh(false);
     const social::View &v = look_view();
     const social::Locker &L = v.locker;
@@ -319,7 +378,7 @@ void draw_locker(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_title, 14, 200, 210, CREAM, "NOTHING HERE YET", CENTER, 0.8f);
         text(dl, f, g_body, 10, 200, 232, GREY,
              L.ranked ? "Finish a ranked season at a tier to unlock its rewards and every tier below it; level your crew up for its rewards."
-                      : "Level your crew up for its rewards.", CENTER, 0, 300);
+                      : "Climb the Towers for card frames and titles; level your crew up for its rewards.", CENTER, 0, 300);
     }
     if (!items.empty()) {
         if (pad.up) LK.sel = std::max(0, LK.sel - 1);
@@ -361,7 +420,9 @@ void draw_locker(ImDrawList *dl, const Frame &f, const Pad &pad)
         item_icon(dl, f, 44, y + 14.5f, 24, it, a);
         std::string nm = item_name(it);
         text(dl, f, g_title, fit_size(f, g_title, 13, nm.c_str(), 220), 62, y + 1, with_alpha(item_col(it), a), nm.c_str(), LEFT, 0.6f);
-        std::string sub = it.unlocked ? (it.finish ? "Your finish: colour, frame, title, Discord role"
+        std::string sub = it.tower ? (std::string(tower_reward_rarity_name(it.rarity)) +
+                                      (it.unlocked ? " - card frame and title, kept forever" : " - Locked: " + it.how))
+                        : it.unlocked ? (it.finish ? "Your finish: colour, frame, title, Discord role"
                                          : it.current ? "Your rank now: shows until the season ends"
                                          : it.id.compare(0, 5, "crew:") == 0 ? it.how
                                          : "Unlocked with your finish")

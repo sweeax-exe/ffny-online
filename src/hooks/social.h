@@ -111,12 +111,18 @@ struct Look {
     int color = -1, frame = -1;
     bool pulse = false;
     std::string title;
+    /* build 104: the Towers rewards worn (tower_rewards.h): the frame's and title's item ids ("" none; frame is then
+     * -1) and the title's rarity (0: not a tower title). Shown ranked on or off. */
+    std::string frame_id, title_id;
+    int title_rarity = 0;
 };
 struct LockerItem {
     std::string id, name, mode, title, role, how, label;
     int season = 0, tier = -1, division = 0;
     bool unlocked = false, finish = false, current = false;
     bool k_color = false, k_frame = false, k_title = false, k_emblem = false, k_crew = false;
+    bool tower = false;         /* build 104: a Towers reward (tw-*), its rarity 1 RARE .. 4 MYTHIC */
+    int rarity = 0;
 };
 struct SeasonFinish {
     std::string mode, peak_rank, next_rank;
