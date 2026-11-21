@@ -837,6 +837,19 @@ def test_validate_install_asks_for_venue_models_v1(tmp_path):
     assert mods.validate_install(folder)["capabilities"] == ["content-v1"]
 
 
+def test_validate_install_asks_clothing_for_items_v1(tmp_path, game):
+    """Build 106: a clothing pack needs a game whose item_ext keeps the save layout (items-v1)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import test_mod_manager  # noqa: E402  (the loaded mods module)
+    sys.path.pop(0)
+    folder = tmp_path / "pack"
+    (folder / "deltas").mkdir(parents=True)
+    (folder / "install.json").write_text(json.dumps({"schema": 1, "type": "clothing", "entries": [],
+                                                     "ops": [item_op("Eyepatch", "Y01", clothing_floor(game))]}),
+                                         encoding="utf-8")
+    assert test_mod_manager.mods.validate_install(folder)["capabilities"] == ["content-v1", "items-v1"]
+
+
 def test_all_36_new_venue_places_compose():
     """Build 86: every new venue place 28..63 can be filled. The Venue rows' names took the first suffix whose hash
     lay anywhere above the table's top, which used the room up after about 13 venues ("no row name found");
