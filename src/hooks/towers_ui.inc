@@ -1364,6 +1364,7 @@ void towers_gallery_view(TowersView &v, int state, int last_floor)
     v.climb_ms = 1000u * (19 * 60 + 42);
     v.fighter = 55;
     v.online = v.board = 1;
+    v.fighter2 = v.last_opponent2 = v.next_opponent2 = -1;     // one on one (build 108: the samples showed fighter 0 as a second CPU)
 }
 
 // Sets the page up; true when it is one of the TOWERS pages.
