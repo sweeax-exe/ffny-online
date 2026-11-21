@@ -32,6 +32,9 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario turf [--off] [--out logs/turf-e2e]   (Turf War: a local account service
            with turf on and a relay, four copies in two crews of two; the hub's TURF WAR, CLAIM on an open venue,
            the crew battle there, the new holder on the map; protection, a member's read-only page; --off: hidden)
+    python tools/defjam-mcp/dj.py scenario towersteam [--out D:/DefJam/community/team-tower-shots]   (build 106: the
+           Team Tower, 2 vs 2 with two pads, signed in on a local account service: 3 floors won and saved, resumed and
+           lost, a new climb on floor 1, the community Team Tower; both boards with both names)
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
     python tools/defjam-mcp/dj.py lock status | run -- <command...>      (any other test under the lock)
@@ -127,6 +130,8 @@ def cmd_scenario(a):
                              out_dir=a.out, stress=a.stress, **common)
     elif a.kind == "towers":
         r = scenarios.towers(timeout=a.timeout, extra_env=env, **common)
+    elif a.kind == "towersteam":
+        r = scenarios.towers_team(timeout=a.timeout, extra_env=env, out_dir=a.out, **common)
     elif a.kind == "towerrewards":
         r = scenarios.tower_rewards(timeout=a.timeout or 150, relay_port=a.relay_port, extra_env=env, out_dir=a.out, **common)
     else:
@@ -235,7 +240,7 @@ def main(argv=None):
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
                                               "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers",
-                                              "towerrewards"])
+                                              "towerrewards", "towersteam"])
     sc.add_argument("--case", default="kick", help="lobby97 (build 97): kick, quick, quickmax or afk")
     sc.add_argument("--via", default="voice", choices=["voice", "chat"], help="mute: the VOICE CHAT page's call, or the chat window's MUTE IN ROOM")
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")

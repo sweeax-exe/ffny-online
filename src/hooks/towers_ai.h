@@ -17,6 +17,8 @@ extern "C" {
 
 /* The floor's fight was set up (towers_match_start): slot 0 the climber, slot 1 the CPU. */
 void towers_ai_begin(int tower, int floor, int floors);
+/* Build 106, the team towers: the same ramp on both CPU slots (2 against its diagonal opponent 1, 3 against 0). */
+void towers_ai_begin_team(int tower, int floor, int floors);
 /* Each fight step before the game's own (towers_step), step 1.. of the fight; decided: the fight is decided. */
 void towers_ai_step(unsigned step, int decided);
 /* A health change the game is about to apply (towers_health_change): the record and the delta after our scale. */

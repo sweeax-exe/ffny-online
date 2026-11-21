@@ -144,6 +144,40 @@ int main(void)
         towers_file_write(runs, best, text, (int)sizeof text);
         printf("netbad|%d\n", towers_file_read(text, back, have, best) && have[0]);
     }
+    {   /* build 106: the team towers (2 vs 2, two opponents a floor, boss pairs) */
+        static TowerRun tr, tb;
+        const TowerRun *runs[TOWER_COUNT] = { NULL, NULL, NULL, &tr, NULL };
+        TowerRun back[TOWER_COUNT];
+        int tp[90], tn = 0, have[TOWER_COUNT], best[TOWER_COUNT] = { 1, 2, 0, 9, 4 }, best2[TOWER_COUNT];
+        for (i = 0; i < 90; i++) tp[tn++] = i;
+        printf("team|%d|%d|%d", towers_new_team_run(&tr, TOWER_TEAM, 4321u, 55, 0, 22, 1, tp, tn, venues, vn), tr.roster_n, tr.venue_n);
+        printf("|%d|%d|%d\n", towers_place_bosses(&tr), towers_roster_hash(tr.roster, tr.roster_n) == tr.roster_hash, tr.floors);
+        printf("teamvenues|");
+        for (i = 0; i < tr.venue_n; i++) printf("%s%d", i ? "," : "", tr.venues[i]);
+        printf("\n");
+        for (f = 1; f <= tr.floors; f++) {
+            TowerFloorRules r;
+            towers_floor_rules(TOWER_TEAM, f, tr.floors, &r);
+            printf("tfloor|%d|%d|%d|%d|%d\n", f, towers_opponent(&tr, f), towers_opponent2(&tr, f), r.boss, r.cpu_level);
+        }
+        tr.floor = 5;
+        towers_file_write(runs, best, text, (int)sizeof text);
+        printf("tread|%d|%d|%d|%d|%d|%d|%d|%d\n", towers_file_read(text, back, have, best2), have[3], back[3].fighter2,
+               back[3].skin2, back[3].roster_n, back[3].floor, best2[3], best2[4]);
+        { int okr = towers_file_read("{\"version\":1,\"best\":[5,6,0],\"runs\":[]}", back, have, best2); printf("told|%d|%d\n", okr, best2[0] + best2[1]); }
+        printf("tclimber|%d|%d|%d\n", towers_climber_ok(TOWER_TEAM, TOWER_CREATED_FIGHTER, 0), towers_climber_ok(TOWER_TEAM_COMMUNITY,
+               1000, 0), towers_opponent2(&a, 1));
+        {   /* the account service's vector (server towers_team_test.go): pool 1..10, players 3 and 7 */
+            int p10[10], v5[5] = { 1, 3, 5, 8, 30 };
+            for (i = 0; i < 10; i++) p10[i] = i + 1;
+            towers_new_team_run(&tb, TOWER_TEAM, 0x4F2A91C3u, 3, 0, 7, 0, p10, 10, v5, 5);
+            printf("tsrv|%08X|", tb.roster_hash);
+            for (i = 0; i < tb.roster_n; i++) printf("%s%d", i ? "," : "", tb.roster[i]);
+            printf("|");
+            for (i = 0; i < tb.venue_n; i++) printf("%s%d", i ? "," : "", tb.venues[i]);
+            printf("\n");
+        }
+    }
     return 0;
 }
 '''
@@ -259,7 +293,7 @@ def test_the_run_file_round_trips(out):
     file_row = next(line for line in out if line.startswith('file|'))
     text = file_row.split('|', 2)[2]
     data = json.loads(text)                               # real JSON
-    assert data['version'] == 1 and data['best'] == [17, 3, 0]
+    assert data['version'] == 1 and data['best'] == [17, 3, 0, 0, 0]
     run = data['runs'][0]
     assert run['tower'] == 1 and run['floor'] == 13 and len(run['roster']) == run['floors']
     r = row(out, 'read')
@@ -346,3 +380,33 @@ def test_the_board_page_signs_in_as_the_runs_post():
     # a board asked without the session has no me= line: it is asked again once signed in, never shown as 'not on it'
     assert 'b.with_session = ok && with_session;' in ui and '!TWB.b[which].with_session && towers_signed_in()' in ui
     assert 'Loading your place...' in ui
+
+
+def test_the_team_towers(out):
+    floors, roster_n, venue_n, placed, hash_ok, floors2 = (int(x) for x in row(out, 'team'))
+    assert floors == 44 and roster_n == 88 and floors2 == 44 and hash_ok == 1      # 90 IDs less the two players
+    assert placed == 8
+    venues = ids(row(out, 'teamvenues')[0])
+    assert venues and all(v < 28 and v not in (17, 19, 24, 26) for v in venues)
+    fl = {int(r[0]): [int(x) for x in r[1:]] for r in rows(out, 'tfloor')}
+    assert len(fl) == 44
+    assert fl[44][:2] == [58, 82] and fl[10][:2] == [59, 57] and fl[20][:2] == [56, 83] and fl[30][:2] == [80, 81]
+    assert [f for f in fl if fl[f][2]] == [10, 20, 30, 40, 44]
+    seen = [x for f in fl for x in fl[f][:2]]
+    assert len(set(seen)) == 88 and 55 not in seen and 22 not in seen
+    assert fl[1][3] == 0 and fl[3][3] == 1 and fl[7][3] == 2
+    assert row(out, 'tread') == ['1', '1', '22', '1', '88', '5', '9', '4']
+    assert row(out, 'told') == ['1', '11']      # a file of three towers still reads
+    assert row(out, 'tclimber') == ['0', '1', '-1']
+
+
+def test_the_team_tower_matches_the_server(out):
+    h, order, venues = row(out, 'tsrv')
+    # pool 1..10 less 3 and 7: eight opponents, four floors; venues without the community one (30)
+    assert len(ids(order)) == 8 and sorted(ids(order)) == [1, 2, 4, 5, 6, 8, 9, 10]
+    assert ids(venues) == [1, 3, 5, 8]
+    # the same numbers in server relay/accounts/towers_team_test.go
+    assert (h, order) == TEAM_SERVER_VECTOR
+
+
+TEAM_SERVER_VECTOR = ('84CCB43A', '6,5,1,8,10,2,4,9')

@@ -252,9 +252,9 @@ static void hub_tile(ImDrawList *dl, const Frame &f, const HubRect &r, int id, b
                                     IM_COL32(22, 26, 52, 255), IM_COL32(60, 28, 22, 255), IM_COL32(60, 28, 22, 255));
         int k = sel ? 255 : 170;
         float th = h - 8, tw = th / 2;
-        for (int t = 0; t < TOWER_COUNT; t++) {
+        for (int t = 0; t < TOWER_ART_COUNT; t++) {
             const Tex &tt = tower_tex(t + 1);
-            float tx = x + w - 10 - (TOWER_COUNT - t) * (tw * 0.78f) - tw * 0.2f;
+            float tx = x + w - 10 - (TOWER_ART_COUNT - t) * (tw * 0.78f) - tw * 0.2f;
             if (tt.srv) image_fit(dl, f, tt, tx, y + h - th - 2, tw, th, IM_COL32(k, k, k, 255));
         }
     }

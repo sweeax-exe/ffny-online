@@ -40,23 +40,13 @@
 #define BRAIN(s)            (0x003BF990u + 0xB8u * (uint32_t)(s))
 #define B_HOLD              0x34u       /* the output held while > 0 */
 #define B_THINK             0x38u       /* the think cooldown */
-#define CPU                 1
-#define ME                  0
-
-static TowerAiFloor g_f;
-static int g_tower, g_floor, g_on, g_loaded, g_mode_off, g_skill_test;
-static int g_own_skill, g_skill;
-static int g_own[TOWER_AI_SETS][TOWER_AI_TENDENCIES], g_want[TOWER_AI_SETS][TOWER_AI_TENDENCIES];
-static unsigned g_writes;
-static int g_hold_prev[2], g_hold_seen;
-static unsigned g_hold_cuts;
-static TowerAiAdapt g_adapt;
-static int g_adapt_on, g_boost;         /* the counter runs; the climber's attack under way is a read one */
-static unsigned g_reads, g_boost_writes, g_read_cuts;
+/* Build 106: everything below is per CPU slot (one context; two in the team towers), A the one being worked on. */
+#define CPU                 (A->cpu)
+#define ME                  (A->me)
 
 /* the fight's numbers */
 #define ATTACK_WINDOW 40u
-static struct {
+struct AiStats {
     unsigned attacks, landed, blocked, countered, cpu_attacks;
     unsigned hits_on_cpu, hits_on_me;
     float dmg_on_cpu, dmg_on_me;
@@ -65,8 +55,48 @@ static struct {
     /* the climber's attack under way: since step `at`, until the window or the next one */
     unsigned at;
     int open, saw_block, cpu_hurt, me_hurt;
-} g_s;
-static unsigned g_now;
+};
+
+typedef struct AiCtx {
+    int cpu, me;                        /* the CPU's slot and the human it reads (its primary opponent) */
+    TowerAiFloor f;
+    int tower, floor, on, loaded, mode_off, skill_test;
+    int own_skill, skill;
+    int own[TOWER_AI_SETS][TOWER_AI_TENDENCIES], want[TOWER_AI_SETS][TOWER_AI_TENDENCIES];
+    unsigned writes;
+    int hold_prev[2], hold_seen;
+    unsigned hold_cuts;
+    TowerAiAdapt adapt;
+    int adapt_on, boost;                /* the counter runs; the climber's attack under way is a read one */
+    unsigned reads, boost_writes, read_cuts;
+    struct AiStats s;
+    unsigned now;
+} AiCtx;
+static AiCtx g_ctx[2], *A = &g_ctx[0];
+static int g_nctx = 1;
+#define g_f (A->f)
+#define g_tower (A->tower)
+#define g_floor (A->floor)
+#define g_on (A->on)
+#define g_loaded (A->loaded)
+#define g_mode_off (A->mode_off)
+#define g_skill_test (A->skill_test)
+#define g_own_skill (A->own_skill)
+#define g_skill (A->skill)
+#define g_own (A->own)
+#define g_want (A->want)
+#define g_writes (A->writes)
+#define g_hold_prev (A->hold_prev)
+#define g_hold_seen (A->hold_seen)
+#define g_hold_cuts (A->hold_cuts)
+#define g_adapt (A->adapt)
+#define g_adapt_on (A->adapt_on)
+#define g_boost (A->boost)
+#define g_reads (A->reads)
+#define g_boost_writes (A->boost_writes)
+#define g_read_cuts (A->read_cuts)
+#define g_s (A->s)
+#define g_now (A->now)
 
 static int attack_state(uint32_t st)
 {
@@ -83,7 +113,7 @@ static void close_attack(void)
     g_s.open = 0;
 }
 
-void towers_ai_begin(int tower, int floor, int floors)
+static void ai_begin_one(int tower, int floor, int floors)
 {
     const char *test = getenv("RECOMP_TEST_TOWERS_AI");
     g_tower = tower;
@@ -139,8 +169,8 @@ static void take_own(void)
     if (g_skill_test >= 1 && g_skill_test <= 100 && g_f.on) g_skill = g_skill_test;
     for (k = 0; k < TOWER_AI_TENDENCIES && n < (int)sizeof line - 8; k++)
         n += snprintf(line + n, sizeof line - (size_t)n, "%s%d>%d", k ? " " : "", g_own[0][k], g_want[0][k]);
-    fprintf(stderr, "[TOWERS-AI] floor %d: CPU AI block at %08X (brain's pointer %08X): skill %d -> %d, ramp %.2f%s, "
-            "defence target %d%s; set 0 tendencies %s\n", g_floor, AI_SLOT_BLOCK(CPU), MEM32(AI_SLOT_PTR(CPU)), g_own_skill,
+    fprintf(stderr, "[TOWERS-AI] floor %d: CPU %d AI block at %08X (brain's pointer %08X): skill %d -> %d, ramp %.2f%s, "
+            "defence target %d%s; set 0 tendencies %s\n", g_floor, CPU, AI_SLOT_BLOCK(CPU), MEM32(AI_SLOT_PTR(CPU)), g_own_skill,
             g_on ? g_skill : g_own_skill, g_f.t, g_f.boss ? " (boss)" : "", g_f.defence,
             g_mode_off ? ", test: the game's own data" : !g_f.on ? ", the game's own data (below floor 7)" : "", line);
 }
@@ -238,7 +268,7 @@ static void read_cut(void)
     g_read_cuts += (unsigned)cut;
 }
 
-void towers_ai_step(unsigned step, int decided)
+static void ai_step_one(unsigned step, int decided)
 {
     uint32_t key = 0;
     int began;
@@ -262,7 +292,7 @@ void towers_ai_step(unsigned step, int decided)
     if (g_f.hold_cap > 0 && !decided) cut_holds();
 }
 
-void towers_ai_health(uint32_t record, float delta)
+static void ai_health_one(uint32_t record, float delta)
 {
     if (delta >= 0.0f) return;
     if (record == ACTORS + STRIDE * CPU) {
@@ -276,7 +306,7 @@ void towers_ai_health(uint32_t record, float delta)
     }
 }
 
-void towers_ai_end(int winner, unsigned steps)
+static void ai_end_one(int winner, unsigned steps)
 {
     close_attack();
     fprintf(stderr, "[TOWERS-AI] fight {\"tower\":%d,\"floor\":%d,\"boss\":%d,\"mode\":\"%s\",\"skill\":%d,\"own_skill\":%d,"
@@ -288,4 +318,44 @@ void towers_ai_end(int winner, unsigned steps)
             g_s.hits_on_cpu, (double)g_s.dmg_on_cpu, g_s.hits_on_me, (double)g_s.dmg_on_me, g_s.cpu_attacks,
             steps ? (double)g_s.cpu_changes * 60.0 / (double)steps : 0.0, g_s.cpu_longest, g_writes, g_on ? g_f.hold_cap : 0,
             g_hold_cuts, g_adapt_on, g_reads, g_boost_writes, g_read_cuts);
+}
+
+/* ---------------------------------------------------------------- the public side: each CPU slot's context */
+
+void towers_ai_begin(int tower, int floor, int floors)
+{
+    g_nctx = 1;
+    g_ctx[0].cpu = 1;
+    g_ctx[0].me = 0;
+    A = &g_ctx[0];
+    ai_begin_one(tower, floor, floors);
+}
+
+void towers_ai_begin_team(int tower, int floor, int floors)
+{
+    int i;
+    g_nctx = 2;
+    g_ctx[0].cpu = 2;                   /* team: slot s's primary opponent is s ^ 3 */
+    g_ctx[0].me = 1;
+    g_ctx[1].cpu = 3;
+    g_ctx[1].me = 0;
+    for (i = 0; i < 2; i++) { A = &g_ctx[i]; ai_begin_one(tower, floor, floors); }
+}
+
+void towers_ai_step(unsigned step, int decided)
+{
+    int i;
+    for (i = 0; i < g_nctx; i++) { A = &g_ctx[i]; ai_step_one(step, decided); }
+}
+
+void towers_ai_health(uint32_t record, float delta)
+{
+    int i;
+    for (i = 0; i < g_nctx; i++) { A = &g_ctx[i]; ai_health_one(record, delta); }
+}
+
+void towers_ai_end(int winner, unsigned steps)
+{
+    int i;
+    for (i = 0; i < g_nctx; i++) { A = &g_ctx[i]; ai_end_one(winner, steps); }
 }

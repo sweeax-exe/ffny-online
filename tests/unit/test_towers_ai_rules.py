@@ -188,7 +188,10 @@ def test_the_ai_is_gated_on_a_live_offline_tower_fight_and_the_cpu_slot():
             text = other.read_text(encoding='utf-8', errors='replace')
             assert not re.search(r'\btowers_ai_(begin|step|end|health)\(', text), other.name
     # only the CPU slot's block, and only while that slot is a CPU and the climber's is not
-    assert '#define CPU                 1' in ai
+    # build 106: the CPU slot is the context's (1; the team towers 2 and 3, never a player's 0 or 1)
+    assert '#define CPU                 (A->cpu)' in ai
+    assert 'g_ctx[0].cpu = 1;' in ai and 'g_ctx[0].cpu = 2;' in ai and 'g_ctx[1].cpu = 3;' in ai
+    assert re.findall(r'\.cpu = (\d)', ai) and set(re.findall(r'\.cpu = (\d)', ai)) == {'1', '2', '3'}
     assert 'if (!g_on || !MEM32(G_CPU_FLAG(CPU)) || MEM32(G_CPU_FLAG(ME))) return;' in ai
     assert re.findall(r'MEM32\(AI_(?:SKILL|TEND)\((\w+)', ai) and set(re.findall(r'MEM32\(AI_(?:SKILL|TEND)\((\w+)', ai)) == {'CPU'}
     # the difficulty word is never 3: the slot words come from towers_floor_rules (0..2)

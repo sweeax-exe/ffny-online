@@ -56,6 +56,7 @@ static unsigned long long g_fight_t0;
 static int g_momentum_done;
 static int g_draw_loss;                 /* the run ended on a second draw on its floor */
 static int g_cpu_end_health;            /* the CPU's health % when the fight was decided (the report) */
+static int g_last_opp2 = -1;            /* build 106: the team floor's second CPU just fought */
 
 /* The results' Rematch prompt (YES / NO) has no place in a run. Build 100 armed its answer at the reward save and
  * sent it from the NEXT front-end call: a player who sat on the prompt made none, so it never came (report #204).
@@ -345,7 +346,7 @@ static int pool_of(int tower, int *pool, int max)
     const OnlineFighter *list;
     int n = online_fighters(&list), i, m = 0;
     for (i = 0; i < n && m < max; i++) pool[m++] = list[i].id;
-    if (tower == TOWER_FIVE_BOROUGHS) {
+    if (tower == TOWER_FIVE_BOROUGHS || tower == TOWER_TEAM_COMMUNITY) {
         n = online_new_fighters(&list);
         for (i = 0; i < n && m < max; i++) pool[m++] = list[i].id;
         if (fighter_banks_ready())
@@ -370,6 +371,7 @@ int towers_floors_now(int tower)
 {
     static int pool[TOWER_MAX_ROSTER];
     int n = pool_of(tower, pool, TOWER_MAX_ROSTER);
+    if (TOWER_IS_TEAM(tower)) return n > 3 ? (n - 2) / 2 : 0;     /* two players, two CPUs a floor */
     return n > 1 ? n - 1 : 0;      /* the climber's own pick is never an opponent */
 }
 
@@ -574,6 +576,7 @@ static void net_fight(const TowerRun *run, int floor, const char *event, const c
     }
     n = snprintf(json, sizeof json, "{\"run\":\"%s\",\"floor\":%d,\"event\":\"%s\",\"opponent\":%d,\"venue\":%d", run->run_id,
                  floor, event, towers_opponent(run, floor), towers_venue(run, floor));
+    if (TOWER_IS_TEAM(run->tower)) n += snprintf(json + n, sizeof json - (size_t)n, ",\"opponent2\":%d", towers_opponent2(run, floor));
     if (result) {
         n += snprintf(json + n, sizeof json - (size_t)n, ",\"result\":\"%s\",\"fight\":{\"steps\":%u,\"health\":[%d,%d]},\"ms\":%u",
                       result, steps, me_pct, cpu_pct, ms);
@@ -619,6 +622,8 @@ static int ids_have(const char *list, int a)
  * the service refused it because this PC's community content is behind (why "update": the start is refused, never
  * an offline climb with another roster). Five Boroughs: the service names the community fighters (1000 and up) the
  * run keeps (the live ones now); the others are dropped from pool[] (*pool_n shrinks) before the run is built. */
+static int g_start_f2 = -1, g_start_s2;    /* build 106: player 2 of the team run being started (-1: none) */
+
 static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, const int *venues, int venue_n,
                      uint32_t *seed, char *run, int *board, char *why, int why_size)
 {
@@ -627,8 +632,15 @@ static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, c
     char v[48];
     int n, i, status;
     if (!net_on()) return 0;
-    n = snprintf(json, sizeof json, "{\"tower\":%d,\"fighter\":%d,\"skin\":%d,\"rules\":%d,\"bosses\":1,\"pool\":[", tower, fighter, skin,
+    n = snprintf(json, sizeof json, "{\"tower\":%d,\"fighter\":%d,\"skin\":%d,\"rules\":%d,\"bosses\":1,", tower, fighter, skin,
                  TOWER_RULES_VERSION);
+    if (TOWER_IS_TEAM(tower)) {     /* build 106: player 2, and player 2's own account when its session is given */
+        const char *partner = getenv("RECOMP_TOWERS_PARTNER_TOKEN");
+        n += snprintf(json + n, sizeof json - (size_t)n, "\"fighter2\":%d,\"skin2\":%d,", g_start_f2, g_start_s2);
+        if (partner && *partner && strlen(partner) < 128 && !strchr(partner, '"') && !strchr(partner, '\\'))
+            n += snprintf(json + n, sizeof json - (size_t)n, "\"partner\":\"%s\",", partner);
+    }
+    n += snprintf(json + n, sizeof json - (size_t)n, "\"pool\":[");
     for (i = 0; i < *pool_n && n < (int)sizeof json - 16; i++) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", i ? "," : "", pool[i]);
     n += snprintf(json + n, sizeof json - (size_t)n, "],\"venues\":[");
     for (i = 0; i < venue_n && n < (int)sizeof json - 16; i++) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", i ? "," : "", venues[i]);
@@ -700,8 +712,11 @@ static void place_bosses(void)
 {
     int n = towers_place_bosses(&g_run);
     fprintf(stderr, "[TOWERS] %s: %d fixed boss%s placed (top floor: fighter %d)\n", towers_name(g_run.tower), n,
-            n == 1 ? "" : "es", towers_opponent(&g_run, g_run.tower == TOWER_UPTOWN ? g_run.floors :
+            n == 1 ? "" : "es", towers_opponent(&g_run, g_run.tower == TOWER_UPTOWN || TOWER_IS_TEAM(g_run.tower) ? g_run.floors :
                                                          g_run.floors / TOWER_CHAPTER * TOWER_CHAPTER));
+    if (TOWER_IS_TEAM(g_run.tower))
+        fprintf(stderr, "[TOWERS] %s: the top floor's pair %d + %d\n", towers_name(g_run.tower), towers_opponent(&g_run, g_run.floors),
+                towers_opponent2(&g_run, g_run.floors));
 }
 
 static void test_overrides(int fixed_bosses)
@@ -711,22 +726,25 @@ static void test_overrides(int fixed_bosses)
      * fixed bosses are placed again in it, so a boss put on the new top floor by the first stays there) */
     const char *v = getenv("RECOMP_TEST_TOWERS_OPPONENT");
     int cap = env_int("RECOMP_TEST_TOWERS_FLOORS", 0);
+    int team = TOWER_IS_TEAM(g_run.tower);
     if (v && strchr(v, ':')) {
-        int floor = atoi(v), id = atoi(strchr(v, ':') + 1), i, at = -1;
+        int floor = atoi(v), id = atoi(strchr(v, ':') + 1), i, at = -1, len = towers_roster_len(&g_run);
+        int slot = team ? 2 * floor - 2 : floor - 1;
         if (!strcmp(strchr(v, ':') + 1, "community"))     /* the first community fighter beyond the places */
             id = fighter_banks_ready() && fighter_banks_count() > 0 ? fighter_banks_at(0)->id : -1;
-        for (i = 0; i < g_run.floors; i++) if (g_run.roster[i] == id) at = i;
-        if (floor >= 1 && floor <= g_run.floors && id >= 0) {
-            if (at >= 0) { g_run.roster[at] = g_run.roster[floor - 1]; }
-            else if (g_run.floors < TOWER_MAX_ROSTER) { g_run.roster[g_run.floors++] = g_run.roster[floor - 1]; }
-            g_run.roster[floor - 1] = id;
-            g_run.roster_hash = towers_roster_hash(g_run.roster, g_run.floors);
+        for (i = 0; i < len; i++) if (g_run.roster[i] == id) at = i;
+        if (floor >= 1 && floor <= g_run.floors && id >= 0 && (at >= 0 || !team)) {
+            if (at >= 0) { g_run.roster[at] = g_run.roster[slot]; }
+            else if (g_run.floors < TOWER_MAX_ROSTER) { g_run.roster[g_run.floors++] = g_run.roster[slot]; }
+            g_run.roster[slot] = id;
+            g_run.roster_hash = towers_roster_hash(g_run.roster, towers_roster_len(&g_run));
             fprintf(stderr, "[TOWERS] test: fighter %d on floor %d\n", id, floor);
         }
     }
     if (cap > 0 && cap < g_run.floors) {
         g_run.floors = cap;
-        g_run.roster_hash = towers_roster_hash(g_run.roster, g_run.floors);
+        if (team) g_run.roster_n = 2 * cap;
+        g_run.roster_hash = towers_roster_hash(g_run.roster, towers_roster_len(&g_run));
         fprintf(stderr, "[TOWERS] test: the tower is %d floors tall\n", cap);
         if (fixed_bosses) place_bosses();
     }
@@ -758,7 +776,8 @@ static int arm_fight(void)
 {
     AutoMatch am;
     int opp, venue;
-    while (g_run.floor <= g_run.floors && !fighter_here(towers_opponent(&g_run, g_run.floor))) {
+    while (g_run.floor <= g_run.floors && (!fighter_here(towers_opponent(&g_run, g_run.floor)) ||
+                                           (TOWER_IS_TEAM(g_run.tower) && !fighter_here(towers_opponent2(&g_run, g_run.floor))))) {
         fprintf(stderr, "[TOWERS] floor %d: fighter %d is not on this PC: passed\n", g_run.floor,
                 towers_opponent(&g_run, g_run.floor));
         g_run.skipped++;
@@ -776,6 +795,15 @@ static int arm_fight(void)
     am.skin[0] = g_run.skin;
     am.fighter[1] = opp;
     am.pad[1] = am.pad[2] = am.pad[3] = -1;
+    if (TOWER_IS_TEAM(g_run.tower)) {   /* build 106: 2 vs 2, players on pads 0 and 1 (slots 0, 1), the CPUs in 2 and 3 */
+        am.type = ONLINE_MODE_TEAM;
+        am.count = 4;
+        am.fighter[1] = g_run.fighter2;
+        am.pad[1] = 1;
+        am.skin[1] = g_run.skin2;
+        am.fighter[2] = opp;
+        am.fighter[3] = towers_opponent2(&g_run, g_run.floor);
+    }
     towers_floor_rules(g_run.tower, g_run.floor, g_run.floors, &g_rules);
     g_match_seen = g_decided = g_draw = 0;
     g_winner = -1;
@@ -783,6 +811,9 @@ static int arm_fight(void)
     g_momentum_done = 0;
     set_state(TOWERS_ARMED);
     automatch_request(&am);
+    if (TOWER_IS_TEAM(g_run.tower))
+        fprintf(stderr, "[TOWERS] %s floor %d: team %d + %d against %d + %d\n", towers_name(g_run.tower), g_run.floor,
+                g_run.fighter, g_run.fighter2, opp, am.fighter[3]);
     fprintf(stderr, "[TOWERS] %s floor %d of %d: fighter %d against %d at venue %d (CPU level %d, damage x%.2f, "
             "momentum %.0f%%, health x%.2f%s)\n", towers_name(g_run.tower), g_run.floor, g_run.floors, g_run.fighter,
             opp, venue, g_rules.cpu_level, g_rules.cpu_damage, g_rules.cpu_momentum * 100.0f, g_rules.cpu_health,
@@ -801,16 +832,36 @@ static uint32_t new_seed(void)
     return towers_next32(&s);
 }
 
+static int start_run(int tower, int fighter, int skin, int fighter2, int skin2);
+
 int towers_start(int tower, int fighter, int skin)
 {
+    if (tower != TOWER_UPTOWN && tower != TOWER_FIVE_BOROUGHS) return 0;
+    return start_run(tower, fighter, skin, -1, 0);
+}
+
+int towers_start_team(int tower, int fighter, int skin, int fighter2, int skin2)
+{
+    if (!TOWER_IS_TEAM(tower) || fighter2 < 0) return 0;
+    if (!towers_climber_ok(tower, fighter2, ONLINE_NEW_FIGHTER(fighter2))) {
+        snprintf(g_start_error, sizeof g_start_error, "The Team Tower takes standard fighters only: player 2, pick one of the game's own fighters.");
+        fprintf(stderr, "[TOWERS] %s: player 2's fighter %d is not a standard fighter: no new climb\n", towers_name(tower), fighter2);
+        return 0;
+    }
+    return start_run(tower, fighter, skin, fighter2, skin2);
+}
+
+static int start_run(int tower, int fighter, int skin, int fighter2, int skin2)
+{
     static int pool[TOWER_MAX_ROSTER];
-    int venues[TOWER_MAX_VENUES], n, vn, ok, board = 0, online;
+    int venues[TOWER_MAX_VENUES], n, vn, ok, board = 0, online, team = TOWER_IS_TEAM(tower);
     uint32_t seed = 0;
     char run[TOWER_RUN_ID_MAX + 1] = "", why[24] = "";
     g_start_error[0] = 0;
-    if (netplay_active() || (tower != TOWER_UPTOWN && tower != TOWER_FIVE_BOROUGHS)) return 0;
+    if (netplay_active()) return 0;
     if (!towers_climber_ok(tower, fighter, ONLINE_NEW_FIGHTER(fighter))) {     /* build 98: Uptown, standard fighters only */
-        snprintf(g_start_error, sizeof g_start_error, "Uptown takes standard fighters only: pick one of the game's own fighters.");
+        snprintf(g_start_error, sizeof g_start_error, "%s takes standard fighters only: pick one of the game's own fighters.",
+                 team ? "The Team Tower" : "Uptown");
         fprintf(stderr, "[TOWERS] %s: fighter %d is not a standard fighter: no new climb\n", towers_name(tower), fighter);
         return 0;
     }
@@ -818,6 +869,8 @@ int towers_start(int tower, int fighter, int skin)
     vn = venues_of(venues, TOWER_MAX_VENUES);
     /* T1: signed in, the service deals the seed (no lock held while it answers) */
     g_net_bosses = 0;
+    g_start_f2 = fighter2;
+    g_start_s2 = skin2;
     online = n > 0 && vn > 0 ? net_start(tower, fighter, skin, pool, &n, venues, vn, &seed, run, &board, why, (int)sizeof why) : 0;
     if (online < 0) return 0;      /* this PC's content is behind: g_start_error says so */
     lock();
@@ -826,7 +879,8 @@ int towers_start(int tower, int fighter, int skin)
         if (g_have[tower - 1] && g_saved[tower - 1].run_id[0] && strcmp(g_saved[tower - 1].run_id, run))
             net_end(&g_saved[tower - 1], "new");
     }
-    if (!towers_new_run(&g_run, tower, online ? seed : new_seed(), fighter, skin, pool, n, venues, vn)) {
+    if (!(team ? towers_new_team_run(&g_run, tower, online ? seed : new_seed(), fighter, skin, fighter2, skin2, pool, n, venues, vn)
+               : towers_new_run(&g_run, tower, online ? seed : new_seed(), fighter, skin, pool, n, venues, vn))) {
         unlock();
         fprintf(stderr, "[TOWERS] %s: no run (%d fighters, %d venues read)\n", towers_name(tower), n, vn);
         return 0;
@@ -846,8 +900,10 @@ int towers_start(int tower, int fighter, int skin)
     g_best_before = g_best[tower - 1];
     g_new_best = 0;
     g_last_floor = 0;
-    g_last_opp = g_last_venue = -1;
+    g_last_opp = g_last_venue = g_last_opp2 = -1;
     g_draw_loss = 0;
+    if (team) fprintf(stderr, "[TOWERS] team run: player 1 fighter %d (skin %d), player 2 fighter %d (skin %d)\n", fighter, skin,
+                      fighter2, skin2);
     fprintf(stderr, "[TOWERS] run start: %s, seed %08X, fighter %d (skin %d), %d floors, %d venues, roster %08X, %s\n",
             towers_name(tower), g_run.seed, fighter, skin, g_run.floors, g_run.venue_n, g_run.roster_hash,
             online ? (board ? "on the service, board" : "on the service, off the board") : "offline");
@@ -867,11 +923,12 @@ static int net_check_missing(const TowerRun *run)
     static char reply[8192];
     char live[256];
     int n, i, m = 0, status;
-    if (!run->run_id[0] || run->tower != TOWER_FIVE_BOROUGHS || !net_on()) return 1;
+    if (!run->run_id[0] || (run->tower != TOWER_FIVE_BOROUGHS && run->tower != TOWER_TEAM_COMMUNITY) || !net_on()) return 1;
     n = snprintf(json, sizeof json, "{\"run\":\"%s\",\"missing\":[", run->run_id);
     for (i = run->floor; i <= run->floors && n < (int)sizeof json - 16; i++) {
-        int id = towers_opponent(run, i);
+        int id = towers_opponent(run, i), id2 = towers_opponent2(run, i);
         if (id >= FB_FIRST_LOGICAL && !fighter_here(id)) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", m++ ? "," : "", id);
+        if (id2 >= FB_FIRST_LOGICAL && !fighter_here(id2)) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", m++ ? "," : "", id2);
     }
     if (!m) return 1;
     snprintf(json + n, sizeof json - (size_t)n, "]}");
@@ -921,6 +978,7 @@ int towers_resume(int tower)
 /* The fight is decided: who won, from the phase and result words (as netplay.c reads them). 1 when known. */
 static int read_decision(int *winner, int *draw)
 {
+    int team = TOWER_IS_TEAM(g_run.tower);
     uint32_t phase = MEM32(G_PHASE), count = MEM32(G_RESULT_COUNT), code = 0, w = 0xFFFFFFFFu;
     if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
     *draw = 0;
@@ -928,8 +986,8 @@ static int read_decision(int *winner, int *draw)
     if (phase == 3u) w = MEM32(G_WINNER);
     else if (phase == 2u || ((code & 1u) && (MEM32(G_MATCH_FLAGS) & 8u))) w = MEM32(G_WINNER_FIRST);
     else return 0;
-    if (w > 1u) { *draw = 1; *winner = -1; return 1; }
-    *winner = (int)w;
+    if (w > (team ? 3u : 1u)) { *draw = 1; *winner = -1; return 1; }
+    *winner = team ? (int)(w >> 1) : (int)w;    /* build 106, 2 vs 2: the side (0 the players, slots 0 and 1) */
     return 1;
 }
 
@@ -952,7 +1010,8 @@ void towers_match_start(void)
         g_results_left = 0;
         g_log_pairs = 0;
         g_log_count = 0;
-        towers_ai_begin(g_run.tower, g_run.floor, g_run.floors);     /* the CPU past Hard (towers_ai.c) */
+        if (TOWER_IS_TEAM(g_run.tower)) towers_ai_begin_team(g_run.tower, g_run.floor, g_run.floors);  /* both CPUs */
+        else towers_ai_begin(g_run.tower, g_run.floor, g_run.floors);     /* the CPU past Hard (towers_ai.c) */
         ac_start();
         net_fight(&g_run, g_run.floor, "start", NULL, 0, 0, 0, 0);
         /* the CPU's level for this floor and the climber's fixed one, after the set-up copied the words and before
@@ -968,15 +1027,37 @@ void towers_match_start(void)
         file_store();
         MEM32(G_SLOT_LEVEL) = PLAYER_LEVEL;
         MEM32(G_SLOT_LEVEL + 4u) = (uint32_t)g_rules.cpu_level;
+        if (TOWER_IS_TEAM(g_run.tower)) {   /* the players in slots 0 and 1, the CPUs in 2 and 3 */
+            MEM32(G_SLOT_LEVEL + 4u) = PLAYER_LEVEL;
+            MEM32(G_SLOT_LEVEL + 8u) = MEM32(G_SLOT_LEVEL + 12u) = (uint32_t)g_rules.cpu_level;
+            fprintf(stderr, "[TOWERS] team floor %d set up: slot levels %u %u %u %u\n", g_run.floor, MEM32(G_SLOT_LEVEL),
+                    MEM32(G_SLOT_LEVEL + 4u), MEM32(G_SLOT_LEVEL + 8u), MEM32(G_SLOT_LEVEL + 12u));
+        }
         fprintf(stderr, "[TOWERS] floor %d set up: slot levels %u %u\n", g_run.floor, MEM32(G_SLOT_LEVEL),
                 MEM32(G_SLOT_LEVEL + 4u));
     }
     unlock();
 }
 
+/* the health share of the records [first, first + n) (-1: none there) */
+static int side_health(uint32_t first, int n)
+{
+    float sum = 0.0f;
+    int k, m = 0;
+    for (k = 0; k < n; k++) {
+        uint32_t r = first + STRIDE * (uint32_t)k;
+        float top = MEMF(r + F_HEALTH_TOP), now = MEMF(r + F_HEALTH_NOW);
+        if (MEM32(r + F_SLOT) == 0xFFFFFFFFu || !(top > 0.0f) || now != now) continue;
+        sum += now < 0.0f ? 0.0f : now / top;
+        m++;
+    }
+    return m ? (int)(100.0f * sum / (float)m + 0.5f) : -1;
+}
+
 void towers_step(void)
 {
     uint32_t me = ACTORS, cpu = ACTORS + STRIDE;
+    int team = TOWER_IS_TEAM(g_run.tower);
     if (g_state != TOWERS_FIGHTING || netplay_active() || netplay_rerunning()) return;
     lock();
     if (g_state != TOWERS_FIGHTING) { unlock(); return; }
@@ -1001,14 +1082,18 @@ void towers_step(void)
             fprintf(stderr, "[TOWERS] the climber starts at %d%% health\n", g_run.health_pct);
         }
     }
+    if (team) cpu = ACTORS + 2u * STRIDE;
     if (!g_momentum_done && g_step <= 60 && MEM32(cpu + F_SLOT) != 0xFFFFFFFFu) {
-        float top = MEMF(cpu + F_MOMENTUM_TOP);
-        if (top > 0.0f) {
+        int k;
+        for (k = 0; k < (team ? 2 : 1); k++) {      /* build 106: both CPUs of a team floor */
+            uint32_t c = cpu + STRIDE * (uint32_t)k;
+            float top = MEMF(c + F_MOMENTUM_TOP);
+            if (MEM32(c + F_SLOT) == 0xFFFFFFFFu || !(top > 0.0f)) continue;
             g_momentum_done = 1;
             if (g_rules.cpu_momentum > 0.0f) {
-                MEMF(cpu + F_MOMENTUM) = top * g_rules.cpu_momentum;
+                MEMF(c + F_MOMENTUM) = top * g_rules.cpu_momentum;
                 fprintf(stderr, "[TOWERS] the CPU starts with %.0f%% momentum (%.1f of %.1f)\n",
-                        g_rules.cpu_momentum * 100.0f, (double)MEMF(cpu + F_MOMENTUM), (double)top);
+                        g_rules.cpu_momentum * 100.0f, (double)MEMF(c + F_MOMENTUM), (double)top);
             }
         }
     }
@@ -1022,12 +1107,17 @@ void towers_step(void)
             g_draw = d;
             g_end_health = top > 0.0f ? (int)(100.0f * now / top + 0.5f) : 100;
             g_cpu_end_health = ctop > 0.0f && cnow == cnow ? (int)(100.0f * cnow / ctop + 0.5f) : -1;
+            if (team) {     /* the sides' average health */
+                g_end_health = side_health(ACTORS, 2);
+                if (g_end_health < 0) g_end_health = 100;
+                g_cpu_end_health = side_health(ACTORS + 2u * STRIDE, 2);
+            }
             if (g_cpu_end_health > 100) g_cpu_end_health = 100;
             if (g_cpu_end_health < -1) g_cpu_end_health = 0;
             log_flush();
             towers_ai_end(d ? -1 : w, g_step);
             fprintf(stderr, "[TOWERS] floor %d decided at step %u: %s; the climber's health %d%%\n", g_run.floor,
-                    g_step, d ? "a draw" : w == 0 ? "the climber won" : "the CPU won", g_end_health);
+                    g_step, d ? "a draw" : w == 0 ? (team ? "the team won" : "the climber won") : "the CPU won", g_end_health);
         }
     }
     unlock();
@@ -1041,7 +1131,11 @@ void towers_health_change(void)
     r = MEM32(g_esp + 4);
     delta = MEMF(g_esp + 8);
     if (delta >= 0.0f) return;
-    if (r == ACTORS && g_rules.cpu_damage != 1.0f) MEMF(g_esp + 8) = delta * g_rules.cpu_damage;
+    if (TOWER_IS_TEAM(g_run.tower)) {   /* build 106: the players are slots 0 and 1, the CPUs 2 and 3 */
+        if ((r == ACTORS || r == ACTORS + STRIDE) && g_rules.cpu_damage != 1.0f) MEMF(g_esp + 8) = delta * g_rules.cpu_damage;
+        else if ((r == ACTORS + 2u * STRIDE || r == ACTORS + 3u * STRIDE) && g_rules.cpu_health > 1.0f)
+            MEMF(g_esp + 8) = delta / g_rules.cpu_health;
+    } else if (r == ACTORS && g_rules.cpu_damage != 1.0f) MEMF(g_esp + 8) = delta * g_rules.cpu_damage;
     else if (r == ACTORS + STRIDE && g_rules.cpu_health > 1.0f) MEMF(g_esp + 8) = delta / g_rules.cpu_health;
     towers_ai_health(r, MEMF(g_esp + 8));
 }
@@ -1054,6 +1148,7 @@ static void finish_fight(void)
     if (!g_decided && read_decision(&w, &d)) g_decided = 1;
     g_last_floor = g_run.floor;
     g_last_opp = towers_opponent(&g_run, g_run.floor);
+    g_last_opp2 = towers_opponent2(&g_run, g_run.floor);
     g_last_venue = towers_venue(&g_run, g_run.floor);
     g_run.climb_ms += (uint32_t)(ms > 3600000ull ? 3600000ull : ms);
     g_left = !g_decided;
@@ -1080,7 +1175,8 @@ static void finish_fight(void)
         set_state(TOWERS_DRAW);
         fprintf(stderr, "[TOWERS] floor %d: a draw, fought again (refight %d of %d)\n", beaten, g_run.refights, TOWER_MAX_REFIGHTS);
     } else if (g_decided && !d && w == 0) {
-        int rule = recomp_settings_get("towers", g_run.tower == 1 ? "health1" : "health2", TOWER_HEALTH_FULL);
+        int rule = TOWER_IS_TEAM(g_run.tower) ? TOWER_HEALTH_FULL :     /* the team towers: always full health */
+                   recomp_settings_get("towers", g_run.tower == 1 ? "health1" : "health2", TOWER_HEALTH_FULL);
         int refill = recomp_settings_get("towers", g_run.tower == 1 ? "refill1" : "refill2", 30);
         int chapter = env_int("RECOMP_TEST_TOWERS_CHAPTER", TOWER_CHAPTER);
         file_load();
@@ -1141,6 +1237,12 @@ static void test_start(void)
     if (strstr(v, "resume")) { if (!towers_resume(tower)) fprintf(stderr, "[TOWERS] test: no saved run to resume\n"); return; }
     if (strchr(v, ',')) fighter = atoi(strchr(v, ',') + 1);
     if (strchr(v, ',') && strchr(strchr(v, ',') + 1, ',')) skin = atoi(strchr(strchr(v, ',') + 1, ',') + 1);
+    if (TOWER_IS_TEAM(tower)) {     /* build 106: "<tower>,<fighter 1>,<skin 1>,<fighter 2>,<skin 2>" */
+        int f1 = 55, s1 = 0, f2 = 22, s2 = 0;
+        sscanf(v, "%d,%d,%d,%d,%d", &tower, &f1, &s1, &f2, &s2);
+        if (!towers_start_team(tower, f1, s1, f2, s2)) fprintf(stderr, "[TOWERS] test: the team run did not start\n");
+        return;
+    }
     if (!towers_start(tower, fighter, skin)) fprintf(stderr, "[TOWERS] test: the run did not start\n");
 }
 
@@ -1297,6 +1399,11 @@ void towers_view(TowersView *out)
     out->climb_ms = g_run.climb_ms;
     out->fighter = g_run.fighter;
     out->skin = g_run.skin;
+    out->team = TOWER_IS_TEAM(g_run.tower);
+    out->fighter2 = out->team ? g_run.fighter2 : -1;
+    out->skin2 = g_run.skin2;
+    out->last_opponent2 = g_last_opp2;
+    out->next_opponent2 = towers_opponent2(&g_run, g_run.floor);
     out->since = g_since;
     out->online = g_run.run_id[0] != 0;
     out->board = out->online && g_run.board;

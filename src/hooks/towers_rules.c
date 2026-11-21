@@ -72,10 +72,62 @@ int towers_new_run(TowerRun *run, int tower, uint32_t seed, int fighter, int ski
     return n;
 }
 
+int towers_team_venue_ok(int tower, int fe)
+{
+    (void)tower;
+    return fe >= 1 && fe < TOWER_FIRST_COMMUNITY_VENUE && fe != 17 && fe != 19 && fe != 24 && fe != 26;
+}
+
+int towers_new_team_run(TowerRun *run, int tower, uint32_t seed, int fighter, int skin, int fighter2, int skin2,
+                        const int *pool, int pool_n, const int *venues, int venue_n)
+{
+    uint32_t st = seed;
+    int n, i, k, v[TOWER_MAX_VENUES], vn;
+    memset(run, 0, sizeof *run);
+    run->tower = tower;
+    run->seed = seed;
+    run->fighter = fighter;
+    run->skin = skin;
+    run->fighter2 = fighter2;
+    run->skin2 = skin2;
+    n = clean_list(run->roster, pool, pool_n, TOWER_MAX_ROSTER, fighter);
+    for (i = 0, k = 0; i < n; i++) if (run->roster[i] != fighter2) run->roster[k++] = run->roster[i];
+    n = k;
+    vn = clean_list(v, venues, venue_n, TOWER_MAX_VENUES, -1);
+    for (i = 0; i < vn; i++)
+        if (towers_team_venue_ok(tower, v[i])) run->venues[run->venue_n++] = v[i];
+    for (i = n - 1; i > 0; i--) {       /* Fisher-Yates over the list sorted by ID, as towers_new_run */
+        int j = (int)(towers_next32(&st) % (uint32_t)(i + 1)), t = run->roster[i];
+        run->roster[i] = run->roster[j];
+        run->roster[j] = t;
+    }
+    n &= ~1;                            /* two a floor: an odd last one is left out */
+    run->roster_n = n;
+    run->floors = n / 2;
+    run->roster_hash = towers_roster_hash(run->roster, n);
+    run->floor = 1;
+    run->health_pct = 100;
+    if (!run->floors || !run->venue_n) { run->floors = 0; return 0; }
+    return run->floors;
+}
+
+int towers_roster_len(const TowerRun *run)
+{
+    if (!run) return 0;
+    return run->roster_n > 0 ? run->roster_n : run->floors;
+}
+
 int towers_opponent(const TowerRun *run, int floor)
 {
     if (!run || floor < 1 || floor > run->floors) return -1;
+    if (TOWER_IS_TEAM(run->tower)) return 2 * floor - 1 < towers_roster_len(run) ? run->roster[2 * floor - 2] : -1;
     return run->roster[floor - 1];
+}
+
+int towers_opponent2(const TowerRun *run, int floor)
+{
+    if (!run || !TOWER_IS_TEAM(run->tower) || floor < 1 || floor > run->floors || 2 * floor > towers_roster_len(run)) return -1;
+    return run->roster[2 * floor - 1];
 }
 
 static int venue_index(const TowerRun *run, int floor)
@@ -99,6 +151,7 @@ int towers_is_boss(int tower, int floor, int floors)
     if (floor < 1 || floor > floors) return 0;
     if (tower == TOWER_UPTOWN) return floor == floors;
     if (tower == TOWER_FIVE_BOROUGHS) return floor % TOWER_CHAPTER == 0;
+    if (TOWER_IS_TEAM(tower)) return floor == floors || floor % TOWER_CHAPTER == 0;
     return 0;
 }
 
@@ -143,7 +196,7 @@ void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
 
 int towers_climber_ok(int tower, int fighter, int new_place)
 {
-    if (tower != TOWER_UPTOWN) return 1;
+    if (tower != TOWER_UPTOWN && tower != TOWER_TEAM) return 1;    /* build 106: the standard Team Tower as Uptown */
     return !new_place && fighter >= 0 && fighter < TOWER_CREATED_FIGHTER;     /* the service's towerStockFighter */
 }
 
@@ -173,7 +226,8 @@ int towers_health_after_win(int rule, int refill, int end_pct)
 const char *towers_name(int tower)
 {
     return tower == TOWER_UPTOWN ? "UPTOWN" : tower == TOWER_FIVE_BOROUGHS ? "FIVE BOROUGHS" :
-           tower == TOWER_WEEKLY ? "THE WEEKLY" : "TOWER";
+           tower == TOWER_WEEKLY ? "THE WEEKLY" : tower == TOWER_TEAM ? "TEAM TOWER" :
+           tower == TOWER_TEAM_COMMUNITY ? "TEAM TOWER COMMUNITY" : "TOWER";
 }
 
 /* ---------------------------------------------------------------- the run file */
@@ -194,18 +248,22 @@ int towers_file_write(const TowerRun *const runs[TOWER_COUNT], const int best[TO
     int n = 0, t, first = 1;
     if (size <= 0) return 0;
     out[0] = 0;
-    PUT("{\"version\":1,\"best\":[%d,%d,%d],\"runs\":[", best[0], best[1], best[2]);
+    PUT("{\"version\":1,\"best\":[");
+    for (t = 0; t < TOWER_COUNT; t++) PUT("%s%d", t ? "," : "", best[t]);
+    PUT("],\"runs\":[");
     for (t = 0; t < TOWER_COUNT; t++) {
         const TowerRun *r = runs[t];
         if (!r || r->floors <= 0) continue;
         PUT("%s\n{\"tower\":%d,\"seed\":%u,\"fighter\":%d,\"skin\":%d,\"floors\":%d,\"floor\":%d,\"hash\":%u,"
             "\"health\":%d,\"climb_ms\":%u,\"interrupted\":%d,\"in_fight\":%d,\"draws\":%d,\"skipped\":%d,"
-            "\"started\":%lld,\"refights\":%d,\"board\":%d,\"net_next\":%d,\"run\":\"%s\",",
+            "\"started\":%lld,\"refights\":%d,\"board\":%d,\"net_next\":%d,\"run\":\"%s\",\"fighter2\":%d,"
+            "\"skin2\":%d,\"roster_n\":%d,",
             first ? "" : ",", r->tower, r->seed, r->fighter, r->skin, r->floors, r->floor, r->roster_hash, r->health_pct,
-            r->climb_ms, r->interrupted, r->in_fight, r->draws, r->skipped, r->started, r->refights, r->board, r->net_next, r->run_id);
+            r->climb_ms, r->interrupted, r->in_fight, r->draws, r->skipped, r->started, r->refights, r->board, r->net_next, r->run_id,
+            r->fighter2, r->skin2, towers_roster_len(r));
         n = put_list(out, n, size, "venues", r->venues, r->venue_n);
         PUT(",");
-        n = put_list(out, n, size, "roster", r->roster, r->floors);
+        n = put_list(out, n, size, "roster", r->roster, towers_roster_len(r));
         PUT("}");
         first = 0;
     }
@@ -273,8 +331,11 @@ int towers_file_read(const char *text, TowerRun runs[TOWER_COUNT], int have[TOWE
     for (t = 0; t < TOWER_COUNT; t++) { have[t] = 0; best[t] = 0; }
     if (!text || strncmp(text, "{\"version\":1", 12)) return 0;
     end = text + strlen(text);
-    if (read_list(text, end, "best", v, TOWER_COUNT) == TOWER_COUNT)
-        for (t = 0; t < TOWER_COUNT; t++) best[t] = v[t] < 0 ? 0 : v[t];
+    {   /* three towers before build 106 */
+        int nb = read_list(text, end, "best", v, TOWER_COUNT);
+        if (nb == 3 || nb == TOWER_COUNT)
+            for (t = 0; t < nb; t++) best[t] = v[t] < 0 ? 0 : v[t];
+    }
     list = key_at(text, end, "runs");
     if (!list || *list != '[') return 1;
     for (p = strchr(list, '{'); p; p = strchr(p + 1, '{')) {
@@ -300,6 +361,10 @@ int towers_file_read(const char *text, TowerRun runs[TOWER_COUNT], int have[TOWE
             read_int(p, close, "refights", &r.refights);
             read_int(p, close, "board", &r.board);
             read_int(p, close, "net_next", &r.net_next);
+            read_int(p, close, "fighter2", &r.fighter2);
+            read_int(p, close, "skin2", &r.skin2);
+            read_int(p, close, "roster_n", &r.roster_n);
+            if (!TOWER_IS_TEAM(tower)) r.roster_n = 0;
             {   /* the server's run id: letters and digits only */
                 const char *q = key_at(p, close, "run");
                 int k = 0;
@@ -311,9 +376,10 @@ int towers_file_read(const char *text, TowerRun runs[TOWER_COUNT], int have[TOWE
             }
             r.venue_n = read_list(p, close, "venues", r.venues, TOWER_MAX_VENUES);
             ok = r.venue_n > 0 && r.floors > 0 && r.floors <= TOWER_MAX_ROSTER &&
-                 read_list(p, close, "roster", r.roster, TOWER_MAX_ROSTER) == r.floors &&
+                 (!TOWER_IS_TEAM(tower) || r.roster_n == 2 * r.floors) &&
+                 read_list(p, close, "roster", r.roster, TOWER_MAX_ROSTER) == towers_roster_len(&r) &&
                  r.floor >= 1 && r.floor <= r.floors && r.health_pct >= 1 && r.health_pct <= 100 &&
-                 towers_roster_hash(r.roster, r.floors) == r.roster_hash;
+                 towers_roster_hash(r.roster, towers_roster_len(&r)) == r.roster_hash;
         }
         if (ok) {
             runs[tower - 1] = r;
@@ -336,8 +402,41 @@ static const int k_final_bosses[] = { 58, 82, 84, 81, 83 };
 static int roster_at(const TowerRun *run, int id)
 {
     int i;
-    for (i = 0; i < run->floors; i++) if (run->roster[i] == id) return i;
+    for (i = 0; i < towers_roster_len(run); i++) if (run->roster[i] == id) return i;
     return -1;
+}
+
+/* the team towers: id into roster slot `at` (swapped with the one there) */
+static void put_on_slot(TowerRun *run, int id, int at)
+{
+    int i = roster_at(run, id), t;
+    if (i < 0 || at < 0 || at >= towers_roster_len(run)) return;
+    t = run->roster[at];
+    run->roster[at] = id;
+    run->roster[i] = t;
+}
+
+static int team_bosses(TowerRun *run)
+{
+    static const int chapter[3][2] = { { 59, 57 }, { 56, 83 }, { 80, 81 } };
+    static const int final_pick[] = { 58, 82, 84, 81, 83, 56, 59, 57, 80 };
+    int used[8], nu = 0, placed = 0, i, c, k;
+    for (i = 0; i < (int)(sizeof final_pick / sizeof final_pick[0]) && nu < 2; i++)
+        if (roster_at(run, final_pick[i]) >= 0) {
+            put_on_slot(run, final_pick[i], 2 * run->floors - 2 + nu);
+            used[nu++] = final_pick[i];
+            placed++;
+        }
+    for (c = 1; c <= 3 && c * TOWER_CHAPTER < run->floors; c++)
+        for (i = 0; i < 2; i++) {
+            int id = chapter[c - 1][i], dup = 0;
+            for (k = 0; k < nu; k++) dup |= used[k] == id;
+            if (dup || roster_at(run, id) < 0) continue;
+            put_on_slot(run, id, 2 * c * TOWER_CHAPTER - 2 + i);
+            used[nu++] = id;
+            placed++;
+        }
+    return placed;
 }
 
 static void put_on_floor(TowerRun *run, int id, int floor)
@@ -353,6 +452,7 @@ int towers_place_bosses(TowerRun *run)
 {
     int i, chapters, final_id = -1, placed = 0, next = 0, c;
     if (!run || run->floors <= 0) return 0;
+    if (TOWER_IS_TEAM(run->tower)) return team_bosses(run);
     for (i = 0; i < (int)(sizeof k_final_bosses / sizeof k_final_bosses[0]) && final_id < 0; i++)
         if (roster_at(run, k_final_bosses[i]) >= 0) final_id = k_final_bosses[i];
     if (run->tower == TOWER_UPTOWN) {

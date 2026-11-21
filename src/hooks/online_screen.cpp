@@ -80,6 +80,8 @@
 #include "music_library.h"
 #include "pc_launcher_music.h"
 #include "towers.h"
+#include "input_host.h"     // build 106: the Team Tower's player 2 joins on pad 2 (towers_ui.inc)
+#include "input_map.h"
 #include "hub_grid.h"            // build 98: the tile hub's layout and grid moves
 #include <time.h>
 

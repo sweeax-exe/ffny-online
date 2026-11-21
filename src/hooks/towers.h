@@ -47,6 +47,8 @@ typedef struct TowersView {
     int new_best;               /* this run beat the best before it */
     uint32_t seed, climb_ms;
     int fighter, skin;
+    /* build 106, the team towers: player 2 and each floor's second CPU (-1 elsewhere) */
+    int team, fighter2, skin2, last_opponent2, next_opponent2;
     unsigned long long since;   /* GetTickCount64 when the state began */
     /* T1 */
     int online;                 /* the run is on the account service (its reports go there) */
@@ -60,6 +62,11 @@ typedef struct TowersView {
  * fighters or venues read from the dump). Signed in it first asks the account service for the run (up to about 8 s:
  * call it off the overlay's thread); without an answer the run starts offline. */
 int towers_start(int tower, int fighter, int skin);
+/* Build 106: a new run of a team tower (TOWER_TEAM: standard fighters only, as Uptown; TOWER_TEAM_COMMUNITY): player 1
+ * on pad 0 (slot 0), player 2 on pad 1 (slot 1), against two CPUs a floor (slots 2 and 3, both ramped). Otherwise as
+ * towers_start (signed in, the host's account holds the run; RECOMP_TOWERS_PARTNER_TOKEN, a second account's session,
+ * puts player 2's account on it too). */
+int towers_start_team(int tower, int fighter, int skin, int fighter2, int skin2);
 /* Resume the saved run of `tower` on its floor. 0 when there is none, or (an online Five Boroughs run) when it meets
  * community fighters this PC lacks that are still live (towers_start_error says so). Blocks for the service then: call
  * it off the overlay's thread. */

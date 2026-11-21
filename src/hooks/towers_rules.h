@@ -18,7 +18,16 @@ extern "C" {
 #define TOWER_UPTOWN        1   /* every stock fighter, standard venues */
 #define TOWER_FIVE_BOROUGHS 2   /* stock + the community fighters and venues this PC has, chapters of 10 floors */
 #define TOWER_WEEKLY        3   /* the server's weekly event tower (T2 of the design): "coming soon" in T0 */
-#define TOWER_COUNT         3
+/* Build 106: the Team Tower, two players on one PC (pads 0 and 1, slots 0 and 1) against CPU teams (slots 2 and 3),
+ * 2 vs 2 (Game.SetMatchType(1)). Two towers so the rules never mix on a board: standard fighters and venues only, or
+ * with the community fighters this PC has. Floor f's opponents are roster[2f-2] and roster[2f-1]; venues: only the
+ * standard ones with a 2 vs 2 start table (towers_team_venue_ok), in both. */
+#define TOWER_TEAM          4
+#define TOWER_TEAM_COMMUNITY 5
+#define TOWER_COUNT         5
+#define TOWER_PAGE_TOWERS   4   /* the TOWERS page's cards: Uptown, Five Boroughs, the Weekly, the Team Tower (4 or 5) */
+#define TOWER_ART_COUNT     3   /* towers with a rendered building (scripts/tower-art.py); the Team Tower is drawn */
+#define TOWER_IS_TEAM(t)    ((t) == TOWER_TEAM || (t) == TOWER_TEAM_COMMUNITY)
 
 #define TOWER_MAX_ROSTER    600
 #define TOWER_MAX_VENUES    64
@@ -45,7 +54,9 @@ typedef struct TowerRun {
     int tower;                  /* TOWER_* */
     uint32_t seed;
     int fighter, skin;          /* the climber: Battle-mode ID (99 a created fighter, 1000+ a community one), skin */
-    int floors;                 /* how tall this run's tower is: the roster's size */
+    int fighter2, skin2;        /* the team towers: player 2's fighter (pad 1, slot 1) */
+    int roster_n;               /* the IDs in roster[]: 2 a floor in the team towers; 0: floors (one a floor) */
+    int floors;                 /* how tall this run's tower is: the roster's size (team: half of it) */
     int floor;                  /* the floor fought next, 1..floors; floors + 1 once the top is beaten */
     int roster[TOWER_MAX_ROSTER];   /* the opponents in climb order: roster[floor - 1] */
     int venue_n;
@@ -84,11 +95,24 @@ uint32_t towers_roster_hash(const int *ids, int n);
  * feID < 28), sorted. floor 1, full health. Returns the floor count (0: no opponent or no venue). */
 int towers_new_run(TowerRun *run, int tower, uint32_t seed, int fighter, int skin, const int *pool, int pool_n,
                    const int *venues, int venue_n);
-/* Floor n's opponent (1..floors), -1 outside the run. */
+/* Build 106: a new team run (TOWER_TEAM or TOWER_TEAM_COMMUNITY): both players' fighters dropped from the pool, which
+ * is sorted, shuffled as towers_new_run's and cut to an even count; floors = half of it. Venues: towers_team_venue_ok.
+ * The hash is over the cut roster. Returns the floor count (0: fewer than two opponents or no venue). */
+int towers_new_team_run(TowerRun *run, int tower, uint32_t seed, int fighter, int skin, int fighter2, int skin2,
+                        const int *pool, int pool_n, const int *venues, int venue_n);
+/* A team tower's venue: a standard venue with a 2 vs 2 start table, never The Pit (19) nor the one-on-one-only 17, 24,
+ * 26, nor a community venue (a new venue may keep its template's one-on-one table). */
+int towers_team_venue_ok(int tower, int fe);
+/* The IDs in run->roster (roster_n, or floors). */
+int towers_roster_len(const TowerRun *run);
+/* Floor n's opponent (1..floors), -1 outside the run; the team towers: the first CPU (slot 2). */
 int towers_opponent(const TowerRun *run, int floor);
+/* The team towers: floor n's second CPU (slot 3); -1 in the other towers. */
+int towers_opponent2(const TowerRun *run, int floor);
 /* Floor n's venue: drawn from the pool by the seed and the floor (the same floor, the same venue). -1 with none. */
 int towers_venue(const TowerRun *run, int floor);
-/* A boss floor: Uptown's last floor; every TOWER_CHAPTER-th floor of Five Boroughs. */
+/* A boss floor: Uptown's last floor; every TOWER_CHAPTER-th floor of Five Boroughs; the team towers: every
+ * TOWER_CHAPTER-th floor and the top one. */
 int towers_is_boss(int tower, int floor, int floors);
 /* Build 101: the bosses are fixed, as in the story (and the towers of fighting games): after the shuffle, Uptown's
  * last floor gets Crow (58, the story's final boss; a climb with Crow himself the strongest other story boss), and
@@ -97,7 +121,10 @@ int towers_is_boss(int tower, int floor, int floors);
  * Each is swapped in from its own floor, so the roster (and its hash) stays the same set. Only a boss the roster has
  * is placed. Returns the bosses placed. The account service computes the order itself (towers.go TowerOrder) and
  * freezes a run that meets another opponent: towers.c places them only for an offline run, or when the service
- * says it does the same (its start answer's bosses=1). */
+ * says it does the same (its start answer's bosses=1).
+ * Build 106, the team towers: boss pairs, the top floor Crow + Blaze 3 (else the next of 84, 81, 83, 56, 59, 57, 80
+ * the roster has), floors 10, 20 and 30 (below the top) D-Mob + Sticky, Blaze + D-Mob 2, Sticky 2 + Blaze 2 (a member
+ * the roster lacks or the top pair took is left as drawn); server TowerPlaceTeamBosses does the same. */
 int towers_place_bosses(TowerRun *run);
 /* After floor `beaten` was won, the run is written (a save point): every floor in Uptown, at each chapter's end in
  * Five Boroughs (chapter = TOWER_CHAPTER, tests may pass less). The top floor is always one. */

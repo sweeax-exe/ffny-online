@@ -35,8 +35,13 @@ bool g_towers_close = false;               // the start card started a run: the 
 std::atomic<int> g_towers_hub{0};          // the end screen's A: the next opening of the screens shows TOWERS
 
 struct TowersUi {
-    int sel = 0;                    // the tower chosen on the page, 0..2
-    float grow[3] = { 0, 0, 0 };    // each tower's step forward (0..1, eased)
+    int sel = 0;                    // the tower card chosen on the page, 0..3 (tw_card_tower)
+    float grow[TOWER_PAGE_TOWERS] = {};     // each tower's step forward (0..1, eased)
+    // build 106, the Team Tower card: LB / RB the fighter rule (STANDARD: tower 4, WITH COMMUNITY: tower 5); a new
+    // climb picks player 1's fighter, waits for player 2's A on pad 2, then player 2's pick (team_stage 1, 2, 3)
+    bool team_comm = false;
+    int team_stage = 0;
+    int pick2 = -1, pick2_skin = 0;
     bool rules = false;             // Y: the rules panel over the page
     int card = 0;                   // 0 the towers, 1 the saved run's card, 2 the start card
     int pick = -1, pick_skin = 0;   // the climber chosen in the grid
@@ -61,7 +66,8 @@ struct TowersUi {
 } TWU;
 
 // GET /api/towers/board?format=text (server relay/accounts/towers.go TowerBoardText), per season kind.
-struct TowerBoardRow { int place = 0; long long account = 0; std::string name; int floors = 0; int secs = 0; int fighter = -1; bool cleared = false; };
+struct TowerBoardRow { int place = 0; long long account = 0; std::string name; int floors = 0; int secs = 0; int fighter = -1; bool cleared = false;
+                       std::string partner; };     // build 106: the team towers' player 2 (an account's name, or GUEST)
 struct TowerBoardTower { int entries = 0; std::vector<TowerBoardRow> rows; bool me = false; int me_place = 0, me_floors = 0, me_secs = 0; };
 struct TowerBoard {
     bool valid = false;
@@ -105,6 +111,7 @@ bool parse_tower_board(const char *text, TowerBoard &b)
                 r.secs = (int)ring_num(fl, 5);
                 r.fighter = (int)ring_num(fl, 6);
                 r.cleared = ring_num(fl, 7) != 0;
+                if (fl.size() >= 9) r.partner = ring_str(fl, 8);
                 bt.rows.push_back(r);
             } else if (k == "me") {
                 bt.me = true;
@@ -193,7 +200,19 @@ TowerBoard tw_board(int which)
 }
 
 const ImU32 TOWER_COL[TOWER_COUNT] = { IM_COL32(255, 150, 40, 255), IM_COL32(80, 190, 255, 255),
-                                       IM_COL32(255, 60, 170, 255) };
+                                       IM_COL32(255, 60, 170, 255), IM_COL32(90, 220, 120, 255), IM_COL32(170, 130, 255, 255) };
+
+// The tower of page card k: Uptown, Five Boroughs, the Weekly, the Team Tower (its fighter rule picks 4 or 5).
+int tw_card_tower(int k) { return k < 3 ? k + 1 : TWU.team_comm ? TOWER_TEAM_COMMUNITY : TOWER_TEAM; }
+
+// Build 106: player 2 presses A on the second controller (pad slot 1). Tests: RECOMP_TEST_TOWERS_P2_JOIN=1.
+bool tw_p2_pressed_a()
+{
+    InputRaw raw;
+    const char *t = getenv("RECOMP_TEST_TOWERS_P2_JOIN");
+    if (t && *t == '1') return true;
+    return xbox_HostInputRawPad(1, &raw) && raw.src[INPUT_SRC_SOUTH] >= 16384;
+}
 
 // ---- what the page shows (the gallery's samples, or towers.c's file) ----
 
@@ -254,8 +273,8 @@ const float TOWER_ART_W = 128, TOWER_ART_H = 256;
 
 const Tex &tower_tex(int kind)
 {
-    static const char *const rel[TOWER_COUNT] = { "towers/tower1-512.png", "towers/tower2-512.png", "towers/tower3-512.png" };
-    if (kind < 1 || kind > TOWER_COUNT || TWU.gal_drawn) return no_tex();
+    static const char *const rel[TOWER_ART_COUNT] = { "towers/tower1-512.png", "towers/tower2-512.png", "towers/tower3-512.png" };
+    if (kind < 1 || kind > TOWER_ART_COUNT || TWU.gal_drawn) return no_tex();
     return tex(rel[kind - 1]);
 }
 
@@ -394,7 +413,7 @@ void draw_floor_column(ImDrawList *dl, const Frame &f, int tower, float cx, floa
         float y = bottom - std::min(1.0f, (float)best / floors) * (bottom - top);
         dl->AddLine(f.p(cx - w / 2 - 5, y), f.p(cx + w / 2 + 5, y), with_alpha(GOLD, dim), 1.6f * f.s());
     }
-    if (tower == TOWER_FIVE_BOROUGHS)
+    if (tower == TOWER_FIVE_BOROUGHS || TOWER_IS_TEAM(tower))
         for (int c = TOWER_CHAPTER; c < floors; c += TOWER_CHAPTER) {
             float y = bottom - (float)c / floors * (bottom - top);
             dl->AddLine(f.p(cx - w / 2 - 6, y), f.p(cx - w / 2 - 1, y), with_alpha(CREAM, 0.8f * dim), 1.2f * f.s());
@@ -405,7 +424,7 @@ void draw_floor_column(ImDrawList *dl, const Frame &f, int tower, float cx, floa
 const char *tower_sub(int tower)
 {
     return tower == TOWER_UPTOWN ? "EVERY FIGHTER, ONE BY ONE" : tower == TOWER_FIVE_BOROUGHS ? "THE WHOLE CITY, COMMUNITY TOO"
-                                                                : "A NEW TOWER EVERY WEEK";
+           : TOWER_IS_TEAM(tower) ? "TWO PLAYERS, TWO CONTROLLERS" : "A NEW TOWER EVERY WEEK";
 }
 
 std::string tower_desc(int tower)
@@ -417,6 +436,11 @@ std::string tower_desc(int tower)
     if (tower == TOWER_FIVE_BOROUGHS)
         return "Uptown's fighters plus every community fighter and venue you have, as tall as your roster. Chapters of "
                "10 floors, each ending on a boss. Your climb is saved after every floor. One loss and the climb is over.";
+    if (TOWER_IS_TEAM(tower))
+        return std::string("Two players on this PC, two controllers, 2 vs 2 against a CPU team on every floor. Both CPUs get "
+               "stronger up the tower; boss pairs every 10 floors, Crow and Blaze at the top. Saved after every floor, one loss "
+               "and the climb is over. ") + (tower == TOWER_TEAM ? "STANDARD: the game's own fighters only (LB / RB to change)."
+               : "WITH COMMUNITY: community fighters too, its own board (LB / RB to change).");
     return "Every week a new tower of 20 floors with its own twist, the same for everyone. Coming soon.";
 }
 
@@ -461,6 +485,7 @@ void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
     }
     const char *own = tower == TOWER_UPTOWN ? "Uptown: the original fighters; saved after every floor. Standard fighters only: no created or community fighter climbs it."
                     : tower == TOWER_FIVE_BOROUGHS ? "Five Boroughs: community fighters and venues too. Saved after every floor; one loss and the climb starts over. The board counts official packs only."
+                    : TOWER_IS_TEAM(tower) ? "Team Tower: 2 vs 2, player 2 on the second controller. Both CPUs climb with you. Standard and With community have their own boards."
                     : "The Weekly: 20 floors and one or two twists a week, from the server. Coming soon.";
     text(dl, f, g_title, 12, 140, y + 4, CREAM, own, LEFT, 0.8f, 370);
     float hx = 254;
@@ -505,7 +530,8 @@ void towers_board_panel(ImDrawList *dl, const Frame &f, int tower, int which, bo
         snprintf(line, sizeof line, "%d", r.place);
         text(dl, f, g_title, 13, 150, y, r.place <= 3 ? GOLD : WHITE, line, CENTER, 0.8f);
         if (r.fighter >= 0) portrait(dl, f, r.fighter, 166, y - 1, 14, 18);
-        text(dl, f, g_title, 13, 186, y, mine ? CREAM : WHITE, r.name.c_str(), LEFT, 0.8f, 180);
+        std::string who = r.partner.empty() ? r.name : r.name + " + " + r.partner;
+        text(dl, f, g_title, 13, 186, y, mine ? CREAM : WHITE, who.c_str(), LEFT, 0.8f, 180);
         snprintf(line, sizeof line, r.cleared ? "%d  CLEARED" : "%d", r.floors);
         text(dl, f, g_title, 13, 420, y, r.cleared ? GOLD : col, line, RIGHT, 0.8f);
         snprintf(line, sizeof line, "%d:%02d", r.secs / 60, r.secs % 60);
@@ -538,7 +564,15 @@ void towers_run_card(ImDrawList *dl, const Frame &f, int tower, const TowerRun *
     std::string name = fighter_label(fighter);
     FighterSkin look;
     if (skin > 0 && fighter_skin_get(fighter, skin, &look)) name += std::string(" (") + look.name + ")";
-    text(dl, f, g_title, 11, 220, 296, GREY, "THE CLIMBER", CENTER, 0.8f);
+    if (TOWER_IS_TEAM(tower)) {     // build 106: player 2 beside player 1
+        int f2 = saved ? saved->fighter2 : TWU.pick2;
+        if (f2 >= 0) {
+            portrait(dl, f, f2, 226, 230, 50, 62);
+            frame_rect(dl, f, 226, 230, 50, 62, with_alpha(col, 0.9f), 1.5f);
+            name += "  +  " + fighter_label(f2);
+        }
+    }
+    text(dl, f, g_title, 11, 220, 296, GREY, TOWER_IS_TEAM(tower) ? "THE TEAM" : "THE CLIMBER", CENTER, 0.8f);
     text(dl, f, g_title, std::min(15.0f, fit_size(f, g_title, 15, name.c_str(), 110)), 220, 308, WHITE, name.c_str(), CENTER, 1.0f);
     char line[96];
     float x = 290, y = 172;
@@ -548,10 +582,12 @@ void towers_run_card(ImDrawList *dl, const Frame &f, int tower, const TowerRun *
         text(dl, f, g_title, 20, x, y + 14, col, line, LEFT, 1.2f);
         snprintf(line, sizeof line, "%d BEATEN  -  %d MIN CLIMBED", saved->floor - 1, (int)(saved->climb_ms / 60000));
         text(dl, f, g_title, 11, x, y + 42, CREAM, line, LEFT, 0.8f);
-        int next = saved->floor <= saved->floors ? saved->roster[saved->floor - 1] : -1;
+        int next = towers_opponent(saved, saved->floor), next2 = towers_opponent2(saved, saved->floor);
         if (next >= 0) {
+            std::string up = fighter_label(next);
+            if (next2 >= 0) up += " + " + fighter_label(next2);
             text(dl, f, g_title, 11, x, y + 64, GREY, "NEXT UP", LEFT, 0.8f);
-            text(dl, f, g_title, 15, x, y + 77, WHITE, fighter_label(next).c_str(), LEFT, 1.0f, 180);
+            text(dl, f, g_title, 15, x, y + 77, WHITE, up.c_str(), LEFT, 1.0f, 180);
         }
         snprintf(line, sizeof line, "SEED %08X", saved->seed);
         text(dl, f, g_body, 10, x, y + 104, with_alpha(GREY, 0.9f), line, LEFT, 0);
@@ -572,33 +608,34 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     backdrop(dl, f, display, true, LOOK_STATS);
     page_title(dl, f, "TOWERS");
     text(dl, f, g_hand, 14, 590, 34, ORANGE, "CLIMB NEW YORK, ONE FIGHTER AT A TIME", RIGHT, 1.0f);
-    int tower = TWU.sel + 1;
+    int tower = tw_card_tower(TWU.sel);
     TowerRun saved;
     bool have = tw_saved(tower, &saved);
-    if (TWU.card == 0 && !TWU.rules) {
+    if (TWU.card == 0 && !TWU.rules && !TWU.board) {
         if (pad.left) TWU.sel = std::max(0, TWU.sel - 1);
-        if (pad.right) TWU.sel = std::min(TOWER_COUNT - 1, TWU.sel + 1);
+        if (pad.right) TWU.sel = std::min(TOWER_PAGE_TOWERS - 1, TWU.sel + 1);
+        if (TWU.sel == 3 && (pad.lb || pad.rb)) TWU.team_comm = !TWU.team_comm;     // build 106: the fighter rule
     }
-    tower = TWU.sel + 1;
+    tower = tw_card_tower(TWU.sel);
     have = tw_saved(tower, &saved);
     float dt = std::min(0.1f, ImGui::GetIO().DeltaTime);
     bool signed_now = gallery_on() || towers_signed_in();     // build 99: the rule towers.c posts runs by
     TowerBoard month = signed_now ? tw_board(0) : TowerBoard();
-    for (int k = 0; k < TOWER_COUNT; k++) {
+    for (int k = 0; k < TOWER_PAGE_TOWERS; k++) {
         float want = k == TWU.sel ? 1.0f : 0.0f;
         TWU.grow[k] += (want - TWU.grow[k]) * std::min(1.0f, dt / 0.05f);     // about 150 ms to settle
         if (gallery_on()) TWU.grow[k] = want;
     }
-    for (int k = 0; k < TOWER_COUNT; k++) {
-        int t = k + 1;
-        float cx = 130 + k * 190, base = 326;
+    for (int k = 0; k < TOWER_PAGE_TOWERS; k++) {
+        int t = tw_card_tower(k);
+        float cx = 95 + k * 150, base = 326;
         float s = 1.0f + 0.08f * ease_out_cubic(TWU.grow[k]);
         float dim = 0.6f + 0.4f * TWU.grow[k];
         if (mouse_pick(f, cx - 80, 80, 160, 300) && TWU.card == 0) TWU.sel = k;
         if (mouse_click(f, cx - 80, 80, 160, 300) && TWU.card == 0) const_cast<Pad &>(pad).a = true;
         // the light behind the chosen one
         if (TWU.grow[k] > 0.01f)
-            dl->AddCircleFilled(f.p(cx, base - 120), 120 * f.s(), with_alpha(TOWER_COL[k], 0.10f * TWU.grow[k]), 48);
+            dl->AddCircleFilled(f.p(cx, base - 120), 120 * f.s(), with_alpha(TOWER_COL[t - 1], 0.10f * TWU.grow[k]), 48);
         float top, bottom, w;
         draw_tower_shape(dl, f, t, cx, base, s, dim, &top, &bottom, &w);
         float ccx = tower_tex(t).srv ? cx - TOWER_ART_W * s / 2 + TOWER_ART_COLUMN[k][0] * TOWER_ART_W * s : cx;
@@ -614,18 +651,22 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
         }
         // the name plate
         float plate_h = signed_now && t != TOWER_WEEKLY ? 56.0f : 44.0f;     // T1: room for the board place
-        glass(dl, f, cx - 82, base + 8, 164, plate_h, 8, k == TWU.sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255),
+        glass(dl, f, cx - 72, base + 8, 144, plate_h, 8, k == TWU.sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255),
               k == TWU.sel ? 0.8f : 0.55f);
-        if (k == TWU.sel && TWU.card == 0) selector(dl, f, cx - 82, base + 8, 164, plate_h);
-        text(dl, f, g_title, 17, cx, base + 10, with_alpha(k == TWU.sel ? CREAM : GREY, dim), towers_name(t), CENTER, 1.2f);
+        if (k == TWU.sel && TWU.card == 0) selector(dl, f, cx - 72, base + 8, 144, plate_h);
+        text(dl, f, g_title, TOWER_IS_TEAM(t) ? 15.0f : 17.0f, cx, base + 10, with_alpha(k == TWU.sel ? CREAM : GREY, dim),
+             TOWER_IS_TEAM(t) ? "TEAM TOWER" : towers_name(t), CENTER, 1.2f);
+        if (TOWER_IS_TEAM(t))       // build 106: the fighter rule, LB / RB
+            text(dl, f, g_title, 9.5f, cx, base + plate_h + 12, with_alpha(k == TWU.sel ? TOWER_COL[t - 1] : GREY, dim),
+                 t == TOWER_TEAM ? "<  STANDARD  >" : "<  WITH COMMUNITY  >", CENTER, 0.6f);
         char line[64];
         if (t == TOWER_WEEKLY) snprintf(line, sizeof line, "20 FLOORS  -  SOON");
         else if (hr) snprintf(line, sizeof line, "FLOOR %d / %d", r.floor, r.floors);
         else if (best > 0) snprintf(line, sizeof line, "BEST %d  -  %d FLOORS", best, floors);
         else snprintf(line, sizeof line, "%d FLOORS", floors);
-        text(dl, f, g_title, 11, cx, base + 32, with_alpha(hr ? TOWER_COL[k] : ORANGE, dim), line, CENTER, 0.8f);
+        text(dl, f, g_title, 11, cx, base + 32, with_alpha(hr ? TOWER_COL[t - 1] : ORANGE, dim), line, CENTER, 0.8f);
         if (t != TOWER_WEEKLY && signed_now) {     // T1: the player's place on this month's board
-            const TowerBoardTower &bt = month.t[k];
+            const TowerBoardTower &bt = month.t[t - 1];
             if (month.valid && bt.me && bt.me_place > 0) snprintf(line, sizeof line, "#%d OF %d THIS MONTH", bt.me_place, bt.entries);
             else if (month.valid) snprintf(line, sizeof line, "%d ON THE BOARD", bt.entries);
             else line[0] = 0;
@@ -660,11 +701,26 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
             say(why && *why ? why : "That climb could not be resumed.", 8000);
         }
         if (pad.b) TWU.card = 0;
-        else if (pad.x) { open_fighters_for(true); }
+        else if (pad.x) { TWU.team_stage = TOWER_IS_TEAM(tower) ? 1 : 0; open_fighters_for(true); }
         else if (pad.a && !gallery_on()) {
             int t = tower;
             TWU.starting = 1;
             std::thread([t]() { TWU.starting = towers_resume(t) ? 2 : 3; }).detach();
+        }
+        return;
+    }
+    if (TWU.card == 3) {    // build 106: player 2 joins on the second controller
+        towers_run_card(dl, f, tower, nullptr, TWU.pick, TWU.pick_skin);
+        float pulse = 0.5f + 0.5f * (float)sin(ImGui::GetTime() * 4.0);
+        glass(dl, f, 170, 300, 300, 30, 8, IM_COL32(14, 30, 18, 255), 0.9f);
+        text(dl, f, g_title, 14, 320, 306, with_alpha(TOWER_COL[tower - 1], 0.55f + 0.45f * pulse),
+             "PLAYER 2: PRESS A ON YOUR CONTROLLER", CENTER, 1.0f);
+        hint(dl, f, 280, 336, "b", "BACK");
+        if (pad.b) { TWU.card = 0; TWU.team_stage = 0; return; }
+        if (!gallery_on() && tw_p2_pressed_a()) {
+            TWU.team_stage = 3;
+            say("Player 2: pick your fighter.", 4000);
+            open_fighters_for(true);
         }
         return;
     }
@@ -688,11 +744,14 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
         float hx = 196;
         hx += hint(dl, f, hx, 336, "a", "START THE CLIMB");
         hint(dl, f, hx, 336, "b", "BACK");
-        if (pad.b) TWU.card = 0;
+        if (pad.b) { TWU.card = 0; TWU.team_stage = 0; }
         else if (pad.a && !gallery_on()) {
-            int t = tower, pick = TWU.pick, skin = TWU.pick_skin;
+            int t = tower, pick = TWU.pick, skin = TWU.pick_skin, pick2 = TWU.pick2, skin2 = TWU.pick2_skin;
             TWU.starting = 1;
-            std::thread([t, pick, skin]() { TWU.starting = towers_start(t, pick, skin) ? 2 : 3; }).detach();
+            if (TOWER_IS_TEAM(t))
+                std::thread([t, pick, skin, pick2, skin2]() { TWU.starting = towers_start_team(t, pick, skin, pick2, skin2) ? 2 : 3; }).detach();
+            else
+                std::thread([t, pick, skin]() { TWU.starting = towers_start(t, pick, skin) ? 2 : 3; }).detach();
         }
         return;
     }
@@ -700,6 +759,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     float hx = 54;
     if (tower == TOWER_WEEKLY) {
         hx += hint(dl, f, hx, 424, "y", "RULES");
+        if (TOWER_IS_TEAM(tower)) hx += hint(dl, f, hx, 424, "lb", "RULE");
         hint(dl, f, hx, 424, "b", "BACK");
     } else {
         hx += hint(dl, f, hx, 424, "a", have ? "CONTINUE" : "CLIMB");
@@ -721,12 +781,17 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
         return;
     }
     if (pad.a) {
+        TWU.team_stage = 0;
         if (have) TWU.card = 1;
-        else open_fighters_for(true);
+        else { if (TOWER_IS_TEAM(tower)) TWU.team_stage = 1; open_fighters_for(true); }
     }
 }
 
-bool towers_ui_originals_only() { return TWU.sel + 1 == TOWER_UPTOWN; }
+bool towers_ui_originals_only()
+{
+    int t = tw_card_tower(TWU.sel);
+    return t == TOWER_UPTOWN || t == TOWER_TEAM;
+}
 
 void open_fighters_for(bool towers)
 {
@@ -738,11 +803,29 @@ void open_fighters_for(bool towers)
 // The grid's pick for a climber: the start card.
 void towers_fighter_chosen(int fighter)
 {
-    if (!towers_climber_ok(TWU.sel + 1, fighter, ONLINE_NEW_FIGHTER(fighter))) {     // build 98: Uptown, standard only
-        say("Uptown takes standard fighters only.", 4000);
+    int tower = tw_card_tower(TWU.sel);
+    if (!towers_climber_ok(tower, fighter, ONLINE_NEW_FIGHTER(fighter))) {     // build 98: Uptown, standard only
+        say(TOWER_IS_TEAM(tower) ? "The standard Team Tower takes standard fighters only." : "Uptown takes standard fighters only.", 4000);
         return;
     }
     S.towers_pick = false;
+    if (TOWER_IS_TEAM(tower) && TWU.team_stage == 3) {     // build 106: player 2's pick, then the start card
+        TWU.pick2 = fighter;
+        TWU.pick2_skin = S.pick_skin;
+        TWU.team_stage = 0;
+        TWU.card = 2;
+        S.page = TOWERS;
+        return;
+    }
+    if (TOWER_IS_TEAM(tower)) {     // player 1's pick: player 2 joins next
+        TWU.pick = fighter;
+        TWU.pick_skin = S.pick_skin;
+        TWU.pick2 = -1;
+        TWU.team_stage = 2;
+        TWU.card = 3;
+        S.page = TOWERS;
+        return;
+    }
     TWU.pick = fighter;
     TWU.pick_skin = S.pick_skin;
     TWU.card = 2;
@@ -860,6 +943,11 @@ void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersVi
         portrait(dl, f, v.next_opponent, x + 16, y + 28, 110, 138, with_alpha(IM_COL32_WHITE, a));
         frame_rect(dl, f, x + 16, y + 28, 110, 138, with_alpha(v.next_rules.boss ? GOLD : col, 0.8f * a), 1.5f);
         std::string name = fighter_label(v.next_opponent);
+        if (v.next_opponent2 >= 0) {    // build 106: the CPU team
+            portrait(dl, f, v.next_opponent2, x + 74, y + 112, 52, 64, with_alpha(IM_COL32_WHITE, a));
+            frame_rect(dl, f, x + 74, y + 112, 52, 64, with_alpha(v.next_rules.boss ? GOLD : col, 0.8f * a), 1.5f);
+            name += " + " + fighter_label(v.next_opponent2);
+        }
         text(dl, f, g_title, std::min(22.0f, fit_size(f, g_title, 22, name.c_str(), 124)), x + 138, y + 30, with_alpha(WHITE, a),
              name.c_str(), LEFT, 1.2f);
         const char *style = online_fighter_style(v.next_opponent);

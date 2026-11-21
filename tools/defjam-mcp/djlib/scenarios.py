@@ -3386,6 +3386,135 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
     return result
 
 
+# ---- the Team Tower (build 106) ----------------------------------------------------------------------
+
+TEAM_WATCH = TOWERS_WATCH + ["team floor", "[TOWERS] team run"]
+
+
+def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_env=None, out_dir=None):
+    """The Team Tower (towers 4 and 5), two players on one PC: pad 1 (the scripted pad) and pad 2 (a second virtual
+    pad), 2 vs 2 against two CPUs, signed in against a local account service with Towers on (FFNY_SERVER_DIR: a
+    server checkout with towers 4 and 5); player 2's account rides along (RECOMP_TOWERS_PARTNER_TOKEN). One copy after
+    the other on one run file:
+    1. Team Tower (standard): three floors won by the test knockout (slots 0 and 1 stand, 2 and 3 fall), every one
+       saved; B SAVE AND QUIT on the climb after floor 3.
+    2. Resumed on floor 4 and lost (the CPU team's knockout): the run ends with 3 floors, nothing saved.
+    3. A new standard climb: floor 1 again (one loss sent it back), won.
+    4. The community Team Tower: floor 1 won (its own board).
+    5. TOWERS with the Team Tower card chosen and its BOARD: pictures. Both boards are read back from the service:
+       Copy 0 + Copy 1 on each. Pictures (the overlay's own) go to out_dir too."""
+    import shutil
+    import urllib.request
+    t0 = time.time()
+    s = copies.Session("towersteam", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "towersteam", "ok": False}
+    shots, problems, phases = [], [], []
+    try:
+        h = harness()
+        acc_port = 18960 + (os.getpid() % 20) * 2
+        tokens = s.accounts(acc_port, ["Copy 0", "Copy 1"], extra=["-towers"])
+        towers_file = os.path.join(s.dir, "towers-team.json")
+        base = dict(VIRTUAL_PAD_ENV, RECOMP_INPUT_VIRTUAL_PADS="2", RECOMP_SCRIPT_ANCHOR=TITLE_ANCHOR,
+                    RECOMP_TOWERS_FILE=towers_file, RECOMP_OVERLAY_SHOT_MS="500",
+                    RECOMP_ACCOUNT_SERVER="127.0.0.1:%d" % acc_port, RECOMP_ACCOUNT_TEST_TOKEN=tokens["Copy 0"],
+                    RECOMP_TOWERS_PARTNER_TOKEN=tokens["Copy 1"])
+
+        def script(matches):
+            return h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(matches, 4, False))
+
+        def saved(tower):
+            try:
+                with open(towers_file, encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                return None, None
+            return next((r for r in data.get("runs", []) if r.get("tower") == tower), None), data.get("best")
+
+        def phase(i, name, env, until, plan):
+            e = dict(base, **env)
+            e.update(extra_env or {})
+            c, ok = _towers_phase(s, i, e, until, shots, plan, timeout or 900)
+            text = logparse.read_text(c.log)
+            p = {"phase": name, "reached": ok, "log": _relpath(c.log),
+                 "levels": re.findall(r"team floor (\d+) set up: slot levels (\d+ \d+ \d+ \d+)", text),
+                 "teams": re.findall(r"floor (\d+): team (\d+) \+ (\d+) against (\d+) \+ (\d+)", text),
+                 "ai": sorted(set(re.findall(r"\[TOWERS-AI\] floor \d+: CPU (\d) AI block", text))),
+                 "reports": [r for r in re.findall(r"service /api/towers/fight\?format=text floor (\d+): HTTP (\d+)", text)]}
+            phases.append(p)
+            for r in p["reports"]:
+                if r[1] != "200":
+                    problems.append("%s: a report was refused (floor %s: HTTP %s)" % (name, r[0], r[1]))
+            if not re.search(r"service: run \w+, seed [0-9A-F]+, \d+ floors[^\n]*on the board", text) and "resume" not in name:
+                problems.append("%s: the service dealt no run on the board" % name)
+            for f, lv in p["levels"]:
+                if lv.split()[:2] != ["1", "1"]:
+                    problems.append("%s: floor %s: the players' slot words are %s" % (name, f, lv))
+            if p["levels"] and p["ai"] != ["2", "3"]:
+                problems.append("%s: the AI ramp did not take both CPU slots (%s)" % (name, p["ai"]))
+            return ok, text
+
+        ok, text = phase(0, "team-climb", {"RECOMP_TEST_TOWERS": "4,55,0,22,0", "RECOMP_TEST_KO_STEP": "900,0",
+                                           "RECOMP_PAD_SCRIPT": script(4), "RECOMP_TEST_TOWERS_QUIT": "3"},
+                         (1, "save and quit"), [("set up: slot levels", 1, 10, "t1-fight-floor1"),
+                                                ("save and quit", 1, 4.0, "t1-towers-page")])
+        r4, best = saved(4)
+        phases[-1].update({"saved_floor": r4 and r4.get("floor"), "fighter2": r4 and r4.get("fighter2"), "best": best})
+        if not ok or not r4 or r4.get("floor") != 4 or r4.get("fighter2") != 22 or r4.get("roster_n") != 2 * r4.get("floors", 0):
+            problems.append("team: three floors were not won and saved (file %s)" % (r4 and {k: r4.get(k) for k in ("floor", "fighter2", "roster_n")}))
+        if len(phases[-1]["teams"]) < 3:
+            problems.append("team: not three 2 vs 2 floors (%s)" % phases[-1]["teams"])
+        ok, text = phase(1, "team-resume-loss", {"RECOMP_TEST_TOWERS": "4,resume", "RECOMP_TEST_KO_STEP": "900,2",
+                                                 "RECOMP_PAD_SCRIPT": script(2), "RECOMP_TEST_TOWERS_END": "a"},
+                         (1, " lost: the run"), [("set up: slot levels", 1, 10, "t2-fight-floor4"),
+                                                 (" lost: the run", 1, 6.0, "t2-lost")])
+        r4, best = saved(4)
+        phases[-1].update({"resumed": "run resumed: TEAM TOWER" in text, "run_left": bool(r4), "best": best})
+        if not ok or "run resumed: TEAM TOWER, seed" not in text or "floor 4 lost: the run ends with 3 floors beaten" not in text:
+            problems.append("team: the resumed climb was not lost on floor 4")
+        if r4 or not best or len(best) < 5 or best[3] != 3:
+            problems.append("team: the loss did not end the run with best 3 (%s)" % best)
+        ok, text = phase(2, "team-new-climb", {"RECOMP_TEST_TOWERS": "4,55,0,22,0", "RECOMP_TEST_KO_STEP": "900,0",
+                                               "RECOMP_PAD_SCRIPT": script(2)},
+                         (1, " won ("), [("set up: slot levels", 1, 10, "t3-fight-new")])
+        if not ok or not re.search(r"TEAM TOWER floor 1 of \d+: fighter 55", text):
+            problems.append("team: the new climb did not start on floor 1")
+        ok, text = phase(3, "team-community", {"RECOMP_TEST_TOWERS": "5,55,0,22,0", "RECOMP_TEST_KO_STEP": "900,0",
+                                               "RECOMP_PAD_SCRIPT": script(2)},
+                         (1, " won ("), [("set up: slot levels", 1, 10, "t4-fight-community")])
+        if not ok or "run start: TEAM TOWER COMMUNITY" not in text:
+            problems.append("team community: floor 1 was not won")
+        _towers_phase(s, 4, dict(base, RECOMP_TEST_OPEN_ONLINE="towers", RECOMP_TEST_OVERLAY_PAD="r,r,r,x",
+                                 RECOMP_PAD_SCRIPT=h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"])),
+                      (1, "[TOWERS] board (month)"), shots, [("[TOWERS] board (month)", 1, 6.0, "t5-team-board")], 240)
+        boards = {}
+        for tower in (4, 5):
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:%d/api/towers/board?format=text&tower=%d&season=all"
+                                            % (acc_port, tower), timeout=5) as r:
+                    boards[tower] = [l for l in r.read().decode("utf-8", "replace").splitlines() if l.startswith("row=")]
+            except OSError as error:
+                boards[tower] = ["unreachable: %s" % error]
+        result["boards"] = boards
+        want = {4: r"row=4\|1\|\d+\|Copy 0\|3\|\d+\|55\|0\|Copy 1\|22$", 5: r"row=5\|1\|\d+\|Copy 0\|1\|\d+\|55\|0\|Copy 1\|22$"}
+        for tower, pat in want.items():
+            if not any(re.match(pat, l) for l in boards[tower]):
+                problems.append("board %d: no Copy 0 + Copy 1 row (%s)" % (tower, boards[tower]))
+        for p in phases:
+            crashes = _faults(logparse.read_text(os.path.join(machine.REPO, p["log"])))
+            if crashes:
+                problems += ["%s: %s" % (p["phase"], cr) for cr in crashes]
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+            for sh in shots:
+                src = sh if os.path.isabs(sh) else os.path.join(machine.REPO, sh)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(out_dir, os.path.basename(src)))
+        result.update({"ok": not problems, "phases": phases, "problems": problems, "shots": shots})
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
 # ---- Towers rewards (build 104) ---------------------------------------------------------------------
 
 TOWER_REWARDS_UI = "8:locker=frame;14:locker=title;20:locker=sheet;25:hub;27:room=create;38:hub"
