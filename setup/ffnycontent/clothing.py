@@ -79,9 +79,21 @@ def apply_ops(sod_blob, parts_xml, name_tables, ops):
             words[4] = int(op["price"])
             words[5] = ed.add_string(text_hash=h_name)
             words[7] = words[7] + 1
+            model = op.get("model")
+            if model:
+                # an item with a part of its own (build 106: the Eyepatch): the row's model number names the new
+                # part V2CP_<cat>_<num>_C, which goes into the parts list as a model of its own with the item's
+                # textures (the template's mesh is not used)
+                num, name = int(model["num"]), str(model["name"])
+                if not 0 < num < 10000 or name != "V2CP_%03d_%04d_C" % (row.category, num):
+                    raise ClothingError("item model %r does not name %03d_%04d" % (name, row.category, num))
+                words[1] = num
             item_id = ed.add_row(clothing_table, words, sod.name_hash(row_name), row.offset)
             if op.get("bundle"):
                 ed.add_bundle_item(op["bundle"], item_id)
+            if model and parts_xml is not None:
+                textures = [c["texture"] for c in op["colours"]]
+                parts_xml = cpparts.append_model(parts_xml, op["section"], name, [(textures[0], textures[1:])])
             for v in op["variants"]:
                 parts_xml = cpparts.append_texture(parts_xml, op["section"], v["model"], v["textures"][0],
                                                    v["textures"][1:])

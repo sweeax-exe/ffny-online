@@ -59,6 +59,7 @@
 #include "online_guard.h"
 #include "hooks/new_fighters.h"
 #include "hooks/fighter_skins.h"
+#include "hooks/item_ext.h"
 
 extern void sub_000158F0(void);
 
@@ -118,7 +119,7 @@ static void unlock_current_profile(void)
     slot = p + PROFILE_SLOT0 + idx * PROFILE_STRIDE;
     for (k = 0; k < 6; k++) {
         uint32_t c = p + 0x14E4u + kItemContainer[k], at = MEM32(c + 0xC + idx * 4);
-        items[k] = MEM32(c + 8);
+        items[k] = item_ext_retail_count(c);    /* new items have no bits in the slot (item_ext.h) */
         if (at < slot || at - slot >= PROFILE_STRIDE)
             return;                     /* not set up yet, or not in this slot */
         states[k] = at - slot;
@@ -170,15 +171,22 @@ static void unlock_report(const char *text)
         slot = p + 0x177Cu + idx * 0x5950u;
         n += snprintf(line + n, sizeof line - n, " cash %u", MEM32(slot + 0x20u));
         for (k = 0; k < 6 && n < (int)sizeof line - 64; k++) {
-            uint32_t c = p + 0x14E4u + at[k], count = MEM32(c + 8), states = MEM32(c + 0xC + idx * 4), i;
+            /* the retail items, whose states the slot keeps; new ones (item_ext.h) are listed as +N */
+            uint32_t c = p + 0x14E4u + at[k], count = item_ext_retail_count(c), states = MEM32(c + 0xC + idx * 4), i;
+            uint32_t extra = item_ext_new_count(c), items = MEM32(c + 4), h = 2166136261u;
             unsigned lk = 0, un = 0, ow = 0;
             if (!states || count > 4096) continue;
             for (i = 0; i < count; i++) {
                 unsigned v = (MEM8(states + i / 4) >> (i % 4 * 2)) & 3;
                 if (!v) lk++; else if (v == 1) un++; else ow++;
+                /* which item has which state: FNV-1a over (ID, state), the same for two layouts only when
+                 * every item reads the same state in both */
+                h = (h ^ (items ? MEM32(items + 4 * i) : i)) * 16777619u;
+                h = (h ^ v) * 16777619u;
             }
-            n += snprintf(line + n, sizeof line - n, " %s %u@+0x%X %u/%u/%u", name[k], count,
-                          (unsigned)(states - slot), lk, un, ow);
+            n += snprintf(line + n, sizeof line - n, " %s %u@+0x%X %u/%u/%u #%08X", name[k], count,
+                          (unsigned)(states - slot), lk, un, ow, h);
+            if (extra && n < (int)sizeof line - 16) n += snprintf(line + n, sizeof line - n, "+%u", extra);
         }
     }
     fprintf(stderr, "%s\n", line);

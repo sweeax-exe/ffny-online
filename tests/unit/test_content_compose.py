@@ -292,6 +292,36 @@ def test_clothing_adds_and_ops(game, data):
     assert tex.read("V2CP_114_0005_Z01_01.xsh").endswith(b"gold") and tex.read("V2CP_114_0005_A01_01.xsh") == TEX_A
 
 
+def test_clothing_item_with_a_part_of_its_own(game, data):
+    """Build 106 (the Eyepatch): an item op's "model" names a part the pack adds; the row takes its number and the
+    parts list gets it as a model of its own with the item's texture, the template's model untouched."""
+    item = item_op("Eyepatch", "Y01", clothing_floor(game))
+    item.update({"model": {"num": 6, "name": "V2CP_114_0006_C"}, "variants": [],
+                 "colours": [{"number": 1, "label": "Diamond", "texture": "V2CP_114_0006_Y01_01"}]})
+    base_o = viv.Archive(game / "assets" / "v2cp_1.viv").read("V2CP_114_0005_C.o")
+    pack = make_pack(data, "eyepatch", "clothing", [
+        ("assets/v2cp_1.viv", "V2CP_114_0006_C.o", "add", "assets/v2cp_1.viv", "V2CP_114_0005_C.o",
+         base_o, base_o[:40] + b"patch" * 30),
+        ("assets/v2cp_1.viv", "V2CP_114_0006_Y01_01.xsh", "add", "assets/v2cp_1.viv", "V2CP_114_0005_A01_01.xsh",
+         TEX_A, TEX_A[:50] + b"diam" * 60)], [item])
+    result = compose(data, game, [pack])
+    assert result["applied"] == ["eyepatch"], result
+    db = sod.Sod(out(data, "assets/djv2.sod").read_bytes())
+    new, = [r for r in db.clothing() if r.name.startswith("FFNY_")]
+    assert new.num == 6 and new.model_name() == "V2CP_114_0006_C" and new.texture_name() == "V2CP_114_0006_Y01_01"
+    parts = viv.Archive(out(data, "assets/v2cp_0.viv")).read("createplayer_parts.xml").decode("latin-1")
+    assert cpparts.check(parts) == []
+    assert cpparts.models(parts, "Ubody")[-1] == ("V2CP_114_0006_C", [("V2CP_114_0006_Y01_01", [])])
+    assert cpparts.models(parts, "Ubody")[0][0] == "V2CP_114_0005_C"
+    arch = viv.Archive(out(data, "assets/v2cp_1.viv"))
+    assert arch.read("V2CP_114_0006_C.o").endswith(b"patch") and arch.read("V2CP_114_0005_C.o") == base_o
+    # a model that does not name the row's category and number is refused (the pack is skipped)
+    bad = dict(item, model={"num": 7, "name": "V2CP_114_0006_C"})
+    pack2 = make_pack(data, "bad", "clothing", [], [bad])
+    result = compose(data, game, [pack2])
+    assert result["applied"] == [] and "bad" in str(result["skipped"])
+
+
 def test_new_venue(game, data):
     op = {"op": "new-venue", "template": "V2BG_03A", "template_code": "03A", "template_fe_id": 3,
           "filename": "V2BG_28A", "code": "28A", "fe_id": 28, "title": "The Block", "dispname": "28A The Block",
