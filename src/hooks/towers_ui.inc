@@ -416,7 +416,7 @@ std::string tower_desc(int tower)
                "and the climb is over. Your climb is saved after every floor. Standard fighters only.";
     if (tower == TOWER_FIVE_BOROUGHS)
         return "Uptown's fighters plus every community fighter and venue you have, as tall as your roster. Chapters of "
-               "10 floors, each ending on a boss: save there and come back later. One loss and the climb is over.";
+               "10 floors, each ending on a boss. Your climb is saved after every floor. One loss and the climb is over.";
     return "Every week a new tower of 20 floors with its own twist, the same for everyone. Coming soon.";
 }
 
@@ -460,7 +460,7 @@ void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
         y += text_width(f, g_title, 12.5f, line) > 350 ? 34 : 20;
     }
     const char *own = tower == TOWER_UPTOWN ? "Uptown: the original fighters; saved after every floor. Standard fighters only: no created or community fighter climbs it."
-                    : tower == TOWER_FIVE_BOROUGHS ? "Five Boroughs: community fighters and venues too. A save point at the end of each chapter of 10 floors. The board counts official packs only."
+                    : tower == TOWER_FIVE_BOROUGHS ? "Five Boroughs: community fighters and venues too. Saved after every floor; one loss and the climb starts over. The board counts official packs only."
                     : "The Weekly: 20 floors and one or two twists a week, from the server. Coming soon.";
     text(dl, f, g_title, 12, 140, y + 4, CREAM, own, LEFT, 0.8f, 370);
     float hx = 254;

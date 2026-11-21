@@ -105,9 +105,8 @@ int towers_is_boss(int tower, int floor, int floors)
 int towers_is_save_point(int tower, int beaten, int floors, int chapter)
 {
     if (beaten < 1) return 0;
-    if (beaten >= floors) return 1;
-    if (tower == TOWER_FIVE_BOROUGHS) return beaten % (chapter > 0 ? chapter : TOWER_CHAPTER) == 0;
-    return 1;
+    (void)tower; (void)floors; (void)chapter;
+    return 1;       /* build 104 (owner): every won floor is a save point in both towers; a loss still ends the climb */
 }
 
 void towers_floor_rules(int tower, int floor, int floors, TowerFloorRules *out)
