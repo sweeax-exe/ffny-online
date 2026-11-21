@@ -127,6 +127,8 @@ def cmd_scenario(a):
                              out_dir=a.out, stress=a.stress, **common)
     elif a.kind == "towers":
         r = scenarios.towers(timeout=a.timeout, extra_env=env, **common)
+    elif a.kind == "towerrewards":
+        r = scenarios.tower_rewards(timeout=a.timeout or 150, relay_port=a.relay_port, extra_env=env, out_dir=a.out, **common)
     else:
         r = scenarios.gallery(page_ms=a.page_ms, timeout=a.timeout or 300, extra_env=env, **common)
     print(scenarios.format_result(r))
@@ -232,7 +234,8 @@ def main(argv=None):
 
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
-                                              "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers"])
+                                              "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers",
+                                              "towerrewards"])
     sc.add_argument("--case", default="kick", help="lobby97 (build 97): kick, quick, quickmax or afk")
     sc.add_argument("--via", default="voice", choices=["voice", "chat"], help="mute: the VOICE CHAT page's call, or the chat window's MUTE IN ROOM")
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")

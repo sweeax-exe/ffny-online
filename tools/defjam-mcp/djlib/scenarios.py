@@ -3384,3 +3384,135 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
     finally:
         _finish(s, result, t0)
     return result
+
+
+# ---- Towers rewards (build 104) ---------------------------------------------------------------------
+
+TOWER_REWARDS_UI = "8:locker=frame;14:locker=title;20:locker=sheet;25:hub;27:room=create;38:hub"
+TOWER_REWARDS_SHOTS = os.environ.get("DJ_TOWER_REWARDS_SHOTS", r"D:\DefJam\community\tower-rewards-shots")
+
+
+def _tower_rewards_runs(account):
+    """Runs as build 103's service stored them (no rewards then): an October Uptown clear (rules 1, the month's #1,
+    an old "untouched" fact line on floor 22) and a November Five Boroughs clear."""
+    def run(rid, tower, floors, start, beaten, rules, facts=None):
+        return {"id": rid, "account": account, "tower": tower, "fighter": 3, "rules": rules, "seed": 1,
+                "order": [1] * floors, "venues": [1], "start": start, "last": start, "board": True, "next": floors + 1,
+                "beaten": beaten, "steps": 60000, "reached": start, "ended": True, "end": "cleared", "ended_at": start,
+                "cleared": beaten == floors, "facts": facts or []}
+    runs = [run("tr-uptown-oct", 1, 72, "2026-10-12T18:00:00Z", 72, 1,
+                ["floor 22: 90% health or more left on 6 Hard floors in a row (now 100%)"]),
+            run("tr-boroughs-nov", 2, 60, "2026-11-19T18:00:00Z", 60, 2)]
+    return {"runs": {r["id"]: r for r in runs}, "open": {}, "inputs": {}}
+
+
+def tower_rewards(timeout=150, relay_port=27900, lock_timeout=None, log=None, keep_roots=False, extra_env=None,
+                  out_dir=None):
+    """Towers rewards (build 104): a local account service (-social -towers) starts on stored runs from before the
+    rewards (its start-up pass grants them), the copy's account wears the Tower Legend frame and title (the Locker's
+    equip call), and one copy opens the LOCKER on FRAME and TITLE, then a room of its own (its card). out_dir: the
+    captures as PNG (default D:\\DefJam\\community\\tower-rewards-shots)."""
+    import urllib.request
+    t0 = time.time()
+    s = copies.Session("tower-rewards", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "towerrewards", "ok": False}
+    try:
+        h = harness()
+        acc_port = relay_port + 100
+        name = "Copy 0"
+        with open(os.path.join(s.dir, "towers.json"), "w", encoding="utf-8") as fh:
+            json.dump(_tower_rewards_runs(1), fh)       # the first test account is account 1
+        tokens = s.accounts(acc_port, [name], extra=["-social", "-towers"])
+        s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
+
+        def call(method, path, body=None):
+            req = urllib.request.Request("http://127.0.0.1:%d%s" % (acc_port, path), method=method,
+                                         data=None if body is None else json.dumps(body).encode("utf-8"),
+                                         headers={"Authorization": "Bearer " + tokens[name], "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read() or b"null")
+            except Exception as e:
+                return getattr(e, "code", 0), None
+        legend = "tw-legend-1-2026-10"
+        equips = [call("POST", "/api/social/locker/equip", {"slot": slot, "id": legend})[0] for slot in ("frame", "title")]
+        _, locker = call("GET", "/api/social/locker")
+        unlocked = sorted(i["id"] for i in (locker or {}).get("items", []) if i.get("tower") and i.get("unlocked"))
+        result["service"] = {"equip": equips, "unlocked": unlocked}
+
+        shots = os.path.join(s.dir, "shots0")
+        os.makedirs(shots, exist_ok=True)
+        env = dict(VIRTUAL_PAD_ENV)
+        env.update({
+            "RECOMP_INPUT_VIRTUAL_PADS": "1",
+            "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+            "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"]),
+            "RECOMP_TEST_OPEN_ONLINE": "1",
+            "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port, "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:%d" % relay_port,
+            "RECOMP_NETPLAY_NAME": name,
+            "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
+            "RECOMP_ACCOUNT_TEST_TOKEN": tokens[name],
+            "RECOMP_OVERLAY_SHOT_DIR": shots, "RECOMP_OVERLAY_SHOT_MS": "1000",
+            "RECOMP_SOCIAL": "on",
+            "RECOMP_TEST_SOCIAL_UI": TOWER_REWARDS_UI,
+        })
+        env.update(extra_env or {})
+        watch = WATCH + ["[SOCIAL] ready", "[SOCIAL-UI] hub", "[LOCKER] test:"]
+        s.launch(0, env=env, core=2, watch=watch)
+        deadline = time.time() + timeout
+        stop = None
+        c = s.copies[0]
+        while time.time() < deadline:
+            s.poll()
+            if c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") or not c.alive():
+                stop = "the copy crashed or exited"
+                break
+            if c.watch.count("[SOCIAL-UI] hub") >= 2:
+                stop = "done"
+                break
+            time.sleep(1)
+        s.poll()
+        time.sleep(2)
+        text = logparse.read_text(c.log)
+        lines = [l for l in text.splitlines() if "[SOCIAL" in l or "[LOCKER]" in l]
+
+        def has(t):
+            return any(t in l for l in lines)
+        want = ["tw-boroughs", "tw-floor25", "tw-floor50", legend, "tw-untouchable", "tw-uptown"]
+        checks = {
+            "service_granted_from_old_runs": unlocked == sorted(want),
+            "service_equip": equips == [200, 200],
+            "ready": has("[SOCIAL] ready"),
+            "locker_loaded_worn": has("frame=%s title=%s" % (legend, legend)),
+            "locker_frame_rows": has("[LOCKER] test: slot frame") and has("tower (6 unlocked), worn " + legend),
+            "locker_title_rows": has("[LOCKER] test: slot title"),
+            "locker_capture": bool(glob.glob(os.path.join(shots, "*-locker.bmp"))),
+            "room_capture": bool(glob.glob(os.path.join(shots, "*-room.bmp"))),
+            "sheet_capture": bool(glob.glob(os.path.join(shots, "*-towerframes.bmp"))),
+        }
+        result["checks"] = checks
+        result["locker_lines"] = [l.split("] ", 1)[-1] for l in lines if "[LOCKER] test" in l or "] locker:" in l][-3:]
+        picked = []
+        try:
+            from PIL import Image
+        except ImportError:
+            Image = None
+        out_dir = out_dir or TOWER_REWARDS_SHOTS
+        if Image:
+            os.makedirs(out_dir, exist_ok=True)
+            for kind in ("locker", "towerframes", "room"):
+                files = sorted(glob.glob(os.path.join(shots, "*-%s.bmp" % kind)))
+                # the Locker's FRAME page (the first ones), its TITLE page (the last ones), the room's last
+                chosen = [files[len(files) // 4], files[-1]] if kind == "locker" and len(files) > 1 else files[-1:]
+                for p in chosen:
+                    out = os.path.join(out_dir, "%s-%s.png" % (kind, os.path.splitext(os.path.basename(p))[0].split("-")[0]))
+                    Image.open(p).convert("RGB").save(out)
+                    picked.append(out)
+        result["captures"] = picked
+        result["stop"] = stop
+        result["faults"] = _faults(text)
+        result["logs"] = [_relpath(c.log)]
+        result["ok"] = stop == "done" and all(checks.values()) and not result["faults"]
+    finally:
+        _finish(s, result, t0)
+    return result

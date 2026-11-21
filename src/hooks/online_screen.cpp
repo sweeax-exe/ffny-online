@@ -1112,11 +1112,22 @@ int &ranked_stats_tab();
 // build 52: the rewards (locker_ui.inc)
 bool rewards_shown();
 void open_locker();
+void locker_test(const std::string &slot);      // tests: RECOMP_TEST_SOCIAL_UI locker=SLOT (build 104)
 void open_season_rewards(int mode);
 void draw_season_rewards(ImDrawList *dl, const Frame &f, const Pad &pad);
 void draw_locker(ImDrawList *dl, const Frame &f, const Pad &pad);
 bool locker_gallery(const std::string &p);
 const social::Look *look_of(long long id);      // locker_ui.inc
+// build 104: the Towers rewards on the player cards (tower_frames.inc)
+bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, const char *id, float foot = 0,
+                      float a = 1.0f);
+bool tower_title_text(ImDrawList *dl, const Frame &f, float cx, float y, float size, const char *title, const char *id,
+                      float maxw, float a = 1.0f);
+void look_card(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, float round, const social::Look *lk,
+               float foot = 0, float a = 1.0f);
+void look_card_title(ImDrawList *dl, const Frame &f, float cx, float y, float size, const social::Look *lk, float maxw,
+                     float a = 1.0f);
+ImU32 rarity_col(int rarity);
 int look_tier(const social::Look *l);
 float look_icon(ImDrawList *dl, const Frame &f, float x, float cy, float size, const social::Look *l, float alpha = 1.0f);
 ImU32 look_col(const social::Look *l, ImU32 fallback);
@@ -4545,6 +4556,11 @@ void draw_watch(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r
             text(dl, f, g_title, 13, x + w - 8, y + 10, GOLD, streak, RIGHT, 1.2f);
         }
         text(dl, f, g_hand, 20, x + w / 2, y + ph + 2, slot == r.you ? ORANGE : CREAM, slot >= 0 ? slot_name(r, slot) : "?", CENTER, 1.2f);
+        if (slot >= 0 && social_enabled()) {    // build 104: the Towers frame and title the player wears
+            const social::Look *lk = look_of(room_account_of(slot_name(r, slot)));
+            look_card(dl, f, x, y, w, ph + 64, 10, lk, ph - 5);
+            look_card_title(dl, f, x + w / 2, y + ph + 23, 9, lk, w - 12);
+        }
         text(dl, f, g_title, 12, x + w / 2, y + ph + 34, GREY, fighter >= 0 ? online_fighter_name(fighter) : "", CENTER, 0.8f);
     }
     text(dl, f, g_stencil, 52, 320, 168, CREAM, "VS", CENTER, 2.0f);
@@ -4609,6 +4625,11 @@ void draw_watch_rot(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoo
             text(dl, f, g_title, 13, x + w - 8, y + 10, GOLD, streak, RIGHT, 1.2f);
         }
         text(dl, f, g_hand, 17, x + w / 2, y + ph + 2, slot == r.you ? ORANGE : CREAM, slot >= 0 ? slot_name(r, slot) : "?", CENTER, 1.2f, w - 6);
+        if (slot >= 0 && social_enabled()) {    // build 104: the Towers frame and title the player wears
+            const social::Look *lk = look_of(room_account_of(slot_name(r, slot)));
+            look_card(dl, f, x, y, w, ph + 60, 10, lk, ph - 5);
+            look_card_title(dl, f, x + w / 2, y + ph + 21, 8.5f, lk, w - 12);
+        }
         text(dl, f, g_title, 11, x + w / 2, y + ph + 32, GREY, fighter >= 0 ? online_fighter_name(fighter) : "", CENTER, 0.8f, w - 6);
     }
     text(dl, f, g_stencil, 30, 320, 326, CREAM, n > 2 ? "FREE FOR ALL" : "ONE ON ONE", CENTER, 1.6f);
@@ -4812,6 +4833,8 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         int kf = slot_fighter(r, h.king);
         rect(dl, f, kx, ky, 102, 152, IM_COL32(0, 0, 0, 150), 4);
         if (kf < 0 || !portrait(dl, f, kf, kx + 3, ky + 3, 96, 146)) text(dl, f, g_title, 34, kx + 51, ky + 50, GREY, "?", CENTER);
+        if (social_enabled())       // build 104: the king's Towers frame (the crown stays on top)
+            look_card(dl, f, kx, ky, 102, 152, 4, look_of(room_account_of(slot_name(r, h.king))), 149);
         crown(dl, f, kx + 51, ky - 4, 40);
         text(dl, f, g_hand, 20, 463, 256, h.king == r.you ? ORANGE : CREAM, slot_name(r, h.king), CENTER, 1.2f);
         char streak[48];
@@ -5204,7 +5227,8 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             float nw = text_width(f, g_hand, 15, p.name), iw = look_tier(lk) >= 0 ? 17.0f : 0.0f;
             look_icon(dl, f, x + w / 2 - (nw + iw) / 2, y + 210, 15, lk);
             text(dl, f, g_hand, 15, x + w / 2 + iw / 2, y + 200, nc, p.name, CENTER, 1.0f);
-            if (lk && ranked_shown()) card_border(dl, f, x, y, w, 270, 10, lk->frame);     // the Locker's frame
+            look_card(dl, f, x, y, w, 270, 10, lk, py + (w - 8) * 1.5f + 4 - py);     // the Locker's frame (a tower's: build 104)
+            look_card_title(dl, f, x + w / 2, y + 186, 8.5f, lk, w - 14);           // a Towers title under the portrait
         }
         {
             std::string label = picking ? "choosing again" : known ? fighter_label(shown, p.slot) : "choosing";
@@ -5990,6 +6014,7 @@ NetRoom sample_room(int mode, int max, int count)
 }
 
 #include "rank_art.inc"
+#include "tower_frames.inc"      // build 104: the Towers rewards' card frames and titles
 #include "ranked_ui.inc"
 #include "ranked_board.inc"
 #include "social_ui.inc"
@@ -7728,6 +7753,8 @@ const char *shot_label()
         }
         if (S.page == TURF && !r.in_room) return TW.picker ? "turf-claim" : TW.tab == 1 ? "turf-season" : "turf";    // stage 4
         if (S.page == COMPLEX && !r.in_room) return RU.tab == 1 ? "kotr" : "complex";      // F0
+        if (S.page == LOCKER && !r.in_room) return LK.sheet ? "towerframes" : "locker";     // build 104: the Towers rewards' captures
+        if (r.in_room && r.phase == 0 && !NETPLAY_IS_HILL(r.settings.mode)) return "room";
     }
     return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr;
 }

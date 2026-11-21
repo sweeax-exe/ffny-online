@@ -1623,6 +1623,9 @@ Look parse_look(const J &e)
     l.frame = e["frame"].kind == J::NUM ? (int)e["frame"].i() : -1;
     l.pulse = e["frame_pulse"].b;
     l.title = e["title"].str();
+    l.frame_id = e["frame_id"].str();       // build 104: the Towers rewards (tower_frames.inc)
+    l.title_id = e["title_id"].str();
+    l.title_rarity = (int)e["title_rarity"].i();
     return l;
 }
 
@@ -1679,6 +1682,7 @@ void load_locker()
         it.tier = e["tier"].kind == J::NUM ? (int)e["tier"].i() : -1;
         it.division = (int)e["division"].i();
         it.unlocked = e["unlocked"].b; it.finish = e["finish"].b; it.current = e["current"].b;
+        it.tower = e["tower"].b; it.rarity = (int)e["rarity"].i();     // build 104: the Towers rewards
         for (auto &k : e["kinds"].a) {
             const std::string &s = k.str();
             if (s == "color") it.k_color = true;
