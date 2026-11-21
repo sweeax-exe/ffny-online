@@ -239,16 +239,24 @@ namespace
 // The item part of Unlock all on a profile's bytes (offsets from the profile start, as kItemStates): every item
 // state's Unlocked bit set, the shops' row counters raised to the totals. Never lowers anything, so running it
 // again changes nothing. `moves_cost` gets what the Blazin moves it did not own cost at the gym.
-void unlock_items(uint8_t *s, const UnlockLayout &layout, UnlockCounts &counts, uint32_t &moves_cost)
+// `own` (Own everything): hair styles, tattoos, jewellery and clothing go straight to Owned (state 3, what a
+// bought item has: Unlocked 1 | the purchase's 2) and the Blazin moves and fighting styles are not touched.
+void unlock_items(uint8_t *s, const UnlockLayout &layout, UnlockCounts &counts, uint32_t &moves_cost, bool own = false)
 {
     size_t at = kItemStates;
     moves_cost = 0;
     for (int k = 0; k < 6; k++) {
         uint32_t n = layout.items[k];
         counts.items[k] = 0;
+        if (own && k >= 4) { at += n / 4 + 1; continue; }
         for (uint32_t i = 0; i < n; i++) {
             uint8_t &byte = s[at + i / 4];
             int shift = (int)(i % 4) * 2;
+            if (own) {
+                if (((byte >> shift) & 3) < 2) counts.items[k]++;
+                if (((byte >> shift) & 3) < 2) byte |= (uint8_t)(3u << shift);      // owned (2 or 3) stays as it is
+                continue;
+            }
             if (k == 4 && ((byte >> shift) & 3) < 2 && i < layout.blazin_cost.size()) moves_cost += layout.blazin_cost[i];
             if (!((byte >> shift) & 3)) counts.items[k]++;
             byte |= (uint8_t)(1u << shift);        // locked -> unlocked; an owned item stays owned
@@ -257,7 +265,7 @@ void unlock_items(uint8_t *s, const UnlockLayout &layout, UnlockCounts &counts, 
     }
     // The shops' counts of unlocked rows: every row now (never lowered).
     for (int k = 0; k < 6; k++) {
-        if (!kRowCounter[k]) continue;
+        if (!kRowCounter[k] || (own && k >= 4)) continue;
         uint8_t *o = s + kRowCounter[k];
         uint32_t have = o[0] | o[1] << 8, want = std::min<uint32_t>(layout.rows[k], 0xFFFF);
         if (have < want) { o[0] = (uint8_t)want; o[1] = (uint8_t)(want >> 8); }
@@ -289,14 +297,15 @@ bool unlock_profile_slot(uint8_t *slot, size_t size, const uint32_t items[6], co
     return true;
 }
 
-bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, UnlockCounts &counts, std::string *error)
+bool unlock_profile_bytes(Bytes &b, const UnlockLayout &layout, bool cash, UnlockCounts &counts, std::string *error,
+                          bool own)
 {
     if (b.size() != kProfileFile || !header_fault(b).empty() || !identity_is(b, "DJFFNY::User")) {
         if (error) *error = "it is not a profile file of this game";
         return false;
     }
     uint32_t moves_cost;                // the Blazin moves it does not own (state below 2), at the gym's prices
-    unlock_items(b.data() + kProfileAt, layout, counts, moves_cost);
+    unlock_items(b.data() + kProfileAt, layout, counts, moves_cost, own);
     counts.cash = false;
     if (cash && rd(b, kProfileAt + kCash) < kUnlockCash) {
         wr(b, kProfileAt + kCash, kUnlockCash);
@@ -348,7 +357,7 @@ bool unlock_options_bytes(Bytes &b, const UnlockLayout &layout, UnlockCounts &co
 }
 
 UnlockResult unlock_everything(const fs::path &save_dir, const fs::path &backups, const std::string &folder,
-                               const Bytes &sod, bool cash, int64_t now)
+                               const Bytes &sod, bool cash, int64_t now, bool own)
 {
     UnlockResult r;
     auto refuse = [&](const std::string &why) { r.message = "Nothing was changed: " + why + "."; return r; };
@@ -368,7 +377,7 @@ UnlockResult unlock_everything(const fs::path &save_dir, const fs::path &backups
     if (!read_all(pfile, pb, kProfileFile)) return refuse("the profile file could not be read");
     if (!read_all(ofile, ob, kOptionsFile)) return refuse("the Options file could not be read");
     if (!signatures_ok(pb, kPortKey)) return refuse("the profile is signed by another Xbox (bring it in with Import saves first)");
-    if (!unlock_profile_bytes(pb, layout, cash, r.counts, &why) || !unlock_options_bytes(ob, layout, r.counts, &why))
+    if (!unlock_profile_bytes(pb, layout, cash, r.counts, &why, own) || !unlock_options_bytes(ob, layout, r.counts, &why))
         return refuse(why);
     if (!make_backup(save_dir, backups, "unlock", now, &r.backup, &why)) return refuse("no backup could be made (" + why + ")");
     pb = resign(pb, kPortKey);
@@ -383,7 +392,7 @@ UnlockResult unlock_everything(const fs::path &save_dir, const fs::path &backups
     int items = 0;
     for (int n : r.counts.items) items += n;
     r.ok = true;
-    r.message = profile.name + ": everything is unlocked (" + plural(items, "item", "items") + ", " +
+    r.message = profile.name + (own ? ": everything is owned (" : ": everything is unlocked (") + plural(items, "item", "items") + ", " +
                 plural(r.counts.fighters, "fighter", "fighters") + ", " + plural(r.counts.venues, "venue", "venues") +
                 ", " + plural(r.counts.songs, "song", "songs") + (r.counts.cash ? ", $999,999" : "") +
                 (r.counts.dev_points ? ", " + thousands(r.counts.dev_points) + " development points" : "") + " new).";

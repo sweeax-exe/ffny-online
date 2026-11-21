@@ -346,6 +346,9 @@ static RecompSetting g_display_settings[] = {
     { "audio", "prev_song_pad", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Controller buttons for the previous song, pressed together, as for the next song. Empty (the default) "
       "for none.", "" },
+    { "graphics", "occluder_fade", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_OCCLUDER_FADE", 0,
+      "Fade houses, roofs and ceilings of new (Studio-made) venues to see-through when they stand between the camera and "
+      "the fighters. Visual only." },
     { "graphics", "enabled", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Enhanced graphics (community): the ReShade / DLSS pack with presets by Marleymarletto, installed by the "
       "launcher next to the game (Launcher > Graphics). Heavy on the GPU: for NVIDIA RTX cards." },

@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
         if (!unlock_layout(slurp(argv[2]), l, &error)) { std::cout << "error " << error << "\n"; return 1; }
         Bytes b = slurp(argv[3]);
         UnlockCounts c;
-        bool ok = cmd == "profile" ? unlock_profile_bytes(b, l, argc > 5 && atoi(argv[5]), c, &error)
+        bool ok = cmd == "profile" ? unlock_profile_bytes(b, l, argc > 5 && atoi(argv[5]), c, &error, argc > 6 && atoi(argv[6]))
                                    : unlock_options_bytes(b, l, c, &error);
         if (!ok) { std::cout << "error " << error << "\n"; return 1; }
         spit(argv[4], b);
@@ -81,7 +81,7 @@ int main(int argc, char **argv) {
     }
     if (cmd == "unlock") {                          // <save> <backups> <folder> <sod> <cash> <now>
         UnlockResult r = unlock_everything(fs::u8path(argv[2]), fs::u8path(argv[3]), argv[4], slurp(argv[5]),
-                                           atoi(argv[6]) != 0, atoll(argv[7]));
+                                           atoi(argv[6]) != 0, atoll(argv[7]), argc > 8 && atoi(argv[8]));
         std::cout << "ok " << r.ok << "\nbackup " << r.backup << "\nmessage " << r.message << "\n";
         counts(r.counts);
         return r.ok ? 0 : 1;
@@ -296,6 +296,64 @@ def test_profile_unlocks_every_item_and_nothing_else(tool, sod, tmp_path):
     assert out['items'] == '6 30 8 10 82 5' and out['cash'] == '0'
     # padding past each kind's last item is left alone: hair has 9 items, so byte 2 keeps bits 2..7
     assert after[states + 2] & 0xFC == 0
+
+
+def test_own_everything_changes_only_the_closet_item_states(tool, sod, tmp_path):
+    """Own everything: hair, tattoos, jewellery and clothing go to Owned (3), their row counters follow; every
+    other byte of the profile (Blazin moves, styles, cash, stats, the rest) is as it was."""
+    src, dst = tmp_path / 'p', tmp_path / 'q'
+    before = profile_blob()
+    src.write_bytes(before)
+    out = parse(run(tool, 'profile', sod, src, dst, 0, 1))
+    after = dst.read_bytes()
+    sizes = [9, 30, 8, 10, 82, 5]
+    states = 0x80 + 0x4DC4
+    spans, at = [], states
+    for n in sizes:
+        spans.append((at, at + n // 4 + 1))
+        at += n // 4 + 1
+    allowed = set()
+    for lo, hi in spans[:4]:
+        allowed.update(range(lo, hi))
+    allowed.update(range(0x80 + 0xA8, 0x80 + 0xB0))             # hair, tattoo, clothing, jewellery row counters
+    allowed.update(range(0x80 + 0xB8, 0x80 + 0xB8 + 64))        # one per clothing type
+    changed = [i for i in range(len(before)) if before[i] != after[i] and not 0x10 <= i < 0x4C]
+    assert changed and all(i in allowed for i in changed)
+    for lo, hi in spans[4:]:                                    # Blazin moves and fighting styles untouched
+        assert before[lo:hi] == after[lo:hi]
+    assert before[0x80 + 0xB0:0x80 + 0xB8] == after[0x80 + 0xB0:0x80 + 0xB8]      # Blazin counters
+    assert before[0x80 + 0x20:0x80 + 0x28] == after[0x80 + 0x20:0x80 + 0x28]      # cash, development points
+    for k in range(4):                                          # every item owned: state 2 or 3, never lowered
+        lo = spans[k][0]
+        for i in range(sizes[k]):
+            now = (after[lo + i // 4] >> (i % 4 * 2)) & 3
+            was = (before[lo + i // 4] >> (i % 4 * 2)) & 3
+            assert now in (2, 3) and (was < 2 and now == 3 or now == was), (k, i, was, now)
+        # the padding bits past the last item stay as they were
+        for i in range(sizes[k], (sizes[k] // 4 + 1) * 4):
+            assert (after[lo + i // 4] >> (i % 4 * 2)) & 3 == (before[lo + i // 4] >> (i % 4 * 2)) & 3
+    assert struct.unpack_from('<4H', after, 0x80 + 0xA8) == (9, 30, 3, 4)
+    assert out['items'] == '6 30 8 10 0 0' and out['cash'] == '0' and out['dev'] == '0'
+    # again: nothing more changes
+    run(tool, 'profile', sod, dst, tmp_path / 'r', 0, 1)
+    assert (tmp_path / 'r').read_bytes() == after
+
+
+def test_own_everything_with_the_cash_box_gives_no_points_for_blazin_moves(tool, sod, tmp_path):
+    src, dst, dst_buy = tmp_path / 'p', tmp_path / 'q', tmp_path / 'b'
+    blob = bytearray(profile_blob())
+    struct.pack_into('<I', blob, 0x80 + 0x28, 0)                # no points and untrained stats, so the box has something to raise
+    struct.pack_into('<5I', blob, 0x80 + 0xFC, *([0] * 5))
+    src.write_bytes(sign(bytes(blob)))
+    own = parse(run(tool, 'profile', sod, src, dst, 1, 1))
+    buy = parse(run(tool, 'profile', sod, src, dst_buy, 1, 0))
+    assert own['cash'] == '1' and int(own['dev']) > 0
+    assert int(own['dev']) < int(buy['dev'])       # no gym price for the moves it leaves alone
+    a, b = dst.read_bytes(), dst_buy.read_bytes()
+    states = 0x80 + 0x4DC4
+    # the Blazin states are the buyable run's alone
+    blazin = states + sum(n // 4 + 1 for n in [9, 30, 8, 10])
+    assert a[blazin:blazin + 21] == src.read_bytes()[blazin:blazin + 21]
 
 
 def test_slot_in_memory_is_the_profile_edit_without_cash(tool, sod, tmp_path):
