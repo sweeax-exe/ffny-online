@@ -13,7 +13,7 @@
 // restore:<row>, restore-ok, folder (Open folder), bring:<row> (Bring back a profile the game deleted),
 // aside:<profile name> (Put aside), back:<profile name> (Bring back a profile put aside),
 // unlock:<profile name> (Unlock all: opens its confirmation), unlock-cash (ticks "and $999,999 and development points"),
-// unlock-ok, undo (Undo after an unlock).
+// unlock-own (chooses "Own everything" instead of "Make items buyable"), unlock-ok, undo (Undo after an unlock).
 //
 // Put aside (save_manager.h): the game loads at most 16 user IDs, so a profile can be moved out of the
 // folder it reads, whole, and brought back later; the count of profiles in the game is in the heading.
@@ -60,7 +60,7 @@ struct SavesPage
     bool open_restore = false;      // opened at the dialog's own level (a row's button is in a child)
     // Unlock all: the profile asked about, the cash box, and the backup Undo restores
     std::string unlock_folder, unlock_name, undo_backup, undo_name;
-    bool unlock_cash = false, open_unlock = false, want_unlock_ok = false;
+    bool unlock_cash = false, unlock_own = false, open_unlock = false, want_unlock_ok = false;
     // Cloud saves: the CLOUD view, a Restore waiting for its fetch, the two confirms
     bool cloud_tab = false, cloud_fetching = false, open_cloud_restore = false, open_cloud_delete = false;
     bool want_cloud_restore_ok = false, want_cloud_delete_ok = false, cloud_delete_off = false;
@@ -205,6 +205,7 @@ void saves_ask_unlock(const std::string &folder, const std::string &name)
     g_sp.unlock_folder = folder;
     g_sp.unlock_name = name;
     g_sp.unlock_cash = false;
+    g_sp.unlock_own = false;
     g_sp.open_unlock = true;
 }
 
@@ -219,7 +220,7 @@ void saves_do_unlock()
     }
     fprintf(stderr, "[SAVES] unlock: database %s\n", where.c_str());
     auto r = saves::unlock_everything(pcsaves::save_dir(), pcsaves::backup_dir(), g_sp.unlock_folder, sod, g_sp.unlock_cash,
-                                      pcsaves::now());
+                                      pcsaves::now(), g_sp.unlock_own);
     if (r.ok) {
         g_sp.undo_backup = r.backup;
         g_sp.undo_name = g_sp.unlock_name;
@@ -504,6 +505,8 @@ void saves_test_steps()
                 if (e.kind == saves::Entry::PROFILE && e.name == s.arg) saves_ask_unlock(e.folder, e.name);
         } else if (s.action == "unlock-cash") {
             g_sp.unlock_cash = true;
+        } else if (s.action == "unlock-own") {
+            g_sp.unlock_own = true;
         } else if (s.action == "unlock-ok") {
             g_sp.want_unlock_ok = true;
         } else if (s.action == "undo") {
@@ -599,7 +602,7 @@ void saves_profiles(float w, float h, float s)
             }
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip(e.signed_ok ? "Every fighter, venue, song, item, Blazin and style unlocked (asks first)"
+                ImGui::SetTooltip(e.signed_ok ? "Every fighter, venue and song unlocked; items made buyable or owned, your choice (asks first)"
                                               : "Bring this profile in with Import saves first");
             if (glass_button("##aside", "Put aside", ImVec2(b.x - 104 * s, a.y + 16 * s), ImVec2(90 * s, 28 * s), s,
                              GLASS_PLAIN, bold_font(), 13.5f * s))
@@ -797,16 +800,26 @@ void saves_unlock_confirm()
     ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28);
     ImGui::Text("This changes %s. A backup is kept. Undo with Restore.", g_sp.unlock_name.c_str());
     ImGui::Spacing();
-    ImGui::TextWrapped("Unlocked: every fighter and venue (and so every match type) and every song; in the shops all "
-                       "clothing, jewellery, tattoos and hair styles, and every Blazin move and fighting style to buy "
-                       "or learn. What you own stays owned.");
+    ImGui::TextWrapped("Always unlocked: every fighter and venue (and so every match type) and every song. For the "
+                       "clothing, jewellery, tattoos and hair styles, choose:");
+    ImGui::Spacing();
+    if (ImGui::RadioButton("Make items buyable", !g_sp.unlock_own)) g_sp.unlock_own = false;
+    ImGui::TextDisabled("Every item shows up in the Story shops, to buy with cash. Nothing is in your closet yet. "
+                        "Every Blazin move and fighting style can be learned in the gym.");
+    ImGui::Spacing();
+    if (ImGui::RadioButton("Own everything", g_sp.unlock_own)) g_sp.unlock_own = true;
+    ImGui::TextDisabled("Every piece of clothing, jewellery, every tattoo and hair style goes straight into your "
+                        "closet as owned, with nothing to pay. Blazin moves and fighting styles are not changed.");
+    ImGui::Spacing();
+    ImGui::TextWrapped("What you own stays owned.");
     ImGui::Spacing();
     ImGui::TextDisabled("Fighters, venues and songs are shared by every profile on this PC. Stats, level and story "
                         "progress stay as they are. Online play is not affected.");
     ImGui::Spacing();
     ImGui::Checkbox("and $999,999 and development points for Story", &g_sp.unlock_cash);
-    ImGui::TextDisabled("Enough development points to train every stat to its maximum, learn every Blazin move and "
-                        "two more fighting styles in the gym. Cash and points are only raised, never lowered.");
+    ImGui::TextDisabled("Enough development points to train every stat to its maximum, learn every Blazin move "
+                        "(Make items buyable only) and two more fighting styles in the gym. Cash and points are only "
+                        "raised, never lowered.");
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_Button, k_red);
