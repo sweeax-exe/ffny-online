@@ -3098,9 +3098,10 @@ def lobby97(case="kick", timeout=None, relay_port=27900, lock_timeout=None, log=
 
 # ---- towers (T0) -----------------------------------------------------------------------------------
 
-TOWERS_WATCH = ["[CRASH]", "[WATCHDOG]", "[TOWERS] window:", "[TOWERS] run saved", " won (", " lost: the run",
+TOWERS_WATCH = ["[CRASH]", "[WATCHDOG]", "[TOWERS] window:", "decided at step", "[TOWERS] run saved", " won (", " lost: the run",
                 "save and quit", "set up: slot levels", "[TOWERS] run start", "[TOWERS] run resumed",
-                "the game ends in floor 3", "[TOWERS] board (month)", "fight?format=text floor 3"]
+                "the game ends in floor 3", "[TOWERS] board (month)", "fight?format=text floor 3",
+                "test pad: r", "test pad: y", "test pad: x", "[TOWERS] board (week)", "page: the Weekly's card"]
 
 
 def _towers_overlay_pngs(folder, prefix, out_dir, shots, per_label=3):
@@ -3528,6 +3529,220 @@ def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, ext
                 if os.path.isfile(src):
                     shutil.copy2(src, os.path.join(out_dir, os.path.basename(src)))
         result.update({"ok": not problems, "phases": phases, "problems": problems, "shots": shots})
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
+# ---- The Weekly (build 108) -------------------------------------------------------------------------
+
+WEEKLY_TWISTS = ["low_health", "double_damage", "cpu_momentum", "glass_jaw", "all_bosses", "one_venue"]
+TOWERS_WEEKLY_SHOTS = os.environ.get("DJ_TOWERS_WEEKLY_SHOTS", r"D:\DefJam\community\weekly-tower-shots")
+
+
+def towers_weekly(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_env=None, out_dir=None, twists=None):
+    """The Weekly (tower 3, build 108) against a local account service run from source (FFNY_SERVER_DIR, the server
+    checkout with towers_weekly.go) with Towers on and its switch file (weekly=0, then weekly=1); the week's twist is
+    set per phase through the service's own admin override (towers-weekly.json beside its towers.json). One copy after
+    the other, signed in as Copy 0 on one run file:
+    1. weekly=0: TOWERS opens with three cards, no Weekly (GET /api/towers/weekly answers 404).
+    2. One phase per twist (twists, default all six): a new Weekly climb with fighter 55, two floors won by the test
+       knockout; each floor's opponent and venue must be the service's floor list (GET /api/towers/weekly), every
+       report HTTP 200, the run on the board, and the twist's own line in the log: IRON MAN the health carried from
+       floor 1 into floor 2, HEAVY HANDS hits scaled x2, BLAZIN' HOUR the CPU's meter held full, GLASS JAW both
+       maximum healths halved (still halved at the decision), BOSS RUSH a boss floor 1 with the boss AI, HOME TURF
+       both floors at the week's one venue.
+    3. weekly=1: TOWERS with the Weekly's card (the twist, the countdown), its rules and its board (this week, Copy 0
+       on it); the service's board for tower 3 is read back: Copy 0 with 2 floors in this week's season.
+    Pictures (the overlay's own) go to out_dir (default D:\\DefJam\\community\\weekly-tower-shots)."""
+    import datetime
+    import shutil
+    import urllib.request
+    t0 = time.time()
+    s = copies.Session("towersweekly", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "towersweekly", "ok": False}
+    shots, problems, phases = [], [], []
+    twists = twists or WEEKLY_TWISTS
+    try:
+        h = harness()
+        acc_port = 18940 + (os.getpid() % 10) * 2
+        switch = os.path.join(s.dir, "towers-switch.txt")
+        override = os.path.join(s.dir, "towers-weekly.json")     # beside the service's towers.json (its -data folder)
+
+        def set_switch(weekly):
+            with open(switch, "w", encoding="utf-8") as f:
+                f.write("weekly=%d\n" % weekly)
+            time.sleep(11)      # the service reads its switch file at most every 10 s
+
+        iso = datetime.datetime.now(datetime.timezone.utc).isocalendar()
+        week = "%04d-W%02d" % (iso[0], iso[1])
+
+        def set_twist(twist):
+            with open(override, "w", encoding="utf-8") as f:
+                json.dump({week: {"twist": twist}} if twist else {}, f)
+
+        def get(path):
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:%d%s" % (acc_port, path), timeout=5) as r:
+                    return r.status, r.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as e:
+                return e.code, ""
+            except OSError as e:
+                return 0, str(e)
+
+        with open(switch, "w", encoding="utf-8") as f:
+            f.write("weekly=0\n")
+        set_twist(None)
+        tokens = s.accounts(acc_port, ["Copy 0"], extra=["-towers", "-towers-switch", switch])
+        towers_file = os.path.join(s.dir, "towers-weekly-run.json")
+        base = dict(RECOMP_SCRIPT_ANCHOR=TITLE_ANCHOR, RECOMP_TOWERS_FILE=towers_file, RECOMP_OVERLAY_SHOT_MS="500",
+                    RECOMP_ACCOUNT_SERVER="127.0.0.1:%d" % acc_port, RECOMP_ACCOUNT_TEST_TOKEN=tokens["Copy 0"])
+
+        def script(matches):
+            return h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], towers_tail(matches))
+
+        page_script = h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"])
+        n = 0
+        # 1: the switch off: no Weekly on the page
+        code, _ = get("/api/towers/weekly?format=text")
+        c, ok = _towers_phase(s, n, dict(base, RECOMP_TEST_OPEN_ONLINE="towers", RECOMP_PAD_SCRIPT=page_script,
+                                         RECOMP_TEST_OVERLAY_PAD="u,u,u,u,u,u,r,r,u,u"),
+                              (2, "test pad: r"), shots, [("test pad: r", 2, 2.0, "w1-towers-off")], 300)
+        n += 1
+        text = logparse.read_text(c.log)
+        phases.append({"phase": "hub-off", "service": code, "reached": ok, "log": _relpath(c.log),
+                       "weekly": re.findall(r"\[TOWERS\] the Weekly: [^\n]*", text)[:2]})
+        if code != 404:
+            problems.append("hub-off: the service's /api/towers/weekly answered %s, not 404" % code)
+        if "page: the Weekly's card shown" in text:
+            problems.append("hub-off: the Weekly's card was shown with the switch off")
+        if not re.search(r"\[TOWERS\] the Weekly: off \(HTTP 404\)", text):
+            problems.append("hub-off: the game did not read the Weekly as off")
+        # 2: the twists
+        set_switch(1)
+        for twist in twists:
+            set_twist(twist)
+            code, wtext = get("/api/towers/weekly?format=text")
+            floors = {int(m[0]): (int(m[1]), int(m[2]), int(m[4])) for m in
+                      re.findall(r"^floor=(\d+)\|(\d+)\|(\d+)\|(\d+)\|(\d)$", wtext, re.M)}
+            env = dict(base, RECOMP_TEST_TOWERS="3,55", RECOMP_TEST_KO_STEP="900,0", RECOMP_PAD_SCRIPT=script(3))
+            env.update(extra_env or {})
+            c, ok = _towers_phase(s, n, env, (2, " won ("), shots, [("set up: slot levels", 1, 12, "w2-%s-fight1" % twist),
+                                                                    ("decided at step", 1, 0.3, "w2-%s-ko1" % twist),
+                                                                    ("set up: slot levels", 2, 12, "w2-%s-fight2" % twist)],
+                                  timeout or 600)
+            n += 1
+            text = logparse.read_text(c.log)
+            fights = [(int(a), int(b), int(v)) for a, b, v in
+                      re.findall(r"THE WEEKLY floor (\d+) of 20: fighter 55 against (\d+) at venue (\d+)", text)]
+            p = {"phase": twist, "service": code, "reached": ok, "log": _relpath(c.log), "fights": fights,
+                 "start": (re.findall(r"run start: THE WEEKLY [^\n]*", text) or [""])[0][:160],
+                 "reports": re.findall(r"service /api/towers/fight\?format=text floor (\d+): HTTP (\d+)", text),
+                 "lines": [l.split("] ", 1)[-1][:150] for l in text.splitlines() if "the Weekly" in l and "[TOWERS]" in l][:8]}
+            phases.append(p)
+            probs = []
+            if code != 200:
+                probs.append("the service has no Weekly (%s)" % code)
+            if ("twist %s" % twist) not in p["start"]:
+                probs.append("the climb did not start with the twist")
+            if not re.search(r"service: run \w+, seed [0-9A-F]+, 20 floors[^\n]*on the board", text):
+                probs.append("the service dealt no run on the board")
+            if [r for r in p["reports"] if r[1] != "200"]:
+                probs.append("a report was refused: %s" % p["reports"])
+            won = re.findall(r"floor (\d) won \([\d.]+ s, health (\d+)%", text)
+            if len(won) < 2:
+                probs.append("two floors were not won (%s)" % won)
+            for f, opp, ven in fights[:2]:
+                if floors.get(f, (None, None))[:2] != (opp, ven):
+                    probs.append("floor %d: fought %d at %d, the service's floor is %s" % (f, opp, ven, floors.get(f)))
+            if twist == "low_health":
+                carried = re.search(r"the climber starts at (\d+)% health \(the Weekly's IRON MAN", text)
+                h1 = int(won[0][1]) if won else None
+                if h1 is not None and h1 < 100 and (not carried or int(carried.group(1)) != h1):
+                    probs.append("floor 2 did not start with floor 1's %s%% (%s)" % (h1, carried and carried.group(1)))
+                p["carried"] = [h1, carried and int(carried.group(1))]
+                if "health carried" not in text:
+                    probs.append("the floor rules do not carry the health")
+            elif twist == "double_damage":
+                hits = [int(x) for x in re.findall(r"the Weekly at the decision: (\d+) hit\(s\) scaled x2\.0", text)]
+                p["hits"] = hits
+                if not hits or max(hits) <= 0:
+                    probs.append("no hit was doubled")
+            elif twist == "cpu_momentum":
+                full = re.findall(r"BLAZIN' HOUR: the CPU's meter full at step (\d+) \(([\d.]+), state (\d+)\)", text)
+                refills = [int(x) for x in re.findall(r"CPU meter refilled (\d+) time", text)]
+                p["meter"] = full[:2]
+                p["refills"] = refills
+                if not full or not refills or min(refills) < 1:
+                    probs.append("the CPU's meter was not held full")
+                elif any(not (int(st) & 1) for _, _, st in full):
+                    probs.append("the CPU's Blazin' was not ready after the refill (%s)" % full)
+            elif twist == "glass_jaw":
+                halved = re.findall(r"GLASS JAW: max health x0\.50 at step \d+: climber ([\d.]+) -> ([\d.]+), CPU ([\d.]+) -> ([\d.]+)", text)
+                kept = re.findall(r"max health climber ([\d.]+), CPU ([\d.]+)", text)
+                p["halved"], p["kept"] = halved[:2], kept[:2]
+                if len(halved) < 2:
+                    probs.append("the maximum health was not halved on both floors (%s)" % halved)
+                else:
+                    for (a, a2, b, b2), (k1, k2) in zip(halved, kept):
+                        if abs(float(a) / 2 - float(a2)) > 0.2 or abs(float(b) / 2 - float(b2)) > 0.2:
+                            probs.append("not half: %s" % [a, a2, b, b2])
+                        if abs(float(k1) - float(a2)) > 0.2 or abs(float(k2) - float(b2)) > 0.2:
+                            probs.append("the game put the maximum back by the decision (%s vs %s)" % ([k1, k2], [a2, b2]))
+            elif twist == "all_bosses":
+                if not re.search(r"THE WEEKLY floor 1 of 20: [^\n]*boss floor\)", text):
+                    probs.append("floor 1 was no boss floor")
+                if not re.search(r"\[TOWERS-AI\] fight \{\"tower\":3,\"floor\":1,\"boss\":1", text):
+                    probs.append("floor 1's AI was not a boss's")
+                if not floors.get(1) or floors[1][2] != 1:
+                    probs.append("the service's floor 1 is no boss floor (%s)" % floors.get(1))
+            elif twist == "one_venue":
+                venues = set(v for _, _, v in fights)
+                srv = set(v for _, v, _ in floors.values())
+                p["venues"] = sorted(venues)
+                if len(srv) != 1 or venues != srv:
+                    probs.append("not one venue: fought at %s, the service's %s" % (sorted(venues), sorted(srv)))
+            problems += ["%s: %s" % (twist, x) for x in probs]
+        # 3: the page with the Weekly (its card, the rules, this week's board)
+        set_twist("double_damage")
+        c, ok = _towers_phase(s, n, dict(base, RECOMP_TEST_OPEN_ONLINE="towers", RECOMP_PAD_SCRIPT=page_script,
+                                         RECOMP_TEST_OVERLAY_PAD="u,u,u,u,u,u,r,r,u,u,u,y,u,u,u,y,x,u,u,u,u,u,u"),
+                              (1, "test pad: x"), shots,
+                              [("test pad: r", 2, 1.5, "w3-weekly-card"), ("test pad: y", 1, 1.5, "w3-weekly-rules"),
+                               ("test pad: x", 1, 3.0, "w3-weekly-board")], 300)
+        text = logparse.read_text(c.log)
+        bcode, board = get("/api/towers/board?format=text&tower=3")
+        rows = [l for l in board.splitlines() if l.startswith("row=3|")]
+        season = (re.findall(r"^season=(\S+)", board, re.M) or [""])[0]
+        phases.append({"phase": "hub-on", "reached": ok, "log": _relpath(c.log), "board": rows[:3], "season": season,
+                       "page": re.findall(r"\[TOWERS\] (?:page|board \(week\))[^\n]*", text)[:3]})
+        if "page: the Weekly's card shown" not in text:
+            problems.append("hub-on: the Weekly's card was not shown")
+        if not re.search(r"board \(week\): season %s, The Weekly \d+ entries \(you #1" % re.escape(week), text):
+            problems.append("hub-on: the game's week board has not Copy 0 at #1")
+        if bcode != 200 or season != week or not any(re.match(r"row=3\|1\|\d+\|Copy 0\|2\|\d+\|55\|0", r) for r in rows):
+            problems.append("hub-on: the service's tower 3 board has not Copy 0 with 2 floors this week (%s %s %s)"
+                            % (bcode, season, rows[:2]))
+        try:
+            with open(towers_file, encoding="utf-8") as f:
+                run = next((r for r in json.load(f).get("runs", []) if r.get("tower") == 3), None)
+        except (OSError, ValueError):
+            run = None
+        result["saved"] = run and {k: run.get(k) for k in ("week", "twist", "floor", "run")}
+        if not run or run.get("week") != week:
+            problems.append("the saved Weekly run lacks its week (%s)" % result["saved"])
+        for p in phases:
+            if "log" in p:
+                crashes = _faults(logparse.read_text(os.path.join(machine.REPO, p["log"])))
+                problems += ["%s: %s" % (p["phase"], cr) for cr in crashes]
+        out_dir = out_dir or TOWERS_WEEKLY_SHOTS
+        os.makedirs(out_dir, exist_ok=True)
+        for sh in shots:
+            src = sh if os.path.isabs(sh) else os.path.join(machine.REPO, sh)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(out_dir, os.path.basename(src)))
+        result.update({"ok": not problems, "week": week, "phases": phases, "problems": problems, "shots": shots,
+                       "out_dir": out_dir})
     finally:
         _finish(s, result, t0)
     return result
