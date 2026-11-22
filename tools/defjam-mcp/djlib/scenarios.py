@@ -2845,13 +2845,14 @@ def resume_check(logs, relay_log, cutter, expect, problems):
              "sockets": text.count("[NETPLAY] resume: a new socket"),
              "gave_up": text.count("[NETPLAY] gave up"), "lost": text.count("seat was given up"),
              "not_in_time": text.count("did not get back in time"), "stopped": text.count("stopped waiting for player"),
-             "desync": text.count("[NETPLAY] desync in"), "left_report": text.count("left the match before it was decided")}
+             "desync": text.count("[NETPLAY] desync in"), "left_report": text.count("left the match before it was decided"),
+             "room_left": text.count("[NETPLAY] a player left the match")}
         out["copies"][i] = c
         gave_any += c["gave_up"]
         stopped += c["stopped"]
         if i == cutter[0] and not c["cuts"]:
             problems.append("copy %d was never cut" % i)
-        if expect != "none" and not c["on"]:
+        if expect != "none" and not c["on"] and i < 2:     # spectators get no RESUME ON, only the HELD notices
             problems.append("copy %d never heard RESUME ON" % i)
         if c["desync"]:
             problems.append("copy %d went out of sync" % i)
@@ -2863,7 +2864,7 @@ def resume_check(logs, relay_log, cutter, expect, problems):
     elif expect == "end":
         if not held or not ends:
             problems.append("the relay held %d, %d holds ran out (want both)" % (held, ends))
-        if not gave_any:
+        if not gave_any and not any(c["left_report"] or c["room_left"] for c in out["copies"].values()):
             problems.append("no copy ended the fight after the hold")
     elif expect == "limit":
         if not nohold:
