@@ -1818,7 +1818,7 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
            rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None,
            linger=None, reports=False, fighter_rules=None, max_ping=None, banned_tier=None, room_menu=None,
-           results_leave=None, hill_pick=None, hill_idle=None, password=False, social=False):
+           results_leave=None, hill_pick=None, hill_idle=None, password=False, social=False, drop_downlink=None):
     """social (build 92): a local account service with -social and test accounts "Copy N" (not ranked): the relay knows the
     copies' accounts (their room chat lines carry them) and the chat window's lists are on; copy_env can drive the chat
     window (RECOMP_TEST_SOCIAL_UI) and the room chat (RECOMP_TEST_ROOM_CHAT). See mute().
@@ -1934,6 +1934,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         relay_extra = (["-created"] if created else []) + (["-test-venues", str(venues)] if venues else [])
         # DJ_RELAY_ARGS (tests): more relay flags, space-separated (Run the Streets: "-rts-open")
         relay_extra += os.environ.get("DJ_RELAY_ARGS", "").split()
+        if drop_downlink:       # build 109: the forced stall, one copy's downlink cut by the relay (stall_check)
+            relay_extra += ["-test-drop-downlink", str(drop_downlink)]
+            result["params"]["drop_downlink"] = str(drop_downlink)
         if rollback_max_ping:   # build 54: the relay's rollback ping limit (else the game's default)
             relay_extra += ["-rollback-max-ping", str(int(rollback_max_ping))]
             result["params"]["rollback_max_ping"] = int(rollback_max_ping)
@@ -2301,6 +2304,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         result["password"] = password_check(s.dir, logs, players, pw_secrets, problems)
     if spectate_after:
         result["late_spectators"] = late_spectator_check(analyses, players, spectators, problems)
+    if drop_downlink:
+        result["stall"] = stall_check(logs, rot_relay_log or "", problems)
     if leaver:
         result["leave"] = leave_check(logs, leaver, players, problems)
         analyses.pop(leaver[0], None)
@@ -2762,6 +2767,41 @@ def late_spectator_check(analyses, players, spectators, problems):
         if not rows:
             problems.append("late spectator copy %d watched no fight" % i)
         out[str(i)] = rows
+    return out
+
+
+def stall_check(logs, relay_log, problems):
+    """A run with a cut downlink (--drop-downlink, build 109): the relay cut and restored it, the copies showed the
+    stall notice and resent the entries the other lacked, and none gave up."""
+    import re
+    out = {"copies": {}}
+    try:
+        rl = open(relay_log, encoding="utf-8", errors="replace").read()
+    except OSError:
+        rl = ""
+    m = re.search(r"downlink cut is over \((\d+) datagrams dropped\)", rl)
+    out["relay_cut"] = "the downlink of slot" in rl
+    out["relay_dropped"] = int(m.group(1)) if m else None
+    if not out["relay_cut"] or m is None:
+        problems.append("the relay never cut (or never restored) the downlink")
+    resends = notices = 0
+    for i, p in sorted(logs.items()):
+        text = logparse.read_text(p)
+        lines = text.splitlines()
+        c = {"resend_lines": sum(1 for l in lines if "[NETPLAY] resend: " in l),
+             "notices": [l.split("): ", 1)[-1] for l in lines if "[NETPLAY] stall notice" in l][:6],
+             "waited": [l.split("notice: ", 1)[-1] for l in lines if "notice: Waited " in l][:4],
+             "gave_up": text.count("[NETPLAY] gave up"),
+             "first_resend": next((l.split("] ", 1)[-1] for l in lines if "[NETPLAY] resend: " in l), None)}
+        out["copies"][i] = c
+        resends += c["resend_lines"]
+        notices += len(c["notices"])
+        if c["gave_up"]:
+            problems.append("copy %d gave up waiting despite the resend window" % i)
+    if not resends:
+        problems.append("no copy resent any entries")
+    if not notices:
+        problems.append("no copy showed the stall notice")
     return out
 
 

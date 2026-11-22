@@ -469,6 +469,8 @@ static struct {
     int pings[NETSERVER_COUNT][LISTED_MAX][NETSERVER_COUNT];   /* build 90: a quick room's player's pings, 0 none */
     int seat_max[NETSERVER_COUNT][LISTED_MAX];  /* build 97: its player's own Quick Match max ping (ms, 0 off) */
     int seat_wait[NETSERVER_COUNT][LISTED_MAX]; /* build 97: how long it has searched (s; -1 not listed) */
+    int seat_flags[NETSERVER_COUNT][LISTED_MAX]; /* build 109: its QUICK_SEAT_* byte (0 not listed) */
+    int cap_ms[NETSERVER_COUNT];                /* build 109: the ceiling that relay listed (0: none or not listed) */
     int logged[NETSERVER_COUNT];        /* the room count last logged plus one, 0 none yet */
     unsigned version;
 } R;
@@ -568,7 +570,7 @@ static void list_round(void)
         NetRoomInfo list[LISTED_MAX];
         int ages[LISTED_MAX];
         int pings[LISTED_MAX][NETSERVER_COUNT];
-        int seat_max[LISTED_MAX], seat_wait[LISTED_MAX];
+        int seat_max[LISTED_MAX], seat_wait[LISTED_MAX], seat_flags[LISTED_MAX], cap_ms = 0;
         FD_ZERO(&rd);
         FD_SET(s, &rd);
         n = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(s, (char *)b, sizeof(b), 0) : 0;
@@ -599,7 +601,7 @@ static void list_round(void)
         if (at + count <= n)            /* build 82 relays: each room's FIGHTER RULES bits (the STANDARD tag) */
             for (k = 0; k < count; k++) list[k].rules = b[at + k] & NETPLAY_RULES_MASK;
         memset(pings, 0, sizeof(pings));
-        for (k = 0; k < LISTED_MAX; k++) { seat_max[k] = 0; seat_wait[k] = -1; }
+        for (k = 0; k < LISTED_MAX; k++) { seat_max[k] = 0; seat_wait[k] = -1; seat_flags[k] = 0; }
         if (at + count + 2 * NETSERVER_LEGACY * count <= n) { /* build 90 relays with the ping-sum switch on */
             int p = at + count, j, used;
             for (k = 0; k < count; k++)
@@ -615,6 +617,12 @@ static void list_round(void)
                     seat_max[k] = b[p] * 10;
                     seat_wait[k] = rd16(b + p + 1);
                 }
+                /* build 109 relays (server relay/quick_cap.go), to a request with CAPS_QUICKCAP: the ceiling and each
+                 * seat's QUICK_SEAT_* byte */
+                if (p + 2 + count <= n) {
+                    cap_ms = rd16(b + p);
+                    for (k = 0; k < count; k++) seat_flags[k] = b[p + 2 + k];
+                }
             }
         }
         want[who] = 0;
@@ -625,6 +633,8 @@ static void list_round(void)
         memcpy(R.pings[who], pings, sizeof(pings[0]) * (size_t)count);
         memcpy(R.seat_max[who], seat_max, sizeof(seat_max[0]) * (size_t)count);
         memcpy(R.seat_wait[who], seat_wait, sizeof(seat_wait[0]) * (size_t)count);
+        memcpy(R.seat_flags[who], seat_flags, sizeof(seat_flags[0]) * (size_t)count);
+        R.cap_ms[who] = cap_ms;
         R.count[who] = count;
         R.total[who] = rd16(b + 10);
         R.got[who] = GetTickCount64();
@@ -776,6 +786,15 @@ static void wake_list_thread(void)
         SetEvent(R.wake);
     }
     LeaveCriticalSection(&g_cs);
+}
+
+int netservers_quick_cap_ms(void)
+{
+    int cur = netservers_connected(), cap = 0;
+    EnterCriticalSection(&g_cs);
+    if (cur >= 0 && cur < NETSERVER_COUNT && R.got[cur]) cap = R.cap_ms[cur];
+    LeaveCriticalSection(&g_cs);
+    return cap > 0 ? cap : QUICK_CAP_MS;
 }
 
 int netservers_connected(void)
@@ -1233,6 +1252,8 @@ int netservers_quick_move(int mode, int search_s, int alone_s, const char *code,
                 /* build 97: the relay's listed wait (its player's search, which a move between relays keeps) */
                 seats[n].age = (R.seat_wait[o][k] >= 0 ? R.seat_wait[o][k] : R.age[o][k]) + (int)((now - R.got[o]) / 1000);
                 seats[n].max_ping = R.seat_max[o][k];
+                seats[n].flags = R.seat_flags[o][k];        /* build 109: the ceiling (netservers_pair_relay) */
+                seats[n].cap_ms = R.cap_ms[o];
                 memcpy(seats[n].pings, R.pings[o][k], sizeof(seats[n].pings));
                 snprintf(seats[n].code, sizeof(seats[n].code), "%s", x->code);
                 if (o == cur && code && !strcmp(x->code, code)) me = n;
@@ -1499,6 +1520,7 @@ int netservers_ring_of(int server, const char *code, NetRingCard *out)
 #else   /* other systems: no online play yet */
 
 int netservers_reconnect(const char *name) { (void)name; return 0; }
+int netservers_quick_cap_ms(void) { return QUICK_CAP_MS; }
 int netservers_connected(void) { return -1; }
 int netservers_best(void) { return -1; }
 void netservers_fetch_rooms(void) {}

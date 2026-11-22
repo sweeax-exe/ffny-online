@@ -148,6 +148,10 @@ static RecompSetting g_display_settings[] = {
       "Quick Match only meets players whose ping to you is under this (off, 100, 150 or 200 ms). Off: Quick Match "
       "starts with close players and widens the search the longer it waits. Your limit never widens, so with it on "
       "the wait can be longer. Rooms and Ranked are not affected." },
+    { "online", "quick_far", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, 0,
+      "Quick Match may pair you with players far away (a ping over 300 ms between you) after a long wait. Such "
+      "fights play with a large input delay and can stutter. Off: Quick Match never goes over 300 ms. Rooms and "
+      "Ranked are not affected." },
     { "online", "p2p_direct", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_P2P_DIRECT", 0,
       "Direct connection (P2P) in 1v1 online fights, used only when the other player has it on too: the fight's "
       "inputs also go straight between the two PCs, which can be faster than through the server. The other player's "

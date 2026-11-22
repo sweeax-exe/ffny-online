@@ -70,6 +70,9 @@ void netservers_use(int index);
  * answers (at most about 2.5 s after the first probe), -2 for a custom address. The automatic
  * choice is made once and kept for the session. */
 int netservers_current(void);
+/* Build 109: the Quick Match ping ceiling the connected relay listed in ROOMLIST (server relay/quick_cap.go), or
+ * QUICK_CAP_MS while none is known. */
+int netservers_quick_cap_ms(void);
 /* Before a new connection (not in a room or match): Automatic moves to the relay with the lowest ping
  * when it is clearly better (40 ms and 30 % lower) or the current one is offline. Returns the relay
  * to use. */

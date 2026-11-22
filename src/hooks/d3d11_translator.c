@@ -1014,6 +1014,21 @@ void d3d11_translator_pump(void)
 {
 }
 
+/* Build 109: the last picture once more, with the overlay drawn over it (pc_ui's notices), from the game thread
+ * while an online fight waits for another player's entries (netplay.c stall_notice): the game draws nothing
+ * meanwhile, so a wait of seconds was a frozen picture with nothing said. The present path scales the title's
+ * last frame and puts its pipeline state back (d3d8_present.c), and the overlay restores its own; the frame
+ * capture and the recorder are left out. */
+void d3d11_translator_present_again(void)
+{
+    IDirect3DDevice8 *dev;
+    if (!s_ready)
+        return;
+    dev = xbox_GetD3DDevice();
+    if (dev)
+        dev->lpVtbl->Present(dev, NULL, NULL, NULL, NULL);
+}
+
 /* What the translator actually did, which is the only way to tell "no methods
  * arrived" from "methods arrived and were all ignored" from "it drew and the
  * result is off screen". Called on a timer from the host so a run reports

@@ -418,6 +418,10 @@ void netplay_note_input(void);
 int netplay_afk_left(void);
 int netplay_quick_max_ping(void);
 int netplay_quick_search_s(void);
+/* Build 109: [online] quick_far ("Allow far opponents"), and the Quick Match ping ceiling this search keeps to
+ * (ms of ping sum; 0: none: far opponents allowed, or a relay without it; server relay/quick_cap.go). */
+int netplay_quick_far(void);
+int netplay_quick_cap_ms(void);
 /* King of the Hill: give up this PC's place in the line (to the back; a king gives up the crown).
  * Only when netplay_lobby_caps() has NETPLAY_CAP_YIELD and this PC neither votes nor fights. */
 void netplay_lobby_yield(void);
@@ -629,6 +633,10 @@ typedef struct NetVersus {
     char cp_name[4][17];        /* a created fighter (fighter 99): its name (up to 16, CP_NAME_MAX); "" otherwise */
     char cp_style[4][64];       /* and its fighting styles ("KICKBOXING / STREETFIGHTING") */
     char room_key[40];          /* build 98: the room the streaks count in (hud_stats.h): its code and name */
+    /* build 109: the pair's ping (the path the delay reads: half of each of the two highest relay round trips, ms;
+     * -1 not every player's yet) and how the fight plays: 1 rollback, 0 delay-based (lockstep), -1 not known yet;
+     * frames: the input delay once agreed (0 before) */
+    int path_ms, rollback, frames;
 } NetVersus;
 int netplay_versus(NetVersus *out);
 /* Discord's presence (discord_presence.c): the hub room's match as its START set it up, from the

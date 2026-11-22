@@ -95,7 +95,7 @@ def cmd_scenario(a):
                              maintenance=a.maintenance, cpu_level=a.cpu_level, linger=a.linger, reports=a.reports,
                              fighter_rules=a.fighter_rules, max_ping=a.max_ping, room_menu=a.room_menu,
                              results_leave=a.results_leave, hill_pick=a.hill_pick, hill_idle=a.hill_idle,
-                             password=a.password,
+                             password=a.password, drop_downlink=a.drop_downlink,
                              banned_tier=[int(x) for x in a.banned_tier.split(",") if x.strip()] if a.banned_tier is not None else None,
                              **common)
     elif a.kind == "offline":
@@ -257,6 +257,9 @@ def main(argv=None):
                                              "e.g. '1v1 team ffa koth crew ranked'")
     sc.add_argument("--rollback-max-ping", type=int, help="online: the relay's rollback ping limit in ms (-rollback-max-ping; "
                                                           "default none, the game's own 120)")
+    sc.add_argument("--drop-downlink", help="online (build 109): SLOT:STEP:DURATION, the relay cuts every datagram to "
+                    "the copy in relay slot SLOT for DURATION once the fight's STEPS reach STEP (relay -test-drop-downlink, e.g. 1:900:4s); "
+                    "the resend window must close the gap: no copy gives up, the stall notice shows")
     sc.add_argument("--fast-ko", type=int, default=600, help="knockout at this fight step (0: off)")
     sc.add_argument("--ko-winner", help="slot, alt or humans (only the human fighters; default alt; koth 0)")
     sc.add_argument("--cpu-level", choices=["easy", "normal", "hard"],

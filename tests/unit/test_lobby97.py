@@ -16,6 +16,7 @@ HOOKS = ROOT / 'src' / 'hooks'
 
 DRIVER = r'''
 #include <stdio.h>
+#include <string.h>
 #include "netplay_lobby97_rules.h"
 #include "netplay_servers_rules.h"
 
@@ -39,6 +40,28 @@ int main(void)
     printf("search|50|%s\n", line);
     netlobby_search_line(line, sizeof(line), 150, 50, "every server");
     printf("search|own-late|%s\n", line);
+    netlobby_search_line_cap(line, sizeof(line), 0, 50, "every server", 300);    /* build 109: the ceiling */
+    printf("search|cap-late|%s\n", line);
+    netlobby_search_line_cap(line, sizeof(line), 0, 5, "every server", 300);
+    printf("search|cap-early|%s\n", line);
+    netlobby_search_line_cap(line, sizeof(line), 0, 50, "every server", 0);
+    printf("search|cap-off|%s\n", line);
+    {   /* build 109: the ceiling in the games' pool (netservers_pair_relay), a pair of 350 ms on relay 0 */
+        static const int fl[][4] = { { 0, 0, 300, 300 }, { QUICK_SEAT_BOUND, 0, 300, 0 }, { QUICK_SEAT_FAR, QUICK_SEAT_FAR, 300, 300 },
+                                     { QUICK_SEAT_BOUND, QUICK_SEAT_BOUND, 0, 0 }, { QUICK_SEAT_BOUND, 0, 400, 360 },
+                                     { 0, QUICK_SEAT_BOUND, 400, 300 } };
+        NetQuickSeat a, c;
+        int k, s;
+        printf("ceiling");
+        for (k = 0; k < 6; k++) {
+            memset(&a, 0, sizeof(a));
+            memset(&c, 0, sizeof(c));
+            a.pings[0] = 150; c.pings[0] = 200;
+            a.flags = fl[k][0]; c.flags = fl[k][1]; a.cap_ms = fl[k][2]; c.cap_ms = fl[k][3];
+            printf("|%d", netservers_pair_relay(&a, &c, 0, &s, NULL));
+        }
+        printf("\n");
+    }
     netlobby_afk_line(line, sizeof(line), 42);
     printf("afk|%s\n", line);
     printf("kickmin|%d|%d|%d|%d\n", netlobby_kick_minutes_left(0), netlobby_kick_minutes_left(61000),
@@ -107,6 +130,12 @@ def test_search_lines(rows):
     assert lines['25'] == 'Looking for a close player (under 180 ms) on Europe and US East...'
     assert lines['50'] == 'Waiting for another player on every server...'
     assert lines['own-late'] == 'Waiting for a player under 150 ms on every server...'         # never widened
+    # build 109: the ceiling from 45 s, tighter stages before it, none when far opponents are allowed
+    assert lines['cap-late'] == 'Looking for a close player (under 300 ms) on every server...'
+    assert lines['cap-early'] == 'Looking for a close player (under 120 ms) on every server...'
+    assert lines['cap-off'] == 'Waiting for another player on every server...'
+    # the pool: unbound pairs meet at 350 ms, a bound one not (the lower listed ceiling holds), no ceiling: they meet
+    assert by(rows, 'ceiling') == [['0', '-1', '0', '0', '0', '-1']]
     assert by(rows, 'afk') == [['Press any button: you leave the room in 42 s.']]
     assert by(rows, 'kickmin') == [['5', '4', '1', '1']]
     assert by(rows, 'stages') == [['120', '20', '180', '45', '0']]
@@ -150,7 +179,7 @@ def test_setting():
     assert 'k_quick_max_ping[] = { "off", "100", "150", "200", NULL }' in _src('src/hooks/pc_settings.c')
     ui = _src('src/hooks/pc_ui.cpp')
     assert '{"online", "quick_max_ping", "Quick Match max ping"}' in ui
-    assert ui.count('settings_group("online", { "quick_max_ping" });') == 2     # the launcher's and the overlay's pages
+    assert ui.count('settings_group("online", { "quick_max_ping", "quick_far" });') == 2     # the launcher's and the overlay's pages
 
 
 @pytest.mark.skipif(RELAY is None or not (RELAY / 'protocol_kick.go').is_file(),
@@ -174,6 +203,14 @@ def test_relay_agrees():
     assert list(m.groups()) == game
     # ACTIVE's body: idle, max ping, search (three u16 after the token), as the game writes it
     assert 'Active{Token: tok, Idle: c.u16(), MaxPing: c.u16(), Search: c.u16()}' in afk
+    # build 109: the optional flags byte after them (quick_cap.go), the game's NETLOBBY_ACTIVE_FAR
+    assert 'm.WithFlags, m.Flags = true, c.u8()' in afk
+    cap = (RELAY / 'quick_cap.go').read_text(encoding='utf-8')
+    assert 'QuickFlagFar = 1' in cap and '#define NETLOBBY_ACTIVE_FAR      1' in rules
+    assert 'CapQuickCap uint32 = 1 << 31' in cap and '#define CAPS_QUICKCAP 2147483648u' in _src('src/hooks/netplay.c')
+    assert 'DefaultQuickPingCap = 300' in cap and re.search(r'#define QUICK_CAP_MS\s+300', h)
+    assert 'QuickSeatBound = 1' in cap and 'QuickSeatFar   = 2' in cap
+    assert re.search(r'#define QUICK_SEAT_BOUND\s+1', h) and re.search(r'#define QUICK_SEAT_FAR\s+2', h)
     # ROOMLIST's seats: max ping in 10 ms units and the wait, three bytes a room after the More pings
     assert 'b = append(b, byte(min(q.MaxPing/10, 255)))' in (RELAY / 'protocol_roomlist.go').read_text(encoding='utf-8')
     assert 'seat_max[k] = b[p] * 10;' in _src('src/hooks/netplay_servers.c')

@@ -5388,7 +5388,9 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     if (alone && scope) {       // where it searches now; build 97: within which ping (the player's own limit, else the stage)
         char line[160];
         int own = gallery_on() ? G.quick_max_ping : netplay_quick_max_ping();
-        netlobby_search_line(line, sizeof(line), own, (int)((tick - S.quick_since) / 1000), scope_words(sv, scope).c_str());
+        // build 109: never past the ping ceiling unless far opponents are allowed (netplay_quick_cap_ms)
+        netlobby_search_line_cap(line, sizeof(line), own, (int)((tick - S.quick_since) / 1000), scope_words(sv, scope).c_str(),
+                                 gallery_on() ? 0 : netplay_quick_cap_ms());
         text(dl, f, g_hand, 15, 320, my, ORANGE, line, CENTER, 0.8f);
     } else if (team && r.player_count < 4) {
         char line[96];
@@ -5867,6 +5869,12 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
         float lw = text_width(f, g_title, 11, line);
         text(dl, f, g_title, 11, 596, 28, ms >= 0 ? ping_colour(ms) : GREY, line, RIGHT, 0.8f);
         ping_bars(dl, f, 596 - lw - 24, 28, 10, ms);
+        // build 109: the pair's ping and how the fight plays, under it ("PING 95 MS - DELAY")
+        if (v.path_ms >= 0 && v.rollback >= 0) {
+            char pair[64];
+            snprintf(pair, sizeof(pair), "PING %d MS - %s", v.path_ms, v.rollback ? "ROLLBACK" : "DELAY");
+            text(dl, f, g_title, 10, 596, 42, v.rollback ? GREEN : ORANGE, pair, RIGHT, 0.8f);
+        }
     }
     shift_fade(dl, f, k, 0, -12 * (1 - ease_out(t / 0.35f)), ease_out(t / 0.35f));
 
@@ -5960,6 +5968,9 @@ NetVersus sample_versus(const std::string &page)
         if (!v.cpu[i]) snprintf(v.name[i], sizeof(v.name[i]), "%s", names[i]);
         v.ping[i] = v.cpu[i] ? -1 : 38 + 41 * i;
     }
+    // build 109: the pair line ("versus-1v1" a delay-based fight, the others rollback)
+    v.path_ms = page == "versus-1v1" ? 95 : 41;
+    v.rollback = page == "versus-1v1" ? 0 : 1;
     if (page == "versus-rot") {     // FFA rotation: Cal won the last one and stays on
         v.room_mode = NETPLAY_MODE_FFAROT;
         v.venue = 11;
