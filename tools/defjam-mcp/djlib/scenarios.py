@@ -3119,9 +3119,12 @@ def _towers_overlay_pngs(folder, prefix, out_dir, shots, per_label=3):
             files = [files[k * (len(files) - 1) // (per_label - 1)] for k in range(per_label)]
         for n, f in enumerate(files):
             path = os.path.join(out_dir, "%s-%s-%d.png" % (prefix, label, n))
-            im = Image.open(f)
-            im.thumbnail((1280, 720))
-            im.save(path)
+            try:        # the last capture may be cut short when the copy is stopped while it writes it
+                im = Image.open(f)
+                im.thumbnail((1280, 720))
+                im.save(path)
+            except OSError:
+                continue
             shots.append(_relpath(path))
 
 
