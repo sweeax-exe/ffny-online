@@ -7559,6 +7559,16 @@ static int test_tower_tick(const NetRoom *r, const char *who, const char *file)
         }
         return 1;
     }
+    {   /* RECOMP_TEST_TOWER_VOTE_DELAY_S=<s>: the continue vote that much after the summary shows (its pictures) */
+        static int delay = -2, key = -1;
+        static ULONGLONG since;
+        if (delay == -2) delay = getenv("RECOMP_TEST_TOWER_VOTE_DELAY_S") ? atoi(getenv("RECOMP_TEST_TOWER_VOTE_DELAY_S")) : 0;
+        if (delay > 0 && t.state == TOWERNET_SUMMARY) {
+            int k = t.last_floor * 16 + t.last_how;
+            if (k != key) { key = k; since = GetTickCount64(); }
+            if (GetTickCount64() - since < (ULONGLONG)delay * 1000u) return 1;
+        }
+    }
     return t.state == TOWERNET_STARTING || t.state == TOWERNET_PLAYING;
 }
 

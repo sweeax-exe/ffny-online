@@ -4178,6 +4178,7 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
             more1 = {"RECOMP_TEST_TOWER_LEAVE": str(floors)}
             if variant == "desync":
                 more0["RECOMP_TEST_TOWERS_ONLINE_DESYNC"] = "2"
+                more0["RECOMP_TEST_TOWER_VOTE_DELAY_S"] = more1["RECOMP_TEST_TOWER_VOTE_DELAY_S"] = "8"   # the summary's pictures
             else:
                 more1["RECOMP_TEST_START_DELAY_MS"] = "4000"
                 more0["RECOMP_NETPLAY_STEPLOG"] = more1["RECOMP_NETPLAY_STEPLOG"] = "1"
