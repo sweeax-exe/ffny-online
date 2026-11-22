@@ -7772,6 +7772,17 @@ const char *shot_label()
     if (const char *tw = towers_shot_label_impl()) return tw;
     if (const char *fw = faction_shot_label()) return fw;
     if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
+    {   // Team Tower Online: the room by its state, also while the floor's match is still "connected" (between floors)
+        NetRoom r;
+        lobby_room(&r);
+        if (!gallery_on() && !g_versus_up && r.in_room && NETPLAY_IS_TOWER(r.settings.mode) && r.phase != 2) {
+            TowerNetView tv;
+            static const char *const st[] = { "toweronline-select", "toweronline-starting", "toweronline-playing",
+                                              "toweronline-summary", "toweronline-waiting", "toweronline-over", "toweronline" };
+            if (r.player_count < 2) return "toweronline-wait";
+            return towers_online_view_net(&tv) ? st[tv.state < 7 ? tv.state : 6] : "toweronline";
+        }
+    }
     if (!gallery_on() && !g_versus_up && net_state() != NETPLAY_CONNECTED) {    // the crew battle screen (stage 3)
         NetRoom r;
         NetCrew cb;
@@ -7785,13 +7796,6 @@ const char *shot_label()
         if (S.page == TURF && !r.in_room) return TW.picker ? "turf-claim" : TW.tab == 1 ? "turf-season" : "turf";    // stage 4
         if (S.page == COMPLEX && !r.in_room) return RU.tab == 1 ? "kotr" : "complex";      // F0
         if (S.page == LOCKER && !r.in_room) return LK.sheet ? "towerframes" : "locker";     // build 104: the Towers rewards' captures
-        if (r.in_room && NETPLAY_IS_TOWER(r.settings.mode) && r.phase != 2) {   // Team Tower Online: the room by its state
-            TowerNetView tv;
-            static const char *const st[] = { "toweronline-select", "toweronline-starting", "toweronline-playing",
-                                              "toweronline-summary", "toweronline-waiting", "toweronline-over", "toweronline" };
-            if (r.player_count < 2) return "toweronline-wait";
-            return towers_online_view_net(&tv) ? st[tv.state < 7 ? tv.state : 6] : "toweronline";
-        }
         if (!r.in_room && S.page == ROOMS) return "rooms";
         if (r.in_room && r.phase == 0 && !NETPLAY_IS_HILL(r.settings.mode)) return "room";
     }

@@ -4181,6 +4181,7 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
                 more0["RECOMP_TEST_TOWER_VOTE_DELAY_S"] = more1["RECOMP_TEST_TOWER_VOTE_DELAY_S"] = "8"   # the summary's pictures
             else:
                 more1["RECOMP_TEST_START_DELAY_MS"] = "4000"
+                more0["RECOMP_TEST_TOWER_VOTE_DELAY_S"] = more1["RECOMP_TEST_TOWER_VOTE_DELAY_S"] = "6"
                 more0["RECOMP_NETPLAY_STEPLOG"] = more1["RECOMP_NETPLAY_STEPLOG"] = "1"
             stop, texts, logs = run_phase(variant, {0: more0, 1: more1},
                                           lambda cs: all(c.watch.count(leaving) for c in cs), timeout)
