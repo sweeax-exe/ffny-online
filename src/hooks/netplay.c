@@ -7436,17 +7436,11 @@ static void test_tower_enter(const char *who, const char *file)
 {
     const char *role = getenv("RECOMP_TEST_TOWER_ROLE");
     int host = role && !strcmp(role, "host"), i;
-    char old[16] = "";
     NetRoom tr;
     if (!host && getenv("RECOMP_TEST_TOWER_JOIN_DELAY_S")) {   /* the host's waiting page (and the list) shows a while */
         int d = atoi(getenv("RECOMP_TEST_TOWER_JOIN_DELAY_S"));
         fprintf(stderr, "[NETPLAY] tests: joining the Team Tower room in %d s""\n", d);
         for (i = 0; i < d * 10 && !N.stop; i++) Sleep(100);
-    }
-    if (!host && file && *file) {   /* a code left from an earlier session is not this one's */
-        FILE *f = fopen(file, "r");
-        if (f) { if (!fgets(old, sizeof(old), f)) old[0] = 0; fclose(f); }
-        old[6] = 0;
     }
     for (i = 0; i < 40 && !N.stop; i++) {
         netplay_lobby_room(&tr);
@@ -7485,7 +7479,7 @@ static void test_tower_enter(const char *who, const char *file)
             FILE *f = file && *file ? fopen(file, "r") : NULL;
             if (f) { if (!fgets(code, sizeof(code), f)) code[0] = 0; fclose(f); }
             code[6] = 0;
-            if (strlen(code) == 6 && strcmp(code, old)) {
+            if (strlen(code) == 6) {     /* (the tests remove an earlier session's file first) */
                 fprintf(stderr, "[NETPLAY] tests: joining the Team Tower Online room %s by its code" "\n", code);
                 netservers_code_begin(1, code, who);
                 netplay_lobby_join(code);
