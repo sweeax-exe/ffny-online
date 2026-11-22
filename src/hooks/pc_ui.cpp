@@ -2920,6 +2920,11 @@ static void page_basics()
     ImGui::SeparatorText("Music");
     settings_group("audio", { "next_song_key", "next_song_pad", "prev_song_key", "prev_song_pad" });
     ImGui::TextDisabled("Next or previous song in the menus and in fights. Only you hear it, online too.");
+    {   // RECOMP_LAUNCHER_PAGE=basics-online (screenshots, build 110): the page opens scrolled to its Online part
+        static bool scrolled;
+        const char *want = getenv("RECOMP_LAUNCHER_PAGE");
+        if (!scrolled && want && !strcmp(want, "basics-online")) { ImGui::SetScrollHereY(0.0f); scrolled = true; }
+    }
     ImGui::SeparatorText("Online");
     settings_group("ui", { "button_icons" });
     discord_status_setting();
@@ -2952,7 +2957,7 @@ static int initial_page()
 {
     static const char *const names[] = { "display", "textures", "controllers", "pad", "keyboard", "voice", "general" };
     const char *want = getenv("RECOMP_LAUNCHER_PAGE");
-    if (want && !strcmp(want, "basics")) return PAGE_COUNT;
+    if (want && (!strcmp(want, "basics") || !strcmp(want, "basics-online"))) return PAGE_COUNT;
     // names has fewer entries than PAGE_COUNT: an unknown name ("saves", the Saves dialog) read past it
     for (int i = 0; want && i < (int)(sizeof(names) / sizeof(names[0])); i++)
         if (!strcmp(want, names[i])) return i;

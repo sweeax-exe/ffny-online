@@ -972,10 +972,6 @@ int netplay_room_rollback_mandatory(void)
     return on;
 }
 
-/* Whether this PC rolls back the room's next match, as far as it decides (P_RTT byte 7): this session
- * can (the audio arena), the relay allows it, and the relay makes it mandatory for the room's mode, or,
- * with no mask from the relay, the player opted in (the setting). In a mode the mask leaves out every
- * match plays in lockstep: that is the server's per-mode kill switch. */
 /* Build 110: the player's Rollback: On / Off ([online] rollback_choice, on by default; RECOMP_ROLLBACK_PREF=off or on
  * for tests). Off: this PC says "no rollback" in P_RTT (byte 7 0, as every build since 17 reads it; byte 14 bit 2 says
  * why), so every PC of the match, older builds too, plays that fight in lockstep with input delay, in every mode. */
@@ -986,6 +982,10 @@ static int rollback_choice_off(void)
     return recomp_settings_get("online", "rollback_choice", 0) == 1;
 }
 
+/* Whether this PC rolls back the room's next match, as far as it decides (P_RTT byte 7): this session
+ * can (the audio arena), the relay allows it, and the relay makes it mandatory for the room's mode, or,
+ * with no mask from the relay, the player opted in (the setting). In a mode the mask leaves out every
+ * match plays in lockstep: that is the server's per-mode kill switch. */
 static int this_pc_rolls_back(void)
 {
     if (rollback_choice_off()) return 0;    /* build 110: the player's choice, whatever the server allows */
