@@ -7510,6 +7510,12 @@ static int test_tower_tick(const NetRoom *r, const char *who, const char *file)
         left_after = lv && *lv ? atoi(lv) : -1;
         rejoin_s = lv && strchr(lv, ',') ? atoi(strchr(lv, ',') + 1) : -1;
     }
+    if (left && r->in_room && strcmp(r->code, g_test_tower_code) && rejoin_s >= 0 && !rejoined) {
+        /* the hub took a scripted press meanwhile (QUICK MATCH): out of that room, back to the climb's */
+        fprintf(stderr, "[NETPLAY] tests: in room %s instead of the climb's: leaving it""\n", r->code);
+        netplay_lobby_leave();
+        return 1;
+    }
     if (left && !r->in_room) {
         if (rejoin_s >= 0 && !rejoined && GetTickCount64() - left_at >= (ULONGLONG)rejoin_s * 1000u && g_test_tower_code[0]) {
             fprintf(stderr, "[NETPLAY] tests: back into the Team Tower Online room %s" "\n", g_test_tower_code);
