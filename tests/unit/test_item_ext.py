@@ -264,8 +264,8 @@ SLOT = 0x80
 STATES = SLOT + 0x4DC4
 
 
-def read_states(kinds, offsets, blob, new_state=2):
-    """{id: state} of every item as an item_ext build reads it (new items: owned, no bits)."""
+def read_states(kinds, offsets, blob, new_state=3):
+    """{id: state} of every item as an item_ext build reads it (new items: unlocked and owned, 3, no bits)."""
     out = {}
     for k, (count, retail, ids) in kinds.items():
         for i, item in enumerate(ids):
@@ -322,10 +322,10 @@ def roundtrip_checks(tool, tmp_path, base_blob, cur_blob, profiles):
         # 1. loaded and saved again, unchanged: byte for byte the file it was
         held = read_states(got, got_off, blob)
         assert write_states(got, got_off, blob, held) == blob, name
-        # 2. every retail item reads in the item_ext build what the retail game reads; the new ones read as owned
+        # 2. every retail item reads in the item_ext build what the retail game reads; the new ones read as owned (3)
         retail = read_states(want, want_off, blob)
         assert {i: s for i, s in held.items() if i in retail} == retail, name
-        assert all(held[i] == 2 for i in new_ids), name
+        assert all(held[i] == 3 for i in new_ids), name
         # 3. the item_ext build buys a retail item and 'buys' the new ones: only that item's two bits change, the
         #    retail game reads the purchase, and reading back in the item_ext build gives what it held
         kinds3 = got[3][2][:got[3][1]]

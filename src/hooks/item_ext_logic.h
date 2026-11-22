@@ -16,8 +16,8 @@
  * row. Every other item is NEW. The containers keep the retail items first, sorted by ID as the game sorts
  * them, then the new ones, sorted by ID; the arrays are sized from the retail counts. A retail item's state
  * is therefore where the retail game keeps it, whatever was added, and a profile file is byte for byte one
- * the retail layout reads. New items have no bits in the profile: they count as owned (ITEM_EXT_NEW_STATE),
- * and writes to them are dropped. */
+ * the retail layout reads. New items have no bits in the profile: they count as unlocked and owned
+ * (ITEM_EXT_NEW_STATE), and writes to them are dropped. */
 #ifndef ITEM_EXT_LOGIC_H
 #define ITEM_EXT_LOGIC_H
 
@@ -29,7 +29,10 @@ extern "C" {
 #endif
 
 #define ITEM_EXT_TABLES 64
-#define ITEM_EXT_NEW_STATE 2u       /* what a new item reads as: owned */
+/* What a new item reads as: unlocked and owned (bit 0 Unlocked, bit 1 Owned; save_unlock's "own" writes 3 too).
+ * Bit 0 matters: the Wardrobe's item list (sub_0004E650, vtable 0x294D54 +4) takes an item only when get() has
+ * bit 0 set, so with 2 the Eyepatch counted as owned but never showed in Wardrobe > Accessories > Eyewear. */
+#define ITEM_EXT_NEW_STATE 3u
 
 typedef struct ItemExtBase {
     int tables;                             /* tables read; 0 = no dump database: every item is retail */
