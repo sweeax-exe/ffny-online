@@ -23,7 +23,8 @@ int main(void)
     static const char *const ids[] = { "tw-floor25", "tw-floor50", "tw-uptown", "tw-untouchable", "tw-weekly",
         "tw-boroughs", "tw-legend-1-2026-11", "tw-legend-2-2027-01", "tw-legend-month", "tw-legend-3-2026-11",
         "tw-legend-1-2026-13", "tw-legend-1-2026-11x", "s1-classic-3", "", "tw-nope",
-        "tw-team-floor25", "tw-team-untouchable", "tw-team-champions", "tw-team-legend-4-2026-11",
+        "tw-team-floor25", "tw-team-untouchable", "tw-team-champions-4", "tw-team-legend-4-2026-11",
+        "tw-team-champions-5", "tw-team-champions",
         "tw-team-legend-5-2027-02", "tw-team-legend-month", "tw-team-legend-1-2026-11", "tw-team-legend-4-2026-11x",
         "tw-team-floor50", "tw-legend-4-2026-11" };
     char rib[64];
@@ -95,16 +96,18 @@ def test_team_rewards(native):
     tower (4 or 5) and ribbon; no team floor 50, no solo legend id for a team tower."""
     rows, _ = native
     kinds = {i: int(r[0]) for i, r in rows.items() if i != 'rarity'}
-    assert [kinds[i] for i in ('tw-team-floor25', 'tw-team-untouchable', 'tw-team-champions', 'tw-team-legend-4-2026-11')] ==         [8, 9, 10, 11]
+    assert [kinds[i] for i in ('tw-team-floor25', 'tw-team-untouchable', 'tw-team-champions-4', 'tw-team-legend-4-2026-11',
+                               'tw-team-champions-5')] == [8, 9, 10, 11, 12]
     assert kinds['tw-team-legend-5-2027-02'] == kinds['tw-team-legend-month'] == 11
-    for bad in ('tw-team-legend-1-2026-11', 'tw-team-legend-4-2026-11x', 'tw-team-floor50', 'tw-legend-4-2026-11'):
+    for bad in ('tw-team-legend-1-2026-11', 'tw-team-legend-4-2026-11x', 'tw-team-floor50', 'tw-legend-4-2026-11',
+                'tw-team-champions'):
         assert kinds[bad] == 0, bad
     rarity = {i: int(r[4]) for i, r in rows.items() if i != 'rarity'}
     assert rarity['tw-team-floor25'] == 1 and rarity['tw-team-untouchable'] == 2
-    assert rarity['tw-team-champions'] == 3 and rarity['tw-team-legend-4-2026-11'] == 4
+    assert rarity['tw-team-champions-4'] == rarity['tw-team-champions-5'] == 3 and rarity['tw-team-legend-4-2026-11'] == 4
     fx = {i: int(r[5]) for i, r in rows.items() if i != 'rarity'}
     assert fx['tw-team-floor25'] == fx['tw-floor25'] and fx['tw-team-untouchable'] == fx['tw-untouchable']
-    assert fx['tw-team-champions'] == fx['tw-boroughs'] and fx['tw-team-legend-4-2026-11'] == fx['tw-legend-1-2026-11']
+    assert fx['tw-team-champions-4'] == fx['tw-team-champions-5'] == fx['tw-boroughs'] and fx['tw-team-legend-4-2026-11'] == fx['tw-legend-1-2026-11']
     assert rows['tw-team-legend-4-2026-11'][1:4] == ['4', '2026', '11']
     assert rows['tw-team-legend-4-2026-11'][7] == '#1 TEAM TOWER · NOV 2026'
     assert rows['tw-team-legend-5-2027-02'][7] == '#1 TEAM TOWER COMMUNITY · FEB 2027'
@@ -113,12 +116,13 @@ def test_team_rewards(native):
     frames = read('tower_frames.inc')
     assert 'int kind = tower_reward_kind(id, nullptr, nullptr, nullptr), base = tower_reward_base(kind);' in frames
     assert frames.count('if (team) trw_team_plate(') == 2 and '"TAG TEAM LEGEND"' in frames
-    assert '"tw-team-champions", "Tag Team Champions"' in read('locker_ui.inc')
+    assert '"tw-team-champions-4", "Tag Team Champions"' in read('locker_ui.inc')
+    assert '"tw-team-champions-5", "Tag Team Champions"' in read('locker_ui.inc')
     # the server's catalogue has the same ids (relay/accounts/tower_rewards.go)
     srv = ROOT / 'server/relay/accounts/tower_rewards.go'
     if srv.is_file():
         go = srv.read_text(encoding='utf-8')
-        for i in ('"tw-team-floor25"', '"tw-team-untouchable"', '"tw-team-champions"', '"tw-team-legend-"'):
+        for i in ('"tw-team-floor25"', '"tw-team-untouchable"', '"tw-team-champions-%d"', '"tw-team-legend-"'):
             assert i in go, i
 
 

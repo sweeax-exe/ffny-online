@@ -11,7 +11,7 @@ static const struct { const char *id; int kind; } k_ids[] = {
     { "tw-floor25", TRW_FLOOR25 }, { "tw-floor50", TRW_FLOOR50 }, { "tw-uptown", TRW_UPTOWN },
     { "tw-untouchable", TRW_UNTOUCHABLE }, { "tw-weekly", TRW_WEEKLY }, { "tw-boroughs", TRW_BOROUGHS },
     { "tw-team-floor25", TRW_TEAM_FLOOR25 }, { "tw-team-untouchable", TRW_TEAM_UNTOUCHABLE },
-    { "tw-team-champions", TRW_TEAM_CHAMPIONS },
+    { "tw-team-champions-4", TRW_TEAM_CHAMPIONS }, { "tw-team-champions-5", TRW_TEAM_CHAMPIONS_COMMUNITY },
 };
 
 int tower_reward_kind(const char *id, int *tower, int *year, int *month)
@@ -51,13 +51,14 @@ int tower_reward_base(int kind)
     switch (kind) {
     case TRW_TEAM_FLOOR25: return TRW_FLOOR25;
     case TRW_TEAM_UNTOUCHABLE: return TRW_UNTOUCHABLE;
-    case TRW_TEAM_CHAMPIONS: return TRW_BOROUGHS;      /* the crown and the sweep, in gold (tower_frames.inc) */
+    case TRW_TEAM_CHAMPIONS: case TRW_TEAM_CHAMPIONS_COMMUNITY:
+        return TRW_BOROUGHS;        /* the crown and the sweep, in gold or emerald (tower_frames.inc) */
     case TRW_TEAM_LEGEND: return TRW_LEGEND;
     default: return kind > TRW_NONE && kind < TRW_KINDS ? kind : TRW_NONE;
     }
 }
 
-int tower_reward_team(int kind) { return kind >= TRW_TEAM_FLOOR25 && kind <= TRW_TEAM_LEGEND; }
+int tower_reward_team(int kind) { return kind >= TRW_TEAM_FLOOR25 && kind <= TRW_TEAM_CHAMPIONS_COMMUNITY; }
 
 int tower_reward_rarity(int kind)
 {

@@ -325,8 +325,9 @@ void draw_tower_sheet(ImDrawList *dl, const Frame &f, const Pad &pad)
         { "tw-uptown", "Uptown Champion" }, { "tw-untouchable", "Untouchable" }, { "tw-weekly", "Weekly Conqueror" },
         { "tw-boroughs", "King of the Five Boroughs" }, { "tw-legend-1-2026-11", "Tower Legend" } };
     // build 108: the Team Tower's four below the solo seven
-    static const char *const team[4][2] = { { "tw-team-floor25", "Tag Team 25" }, { "tw-team-untouchable", "Untouchable Duo" },
-        { "tw-team-champions", "Tag Team Champions" }, { "tw-team-legend-4-2026-11", "Tag Team Legend" } };
+    static const char *const team[5][2] = { { "tw-team-floor25", "Tag Team 25" }, { "tw-team-untouchable", "Untouchable Duo" },
+        { "tw-team-champions-4", "Tag Team Champions" }, { "tw-team-champions-5", "Tag Team Champions" },
+        { "tw-team-legend-4-2026-11", "Tag Team Legend" } };
     page_title(dl, f, "TOWER REWARDS");
     const float w = 78, h = 150, gap = 7, x0 = 320 - (7 * w + 6 * gap) / 2, y = 64;
     auto card = [&](const char *id, const char *title, int who, float x, float cy) {
@@ -339,8 +340,8 @@ void draw_tower_sheet(ImDrawList *dl, const Frame &f, const Pad &pad)
         text(dl, f, g_title, 8, x + w / 2, cy + h + 12, rarity_col(rarity), tower_reward_rarity_name(rarity), CENTER, 0.5f);
     };
     for (int i = 0; i < 7; i++) card(ids[i][0], ids[i][1], i == 5 ? 21 : i * 3, x0 + i * (w + gap), y);
-    const float tx0 = 320 - (4 * w + 3 * gap) / 2;
-    for (int i = 0; i < 4; i++) card(team[i][0], team[i][1], 4 + i * 5, tx0 + i * (w + gap), y + h + 30);
+    const float tx0 = 320 - (5 * w + 4 * gap) / 2;
+    for (int i = 0; i < 5; i++) card(team[i][0], team[i][1], 4 + i * 5, tx0 + i * (w + gap), y + h + 30);
     if (pad.b) { LK.sheet = false; S.page = HUB; }
 }
 

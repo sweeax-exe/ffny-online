@@ -3433,7 +3433,7 @@ def _pair_claimer(acc_port, claims, delay=0.0):
         if len(m) <= len(claims):
             return
         code, url = m[len(claims)]
-        page = urllib.request.urlopen("http://127.0.0.1:%d/auth/pair" % acc_port, timeout=5).read().decode("utf-8", "replace")
+        page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8", "replace")     # the address shown: /pair
         body = urllib.parse.urlencode({"code": code.lower().replace("-", ""), "username": PAIR_USER,
                                        "password": PAIR_PASS}).encode()
         req = urllib.request.Request("http://127.0.0.1:%d/auth/pair/password" % acc_port, data=body,
