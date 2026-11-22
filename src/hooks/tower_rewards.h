@@ -31,8 +31,9 @@ enum {
      * tower is 48 floors with the standard roster, its top reward is the clear. */
     TRW_TEAM_FLOOR25,   /* tw-team-floor25: Tag Team 25, steel as Floor 25 */
     TRW_TEAM_UNTOUCHABLE,   /* tw-team-untouchable: Untouchable Duo, chrome as Untouchable */
-    TRW_TEAM_CHAMPIONS, /* tw-team-champions: Tag Team Champions, gold, a pulsing crown */
+    TRW_TEAM_CHAMPIONS, /* tw-team-champions-4: Tag Team Champions (standard), gold, a pulsing crown */
     TRW_TEAM_LEGEND,    /* tw-team-legend-<tower 4|5>-<yyyy>-<mm>: Tag Team Legend, as Tower Legend */
+    TRW_TEAM_CHAMPIONS_COMMUNITY,   /* tw-team-champions-5: Tag Team Champions (community), emerald, the crown, five gems */
     TRW_KINDS
 };
 

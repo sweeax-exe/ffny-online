@@ -1384,7 +1384,7 @@ bool towers_gallery(const std::string &p)
         TWU.gal_pv = PartnerView();
         TWU.gal_pv.state = p == "towers-pair" ? PARTNER_WAITING : p == "towers-pair-confirm" ? PARTNER_CONFIRM : PARTNER_SIGNED;
         snprintf(TWU.gal_pv.code, sizeof TWU.gal_pv.code, "K7Q-2MX");
-        snprintf(TWU.gal_pv.url, sizeof TWU.gal_pv.url, "https://play.defjam.online/auth/pair");
+        snprintf(TWU.gal_pv.url, sizeof TWU.gal_pv.url, "https://defjam.online/pair");
         snprintf(TWU.gal_pv.name, sizeof TWU.gal_pv.name, "MASA");
         TWU.gal_pv.secs_left = 9 * 60 + 41;
     }

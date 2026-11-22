@@ -14,8 +14,9 @@
 //
 // Build 108, the Team Tower's own: each is its solo look (tower_reward_base) with the TAG TEAM plate on the card's
 // foot (two linked rings and the words): Tag Team 25 (steel, the "25" plate), Untouchable Duo (chrome), Tag Team
-// Champions (LEGENDARY: gold with the pulsing crown, sweep and shine) and Tag Team Legend (the legend's lacquer,
-// laurel, embers and the team tower's month on the ribbon).
+// Champions (LEGENDARY, one per team tower: gold with the pulsing crown, sweep and shine for the standard one,
+// emerald with the five borough gems over the plate for the community one) and Tag Team Legend (the legend's
+// lacquer, laurel, embers and the team tower's month on the ribbon).
 //
 // Everything works on any card size (the room's 128 x 270, the watch screens', the hill's king, the Locker's
 // preview). Visual only and light: fixed arrays, no allocation, the time from GetTickCount64 (a fixed moment in the
@@ -61,6 +62,8 @@ const TrwStyle &trw_style(int kind)
           IM_COL32(255, 226, 120, 255), IM_COL32(232, 190, 64, 255), IM_COL32(255, 250, 215, 255) },
         { IM_COL32(255, 90, 67, 255), IM_COL32(168, 24, 15, 255), IM_COL32(86, 8, 5, 255),                // lacquer
           IM_COL32(212, 166, 42, 255), IM_COL32(240, 179, 58, 255), IM_COL32(255, 243, 200, 255) },
+        { IM_COL32(176, 255, 214, 255), IM_COL32(38, 170, 104, 255), IM_COL32(10, 70, 40, 255),           // emerald
+          IM_COL32(120, 232, 170, 255), IM_COL32(92, 214, 146, 255), IM_COL32(225, 255, 238, 255) },
     };
     return k[kind > 0 && kind < TRW_KINDS ? kind : 0];
 }
@@ -323,6 +326,8 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
     case TRW_BOROUGHS:
         trw_metal(dl, f, x, y, w, h, b, s, a);
         if (!team) trw_gems(dl, f, cx, y + h, u, a);     // Tag Team Champions: the TAG TEAM plate in their place
+        else if (kind == TRW_TEAM_CHAMPIONS_COMMUNITY)      // the community one: the gems over the plate
+            trw_gems(dl, f, cx, y + h - std::max(7.0f, std::min(11.0f, u * 0.075f)) * 1.7f - b, u * 0.8f, a);
         trw_crown(dl, f, cx, y, u * 0.38f, pulse, a);
         break;
     case TRW_UPTOWN:
