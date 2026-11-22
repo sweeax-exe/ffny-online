@@ -88,6 +88,10 @@ def op_problem(op):
         return "the colour's texture %s is not the part %s's" % (colours[0]["texture"], model["name"])
     if op.get("variants") != []:
         return "a roster part's item has no variants"
+    # cosmetic only (owner, build 108): the row's Cost (word 4, field 0x0CFA401E) is both the shop price and what
+    # the profile's sixth base stat (Charisma, sub_00014C20: the worn parts' Cost / 5) counts, so it is 0
+    if op.get("price") != 0 or isinstance(op.get("price"), bool):
+        return "a roster part's item is cosmetic: its price (and so its Charisma) is 0"
     return ""
 
 

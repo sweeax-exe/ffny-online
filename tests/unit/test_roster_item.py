@@ -305,6 +305,19 @@ BUILT = ["V2CP_144_0010_C.o", "V2CP_144_0010_Y01_01.xsh", "screens/shopThumbs/10
 
 # -- tests ------------------------------------------------------------------------------------------------------------
 
+def test_a_roster_item_costs_nothing_and_gives_no_charisma(game):
+    """The template row (the glasses) costs 40, and a worn part's Cost / 5 goes into the profile's Charisma
+    (sub_00014C20); the Eyepatch's row has Cost 0 whatever the template's."""
+    from ffnycontent import clothing, sod
+    eyewear_game(game)
+    blob = (game / clothing.SOD_PATH).read_bytes()
+    template = sod.Sod(blob).find_clothing("Eyewear_Test Frames")
+    new_blob, _, _ = clothing.apply_ops(blob, None, {}, [roster_op(game)])
+    rows = sod.Sod(new_blob).clothing()
+    eyepatch = [r for r in rows if r.num == 10 and r.type == template.type]
+    assert template.cost > 0 and len(eyepatch) == 1 and eyepatch[0].cost == 0
+
+
 def test_a_roster_piece_is_made_from_the_players_files(game, data):
     eyewear_game(game)
     pack = make_pack(data, "eyepatch", "clothing", [], [roster_op(game)])
@@ -403,6 +416,9 @@ def test_a_pack_that_does_not_fit_is_skipped(game, data):
     (lambda op: op.update(variants=[{"model": "V2CP_144_0010_C", "textures": ["V2CP_144_0010_Y01_01"]}]),
      "no variants"),
     (lambda op: op.update(colour_of="x"), "unknown field colour_of"),
+    # cosmetic only (owner, build 108): the row's Cost is also what Charisma counts (sub_00014C20)
+    (lambda op: op.update(price=40), "cosmetic"),
+    (lambda op: op.update(price=False), "cosmetic"),
 ])
 def test_install_json_refuses_a_wrong_roster_op(game, change, message):
     op = roster_op(game)
