@@ -3415,15 +3415,19 @@ TEAM_WATCH = TOWERS_WATCH + ["team floor", "[TOWERS] team run"]
 PAIR_USER, PAIR_PASS = "PairTwo", "pair two's long password"
 
 
-def _pair_claimer(acc_port, claims):
+def _pair_claimer(acc_port, claims, delay=0.0):
     """Build 108: player 2's phone. Once the copy's log shows the partner sign-in code, type it on the service's
     /auth/pair page and sign in there with PAIR_USER's username and password (POST /auth/pair/password, as the phone's form
-    does). claims gets one dict per code: the code and what the page said."""
+    does), delay seconds after the code showed. claims gets one dict per code: the code and what the page said."""
     import urllib.parse
     import urllib.request
 
+    seen = {}
+
     def hook(c):
         if c.watch.count("partner sign-in: code") <= len(claims):
+            return
+        if time.time() - seen.setdefault(len(claims), time.time()) < delay:     # the code's picture first
             return
         m = re.findall(r"partner sign-in: code ([A-Z0-9]{3}-[A-Z0-9]{3}) on (\S+)", logparse.read_text(c.log))
         if len(m) <= len(claims):
@@ -3571,7 +3575,7 @@ def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, ext
                               (1, "player 2 confirmed"), shots,
                               [("partner sign-in: code", 1, 2.5, "t6-pair-code"),
                                ("waiting for player 2's confirm", 1, 1.5, "t6-pair-confirm"),
-                               ("player 2 confirmed", 1, 2.0, "t6-start-team")], 300, _pair_claimer(acc_port, claims2))
+                               ("player 2 confirmed", 1, 2.0, "t6-start-team")], 300, _pair_claimer(acc_port, claims2, 5.0))
         text = logparse.read_text(c.log)
         phases.append({"phase": "team-pair-card", "reached": ok, "claims": claims2, "log": _relpath(c.log)})
         if not ok or not claims2 or "the sign-in card of player 2 (open)" not in text:
