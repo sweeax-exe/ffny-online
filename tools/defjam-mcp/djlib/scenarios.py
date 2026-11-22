@@ -3703,3 +3703,248 @@ def tower_rewards(timeout=150, relay_port=27900, lock_timeout=None, log=None, ke
     finally:
         _finish(s, result, t0)
     return result
+
+
+# ---- Faction War (build 108) -----------------------------------------------------------------------
+
+FACTION_SHOTS = os.environ.get("DJ_FACTION_SHOTS", r"D:\DefJam\community\faction-war-shots")
+# the observer's overlay presses (0.7 s apart, from 3 s after the overlay first reads the pad; "." is a pause): wait
+# for the picker, onto Crow (closed: chains), A on it (refused), back to D-Mob, A (the confirm step), A (YES)
+FACTION_PICK_PAD = ".,.,.,.,.,r,.,.,a,.,.,l,.,.,a,.,.,a"
+
+
+def _fw_http(port, method, path, token=None, body=None):
+    import urllib.request
+    import urllib.error
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), method=method,
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers=dict({"Content-Type": "application/json"},
+                                              **({"Authorization": "Bearer " + token} if token else {})))
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+    except OSError as e:
+        return 0, str(e)
+
+
+def _fw_kv(text):
+    out = {}
+    for line in text.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            out.setdefault(k, v)
+    return out
+
+
+def faction_war(size=1, matches=2, timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots=False,
+                extra_env=None, out_dir=None, fast_ko=600):
+    """Faction War (build 108) against a local account service with -factions (FFNY_SERVER_DIR: a server checkout
+    with relay/accounts/factions.go) and a local relay.
+
+    size 1: five accounts. Lock A, Lock B and Copy 2 pick Crow and Copy 1 D-Mob over HTTP, so Crow holds 3 of the 4
+    active players (balance-min 3): Crow is closed for new picks. Copy 0 (the observer) opens the hub with no side:
+    the picker opens by itself; it moves onto Crow (chains, a lock, the reason), A is refused, then D-Mob, A, YES:
+    the banner, then the FACTION WAR page. Once that page is up, Copies 1 and 2 search 1 ON 1 (RECOMP_NETPLAY=faction):
+    the service matches them, one opens the room, the other joins by code; `matches` fights (slot 0 wins by the test
+    knockout). While the observer's page is open the live totals must change on it; then its BOARD opens. The
+    service's board must hold both fighters and 4 points a fight (3 the win, 1 the loss).
+    size 2: four fighters, Copies 1 and 2 D-Mob, 3 and 4 Crow, search 2 ON 2: one room of four, the teams by side,
+    8 points a fight. The captures (the picker's frames, the page, the board) go to out_dir as PNG."""
+    import shutil
+    t0 = time.time()
+    s = copies.Session("factionwar%d" % size, lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "factionwar", "ok": False, "params": {"size": size, "matches": matches}}
+    problems = []
+    try:
+        h = harness()
+        acc_port = relay_port + 100
+        fighters = ["Copy 1", "Copy 2"] if size == 1 else ["Copy 1", "Copy 2", "Copy 3", "Copy 4"]
+        observer = "Copy 0" if size == 1 else None
+        names = ([observer, "Lock A", "Lock B"] if observer else []) + fighters
+        tokens = s.accounts(acc_port, names, extra=["-factions", "-faction-balance-min", "3"])
+        picks = ([("Lock A", "crow"), ("Lock B", "crow"), ("Copy 2", "crow"), ("Copy 1", "dmob")] if size == 1 else
+                 [("Copy 1", "dmob"), ("Copy 2", "dmob"), ("Copy 3", "crow"), ("Copy 4", "crow")])
+        result["picks"] = {}
+        for who, fac in picks:
+            st, body = _fw_http(acc_port, "POST", "/api/factions/pick?format=text", tokens[who], {"faction": fac})
+            result["picks"][who] = "%s %d" % (fac, st)
+            if st != 200:
+                problems.append("pick %s for %s: HTTP %d %s" % (fac, who, st, body.strip()[:120]))
+        if observer:
+            st, body = _fw_http(acc_port, "GET", "/api/factions/me?format=text", tokens[observer])
+            me0 = _fw_kv(body)
+            result["observer_before"] = {k: me0.get(k) for k in ("faction", "can_pick", "locked", "lock_note")}
+            if me0.get("locked") != "crow":
+                problems.append("Crow is not closed for new picks before the observer starts (%s)" % result["observer_before"])
+        s.relay(relay_port)
+        watch = WATCH + ["[FACTION]", "[FACTION] page open", "[NETPLAY] tests: faction match:"]
+        shots = {}
+        board_file = os.path.join(s.dir, "open-board")
+
+        def base_env(i, name):
+            shots[i] = os.path.join(s.dir, "shots%d" % i)
+            os.makedirs(shots[i], exist_ok=True)
+            env = dict(VIRTUAL_PAD_ENV)
+            env.update({
+                "RECOMP_INPUT_VIRTUAL_PADS": "1",
+                "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port, "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_NAME": name,
+                "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
+                "RECOMP_ACCOUNT_TEST_TOKEN": tokens[name],
+                "RECOMP_OVERLAY_SHOT_DIR": shots[i], "RECOMP_OVERLAY_SHOT_MS": "1500",
+            })
+            return env
+
+        deadline = time.time() + (timeout or 900)
+        stop = None
+        if observer:
+            env = base_env(0, observer)
+            env.update({
+                "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"]),
+                "RECOMP_TEST_OPEN_ONLINE": "1",
+                "RECOMP_TEST_OVERLAY_PAD": FACTION_PICK_PAD,
+                "RECOMP_OVERLAY_SHOT_FAST": "110:faction-pick|faction-confirm",
+                "RECOMP_TEST_FACTION_BOARD_FILE": board_file,
+            })
+            env.update(extra_env or {})
+            s.launch(0, env=env, core=2, watch=watch)
+            while time.time() < deadline:
+                s.poll()
+                c = s.copies[0]
+                if c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") or not c.alive():
+                    stop = "the observer crashed or exited"
+                    break
+                if c.watch.count("[FACTION] page open"):
+                    break
+                time.sleep(1)
+            else:
+                stop = "the observer never reached the FACTION WAR page"
+        if not stop:
+            for k, name in enumerate(fighters):
+                i = k + 1
+                env = base_env(i, name)
+                p2 = k % 2 == 1
+                env.update({
+                    "RECOMP_NETPLAY": "faction", "RECOMP_TEST_FACTION_SIZE": str(size),
+                    "RECOMP_NETPLAY_FIGHTER": str([55, 22, 9, 31][k]),
+                    "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], online_tail(matches, 2, p2)),
+                    "RECOMP_TEST_READY_PLAYERS": str(2 * size),
+                })
+                if fast_ko:
+                    env["RECOMP_TEST_KO_STEP"] = "%d,0" % int(fast_ko)
+                env.update(extra_env or {})
+                s.launch(i, env=env, core=2 + 2 * i, watch=watch)
+                time.sleep(3)
+            want = matches * (4 if size == 1 else 8)
+            board = {}
+            while time.time() < deadline:
+                s.poll()
+                cs = list(s.copies.values())
+                if any(c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") for c in cs) or any(not c.alive() for c in cs):
+                    stop = "a copy crashed or exited"
+                    break
+                if any(c.watch.count("[NETPLAY] desync in") or c.watch.count("[NETPLAY] gave up") for c in cs):
+                    stop = "desync or gave up"
+                    break
+                st, body = _fw_http(acc_port, "GET", "/api/factions/board?format=text&n=10")
+                board = _fw_kv(body) if st == 200 else {}
+                if board and int(board.get("dmob", 0) or 0) + int(board.get("crow", 0) or 0) >= want:
+                    stop = "done"
+                    break
+                time.sleep(3)
+            else:
+                stop = "timeout: %s of %d points on the board" % (
+                    int(board.get("dmob", 0) or 0) + int(board.get("crow", 0) or 0) if board else "none", want)
+        if observer and stop == "done":
+            time.sleep(6)       # the observer's live poll and its count up
+            open(board_file, "w").close()
+            time.sleep(5)
+        s.poll()
+        result["stop"] = stop
+        if stop != "done":
+            problems.append(stop or "stopped")
+        texts = {i: logparse.read_text(c.log) for i, c in s.copies.items()}
+
+        def flines(i, mark="[FACTION]"):
+            return [l.split("] ", 1)[-1] if "] " in l else l for l in texts.get(i, "").splitlines() if mark in l]
+        st, body = _fw_http(acc_port, "GET", "/api/factions/board?format=text&n=10")
+        rows = [l for l in body.splitlines() if l.startswith("row=")]
+        result["board"] = {"dmob": _fw_kv(body).get("dmob"), "crow": _fw_kv(body).get("crow"), "rows": rows}
+        st, live_body = _fw_http(acc_port, "GET", "/api/factions/live?format=text")
+        result["live"] = {k: _fw_kv(live_body).get(k) for k in ("season", "dmob", "crow", "seq", "last")}
+        seats = {i: (flines(i, "[NETPLAY] tests: faction match:") or [""])[-1] for i in texts if i > 0}
+        codes = {v.rsplit(" ", 1)[-1] for v in seats.values()}
+        checks = {
+            "all_seated": all(v and "no room" not in v for v in seats.values()) and len(seats) == len(fighters),
+            "one_room": len(codes) == 1 and "room" not in codes,
+            "hosted_once": sum(1 for i in texts if i > 0 and any("host, opening" in l for l in flines(i))) == 1,
+            "board_points": int(result["board"]["dmob"] or 0) + int(result["board"]["crow"] or 0) == matches * (4 if size == 1 else 8),
+            "board_rows": len(rows) == len(fighters) and all(any("|%s|" % n in r for r in rows) for n in fighters),
+        }
+        if observer:
+            o = flines(0)
+            page_at = next((k for k, l in enumerate(o) if "page open" in l), None)
+            live_after = [l for l in o[page_at + 1:]] if page_at is not None else []
+            live_after = [l for l in live_after if l.startswith("live:")]
+            checks.update({
+                "picker_opened_by_itself": any("picker open (faction none)" in l for l in o),
+                "crow_locked_seen": any("locked crow" in l for l in o),
+                "crow_refused": any("crow is closed for new picks" in l for l in o),
+                "picked_dmob": any("pick dmob: HTTP 200" in l for l in o) and any("picked dmob: the banner" in l for l in o),
+                "page_open": page_at is not None,
+                # the owner's check: the totals change while the page is open (the live poll, then the count-up)
+                "live_updates_on_page": any(sum(int(x) for x in m.groups()) > 0 for m in
+                                            (re.search(r"D-Mob (\d+), Crow (\d+)", l) for l in live_after) if m),
+                "board_shown": any(l.startswith("board: HTTP 200") and "rows" in l for l in o) and any("board open" in l for l in o),
+            })
+            result["observer"] = [l for l in o if not l.startswith("picker: ")][:40]
+        for i in texts:
+            crashes = _faults(texts[i])
+            if crashes:
+                problems += ["copy %d: %s" % (i, cr) for cr in crashes]
+        problems += ["check failed: %s" % k for k, v in checks.items() if not v]
+        result["checks"] = checks
+        result["seats"] = seats
+        result["queue"] = {i: [l for l in flines(i) if l.startswith(("queue:", "match ", "room ", "search"))][:12]
+                           for i in texts if i > 0}
+        # the captures: the observer's picker frames as a numbered sequence, the page and the board (the fighters run
+        # without the online screens)
+        picked = []
+        try:
+            from PIL import Image
+        except ImportError:
+            Image = None
+        if Image:
+            targets = [os.path.join(s.dir, "png")] + ([out_dir] if out_dir else [])
+            for t in targets:
+                os.makedirs(t, exist_ok=True)
+
+            def save(src, name):
+                try:
+                    im = Image.open(src).convert("RGB")
+                except OSError:
+                    return
+                for t in targets:
+                    im.save(os.path.join(t, name))
+                picked.append(name)
+            for i, d in shots.items():
+                files = sorted(glob.glob(os.path.join(d, "*.bmp")))
+                if i == 0:
+                    seq = [p for p in files if re.search(r"-faction-(pick|confirm|picked)\.bmp$", p)]
+                    for k, p in enumerate(seq):
+                        save(p, "picker-seq-%03d-%s.png" % (k, os.path.basename(p).split("-", 1)[1][:-4]))
+                    page = [p for p in files if p.endswith("-faction-war.bmp")]
+                    if page:
+                        save(page[0], "mode-menu-first.png")
+                        save(page[-1], "mode-menu-last.png")
+                    board_shots = [p for p in files if p.endswith("-faction-board.bmp")]
+                    if board_shots:
+                        save(board_shots[-1], "board.png")
+        result["shots"] = picked
+        result.update({"ok": not problems, "problems": problems})
+    finally:
+        _finish(s, result, t0)
+    return result

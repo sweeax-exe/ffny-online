@@ -145,8 +145,8 @@ and license notices available without game data.
 
 FFNY Online's numbered builds (`v<version>-remaster.N`, the number in `config/remaster-version.txt`)
 are not tagged through the Source release workflow; `scripts/publish-update.ps1` publishes them.
-Players get exactly the Windows setup that CI built from the public source, so a code-signing service
-that signs only CI-built binaries (SignPath Foundation) can sign it:
+Players get the Windows setup that CI built from the public source, Authenticode-signed on the
+publishing PC (step 4); signing is the only change, and the provenance shows it:
 
 1. Raise `config/remaster-version.txt` and commit on `main` (clean checkout).
 2. `publish-update.ps1 -Notes "..."` pushes HEAD to `ffny/main` if it is not there yet. The push
@@ -159,20 +159,32 @@ that signs only CI-built binaries (SignPath Foundation) can sign it:
    match `CMakeLists.txt`, and the setup's SHA-256 equals the `.sha256` file and
    `installer_sha256`. CI builds it with the same `scripts/build-setup.ps1` (Release, production
    payload) as a local build, so the payload's source and toolkit are the same.
-4. It writes and signs `latest.json` with the update key, as before, uploads to the servers and
-   makes the GitHub release with the setup, its `.sha256` and its provenance.
+4. Code signing (`scripts/codesign-setup.py`, Certum open-source certificate through SimplySign
+   Desktop; its key never leaves Certum's cloud). It signs `DefJamLauncher.exe` inside the payload,
+   writes its new SHA-256 into the payload's `manifest.json`, puts that payload into the CI setup
+   (resource 101) together with its compiled-in `PAYLOAD_SHA256`, and signs the setup. Every signature
+   is checked with `signtool verify /pa` and `Get-AuthenticodeSignature` (Valid, our thumbprint,
+   timestamped), and the script proves that nothing else changed: the launcher's and the setup's
+   Authenticode image hashes are unchanged by signing, every other payload file, resource and PE
+   section is CI's byte for byte. The provenance gains a `codesign` block with the CI hashes before
+   signing and the hashes after, for the setup and each signed file; anyone can repeat the check with
+   `python scripts/codesign-setup.py compare --ci <CI setup> --signed <released setup>`. Python, its
+   DLLs and the wheels keep their own vendors' signatures; the game executable is compiled on each
+   player's PC and never shipped, so there is nothing of it to sign.
+   The SimplySign session expires after a while: the script signs a probe file first and stops
+   before pushing or uploading anything with "Log in to SimplySign Desktop (tray) and run again".
+   With signing on, nothing unsigned is uploaded.
+5. It writes and signs `latest.json` with the update key over the signed setup's SHA-256 and size,
+   uploads to the servers and makes the GitHub release with the signed setup, its `.sha256` and the
+   signed provenance.
 
-Flags: `-NoUpload` (fetch, verify and sign only), `-NoGitHub` (no GitHub release). With either one the
+Flags: `-NoUpload` (fetch, verify and sign only), `-NoGitHub` (no GitHub release), `-NoCodeSign`
+(emergency: unsigned, SmartScreen warns), `-CodeSignThumbprint` (default the Certum certificate),
+`-SignTool`, `-TimestampUrl` (default `http://time.certum.pl`). With either one the
 script pushes nothing, so HEAD must already be on the branch; both together are a dry run; `-Branch ci/<name>` tests the
 flow against a `ci/**` branch, whose pushes also run CI. `-LocalBuild` is the emergency path: it
-builds the setup on the publishing PC, prints a warning, pushes at the end as the old flow did, and
-its setup is not one SignPath would sign. Say so in the build's notes.
-
-SignPath signing (pending): a step in the `windows-setup` CI job will send the
-`windows-setup-assets` artifact to SignPath and upload the signed setup as its own artifact, with
-the checksum and provenance of the signed bytes; `publish-update.ps1` then downloads that artifact
-and also checks its Authenticode signature. Both places carry a placeholder comment. The API token
-will be a repository secret; none is in this repository.
+builds the setup on the publishing PC, prints a warning, pushes at the end as the old flow did; it
+is still code-signed, and its provenance says `built_by: local`. Say so in the build's notes.
 
 ## CI coverage
 

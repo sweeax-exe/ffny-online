@@ -1626,6 +1626,7 @@ Look parse_look(const J &e)
     l.frame_id = e["frame_id"].str();       // build 104: the Towers rewards (tower_frames.inc)
     l.title_id = e["title_id"].str();
     l.title_rarity = (int)e["title_rarity"].i();
+    l.faction = e["faction"].str();         // build 108: Faction War (faction_ui.inc's pill on the room card)
     return l;
 }
 

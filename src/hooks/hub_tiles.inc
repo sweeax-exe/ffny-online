@@ -16,6 +16,9 @@
 // portraits, the rank emblems, scripts/tower-art.py's buildings); without it the tiles are plain glass.
 // RECOMP_HUB_LIST=1 brings the list of build 97 back (a fallback while the tiles are new).
 
+void hub_faction_tile(ImDrawList *dl, const Frame &f, const HubRect &r, bool sel);     // faction_ui.inc (build 108)
+std::string hub_faction_live();
+
 bool hub_tiles_on()
 {
     static int on = -1;
@@ -263,6 +266,7 @@ static void hub_tile(ImDrawList *dl, const Frame &f, const HubRect &r, int id, b
         if (em.srv) image_fit(dl, f, em, x + w - h + 6, y + 6, h - 12, h - 12, IM_COL32(255, 255, 255, sel ? 255 : 170));
     }
     if (id == HUB_COMPLEX) crown(dl, f, x + w - 30, y + 22, 34, with_alpha(GOLD, sel ? 1.0f : 0.6f));
+    if (id == HUB_FACTION) hub_faction_tile(dl, f, r, sel);     // build 108: both bosses, face to face
     // the words read on any picture: a dark fade under them
     dl->AddRectFilledMultiColor(f.p(x + 2, y + h * 0.30f), f.p(x + w - 2, y + h - 2), IM_COL32(8, 8, 10, 0),
                                 IM_COL32(8, 8, 10, 0), IM_COL32(8, 8, 10, 230), IM_COL32(8, 8, 10, 230));
@@ -295,7 +299,7 @@ void hub_tiles_draw(ImDrawList *dl, const Frame &f, const Pad &pad, const int *s
 {
     int ids[HUB_GRID_MAX], n = 0, nright = 0, nchips = 0;
     ids[n++] = 0;
-    static const int right_order[] = { HUB_RANKED, HUB_RTS, HUB_COMPLEX, HUB_TOWERS, HUB_TSET, 2, 3 };
+    static const int right_order[] = { HUB_RANKED, HUB_FACTION, HUB_RTS, HUB_COMPLEX, HUB_TOWERS, HUB_TSET, 2, 3 };
     static const int chip_order[] = { 4, HUB_TURF, HUB_CREW, 5, HUB_VOICE, HUB_MUSIC, HUB_LEAVE };
     for (int id : right_order) if (hub_has(shown, count, id)) { ids[n++] = id; nright++; }
     for (int id : chip_order) if (id == HUB_MUSIC || hub_has(shown, count, id)) { ids[n++] = id; nchips++; }
@@ -356,6 +360,9 @@ void hub_tiles_draw(ImDrawList *dl, const Frame &f, const Pad &pad, const int *s
                 } else if (id == HUB_COMPLEX) {
                     live = hub_king_line();
                     on = !live.empty() && live != "NO KING YET";
+                } else if (id == HUB_FACTION) {
+                    live = hub_faction_live();
+                    on = !live.empty();
                 } else if (id == HUB_TOWERS) {
                     int best = hub_towers_best();
                     if (best > 0) { live = "YOUR BEST: FLOOR " + std::to_string(best); on = true; }

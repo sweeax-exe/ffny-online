@@ -962,7 +962,7 @@ std::string upper(const char *s)
 // ---- the screens --------------------------------------------------------------------------------
 
 enum Page { HUB, ROOMS, SETTINGS, FIGHTERS, CODE, STATS, PLAYERS, RANKED, VOICE, SERVERS, NAME, RANKED_MODES, RANKED_RESULTS,
-            QUICK, LOCKER, RANKED_BOARD, TURF, MUSIC, RTS, COMPLEX, TOWERS };
+            QUICK, LOCKER, RANKED_BOARD, TURF, MUSIC, RTS, COMPLEX, TOWERS, FACTIONS, FACTION_PICK };
 
 struct State {
     Page page = HUB;
@@ -1918,10 +1918,18 @@ void open_servers()
 
 // ---- hub ----
 
-const int HUB_ITEMS = 14, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9, HUB_CREW = 10,
-          HUB_RTS = 11, HUB_COMPLEX = 12, HUB_TOWERS = 13;
+const int HUB_ITEMS = 15, HUB_LEAVE = 7, HUB_RANKED = 1, HUB_VOICE = 6, HUB_TURF = 8, HUB_TSET = 9, HUB_CREW = 10,
+          HUB_RTS = 11, HUB_COMPLEX = 12, HUB_TOWERS = 13, HUB_FACTION = 14;
 // Build 98: the tile hub (hub_tiles.inc) has MY MUSIC as a chip of its bar (RB still opens it from the whole hub).
-const int HUB_MUSIC = 14;
+// Build 108: FACTION WAR (faction_ui.inc), item 14, a tile beside RANKED MATCH while the account service runs it; MY MUSIC
+// (a chip only, never in HUB_ORDER) moved on to 15.
+const int HUB_MUSIC = 15;
+bool faction_shown();   // faction_ui.inc
+void open_factions();
+void fw_hub_auto();
+int G_fw_faction = 0, G_fw_locked = 0;     // the gallery's sample: the player's side, the closed side
+bool G_fw_shown = false;
+void fw_pill(ImDrawList *dl, const Frame &f, float x, float y, const std::string &faction);   // the room card's side
 bool hub_tiles_on();    // hub_tiles.inc: the tiles (RECOMP_HUB_LIST=1: the list of build 97)
 void hub_tiles_draw(ImDrawList *dl, const Frame &f, const Pad &pad, const int *shown, int count,
                     const std::vector<int> &quick_modes, bool ranked_elsewhere, int ranked_at, const char *const *items,
@@ -1937,7 +1945,7 @@ void open_music();      // music_ui.inc
 // FIGHT COMPLEX (F0) after RANKED MATCH: the official rings, King of the Ring; it shows while the account service's
 // ring board is on or a relay lists a ring (rings_ui.inc).
 // TOWERS (T0) after RUN THE STREETS: the climb mode (towers_ui.inc), always shown.
-const int HUB_ORDER[HUB_ITEMS] = { 0, 1, HUB_COMPLEX, HUB_RTS, HUB_TOWERS, HUB_TSET, 2, 3, 4, HUB_TURF, HUB_CREW, 5, 6, 7 };
+const int HUB_ORDER[HUB_ITEMS] = { 0, 1, HUB_FACTION, HUB_COMPLEX, HUB_RTS, HUB_TOWERS, HUB_TSET, 2, 3, 4, HUB_TURF, HUB_CREW, 5, 6, 7 };
 void open_rts();
 void open_towers();     // towers_ui.inc
 bool my_crew_shown();   // social_ui.inc
@@ -2275,11 +2283,12 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
 {
     static const char *const items[] = { "QUICK MATCH", "RANKED MATCH", "FIND A ROOM", "CREATE A ROOM", "MY STATS",
                                          "PLAYERS ONLINE", "VOICE CHAT", "LEAVE", "TURF WAR", "TOURNAMENT MATCH", "MY CREW",
-                                         "RUN THE STREETS", "FIGHT COMPLEX", "TOWERS" };
+                                         "RUN THE STREETS", "FIGHT COMPLEX", "TOWERS", "FACTION WAR" };
     static const char *const subs[] = { "STRAIGHT INTO A FIGHT", "ONE ON ONE FOR YOUR RATING", "OPEN ROOMS", "YOUR RULES",
                                         "RECORD AND LEADERBOARD", "WHO IS AROUND", "TALK IN ROOMS AND FIGHTS",
                                         "BACK TO THE MENU", "CREWS FIGHT FOR NEW YORK", "YOUR SET IN A TOURNAMENT",
-                                        "YOUR CREW'S PAGE", "THE CITY IS YOURS - CLOSED TEST", "KING OF THE RING", "CLIMB NEW YORK" };
+                                        "YOUR CREW'S PAGE", "THE CITY IS YOURS - CLOSED TEST", "KING OF THE RING", "CLIMB NEW YORK",
+                                        "D-MOB'S TEAM VS CROW'S TEAM" };
     static const char *const descs[] = {
         "You are put into an open room of this mode, or one is opened for the next players.",
         "Classic (stock fighters) or Open (your created fighter too), best of three sets against a player of a "
@@ -2303,6 +2312,8 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         "King; whoever beats a king claims the bounty. Roster fighters only. Sign in with Discord for your wins to count.",
         "Fight your way up a tower, one CPU fighter per floor, each stronger than the last. Uptown has every original "
         "fighter, Five Boroughs the whole city with community fighters too. One loss and the climb is over. Sign in for the leaderboards.",
+        "Pick a side for the season: D-Mob's Team or Crow's Team. Faction fights, one on one or two on two, always against the "
+        "other side: a win gives your side 3 points, a loss 1. The side with more points at the season's end wins.",
     };
     std::vector<int> quick_modes = mode_cycle();     // King of the Hill last, when the relay has it
     int mode_count = (int)quick_modes.size();
@@ -2316,7 +2327,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     for (int k = 0; k < HUB_ITEMS; k++) {
         int i = HUB_ORDER[k];
         if ((i != HUB_RANKED || ranked_shown()) && (i != HUB_TURF || turf) && (i != HUB_TSET || tour) && (i != HUB_CREW || crew) &&
-            (i != HUB_RTS || rts) && (i != HUB_COMPLEX || rings_on))
+            (i != HUB_RTS || rts) && (i != HUB_COMPLEX || rings_on) && (i != HUB_FACTION || faction_shown()))
             shown[count++] = i;
     }
     bool tiles = hub_tiles_on();    // build 98: the tiles move in 2D themselves (hub_tiles_draw)
@@ -2403,6 +2414,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             say("Your browser opens: sign in with Discord, then come back.");
         }
     }
+    fw_hub_auto();      // build 108: the faction picker the first time (and once each new season)
     if (tiles) {    // build 98: the tiles, the bar and the chosen entry's words in place of the list and the door
         hub_tiles_draw(dl, f, pad, shown, count, quick_modes, ranked_elsewhere, ranked_at, items, subs, descs);
     } else {
@@ -2484,7 +2496,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
     }   // the list (RECOMP_HUB_LIST=1)
 
     if (pad.a) {
-        bool needs_account = S.hub_sel == 0 || S.hub_sel == 2 || S.hub_sel == 3 || S.hub_sel == HUB_TSET;
+        bool needs_account = S.hub_sel == 0 || S.hub_sel == 2 || S.hub_sel == 3 || S.hub_sel == HUB_TSET || S.hub_sel == HUB_FACTION;
         if ((needs_account || S.hub_sel == 1) && outdated) {
             char line[120];
             snprintf(line, sizeof(line), "Build %d is out: close the game and update in the launcher to play online.", newer);
@@ -2550,6 +2562,7 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         case HUB_RTS: open_rts(); break;
         case HUB_COMPLEX: open_complex(HUB, 0); break;
         case HUB_TOWERS: open_towers(); break;
+        case HUB_FACTION: open_factions(); break;
         case HUB_MUSIC: open_music(); break;
         case HUB_LEAVE: break;      // handled by the caller (closes)
         }
@@ -5231,6 +5244,7 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             text(dl, f, g_hand, 15, x + w / 2 + iw / 2, y + 200, nc, p.name, CENTER, 1.0f);
             look_card(dl, f, x, y, w, 270, 10, lk, py + (w - 8) * 1.5f + 4 - py);     // the Locker's frame (a tower's: build 104)
             look_card_title(dl, f, x + w / 2, y + 186, 8.5f, lk, w - 14);           // a Towers title under the portrait
+            if (lk && !lk->faction.empty()) fw_pill(dl, f, x + 6, y + 22, lk->faction);    // build 108: the player's side
         }
         {
             std::string label = picking ? "choosing again" : known ? fighter_label(shown, p.slot) : "choosing";
@@ -6042,6 +6056,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "music_ui.inc"
 #include "towers_ui.inc"
 #include "hub_tiles.inc"         // build 98: the tile hub
+#include "faction_ui.inc"        // build 108: FACTION WAR
 
 // Which page the gallery shows now, and the sample it shows with it.
 void gallery_step()
@@ -7753,6 +7768,7 @@ const char *shot_label()
     if (const char *chat = chat_shot_label()) return chat;
     if (const char *rts = rts_shot_label()) return rts;
     if (const char *tw = towers_shot_label_impl()) return tw;
+    if (const char *fw = faction_shot_label()) return fw;
     if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
     if (!gallery_on() && !g_versus_up && net_state() != NETPLAY_CONNECTED) {    // the crew battle screen (stage 3)
         NetRoom r;
@@ -7952,11 +7968,22 @@ bool draw_pages(ImVec2 display)
         if (st == NETPLAY_LOBBY) S.fallback_tried = false;
         ranked_tick(room);
         rings_tick(room);       // F0: a ring JOIN's READY, the crown's refresh
+        fw_match_tick(room);    // build 108: the faction match's room legs
     }
     {   // tests: RECOMP_TEST_OPEN_ONLINE=rts opens RUN THE STREETS itself (with access), connected or not
         static int once;
         const char *v = getenv("RECOMP_TEST_OPEN_ONLINE");
         if (!once && v && !strcmp(v, "rts") && !gallery_on() && rts_access()) { once = 1; open_rts(); }
+    }
+    {   // tests: RECOMP_TEST_OPEN_ONLINE=factions|faction-pick opens FACTION WAR or its picker once in the lobby
+        static int once;
+        const char *v = getenv("RECOMP_TEST_OPEN_ONLINE");
+        if (!once && v && (!strcmp(v, "factions") || !strcmp(v, "faction-pick")) && !gallery_on() && net_in_lobby() &&
+            acc_state() == ACCOUNT_IN && fw_me().valid) {
+            once = 1;
+            FU.auto_done = true;
+            if (!strcmp(v, "factions")) open_factions(); else open_faction_pick(HUB);
+        }
     }
     {   // tests: RECOMP_TEST_OPEN_ONLINE=towers opens TOWERS itself, connected or not
         static int once;
@@ -8166,6 +8193,10 @@ bool draw_pages(ImVec2 display)
         draw_turf(dl, f, pad, display);
     } else if (S.page == COMPLEX && !room.in_room) {
         draw_complex(dl, f, pad);
+    } else if (S.page == FACTION_PICK && !room.in_room) {
+        draw_faction_pick(dl, f, pad, display);
+    } else if (S.page == FACTIONS && !room.in_room) {
+        draw_factions(dl, f, pad, display);
     } else if (S.page == RANKED_RESULTS) {
         draw_ranked_results(dl, f, pad);
     } else if (S.page == VOICE && !(room.in_room && room.phase != 0)) {
@@ -8244,6 +8275,16 @@ bool draw_pages(ImVec2 display)
 
 }   // namespace online_screen
 
+// Tests (build 108, RECOMP_NETPLAY=faction in netplay.c): FACTION WAR's search and its room legs without the screens.
+extern "C" void faction_test_search(int size) { fw_queue_start(size); }
+extern "C" void faction_test_tick(void)
+{
+    NetRoom r;
+    netplay_lobby_room(&r);
+    fw_match_tick(r);
+}
+extern "C" int faction_test_seated(void) { return fw_seated() ? 1 : 0; }
+
 #else   // the online screens are drawn on Windows only for now
 
 namespace online_screen {
@@ -8293,5 +8334,8 @@ bool fight_chat_at(float, float) { return false; }
 bool test_pad(int *b, float *x, float *y) { *b = 0; *x = *y = 0; return false; }
 bool test_pad_r3() { return false; }
 }
+extern "C" void faction_test_search(int) {}
+extern "C" void faction_test_tick(void) {}
+extern "C" int faction_test_seated(void) { return 0; }
 
 #endif

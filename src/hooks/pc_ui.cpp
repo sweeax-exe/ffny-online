@@ -4045,13 +4045,28 @@ static void overlay_shot(ID3D11Device *dev, ID3D11DeviceContext *ctx, ID3D11Rend
     }
     UiTick now = ui_ticks();
     if (!first) first = now;
-    if (last && now - last < period) return;
+    const char *label = online_screen::shot_label();     // the online gallery's page
+    // RECOMP_OVERLAY_SHOT_FAST="<ms>:<prefix>[|<prefix>...]" (build 108): pages whose label starts so are taken every
+    // <ms> instead (a frame sequence of an animation, e.g. "120:faction-pick|faction-confirm")
+    unsigned every = period;
+    {
+        static const char *fast = getenv("RECOMP_OVERLAY_SHOT_FAST");
+        if (fast && *fast && label && strchr(fast, ':')) {
+            for (const char *p = strchr(fast, ':') + 1; *p;) {
+                const char *end = strchr(p, '|');
+                size_t n = end ? (size_t)(end - p) : strlen(p);
+                if (n && !strncmp(label, p, n)) { every = (unsigned)atoi(fast); break; }
+                if (!end) break;
+                p = end + 1;
+            }
+        }
+    }
+    if (last && now - last < every) return;
     last = now;
     std::vector<unsigned char> pic;
     unsigned w = 0, h = 0;
     if (!read_window_picture(dev, ctx, rtv, pic, w, h)) return;
     char path[1024];
-    const char *label = online_screen::shot_label();     // the online gallery's page
     snprintf(path, sizeof(path), "%s/%06u%s%s.bmp", dir, (unsigned)(now - first), label ? "-" : "",
              label ? label : "");
     FILE *f = fopen(path, "wb");
