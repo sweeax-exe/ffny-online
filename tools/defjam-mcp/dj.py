@@ -40,6 +40,9 @@ the exit code is 1 on any failure.
            lost, a new climb on floor 1, the community Team Tower; build 108: player 2 signs in on the local
            service's /auth/pair page with the code off the screen, the start records them, the sign-in card's pictures;
            both boards with both names; FFNY_SERVER_DIR: a server checkout with pair.go)
+    python tools/defjam-mcp/dj.py scenario towersonline [--variant climb|leave|desync|soak] [--floors N]
+           [--out D:/DefJam/community/team-tower-online-shots]   (Team Tower Online: two signed-in copies on a local
+           account service and relay climb together; FFNY_SERVER_DIR: a server checkout with relay/tower.go)
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
     python tools/defjam-mcp/dj.py lock status | run -- <command...>      (any other test under the lock)
@@ -137,6 +140,9 @@ def cmd_scenario(a):
         r = scenarios.towers(timeout=a.timeout, extra_env=env, **common)
     elif a.kind == "towersteam":
         r = scenarios.towers_team(timeout=a.timeout, extra_env=env, out_dir=a.out, **common)
+    elif a.kind == "towersonline":
+        r = scenarios.towers_online(variant=a.variant, floors=a.floors, timeout=a.timeout, relay_port=a.relay_port,
+                                    extra_env=env, out_dir=a.out, fast_ko=a.fast_ko, **common)
     elif a.kind == "factionwar":
         r = scenarios.faction_war(size=a.size, matches=a.matches if a.matches != 3 else (2 if a.size == 1 else 1),
                                   timeout=a.timeout, relay_port=a.relay_port, extra_env=env,
@@ -249,7 +255,11 @@ def main(argv=None):
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
                                               "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers",
-                                              "towerrewards", "towersteam", "factionwar"])
+                                              "towerrewards", "towersteam", "factionwar", "towersonline"])
+    sc.add_argument("--variant", default="climb", choices=["climb", "leave", "desync", "soak"],
+                    help="towersonline: climb (public room, list join, resume, loss, new climb), leave (away and back, "
+                         "then the 3-minute save), desync (a forced void), soak (10 floors, unequal loads)")
+    sc.add_argument("--floors", type=int, default=0, help="towersonline: floors to climb (default 3; soak 10)")
     sc.add_argument("--size", type=int, default=1, choices=[1, 2], help="factionwar: 1 ON 1 (with the observer, the picker "
                     "and the lock) or 2 ON 2 (four fighters)")
     sc.add_argument("--case", default="kick", help="lobby97 (build 97): kick, quick, quickmax or afk")

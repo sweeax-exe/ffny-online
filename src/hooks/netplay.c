@@ -1308,8 +1308,10 @@ void netplay_results_funccall(const char *text)
         /* a ranked set's game: the Rematch menu comes next; either choice, or none, goes back to the room */
         N.set_menu = GetTickCount64();
         fprintf(stderr, "[NETPLAY] ranked set: on the results' Rematch menu; back to the room for the next game\n");
-        toast(SET_MENU_MS, "%s set: the next game starts from the room.",
-              N.tset.match && !memcmp(N.tset_room, N.roomv.code, 6) ? "Tournament" : "Ranked");
+        if (N.tower_match) toast(SET_MENU_MS, "Team Tower: the next floor starts from the room.");
+        else
+            toast(SET_MENU_MS, "%s set: the next game starts from the room.",
+                  N.tset.match && !memcmp(N.tset_room, N.roomv.code, 6) ? "Tournament" : "Ranked");
     }
     if (strncmp(text, "Game.GetHeroFighterNumber(", 26) || !N.lobby || !N.match_live || N.watching ||
         MEM32(G_MATCH_PHASE) < 3u)
@@ -4306,6 +4308,15 @@ static void cp_tick_refresh(void)
     LeaveCriticalSection(&g_cs);
 }
 
+static DWORD WINAPI delayed_setup(LPVOID arg)
+{
+    static int delay = -1;
+    if (delay < 0) delay = getenv("RECOMP_TEST_START_DELAY_MS") ? atoi(getenv("RECOMP_TEST_START_DELAY_MS")) : 0;
+    Sleep((DWORD)delay);
+    automatch_request((AutoMatch *)arg);
+    return 0;
+}
+
 static void on_start_as(const uint8_t *b, int len, int watching)
 {
     Reader r = { b, len, 0, 0 };
@@ -4654,6 +4665,18 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         return;
     }
     LeaveCriticalSection(&g_cs);
+    {   /* tests: RECOMP_TEST_START_DELAY_MS=<ms> sets the match up that much later on this copy (unequal loads) */
+        static int delay = -1;
+        if (delay < 0) delay = getenv("RECOMP_TEST_START_DELAY_MS") ? atoi(getenv("RECOMP_TEST_START_DELAY_MS")) : 0;
+        if (delay > 0 && !watching) {
+            static AutoMatch later;
+            HANDLE h;
+            later = m;
+            fprintf(stderr, "[NETPLAY] tests: this copy sets the match up %d ms late" "\n", delay);
+            h = CreateThread(NULL, 0, delayed_setup, &later, 0, NULL);
+            if (h) { CloseHandle(h); return; }
+        }
+    }
     automatch_request(&m);
 }
 
@@ -7407,6 +7430,138 @@ void faction_test_search(int size);
 void faction_test_tick(void);
 int faction_test_seated(void);
 
+/* Team Tower Online tests (RECOMP_NETPLAY=tower): into the room, and the room's own steps. */
+static char g_test_tower_code[8];
+static void test_tower_enter(const char *who, const char *file)
+{
+    const char *role = getenv("RECOMP_TEST_TOWER_ROLE");
+    int host = role && !strcmp(role, "host"), i;
+    char old[16] = "";
+    NetRoom tr;
+    if (!host && file && *file) {   /* a code left from an earlier session is not this one's */
+        FILE *f = fopen(file, "r");
+        if (f) { if (!fgets(old, sizeof(old), f)) old[0] = 0; fclose(f); }
+        old[6] = 0;
+    }
+    for (i = 0; i < 40 && !N.stop; i++) {
+        netplay_lobby_room(&tr);
+        if (tr.in_room) break;
+        if (host) {
+            NetRoomSettings ts;
+            memset(&ts, 0, sizeof(ts));
+            snprintf(ts.name, sizeof(ts.name), "Team Tower");
+            ts.mode = NETPLAY_MODE_TOWER;
+            ts.max = 2;
+            ts.pool_count = 1;
+            ts.pool[0] = 1;
+            ts.is_public = getenv("RECOMP_TEST_TOWER_PUBLIC") && *getenv("RECOMP_TEST_TOWER_PUBLIC") == '1';
+            ts.rounds = getenv("RECOMP_TEST_TOWER_RESUME") && *getenv("RECOMP_TEST_TOWER_RESUME") == '1';
+            fprintf(stderr, "[NETPLAY] tests: opening a %s Team Tower Online room (%s)" "\n", ts.is_public ? "public" : "private",
+                    ts.rounds ? "resume" : "new climb");
+            netplay_lobby_create(&ts);
+        } else if (role && !strcmp(role, "list")) {
+            /* the room list, as FIND A ROOM: the first open Team Tower room, joined without its code */
+            NetRoomInfo list[32];
+            int n, k;
+            netplay_lobby_list(0xFF);
+            Sleep(1500);
+            n = netplay_lobby_rooms(list, 32, NULL);
+            for (k = 0; k < n; k++)
+                fprintf(stderr, "[NETPLAY] tests: listed room %s \"%s\" mode %d %d/%d phase %d" "\n", list[k].code, list[k].name,
+                        list[k].mode, list[k].players, list[k].max, list[k].phase);
+            for (k = 0; k < n; k++)
+                if (NETPLAY_IS_TOWER(list[k].mode) && list[k].players < list[k].max && list[k].phase == 0) {
+                    fprintf(stderr, "[NETPLAY] tests: joining the listed Team Tower room %s \"%s\"" "\n", list[k].code, list[k].name);
+                    netplay_lobby_join(list[k].code);
+                    break;
+                }
+        } else {
+            char code[16] = "";
+            FILE *f = file && *file ? fopen(file, "r") : NULL;
+            if (f) { if (!fgets(code, sizeof(code), f)) code[0] = 0; fclose(f); }
+            code[6] = 0;
+            if (strlen(code) == 6 && strcmp(code, old)) {
+                fprintf(stderr, "[NETPLAY] tests: joining the Team Tower Online room %s by its code" "\n", code);
+                netservers_code_begin(1, code, who);
+                netplay_lobby_join(code);
+            }
+        }
+        Sleep(3000);
+    }
+    netplay_lobby_room(&tr);
+    if (tr.in_room) snprintf(g_test_tower_code, sizeof(g_test_tower_code), "%s", tr.code);
+    if (host && tr.in_room && file && *file) {
+        FILE *f = fopen(file, "w");
+        if (f) { fputs(tr.code, f); fclose(f); }
+    }
+    fprintf(stderr, "[NETPLAY] tests: Team Tower Online room: %s" "\n", tr.in_room ? tr.code : "none");
+}
+
+/* The room's test steps; 1 when this pass is taken (no READY now). RECOMP_TEST_TOWER_LEAVE="<floor>[,<s>]": once
+ * the summary after that floor shows, leave the room (as SAVE & QUIT); with s, join it again s seconds later.
+ * RECOMP_TEST_TOWER_NEW=1: the host picks NEW CLIMB over a saved one, and after the end a new climb. */
+static int test_tower_tick(const NetRoom *r, const char *who, const char *file)
+{
+    static int left_after = -2, rejoin_s = -1, left, rejoined, newed, over_told;
+    static ULONGLONG left_at;
+    TowerNetView t;
+    (void)file;
+    if (left_after == -2) {
+        const char *lv = getenv("RECOMP_TEST_TOWER_LEAVE");
+        left_after = lv && *lv ? atoi(lv) : -1;
+        rejoin_s = lv && strchr(lv, ',') ? atoi(strchr(lv, ',') + 1) : -1;
+    }
+    if (left && !r->in_room) {
+        if (rejoin_s >= 0 && !rejoined && GetTickCount64() - left_at >= (ULONGLONG)rejoin_s * 1000u && g_test_tower_code[0]) {
+            fprintf(stderr, "[NETPLAY] tests: back into the Team Tower Online room %s" "\n", g_test_tower_code);
+            netservers_code_begin(1, g_test_tower_code, who);
+            netplay_lobby_join(g_test_tower_code);
+            rejoined = 1;
+        }
+        return 1;
+    }
+    if (!r->in_room || !NETPLAY_IS_TOWER(r->settings.mode) || N.match_live || !towers_online_view_net(&t)) return 0;
+    {   /* RECOMP_TEST_TOWER_LEAVE2=<floor>: after that floor's summary, leave for good (after a first leave and return) */
+        static int for_good = -2;
+        if (for_good == -2) for_good = getenv("RECOMP_TEST_TOWER_LEAVE2") ? atoi(getenv("RECOMP_TEST_TOWER_LEAVE2")) : -1;
+        if (for_good > 0 && left && rejoined && t.state == TOWERNET_SUMMARY && t.last_floor == for_good &&
+            t.last_how == TOWERNET_HOW_WIN) {
+            fprintf(stderr, "[NETPLAY] tests: leaving the Team Tower Online room for good after floor %d" "\n", for_good);
+            netplay_lobby_leave();
+            rejoin_s = -1;
+            for_good = -1;
+            return 1;
+        }
+    }
+    if (left_after > 0 && !left && t.state == TOWERNET_SUMMARY && t.last_floor == left_after && t.last_how == TOWERNET_HOW_WIN) {
+        fprintf(stderr, "[NETPLAY] tests: leaving the Team Tower Online room after floor %d%s" "\n", left_after,
+                rejoin_s >= 0 ? " (back soon)" : "");
+        netplay_lobby_leave();
+        left = 1;
+        left_at = GetTickCount64();
+        return 1;
+    }
+    if (t.state == TOWERNET_OVER) {
+        if (over_told != t.floor + 1000 * t.beaten + 1) {
+            over_told = t.floor + 1000 * t.beaten + 1;
+            fprintf(stderr, "[NETPLAY] tests: Team Tower Online climb over: %s, %d floors beaten (%s)" "\n", t.end, t.beaten, t.why);
+        }
+        if (getenv("RECOMP_TEST_TOWER_NEW") && r->you == r->host && newed < 2) {
+            static ULONGLONG at;
+            if (!at) at = GetTickCount64();
+            if (GetTickCount64() - at > 4000) { netplay_lobby_tower_choice(TOWERNET_CHOICE_NEW); newed++; at = 0; }
+        }
+        return 1;
+    }
+    if (t.state == TOWERNET_SELECT && (t.flags & TOWERNET_FLAG_SAVED) && getenv("RECOMP_TEST_TOWER_NEW") && r->you == r->host &&
+        (t.flags & TOWERNET_FLAG_RESUME) && !newed) {
+        netplay_lobby_tower_choice(TOWERNET_CHOICE_NEW);
+        newed = 1;
+        return 1;
+    }
+    return t.state == TOWERNET_STARTING || t.state == TOWERNET_PLAYING;
+}
+
 static DWORD WINAPI autostart_thread(LPVOID unused)
 {
     const char *mode = getenv("RECOMP_NETPLAY"), *server = getenv("RECOMP_NETPLAY_SERVER");
@@ -7489,7 +7644,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         return 0;
     }
     if (!strcmp(mode, "quick") || !strcmp(mode, "ranked") || !strcmp(mode, "crew") || !strcmp(mode, "tset") ||
-        !strcmp(mode, "faction")) {
+        !strcmp(mode, "faction") || !strcmp(mode, "tower")) {
         const char *f = getenv("RECOMP_NETPLAY_FIGHTER"), *name = getenv("RECOMP_NETPLAY_NAME");
         const char *delay = getenv("RECOMP_NETPLAY_READY_DELAY_MS");
         /* RECOMP_TEST_READY_PLAYERS=<n> (tests of three or four copies): ready (or, on the hill, answer
@@ -7674,6 +7829,12 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
             for (i = 0; i < 6000 && !N.stop && !(battle = social_battle_ready(region, sizeof(region))); i++) Sleep(100);
             fprintf(stderr, "[NETPLAY] tests: crew battle %lld (%s)%s\n", battle, region, battle ? "; joining" : ": none came");
             if (battle) netplay_lobby_crew_join((unsigned)battle);
+        } else if (!strcmp(mode, "tower")) {
+            /* RECOMP_NETPLAY=tower (tests, Team Tower Online): RECOMP_TEST_TOWER_ROLE=host opens a tower room as the
+             * Team Tower card's HOST does and writes its code to RECOMP_NETPLAY_CODE_FILE; any other role reads the code
+             * there and joins by it (JOIN BY CODE). Both again every 3 s until in the room (the relay wants the IDENT
+             * first), for up to 2 minutes. The loop below readies (the fighter pick, then each floor's continue). */
+            test_tower_enter(who, file);
         } else if (!strcmp(mode, "tset")) {
             /* RECOMP_NETPLAY=tset (tests, tournament sets): TOURNAMENT MATCH as the hub's entry does it (TJOIN
              * RECOMP_TEST_TSET_MATCH, default 0: this account's ready match); again after a refusal, every 5 s
@@ -7978,6 +8139,10 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     Sleep(100);
                     continue;
                 }
+            }
+            if (!strcmp(mode, "tower") && test_tower_tick(&r, who, file)) {
+                Sleep(100);
+                continue;
             }
             if (!strcmp(mode, "tset") && r.in_room && !N.match_live) {
                 /* tests, tournament sets: the loser's stage pick (RECOMP_TEST_TSET_PICK="7,8": the first of these

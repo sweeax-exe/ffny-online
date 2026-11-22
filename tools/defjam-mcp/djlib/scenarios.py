@@ -20,6 +20,7 @@ import os
 import subprocess
 import threading
 import time
+import urllib.request
 
 from . import copies, logparse, machine, nav
 
@@ -3986,6 +3987,266 @@ def faction_war(size=1, matches=2, timeout=None, relay_port=27900, lock_timeout=
                         save(board_shots[-1], "board.png")
         result["shots"] = picked
         result.update({"ok": not problems, "problems": problems})
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
+# ---- Team Tower Online ---------------------------------------------------------------------------------------------
+
+TOWER_ONLINE_SHOTS = r"D:\DefJam\community\team-tower-online-shots"
+TOWER_ONLINE_PLAYERS = ["Copy 0", "Copy 1"]
+TOWER_ONLINE_WATCH = WATCH + ["[TOWERS] online floor", "[NETPLAY] tests: leaving the Team Tower Online room",
+                              "[NETPLAY] tests: Team Tower Online climb over", "[NETPLAY] tests: Team Tower Online room:",
+                              "[NETPLAY] tests: joining the listed Team Tower room", "[NETPLAY] tower floor:",
+                              "[NETPLAY] tests: back into the Team Tower Online room"]
+
+
+def _tower_online_pngs(folder, prefix, out_dir, shots, per_label=2):
+    """The overlay's pictures of the Team Tower Online pages (toweronline-*, rooms, towers) as PNGs."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return
+    by = {}
+    for pat in ("*-toweronline*.bmp", "*-rooms.bmp", "*-towers*.bmp"):
+        for f in sorted(glob.glob(os.path.join(folder, pat))):
+            by.setdefault(os.path.basename(f).split("-", 1)[1][:-4], []).append(f)
+    for label, files in sorted(by.items()):
+        if len(files) > per_label:
+            files = [files[k * (len(files) - 1) // max(1, per_label - 1)] for k in range(per_label)]
+        for n, f in enumerate(files):
+            for d in [out_dir] if out_dir else []:
+                os.makedirs(d, exist_ok=True)
+                path = os.path.join(d, "%s-%s-%d.png" % (prefix, label, n))
+                im = Image.open(f)
+                im.thumbnail((1280, 720))
+                im.save(path)
+                shots.append(path)
+
+
+def _tower_floors(text):
+    """[TOWERS] online floor lines of a copy: (floor, CPUs) in order."""
+    out = []
+    for l in text.splitlines():
+        if "[TOWERS] online floor " in l and " of " in l and "CPUs " in l and "set up" not in l and "decided" not in l:
+            try:
+                floor = int(l.split("[TOWERS] online floor ", 1)[1].split(" ", 1)[0])
+                cpus = l.split("CPUs ", 1)[1].split(",", 1)[0].strip()
+                out.append((floor, cpus))
+            except (ValueError, IndexError):
+                pass
+    return out
+
+
+def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots=False,
+                  extra_env=None, out_dir=None, fast_ko=600):
+    """Team Tower Online (community/team-tower-online-design.md): a local account service with Towers on and a relay
+    that asks it (FFNY_SERVER_DIR: a server checkout with relay/tower.go); two signed-in copies.
+
+    climb (default): copy 0 hosts a PUBLIC tower room from the Team Tower card, copy 1 finds it in FIND A ROOM and
+    joins without a code; they climb `floors` floors (both games must agree on every floor's CPUs; no desync), then
+    both leave (the climb is saved). Session 2: the host opens a room that resumes the saved climb (only that partner
+    may join), the climb goes on from the next floor, the floor after it is lost (RECOMP_TEST_TOWERS_ONLINE_LOSE): the
+    run ends; the host's NEW CLIMB starts again on floor 1 with the same partner. The board shows both names.
+    leave: copy 1 leaves after floor 1 and comes back by the code 20 s later, the climb goes on; after floor 2 it
+    leaves for good: 3 minutes later the relay saves the climb (the host's page says so; the service has it saved).
+    desync: copy 0's checksum is parted on floor 2's first fight: the floor is void and fought again.
+    soak: `floors` floors (10) with copy 1 setting each floor up 4 s late (unequal loads): no desync, no void."""
+    t0 = time.time()
+    floors = int(floors or (10 if variant == "soak" else 3))
+    timeout = timeout or (300 + floors * 120 + (420 if variant in ("climb", "leave") else 0))
+    s = copies.Session("towersonline", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "towersonline", "variant": variant, "ok": False}
+    shots, problems = [], []
+    out_dir = out_dir or TOWER_ONLINE_SHOTS
+    try:
+        h = harness()
+        acc_port = relay_port + 100
+        base = "http://127.0.0.1:%d" % acc_port
+        tokens = s.accounts(acc_port, TOWER_ONLINE_PLAYERS, extra=["-towers", "-social"])
+        s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
+        code_file = os.path.join(s.dir, "tower-code.txt")
+        fight = h.FIGHT_TAIL.replace(",b:10.6:1200:0.8:0.15", "")     # no B: on the room page it is SAVE & QUIT
+
+        def env_for(i, phase, more):
+            role = "host" if i == 0 else "list" if variant == "climb" else "join"
+            shot_dir = os.path.join(s.dir, "overlay%d-%s" % (i, phase))
+            os.makedirs(shot_dir, exist_ok=True)
+            tail = [fight.replace("right:", "left:") if i else fight]
+            for m in range(1, floors + 4):
+                nth = "#%d" % m if m > 1 else ""
+                tail.append(h.raw_stages(["game.getmatchsummary(0%s=a@4+3x12" % nth]))
+                tail.append((fight.replace("right:", "left:") if i else fight).replace("@game.startgame(", "@game.startgame(#%d" % (m + 1)))
+            script = h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], ",".join(tail))
+            while len(script) > PAD_SCRIPT_MAX and len(tail) > 3:
+                tail = tail[:-2]
+                script = h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"], ",".join(tail))
+            env = dict(VIRTUAL_PAD_ENV)
+            env.update({
+                "RECOMP_INPUT_VIRTUAL_PADS": "1",
+                "RECOMP_NETPLAY": "tower", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_SERVER_EU": "127.0.0.1:%d" % relay_port,
+                "RECOMP_NETPLAY_FIGHTER": str([55, 22][i]),
+                "RECOMP_NETPLAY_NAME": TOWER_ONLINE_PLAYERS[i],
+                "RECOMP_NETPLAY_CODE_FILE": code_file,
+                "RECOMP_TEST_TOWER_ROLE": role,
+                "RECOMP_TEST_TOWER_PUBLIC": "1" if variant == "climb" else "0",
+                "RECOMP_ROLLBACK": "off",
+                "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                "RECOMP_PAD_SCRIPT": script,
+                "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
+                "RECOMP_ACCOUNT_TEST_TOKEN": tokens[TOWER_ONLINE_PLAYERS[i]],
+                "RECOMP_TEST_OPEN_ONLINE": ("towercard" if i == 0 else "rooms") if variant == "climb" else "1",
+                "RECOMP_OVERLAY_SHOT_DIR": shot_dir, "RECOMP_OVERLAY_SHOT_MS": "1500",
+                "RECOMP_TEST_KO_STEP": "%d,0" % int(fast_ko or 600),
+            })
+            env.update(more)
+            env.update(extra_env or {})
+            return env, shot_dir
+
+        def run_phase(phase, envs, done, secs):
+            if os.path.isfile(code_file):
+                os.remove(code_file)
+            dirs = {}
+            for i in (0, 1):
+                env, dirs[i] = env_for(i, phase, envs[i])
+                s.launch(i, env=env, core=2 + 2 * i, watch=TOWER_ONLINE_WATCH)
+                time.sleep(4)
+            deadline = time.time() + secs
+            stop = "timeout after %d s" % secs
+            while time.time() < deadline:
+                s.poll()
+                cs = list(s.copies.values())
+                if any(c.watch.count("[CRASH]") or c.watch.count("[WATCHDOG]") for c in cs) or any(not c.alive() for c in cs):
+                    stop = "a copy crashed or exited"
+                    break
+                if variant != "desync" and any(c.watch.count("[NETPLAY] desync in") for c in cs):
+                    time.sleep(5)
+                    stop = "desync"
+                    break
+                if done(cs):
+                    stop = "done"
+                    break
+                time.sleep(1)
+            time.sleep(4)
+            s.poll()
+            texts = {i: logparse.read_text(c.log) for i, c in s.copies.items()}
+            logs = [_relpath(c.log) for c in s.copies.values()]
+            for i, c in list(s.copies.items()):
+                saved = os.path.join(s.dir, "copy%d-%s.log.err" % (i, phase))
+                try:
+                    with open(saved, "w", encoding="utf-8", errors="replace") as fo:
+                        fo.write(texts[i])
+                    logs.append(_relpath(saved))
+                except OSError:
+                    pass
+                if c.alive():
+                    c.proc.kill()
+                    try:
+                        c.proc.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        pass
+            for i in (0, 1):
+                _tower_online_pngs(dirs[i], "%s-p%d" % (phase, i + 1), out_dir, shots)
+            return stop, texts, logs
+
+        def agree(texts, label):
+            f0, f1 = _tower_floors(texts[0]), _tower_floors(texts[1])
+            same = f0 == f1 and len(f0) > 0
+            if not same:
+                problems.append("%s: the copies' floors differ: %s / %s" % (label, f0, f1))
+            return f0
+
+        def relay_log():
+            return "".join(logparse.read_text(p) for p in sorted(glob.glob(os.path.join(s.dir, "relay*.*"))))
+        phases = {}
+        leaving = "[NETPLAY] tests: leaving the Team Tower Online room"
+        if variant == "leave":
+            stop, texts, logs = run_phase("leave", {0: {}, 1: {"RECOMP_TEST_TOWER_LEAVE": "1,20", "RECOMP_TEST_TOWER_LEAVE2": "2"}},
+                                          lambda cs: cs[0].watch.count("[NETPLAY] tests: Team Tower Online climb over"), timeout)
+            fl = agree(texts, "leave")
+            over = [l for l in texts[0].splitlines() if "Team Tower Online climb over" in l]
+            phases["leave"] = {"stop": stop, "floors": fl, "over": over[-1][-200:] if over else "", "logs": logs}
+            rl = relay_log()
+            checks = {"rejoined": "back into the Team Tower Online room" in texts[1],
+                      "climb_went_on": any(f == 2 for f, _ in _tower_floors(texts[0])),
+                      "saved_after_away": bool(over) and "saved" in over[-1] and "did not come back" in over[-1],
+                      "relay_saved": "climb over: saved" in rl}
+        elif variant in ("desync", "soak"):
+            more0 = {"RECOMP_TEST_TOWER_LEAVE": str(floors)}
+            more1 = {"RECOMP_TEST_TOWER_LEAVE": str(floors)}
+            if variant == "desync":
+                more0["RECOMP_TEST_TOWERS_ONLINE_DESYNC"] = "2"
+            else:
+                more1["RECOMP_TEST_START_DELAY_MS"] = "4000"
+                more0["RECOMP_NETPLAY_STEPLOG"] = more1["RECOMP_NETPLAY_STEPLOG"] = "1"
+            stop, texts, logs = run_phase(variant, {0: more0, 1: more1},
+                                          lambda cs: all(c.watch.count(leaving) for c in cs), timeout)
+            fl = agree(texts, variant)
+            rl = relay_log()
+            voids = rl.count(" void (")
+            phases[variant] = {"stop": stop, "floors": fl, "voids": voids, "logs": logs,
+                               "desyncs": [texts[i].count("[NETPLAY] desync in") for i in (0, 1)]}
+            if variant == "desync":
+                checks = {"voided": "floor 2 void" in rl, "replayed": [f for f, _ in fl].count(2) >= 2,
+                          "climbed_on": any(f == floors for f, _ in fl), "void_result": "void: this PC saw the floor desync" in texts[0]}
+            else:
+                checks = {"all_floors": sorted({f for f, _ in fl}) == list(range(1, floors + 1)), "no_desync":
+                          not any(phases[variant]["desyncs"]), "no_void": voids == 0,
+                          "delayed": "sets the match up 4000 ms late" in texts[1]}
+        else:
+            stop, texts, logs = run_phase("climb", {0: {"RECOMP_TEST_TOWER_LEAVE": str(floors)}, 1: {"RECOMP_TEST_TOWER_LEAVE": str(floors)}},
+                                          lambda cs: all(c.watch.count(leaving) for c in cs), timeout)
+            fl = agree(texts, "climb")
+            phases["climb"] = {"stop": stop, "floors": fl, "logs": logs}
+            listed = [l for l in texts[1].splitlines() if "joining the listed Team Tower room" in l]
+            # session 2: resume with the same pair, a loss, then a new climb
+            stop2, texts2, logs2 = run_phase("resume", {
+                0: {"RECOMP_TEST_TOWER_RESUME": "1", "RECOMP_TEST_TOWERS_ONLINE_LOSE": str(floors + 2), "RECOMP_TEST_TOWER_NEW": "1",
+                    "RECOMP_TEST_TOWER_LEAVE": "1"},
+                1: {"RECOMP_TEST_TOWERS_ONLINE_LOSE": str(floors + 2), "RECOMP_TEST_TOWER_LEAVE": "1"}},
+                lambda cs: all(c.watch.count(leaving) for c in cs), timeout)
+            fl2 = agree(texts2, "resume")
+            phases["resume"] = {"stop": stop2, "floors": fl2, "logs": logs2}
+            rl = relay_log()
+            board = ""
+            try:
+                with urllib.request.urlopen(base + "/api/towers/board?tower=4&format=text", timeout=5) as r:
+                    board = r.read().decode("utf-8", "replace")
+            except Exception as e:      # noqa: BLE001
+                board = "error %s" % e
+            phases["board"] = board[:600]
+            seq = [f for f, _ in fl2]
+            checks = {
+                "public_listed": bool(listed),
+                "climbed": sorted({f for f, _ in fl}) == list(range(1, floors + 1)),
+                "no_desync": not any("[NETPLAY] desync in" in t for t in list(texts.values()) + list(texts2.values())),
+                "resumed_next_floor": bool(seq) and seq[0] == floors + 1,
+                "resume_reserved": "W/ Copy 1" in rl or "W/ COPY 1" in rl,
+                "lost_ends": "climb over: loss" in rl,
+                "new_climb_floor_1": 1 in seq[seq.index(floors + 2) + 1:] if (floors + 2) in seq else False,
+                "board_both_names": "Copy 0" in board and "Copy 1" in board,
+            }
+        result["checks"] = checks
+        result["phases"] = phases
+        result["problems"] = problems
+        result["shots"] = shots[:60]
+        result["faults"] = {}
+        for ph in phases.values():
+            if isinstance(ph, dict):
+                for lg in ph.get("logs", []):
+                    try:
+                        fl_ = _faults(logparse.read_text(os.path.join(machine.REPO, lg)))
+                    except OSError:
+                        fl_ = []
+                    if fl_:
+                        result["faults"][lg] = fl_
+        result["ok"] = all(checks.values()) and not problems and not result["faults"] and \
+            all(p.get("stop") == "done" for p in phases.values() if isinstance(p, dict) and "stop" in p)
+    except Exception as e:      # noqa: BLE001
+        import traceback
+        result["error"] = (str(e) + " " + traceback.format_exc()[-600:])[:900]
     finally:
         _finish(s, result, t0)
     return result
