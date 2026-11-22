@@ -2,9 +2,12 @@
 // Copyright (c) 2026 sweeax-exe (FFNY Online)
 // TOWERS (T0, towers.h): the climb mode's screens. Included into online_screen.cpp after music_ui.inc.
 //
-//   TOWERS page     the three towers side by side (UPTOWN, FIVE BOROUGHS, THE WEEKLY "coming soon"), each a
+//   TOWERS page     the towers side by side (UPTOWN, FIVE BOROUGHS, THE WEEKLY, the TEAM TOWER), each a
 //                   drawn building with its floors lit for the saved run, the best floor as a gold line and the
 //                   floor fought next pulsing. A CLIMB (or CONTINUE), X NEW CLIMB over a saved run, Y RULES.
+//                   Build 108: THE WEEKLY's card only while the account service has a Weekly (GET /api/towers/weekly;
+//                   404 or no answer: three cards): the week's twist across the building, the time to the reset,
+//                   the place on this week's board; its BOARD is this week's and last week's (LB / RB).
 //   the start card  after the hub's fighter grid: the tower, its floors, the climber, the rules; A starts it.
 //   the climb       after every won floor (the overlay's TOWERS window, input held): about 3.5 s, A skips. The
 //                   beaten fighter greys out under a BEATEN stamp, the marker climbs one floor up the tower, the
@@ -63,6 +66,9 @@ struct TowersUi {
     std::atomic<int> starting{0};   // 1 a start is asking the service, 2 it started, 3 it could not start
     bool sfx_move = false, sfx_land = false;
     bool gal_drawn = false;         // towers-art: the drawn fallback even with the art there
+    // build 108, The Weekly: its card is on the page only while the service has one (towers_weekly); read once a frame
+    bool weekly_on = false;
+    TowerWeekly wk;
 } TWU;
 
 // GET /api/towers/board?format=text (server relay/accounts/towers.go TowerBoardText), per season kind.
@@ -79,11 +85,11 @@ struct TowerBoard {
 };
 struct TowerBoards {
     std::mutex mu;
-    TowerBoard b[2];                // [0] this month, [1] all time
-    int status[2] = { 0, 0 };       // the last fetch: 200, 404 (the boards are off), 0 unreachable, -1 not yet
-    ULONGLONG at[2] = { 0, 0 };
-    std::atomic<int> busy[2];
-    TowerBoards() { busy[0] = busy[1] = 0; }
+    TowerBoard b[4];                // [0] this month, [1] all time; build 108, The Weekly (tower 3): [2] this week, [3] last week
+    int status[4] = { 0, 0, 0, 0 }; // the last fetch: 200, 404 (the boards are off), 0 unreachable, -1 not yet
+    ULONGLONG at[4] = { 0, 0, 0, 0 };
+    std::atomic<int> busy[4];
+    TowerBoards() { busy[0] = busy[1] = busy[2] = busy[3] = 0; }
 } TWB;
 
 bool parse_tower_board(const char *text, TowerBoard &b)
@@ -137,11 +143,39 @@ const char *const TOWERS_BOARD_SAMPLE =
     "row=2|1|51|Kaze|88|5120|9|0\nrow=2|2|12|Blaze|61|3302|22|0\nrow=2|3|77|Rex|30|1650|4|0\n"
     "me=2|0|0|0\n";
 
+// The gallery's sample Weekly (the service's WeeklyText of 2026-W42, rules 2) and its board.
+const char *const TOWERS_WEEKLY_SAMPLE =
+    "enabled=1\nweek=2026-W42\nname=The Weekly 2026-W42: HEAVY HANDS\ntwist=double_damage|HEAVY HANDS\n"
+    "rules=2\nseed=33094566\nfloors=20\nstarts=1791763200\nends=1792368000\nnow=1792270000\n"
+    "roster=C3BBACB2\nspare=22\nvenues=1|3|10|11|14|17\nfloor=1|91|11|0|0\nfloor=2|7|3|0|0\n"
+    "floor=3|24|10|1|0\nfloor=4|77|17|1|0\nfloor=5|57|3|1|0\nfloor=6|50|17|1|0\nfloor=7|74|3|2|0\n"
+    "floor=8|67|14|2|0\nfloor=9|14|11|2|0\nfloor=10|55|10|2|0\nfloor=11|2|3|2|0\nfloor=12|21|14|2|0\n"
+    "floor=13|10|3|2|0\nfloor=14|76|1|2|0\nfloor=15|20|14|2|0\nfloor=16|26|10|2|0\nfloor=17|93|1|2|0\n"
+    "floor=18|16|3|2|0\nfloor=19|75|3|2|0\nfloor=20|58|17|2|1\n";
+const char *const TOWERS_WEEKLY_BOARD_SAMPLE =
+    "enabled=1\nseason=2026-W42\nends=1792368000\nnow=1792270000\ntower=3|THE WEEKLY|23\n"
+    "row=3|1|12|Blaze|20|1712|22|1\nrow=3|2|51|Kaze|17|1480|9|0\nrow=3|3|34|Crow|14|1301|31|0\nrow=3|4|77|Rex|11|1022|4|0\n"
+    "row=3|5|90|Nia|9|840|70|0\nme=3|7|6|655\n";
+
+// The Weekly as the page knows it: the gallery's sample, else towers.c's last definition (hidden: false).
+bool tw_weekly(TowerWeekly *w)
+{
+    if (gallery_on()) return towers_weekly_parse(TOWERS_WEEKLY_SAMPLE, w) != 0;
+    return towers_weekly(w) != 0;
+}
+
+// The four boards: 0 this month, 1 all time, 2 the Weekly this week, 3 the Weekly last week (build 108).
 void towers_fetch_board(int which)
 {
-    if (gallery_on() || which < 0 || which > 1 || TWB.busy[which].exchange(1)) return;
+    if (gallery_on() || which < 0 || which > 3 || TWB.busy[which].exchange(1)) return;
     TWB.at[which] = GetTickCount64();
-    std::thread([which]() {
+    std::string weekly_path;
+    if (which >= 2) {   // the Weekly's board by its number; last week by the week before this one's start
+        char week[16] = "";
+        if (which == 3 && TWU.wk.valid) towers_iso_week(TWU.wk.starts - 7 * 86400LL, week, (int)sizeof week);
+        weekly_path = std::string("/api/towers/board?format=text&n=10&tower=3") + (week[0] ? std::string("&season=") + week : "");
+    }
+    std::thread([which, weekly_path]() {
         std::vector<char> buf(16384);
         int len = 0, status = 0;
         bool with_session = false;
@@ -153,7 +187,8 @@ void towers_fetch_board(int which)
             // signed in: account_call sends the session, so the answer has our own place (me=). Build 99: the same rule
             // as the page's SIGNED IN (towers_signed_in); account_call also takes a session being checked, and the
             // board without the session is only the fallback (it never has the player's place).
-            const char *path = which ? "/api/towers/board?format=text&n=10&season=all" : "/api/towers/board?format=text&n=10";
+            const char *path = which >= 2 ? weekly_path.c_str() : which ? "/api/towers/board?format=text&n=10&season=all"
+                                                                       : "/api/towers/board?format=text&n=10";
             status = towers_signed_in() || account_state() == ACCOUNT_CHECKING
                          ? account_call("GET", path, nullptr, buf.data(), (int)buf.size(), 8000, nullptr) : -1;
             with_session = status == 200;
@@ -169,11 +204,15 @@ void towers_fetch_board(int which)
             else if (status == 404) TWB.b[which] = TowerBoard();
             TWB.status[which] = ok ? 200 : status;
         }
-        if (ok)
+        static const char *const kind[4] = { "month", "all time", "week", "last week" };
+        if (ok && which >= 2)
+            fprintf(stderr, "[TOWERS] board (%s): season %s, The Weekly %d entries (you #%d, %d floors)\n", kind[which],
+                    b.season.c_str(), b.t[2].entries, b.t[2].me_place, b.t[2].me_floors);
+        else if (ok)
             fprintf(stderr, "[TOWERS] board (%s): season %s, Uptown %d entries (you #%d), Five Boroughs %d (you #%d)\n",
-                    which ? "all time" : "month", b.season.c_str(), b.t[0].entries, b.t[0].me_place, b.t[1].entries, b.t[1].me_place);
+                    kind[which], b.season.c_str(), b.t[0].entries, b.t[0].me_place, b.t[1].entries, b.t[1].me_place);
         else
-            fprintf(stderr, "[TOWERS] board (%s): %s (HTTP %d)\n", which ? "all time" : "month", status == 404 ? "off" : "not loaded", status);
+            fprintf(stderr, "[TOWERS] board (%s): %s (HTTP %d)\n", kind[which], status == 404 ? "off" : "not loaded", status);
         TWB.busy[which] = 0;
     }).detach();
 }
@@ -183,8 +222,9 @@ TowerBoard tw_board(int which)
 {
     if (gallery_on()) {
         TowerBoard b;
-        parse_tower_board(TOWERS_BOARD_SAMPLE, b);
-        if (which) b.season = "all";
+        parse_tower_board(which >= 2 ? TOWERS_WEEKLY_BOARD_SAMPLE : TOWERS_BOARD_SAMPLE, b);
+        if (which == 1) b.season = "all";
+        if (which == 3) b.season = "2026-W41";
         return b;
     }
     bool stale = false;
@@ -202,8 +242,64 @@ TowerBoard tw_board(int which)
 const ImU32 TOWER_COL[TOWER_COUNT] = { IM_COL32(255, 150, 40, 255), IM_COL32(80, 190, 255, 255),
                                        IM_COL32(255, 60, 170, 255), IM_COL32(90, 220, 120, 255), IM_COL32(170, 130, 255, 255) };
 
-// The tower of page card k: Uptown, Five Boroughs, the Weekly, the Team Tower (its fighter rule picks 4 or 5).
-int tw_card_tower(int k) { return k < 3 ? k + 1 : TWU.team_comm ? TOWER_TEAM_COMMUNITY : TOWER_TEAM; }
+// The tower of page card k: Uptown, Five Boroughs, the Weekly, the Team Tower (its fighter rule picks 4 or 5). Build
+// 108: the Weekly's card only while the service has a Weekly (TWU.weekly_on, read on the page); else three cards.
+int tw_card_count() { return TWU.weekly_on ? 4 : 3; }
+int tw_card_tower(int k)
+{
+    int stock = TWU.weekly_on ? 3 : 2;
+    return k < stock ? k + 1 : TWU.team_comm ? TOWER_TEAM_COMMUNITY : TOWER_TEAM;
+}
+
+// The page's look at The Weekly, once a frame (the card shows and hides with it).
+void tw_weekly_refresh()
+{
+    TowerWeekly w;
+    bool on = tw_weekly(&w);
+    if (on != TWU.weekly_on) {
+        int t = tw_card_tower(TWU.sel);      // the chosen tower stays chosen
+        fprintf(stderr, "[TOWERS] page: the Weekly's card %s\n", on ? "shown" : "hidden");
+        TWU.weekly_on = on;
+        TWU.sel = 0;
+        for (int k = 0; k < tw_card_count(); k++)
+            if (tw_card_tower(k) == t || (TOWER_IS_TEAM(t) && TOWER_IS_TEAM(tw_card_tower(k)))) TWU.sel = k;
+        if (!on && t == TOWER_WEEKLY) { TWU.card = 0; TWU.board = TWU.rules = false; }
+    }
+    if (on) TWU.wk = w;
+    else TWU.wk.valid = 0;
+}
+
+// The Weekly's twist titles (the service's own, for a run whose week's definition is gone).
+const char *tw_twist_title(int twist)
+{
+    static const char *const t[TOWER_TWIST_COUNT] = { "", "IRON MAN", "HEAVY HANDS", "BLAZIN' HOUR", "GLASS JAW", "BOSS RUSH", "HOME TURF" };
+    return twist > 0 && twist < TOWER_TWIST_COUNT ? t[twist] : "";
+}
+
+// "RESETS IN 2D 5H" (days and hours; the last hour in minutes) to the Weekly's end.
+std::string tw_weekly_countdown(const TowerWeekly &w)
+{
+    long long left = w.ends - w.now;
+    char line[48];
+    if (left <= 0) return "A NEW WEEK IS ON ITS WAY";
+    if (left >= 86400) snprintf(line, sizeof line, "RESETS IN %lldD %lldH", left / 86400, left % 86400 / 3600);
+    else if (left >= 3600) snprintf(line, sizeof line, "RESETS IN %lldH %lldM", left / 3600, left % 3600 / 60);
+    else snprintf(line, sizeof line, "RESETS IN %lldM", left / 60 + 1);
+    return line;
+}
+
+// The week's twist in plain words (Home Turf names its venue).
+std::string tw_weekly_twist_words(const TowerWeekly &w)
+{
+    if (!w.twist) return "This week's twist needs a newer game: update FFNY Online to climb it.";
+    std::string s = towers_twist_text(w.twist);
+    if (w.twist == TOWER_TWIST_ONE_VENUE && w.venue_n == 1) s = "All 20 floors at one venue: " + std::string(online_venue_name(w.venues[0])) + ".";
+    return s;
+}
+
+// The Weekly can be climbed by this build (a twist it knows, its rules version).
+bool tw_weekly_playable(const TowerWeekly &w) { return w.valid && w.twist != TOWER_TWIST_NONE && w.rules == TOWER_WEEKLY_RULES; }
+
 
 // Build 106: player 2 presses A on the second controller (pad slot 1). Tests: RECOMP_TEST_TOWERS_P2_JOIN=1.
 bool tw_p2_pressed_a()
@@ -228,8 +324,18 @@ bool tw_saved(int tower, TowerRun *out)
 int tw_best(int tower) { return gallery_on() ? TWU.gal_best[tower - 1] : towers_best(tower); }
 int tw_floors(int tower)
 {
+    if (tower == TOWER_WEEKLY) return TWU.wk.valid ? TWU.wk.floors : 20;     // build 108: the week's tower
     if (gallery_on()) return tower == TOWER_UPTOWN ? 59 : 87;
     return towers_floors_now(tower);
+}
+
+// A saved Weekly climb counts only in its own week, with its twist (the service's override may change it).
+bool tw_weekly_saved(TowerRun *out)
+{
+    TowerRun r;
+    if (!tw_saved(TOWER_WEEKLY, &r) || !TWU.wk.valid || strcmp(r.week, TWU.wk.week) || r.twist != TWU.wk.twist) return false;
+    if (out) *out = r;
+    return true;
 }
 
 float ease_out_cubic(float t) { t = std::max(0.0f, std::min(1.0f, t)); return 1 - (1 - t) * (1 - t) * (1 - t); }
@@ -373,16 +479,21 @@ void draw_tower_shape(ImDrawList *dl, const Frame &f, int kind, float cx, float 
         rect(dl, f, cx - 18 * s, base - 30 * s, 36 * s, 30 * s, shade_col(iron, 0.6f));      // the loading door
         for (float d = base - 28 * s; d < base; d += 4 * s)
             dl->AddLine(f.p(cx - 16 * s, d), f.p(cx + 16 * s, d), with_alpha(BLACK, 0.5f), 1.0f);
-        ImU32 neon = TOWER_COL[2];
+        // build 108: the sign reads the tower's own name (the Team Tower's said WEEKLY too, beside the Weekly's card)
+        bool team_sign = TOWER_IS_TEAM(kind);
+        ImU32 neon = TOWER_COL[team_sign ? kind - 1 : 2];
         int beat = (int)(now * 7.0) % 23;
         float flick = (beat == 3 || beat == 4 || beat == 11) ? 0.35f : 1.0f;
         float sx = x + w + 6 * s, sy = y + 18 * s;
-        glass(dl, f, sx - 2 * s, sy - 4 * s, 20 * s, 132 * s, 3 * s, IM_COL32(20, 6, 18, 255), 0.85f);
-        static const char *const letters[] = { "W", "E", "E", "K", "L", "Y" };
-        for (int k = 0; k < 6; k++)
+        static const char *const weekly_letters[] = { "W", "E", "E", "K", "L", "Y" }, *const team_letters[] = { "T", "E", "A", "M" };
+        const char *const *letters = team_sign ? team_letters : weekly_letters;
+        int nl = team_sign ? 4 : 6;
+        float sh = (132 - (6 - nl) * 21) * s;
+        glass(dl, f, sx - 2 * s, sy - 4 * s, 20 * s, sh, 3 * s, IM_COL32(20, 6, 18, 255), 0.85f);
+        for (int k = 0; k < nl; k++)
             text(dl, f, g_title, 15 * s, sx + 8 * s, sy + k * 21 * s, with_alpha(neon, (0.25f + 0.75f * flick) * (0.4f + 0.6f * dim)),
                  letters[k], CENTER, 0.6f);
-        dl->AddRect(f.p(sx - 2 * s, sy - 4 * s), f.p(sx + 18 * s, sy + 128 * s), with_alpha(neon, 0.6f * flick * dim), 3 * s * f.s(), 0, 1.5f * f.s());
+        dl->AddRect(f.p(sx - 2 * s, sy - 4 * s), f.p(sx + 18 * s, sy - 4 * s + sh), with_alpha(neon, 0.6f * flick * dim), 3 * s * f.s(), 0, 1.5f * f.s());
         *col_top = y + 12 * s;
         *col_bottom = base - 38 * s;
         *col_w = 24 * s;
@@ -441,7 +552,16 @@ std::string tower_desc(int tower)
                "stronger up the tower; boss pairs every 10 floors, Crow and Blaze at the top. Saved after every floor, one loss "
                "and the climb is over. ") + (tower == TOWER_TEAM ? "STANDARD: the game's own fighters only (LB / RB to change)."
                : "WITH COMMUNITY: community fighters too, its own board (LB / RB to change).");
-    return "Every week a new tower of 20 floors with its own twist, the same for everyone. Coming soon.";
+    if (tower == TOWER_WEEKLY && TWU.wk.valid) {    // build 108: this week's tower from the service
+        const TowerWeekly &w = TWU.wk;
+        std::string twist = w.title[0] ? w.title : tw_twist_title(w.twist);
+        char head[96];
+        snprintf(head, sizeof head, "THIS WEEK: %s. ", upper(twist.c_str()).c_str());
+        return std::string(head) + tw_weekly_twist_words(w) + " The same " + std::to_string(w.floors) +
+               " floors for everyone, Crow at the top; one loss ends the climb, your best counts on this week's board. "
+               "Standard fighters only. " + tw_weekly_countdown(w) + ".";
+    }
+    return "Every week a new tower of 20 floors with its own twist, the same for everyone.";
 }
 
 // ---- the TOWERS page ----
@@ -460,7 +580,7 @@ void open_towers()
                  towers_name(t), floor);
         say(line, 8000);
     }
-    if (!gallery_on() && towers_signed_in()) { TWB.at[0] = TWB.at[1] = 0; }     // fetched again on the page
+    if (!gallery_on() && towers_signed_in()) { TWB.at[0] = TWB.at[1] = TWB.at[2] = TWB.at[3] = 0; }     // fetched again on the page
 }
 
 void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
@@ -477,7 +597,27 @@ void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
         "Leaving a fight, or closing the game in one, counts as a loss. A draw is fought again once.",
         "Signed in, your climbs go on the monthly and all-time boards. Rewards are looks only.",
     };
+    std::vector<std::string> weekly;    // build 108: The Weekly's own rules (its twist first)
+    if (tower == TOWER_WEEKLY) {
+        const TowerWeekly &w = TWU.wk;
+        weekly.push_back(std::string("This week: ") + (w.title[0] ? w.title : "THE WEEKLY") + ". " + tw_weekly_twist_words(w));
+        weekly.push_back("The same 20 floors for everyone this week: one fixed order of fighters and venues, Crow at the top.");
+        weekly.push_back(w.twist == TOWER_TWIST_LOW_HEALTH ? "No healing between floors: your health carries over from each win."
+                                                           : "Full health at the start of every fight.");
+        weekly.push_back("No continues: a loss, or leaving a fight, ends the climb. A draw is fought again once.");
+        weekly.push_back("The CPU climbs with you, Easy to Hard and past it, as in the other towers.");
+        weekly.push_back("Signed in, your climbs go on this week's board. A new tower every Monday, 00:00 UTC.");
+    }
     float y = 140;
+    if (tower == TOWER_WEEKLY) {
+        for (const std::string &line : weekly) {
+            text(dl, f, g_hand, 13, 140, y, ORANGE, "-", LEFT, 0.8f);
+            text(dl, f, g_title, 12.5f, 154, y, WHITE, line.c_str(), LEFT, 0.8f, 350);
+            y += text_width(f, g_title, 12.5f, line.c_str()) > 350 ? 34 : 20;
+        }
+        hint(dl, f, 254, 352, "y", "CLOSE");
+        return;
+    }
     for (const char *line : common) {
         text(dl, f, g_hand, 13, 140, y, ORANGE, "-", LEFT, 0.8f);
         text(dl, f, g_title, 12.5f, 154, y, WHITE, line, LEFT, 0.8f, 350);
@@ -486,7 +626,7 @@ void towers_rules_panel(ImDrawList *dl, const Frame &f, int tower)
     const char *own = tower == TOWER_UPTOWN ? "Uptown: the original fighters; saved after every floor. Standard fighters only: no created or community fighter climbs it."
                     : tower == TOWER_FIVE_BOROUGHS ? "Five Boroughs: community fighters and venues too. Saved after every floor; one loss and the climb starts over. The board counts official packs only."
                     : TOWER_IS_TEAM(tower) ? "Team Tower: 2 vs 2, player 2 on the second controller. Both CPUs climb with you. Standard and With community have their own boards."
-                    : "The Weekly: 20 floors and one or two twists a week, from the server. Coming soon.";
+                    : "The Weekly: 20 floors and a twist a week, from the server.";
     text(dl, f, g_title, 12, 140, y + 4, CREAM, own, LEFT, 0.8f, 370);
     float hx = 254;
     hint(dl, f, hx, 352, "y", "CLOSE");
@@ -498,18 +638,19 @@ void towers_board_panel(ImDrawList *dl, const Frame &f, int tower, int which, bo
     glass(dl, f, 110, 78, 420, 324, 14, IM_COL32(10, 10, 13, 255), 0.94f);
     ImU32 col = TOWER_COL[tower - 1];
     text(dl, f, g_stencil, 22, 130, 88, CREAM, towers_name(tower), LEFT, 1.4f);
-    text(dl, f, g_title, 13, 510, 92, col, which ? "BOARD - ALL TIME" : "BOARD - THIS MONTH", RIGHT, 0.8f);
+    bool wkb = tower == TOWER_WEEKLY;       // build 108: the Weekly's boards are by week (this one, the last one)
+    text(dl, f, g_title, 13, 510, 92, col, wkb ? (which ? "BOARD - LAST WEEK" : "BOARD - THIS WEEK") : which ? "BOARD - ALL TIME"
+                                                                                                    : "BOARD - THIS MONTH", RIGHT, 0.8f);
     rect(dl, f, 130, 116, 380, 2, col);
+    if (wkb) which += 2;
     TowerBoard b = tw_board(which);
     int status;
     {
         std::lock_guard<std::mutex> lock(TWB.mu);
         status = TWB.status[which];
     }
-    if (tower == TOWER_WEEKLY) {
-        text(dl, f, g_hand, 14, 320, 220, ORANGE, "The Weekly's boards open with The Weekly.", CENTER, 0.8f);
-        return;
-    }
+    if (wkb && b.valid && !b.season.empty())
+        text(dl, f, g_body, 10, 510, 106, with_alpha(GREY, 0.9f), b.season.c_str(), RIGHT, 0);
     if (!b.valid) {
         const char *why = gallery_on() ? "" : status == 404 ? "The boards are not open yet." :
                           (status == 0 && TWB.at[which] && !TWB.busy[which]) ? "The boards could not be reached." : "Loading the board...";
@@ -548,7 +689,7 @@ void towers_board_panel(ImDrawList *dl, const Frame &f, int tower, int which, bo
         text(dl, f, g_title, 13, 320, my, CREAM, line, CENTER, 0.8f);
     } else text(dl, f, g_hand, 12, 320, my, GREY, "You are not on this board yet: climb while signed in.", CENTER, 0.8f);
     float hx = 214;
-    hx += hint(dl, f, hx, 382, "lb", which ? "THIS MONTH" : "ALL TIME");
+    hx += hint(dl, f, hx, 382, "lb", wkb ? (which == 3 ? "THIS WEEK" : "LAST WEEK") : which ? "THIS MONTH" : "ALL TIME");
     hint(dl, f, hx, 382, "x", "CLOSE");
 }
 
@@ -590,7 +731,16 @@ void towers_run_card(ImDrawList *dl, const Frame &f, int tower, const TowerRun *
             text(dl, f, g_title, 15, x, y + 77, WHITE, up.c_str(), LEFT, 1.0f, 180);
         }
         snprintf(line, sizeof line, "SEED %08X", saved->seed);
+        if (tower == TOWER_WEEKLY) snprintf(line, sizeof line, "%s  -  %s", saved->week, tw_twist_title(saved->twist));
         text(dl, f, g_body, 10, x, y + 104, with_alpha(GREY, 0.9f), line, LEFT, 0);
+    } else if (tower == TOWER_WEEKLY) {     // build 108: this week's tower and its twist
+        const TowerWeekly &w = TWU.wk;
+        text(dl, f, g_title, 12, x, y, GREY, w.week, LEFT, 0.8f);
+        text(dl, f, g_title, 20, x, y + 14, col, w.title[0] ? w.title : "THE WEEKLY", LEFT, 1.2f, 180);
+        text(dl, f, g_hand, 11, x, y + 42, CREAM, tw_weekly_twist_words(w).c_str(), LEFT, 0.8f, 180);
+        snprintf(line, sizeof line, "%d FLOORS  -  NO CONTINUES", w.floors);
+        text(dl, f, g_title, 11, x, y + 86, ORANGE, line, LEFT, 0.8f, 180);
+        text(dl, f, g_title, 10, x, y + 104, GOLD, tw_weekly_countdown(w).c_str(), LEFT, 0.6f, 180);
     } else {
         int floors = tw_floors(tower);
         text(dl, f, g_title, 12, x, y, GREY, "THE TOWER", LEFT, 0.8f);
@@ -607,28 +757,32 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
 {
     backdrop(dl, f, display, true, LOOK_STATS);
     page_title(dl, f, "TOWERS");
-    text(dl, f, g_hand, 14, 590, 34, ORANGE, "CLIMB NEW YORK, ONE FIGHTER AT A TIME", RIGHT, 1.0f);
+    text(dl, f, g_hand, 14, 590, page_subtitle_y(34), ORANGE, "CLIMB NEW YORK, ONE FIGHTER AT A TIME", RIGHT, 1.0f);
+    tw_weekly_refresh();        // build 108: the Weekly's card while the service has one
+    int cards = tw_card_count();
+    TWU.sel = std::max(0, std::min(cards - 1, TWU.sel));
     int tower = tw_card_tower(TWU.sel);
     TowerRun saved;
-    bool have = tw_saved(tower, &saved);
+    bool have = tower == TOWER_WEEKLY ? tw_weekly_saved(&saved) : tw_saved(tower, &saved);
     if (TWU.card == 0 && !TWU.rules && !TWU.board) {
         if (pad.left) TWU.sel = std::max(0, TWU.sel - 1);
-        if (pad.right) TWU.sel = std::min(TOWER_PAGE_TOWERS - 1, TWU.sel + 1);
-        if (TWU.sel == 3 && (pad.lb || pad.rb)) TWU.team_comm = !TWU.team_comm;     // build 106: the fighter rule
+        if (pad.right) TWU.sel = std::min(cards - 1, TWU.sel + 1);
+        if (TOWER_IS_TEAM(tw_card_tower(TWU.sel)) && (pad.lb || pad.rb)) TWU.team_comm = !TWU.team_comm;     // build 106: the fighter rule
     }
     tower = tw_card_tower(TWU.sel);
-    have = tw_saved(tower, &saved);
+    have = tower == TOWER_WEEKLY ? tw_weekly_saved(&saved) : tw_saved(tower, &saved);
     float dt = std::min(0.1f, ImGui::GetIO().DeltaTime);
     bool signed_now = gallery_on() || towers_signed_in();     // build 99: the rule towers.c posts runs by
     TowerBoard month = signed_now ? tw_board(0) : TowerBoard();
+    TowerBoard week = signed_now && TWU.weekly_on ? tw_board(2) : TowerBoard();
     for (int k = 0; k < TOWER_PAGE_TOWERS; k++) {
         float want = k == TWU.sel ? 1.0f : 0.0f;
         TWU.grow[k] += (want - TWU.grow[k]) * std::min(1.0f, dt / 0.05f);     // about 150 ms to settle
         if (gallery_on()) TWU.grow[k] = want;
     }
-    for (int k = 0; k < TOWER_PAGE_TOWERS; k++) {
+    for (int k = 0; k < cards; k++) {
         int t = tw_card_tower(k);
-        float cx = 95 + k * 150, base = 326;
+        float cx = (cards == 4 ? 95 : 170) + k * 150, base = 326;
         float s = 1.0f + 0.08f * ease_out_cubic(TWU.grow[k]);
         float dim = 0.6f + 0.4f * TWU.grow[k];
         if (mouse_pick(f, cx - 80, 80, 160, 300) && TWU.card == 0) TWU.sel = k;
@@ -638,34 +792,54 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
             dl->AddCircleFilled(f.p(cx, base - 120), 120 * f.s(), with_alpha(TOWER_COL[t - 1], 0.10f * TWU.grow[k]), 48);
         float top, bottom, w;
         draw_tower_shape(dl, f, t, cx, base, s, dim, &top, &bottom, &w);
-        float ccx = tower_tex(t).srv ? cx - TOWER_ART_W * s / 2 + TOWER_ART_COLUMN[k][0] * TOWER_ART_W * s : cx;
+        float ccx = tower_tex(t).srv && t <= TOWER_ART_COUNT ? cx - TOWER_ART_W * s / 2 + TOWER_ART_COLUMN[t - 1][0] * TOWER_ART_W * s : cx;
         TowerRun r;
-        bool hr = t != TOWER_WEEKLY && tw_saved(t, &r);
+        bool hr = t == TOWER_WEEKLY ? tw_weekly_saved(&r) : tw_saved(t, &r);
         int floors = hr ? r.floors : tw_floors(t), best = tw_best(t);
-        if (t == TOWER_WEEKLY) floors = 20;
+        if (t == TOWER_WEEKLY) {    // build 108: this week's best is the board's (an older week's tower was another)
+            const TowerBoardTower &bt = week.t[TOWER_WEEKLY - 1];
+            best = week.valid && bt.me ? bt.me_floors : 0;
+        }
         draw_floor_column(dl, f, t, ccx, top, bottom, w, floors, hr ? r.floor - 1 : 0, best, hr ? r.floor : 0, dim);
-        if (t == TOWER_WEEKLY) {    // the banner across it
-            float by = base - 130;
-            rect(dl, f, cx - 64, by, 128, 24, with_alpha(IM_COL32(150, 14, 30, 255), 0.92f * dim), 3);
-            text(dl, f, g_title, 15, cx, by + 3, with_alpha(WHITE, dim), "COMING SOON", CENTER, 1.0f);
+        if (t == TOWER_WEEKLY) {    // the week's twist across it
+            const char *title = TWU.wk.title[0] ? TWU.wk.title : "THE WEEKLY";
+            float tw = std::max(128.0f, text_width(f, g_title, 15, title) + 20), by = base - 130;
+            float pulse = 0.8f + 0.2f * (float)sin(ImGui::GetTime() * 3.0);
+            rect(dl, f, cx - tw / 2, by, tw, 24, with_alpha(IM_COL32(150, 14, 30, 255), 0.92f * dim), 3);
+            frame_rect(dl, f, cx - tw / 2 + 2, by + 2, tw - 4, 20, with_alpha(TOWER_COL[TOWER_WEEKLY - 1], 0.8f * dim * pulse), 1.2f);
+            text(dl, f, g_title, 15, cx, by + 3, with_alpha(WHITE, dim), title, CENTER, 1.0f);
+            text(dl, f, g_title, 9.5f, cx, by + 28, with_alpha(CREAM, dim), TWU.wk.week, CENTER, 0.6f);
         }
         // the name plate
-        float plate_h = signed_now && t != TOWER_WEEKLY ? 56.0f : 44.0f;     // T1: room for the board place
+        float plate_h = signed_now || t == TOWER_WEEKLY ? 56.0f : 44.0f;     // T1: room for the board place
         glass(dl, f, cx - 72, base + 8, 144, plate_h, 8, k == TWU.sel ? IM_COL32(44, 32, 22, 255) : IM_COL32(10, 10, 13, 255),
               k == TWU.sel ? 0.8f : 0.55f);
         if (k == TWU.sel && TWU.card == 0) selector(dl, f, cx - 72, base + 8, 144, plate_h);
         text(dl, f, g_title, TOWER_IS_TEAM(t) ? 15.0f : 17.0f, cx, base + 10, with_alpha(k == TWU.sel ? CREAM : GREY, dim),
              TOWER_IS_TEAM(t) ? "TEAM TOWER" : towers_name(t), CENTER, 1.2f);
-        if (TOWER_IS_TEAM(t))       // build 106: the fighter rule, LB / RB
-            text(dl, f, g_title, 9.5f, cx, base + plate_h + 12, with_alpha(k == TWU.sel ? TOWER_COL[t - 1] : GREY, dim),
-                 t == TOWER_TEAM ? "<  STANDARD  >" : "<  WITH COMMUNITY  >", CENTER, 0.6f);
         char line[64];
-        if (t == TOWER_WEEKLY) snprintf(line, sizeof line, "20 FLOORS  -  SOON");
-        else if (hr) snprintf(line, sizeof line, "FLOOR %d / %d", r.floor, r.floors);
+        if (hr) snprintf(line, sizeof line, "FLOOR %d / %d", r.floor, r.floors);
         else if (best > 0) snprintf(line, sizeof line, "BEST %d  -  %d FLOORS", best, floors);
         else snprintf(line, sizeof line, "%d FLOORS", floors);
-        text(dl, f, g_title, 11, cx, base + 32, with_alpha(hr ? TOWER_COL[t - 1] : ORANGE, dim), line, CENTER, 0.8f);
-        if (t != TOWER_WEEKLY && signed_now) {     // T1: the player's place on this month's board
+        if (TOWER_IS_TEAM(t)) {     // build 106: the fighter rule, LB / RB; build 108: in the plate's line (under the
+            // plate it ran into the tower's description below), with the LB / RB arrows on the plate's edges
+            char rule[96];
+            snprintf(rule, sizeof rule, "%s  -  %s", t == TOWER_TEAM ? "STANDARD" : "WITH COMMUNITY", line);
+            float sz = std::min(11.0f, fit_size(f, g_title, 11, rule, 120));
+            text(dl, f, g_title, sz, cx, base + 32 + (11 - sz) * 0.5f, with_alpha(hr ? TOWER_COL[t - 1] : ORANGE, dim), rule, CENTER, 0.8f);
+            ImU32 ac = with_alpha(k == TWU.sel ? TOWER_COL[t - 1] : GREY, dim);
+            text(dl, f, g_title, 11, cx - 66, base + 32, ac, "<", CENTER, 0.6f);
+            text(dl, f, g_title, 11, cx + 66, base + 32, ac, ">", CENTER, 0.6f);
+        } else text(dl, f, g_title, 11, cx, base + 32, with_alpha(hr ? TOWER_COL[t - 1] : ORANGE, dim), line, CENTER, 0.8f);
+        if (t == TOWER_WEEKLY) {    // build 108: the place on this week's board, else the time to the reset
+            const TowerBoardTower &bt = week.t[TOWER_WEEKLY - 1];
+            std::string cd = tw_weekly_countdown(TWU.wk);
+            if (week.valid && bt.me && bt.me_place > 0)
+                snprintf(line, sizeof line, "#%d OF %d  -  %s", bt.me_place, bt.entries, cd.compare(0, 10, "RESETS IN ") ? cd.c_str() :
+                         (cd.substr(10) + " LEFT").c_str());
+            else snprintf(line, sizeof line, "%s", cd.c_str());
+            text(dl, f, g_title, 9.5f, cx, base + 47, with_alpha(k == TWU.sel ? GOLD : GREY, dim), line, CENTER, 0.6f);
+        } else if (signed_now) {     // T1: the player's place on this month's board
             const TowerBoardTower &bt = month.t[t - 1];
             if (month.valid && bt.me && bt.me_place > 0) snprintf(line, sizeof line, "#%d OF %d THIS MONTH", bt.me_place, bt.entries);
             else if (month.valid) snprintf(line, sizeof line, "%d ON THE BOARD", bt.entries);
@@ -757,27 +931,21 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     }
     TWU.card = 0;
     float hx = 54;
-    if (tower == TOWER_WEEKLY) {
-        hx += hint(dl, f, hx, 424, "y", "RULES");
-        if (TOWER_IS_TEAM(tower)) hx += hint(dl, f, hx, 424, "lb", "RULE");
-        hint(dl, f, hx, 424, "b", "BACK");
-    } else {
-        hx += hint(dl, f, hx, 424, "a", have ? "CONTINUE" : "CLIMB");
-        hx += hint(dl, f, hx, 424, "x", "BOARD");
-        hx += hint(dl, f, hx, 424, "y", "RULES");
-        hint(dl, f, hx, 424, "b", "BACK");
-    }
+    hx += hint(dl, f, hx, 424, "a", have ? "CONTINUE" : "CLIMB");
+    hx += hint(dl, f, hx, 424, "x", "BOARD");
+    hx += hint(dl, f, hx, 424, "y", "RULES");
+    hint(dl, f, hx, 424, "b", "BACK");
     text(dl, f, g_hand, 10, 590, 428, with_alpha(signed_now ? GOLD : GREY, 0.9f),
          signed_now ? "SIGNED IN  -  YOUR CLIMBS GO ON THE BOARD" : "SIGN IN TO PUT YOUR CLIMB ON THE BOARD", RIGHT, 0.8f);
     if (pad.y) { TWU.rules = true; return; }
     if (pad.b) { S.page = HUB; return; }
-    if (pad.x && tower != TOWER_WEEKLY) {     // build 99: the board as it is now (a climb may have gone on it since)
+    if (pad.x) {     // build 99: the board as it is now (a climb may have gone on it since)
         TWU.board = true; TWU.board_all = 0;
-        if (!gallery_on() && towers_signed_in()) TWB.at[0] = TWB.at[1] = 0;
+        if (!gallery_on() && towers_signed_in()) TWB.at[0] = TWB.at[1] = TWB.at[2] = TWB.at[3] = 0;
         return;
     }
-    if (tower == TOWER_WEEKLY) {
-        if (pad.a) say("The Weekly opens soon: a new tower every week, the same for everyone.");
+    if (tower == TOWER_WEEKLY && pad.a && !have && !tw_weekly_playable(TWU.wk)) {    // build 108: a twist this build lacks
+        say("This week's Weekly needs a newer game: update FFNY Online, then climb.", 6000);
         return;
     }
     if (pad.a) {
@@ -790,7 +958,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
 bool towers_ui_originals_only()
 {
     int t = tw_card_tower(TWU.sel);
-    return t == TOWER_UPTOWN || t == TOWER_TEAM;
+    return t == TOWER_UPTOWN || t == TOWER_TEAM || t == TOWER_WEEKLY;     // build 108: the Weekly, stock climbers only
 }
 
 void open_fighters_for(bool towers)
@@ -805,7 +973,8 @@ void towers_fighter_chosen(int fighter)
 {
     int tower = tw_card_tower(TWU.sel);
     if (!towers_climber_ok(tower, fighter, ONLINE_NEW_FIGHTER(fighter))) {     // build 98: Uptown, standard only
-        say(TOWER_IS_TEAM(tower) ? "The standard Team Tower takes standard fighters only." : "Uptown takes standard fighters only.", 4000);
+        say(TOWER_IS_TEAM(tower) ? "The standard Team Tower takes standard fighters only." : tower == TOWER_WEEKLY ?
+            "The Weekly takes standard fighters only." : "Uptown takes standard fighters only.", 4000);
         return;
     }
     S.towers_pick = false;
@@ -873,6 +1042,8 @@ void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersVi
     bool first = v.last_floor <= 0, draw = v.state == TOWERS_DRAW || (card && v.last_floor == v.floor);
     bool won = !first && !draw;
     text(dl, f, g_stencil, 26, 50, 22, CREAM, towers_name(tower), LEFT, 1.6f);
+    if (tower == TOWER_WEEKLY && run.tower == TOWER_WEEKLY)     // build 108: the week's twist under the name
+        text(dl, f, g_title, 12, 52, 50, col, (std::string(run.week) + "  -  " + tw_twist_title(run.twist)).c_str(), LEFT, 0.8f);
     char line[96];
     snprintf(line, sizeof line, "SEED %08X", v.seed);
     text(dl, f, g_body, 10, 590, 30, with_alpha(GREY, 0.9f), line, RIGHT, 0);
@@ -891,7 +1062,7 @@ void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersVi
         if (floor < 1 || floor > v.floors || y < top - 2 || y > bottom - slot + 2) continue;
         bool beaten = floor < v.floor || (won && floor == v.last_floor && climb >= 0.99f);
         bool lit = floor < v.last_floor || (won && floor == v.last_floor && t > 1.2f) || (!won && floor < v.floor);
-        bool boss = towers_is_boss(tower, floor, v.floors) != 0;
+        bool boss = (run.tower == tower ? towers_run_is_boss(&run, floor) : towers_is_boss(tower, floor, v.floors)) != 0;
         ImU32 c = lit ? col : boss ? BOSS_FILL : IM_COL32(64, 64, 70, 255);
         rect(dl, f, colx - 24, y + 2, 48, slot - 4, with_alpha(c, lit ? 0.85f : boss ? 0.95f : 0.6f), 3);
         if (boss) {     // build 101: a boss floor in gold, wider, with its tag on the left
@@ -1199,6 +1370,7 @@ void towers_gallery_view(TowersView &v, int state, int last_floor)
     v.climb_ms = 1000u * (19 * 60 + 42);
     v.fighter = 55;
     v.online = v.board = 1;
+    v.fighter2 = v.last_opponent2 = v.next_opponent2 = -1;     // one on one (build 108: the samples showed fighter 0 as a second CPU)
 }
 
 // Sets the page up; true when it is one of the TOWERS pages.
@@ -1216,8 +1388,29 @@ bool towers_gallery(const std::string &p)
     if (p == "hub-towers") { S.page = HUB; S.hub_sel = HUB_TOWERS; return true; }
     S.page = TOWERS;
     TWU.sel = 0;
+    TWU.weekly_on = false;
+    tw_weekly_refresh();        // build 108: the gallery's sample Weekly (its card on the page)
     if (p == "towers-t2") TWU.sel = 1;
     else if (p == "towers-weekly") TWU.sel = 2;
+    else if (p == "towers-weekly-rules") { TWU.sel = 2; TWU.rules = true; }
+    else if (p == "towers-weekly-board") { TWU.sel = 2; TWU.board = true; TWU.board_all = 0; }
+    else if (p == "towers-weekly-start") { TWU.sel = 2; TWU.card = 2; TWU.pick = 22; TWU.pick_skin = 0; }
+    else if (p == "towers-weekly-climb") {      // the climb after floor 4 of the sample week
+        static TowerRun wr;
+        towers_new_weekly_run(&wr, &TWU.wk, 55, 0);
+        TWU.gal_window = 1;
+        TWU.gal_t = 3.5f;
+        towers_gallery_view(TWU.v, TOWERS_WON, 4);
+        TWU.v.tower = TOWER_WEEKLY;
+        TWU.v.floors = wr.floors;
+        TWU.v.last_opponent = towers_opponent(&wr, 4);
+        TWU.v.next_opponent = towers_opponent(&wr, 5);
+        TWU.v.next_venue = towers_venue(&wr, 5);
+        TWU.v.seed = wr.seed;
+        towers_run_floor_rules(&wr, 5, &TWU.v.next_rules);
+        TWU.run = wr;
+        return true;
+    }
     else if (p == "towers-rules") TWU.rules = true;
     else if (p == "towers-board" || p == "towers-board-all") { TWU.board = true; TWU.board_all = p == "towers-board-all"; }
     else if (p == "towers-art") TWU.gal_drawn = true;      // the drawn fallback (no art files)

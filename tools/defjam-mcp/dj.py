@@ -38,6 +38,10 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario towersteam [--out D:/DefJam/community/team-tower-shots]   (build 106: the
            Team Tower, 2 vs 2 with two pads, signed in on a local account service: 3 floors won and saved, resumed and
            lost, a new climb on floor 1, the community Team Tower; both boards with both names)
+    python tools/defjam-mcp/dj.py scenario towersweekly [--twists low_health,glass_jaw] [--out DIR]   (build 108: The
+           Weekly, tower 3, on a local account service from source with its switch off, then on: no card while off;
+           two floors of each twist, checked against the service's floor list and the twist's own effect; the
+           page's Weekly card, rules and this week's board; pictures to D:/DefJam/community/weekly-tower-shots)
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
     python tools/defjam-mcp/dj.py lock status | run -- <command...>      (any other test under the lock)
@@ -139,6 +143,9 @@ def cmd_scenario(a):
         r = scenarios.faction_war(size=a.size, matches=a.matches if a.matches != 3 else (2 if a.size == 1 else 1),
                                   timeout=a.timeout, relay_port=a.relay_port, extra_env=env,
                                   out_dir=a.out or scenarios.FACTION_SHOTS, fast_ko=a.fast_ko, **common)
+    elif a.kind == "towersweekly":
+        r = scenarios.towers_weekly(timeout=a.timeout, extra_env=env, out_dir=a.out,
+                                    twists=[t for t in (a.twists or "").split(",") if t] or None, **common)
     elif a.kind == "towerrewards":
         r = scenarios.tower_rewards(timeout=a.timeout or 150, relay_port=a.relay_port, extra_env=env, out_dir=a.out, **common)
     else:
@@ -247,9 +254,10 @@ def main(argv=None):
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
                                               "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers",
-                                              "towerrewards", "towersteam", "factionwar"])
+                                              "towerrewards", "towersteam", "factionwar", "towersweekly"])
     sc.add_argument("--size", type=int, default=1, choices=[1, 2], help="factionwar: 1 ON 1 (with the observer, the picker "
                     "and the lock) or 2 ON 2 (four fighters)")
+    sc.add_argument("--twists", help="towersweekly: the twists to climb (comma list; default all six)")
     sc.add_argument("--case", default="kick", help="lobby97 (build 97): kick, quick, quickmax or afk")
     sc.add_argument("--via", default="voice", choices=["voice", "chat"], help="mute: the VOICE CHAT page's call, or the chat window's MUTE IN ROOM")
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")

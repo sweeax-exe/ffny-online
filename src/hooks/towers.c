@@ -14,6 +14,7 @@
 #include "recomp_settings.h"
 #include "towers.h"
 #include "towers_ai.h"
+#include "guest_call.h"
 #include "account.h"
 #include "anticheat.h"
 #include "automatch.h"
@@ -29,8 +30,8 @@
 #define F_HEALTH_NOW    0x350u
 #define F_HEALTH_TOP    0x354u
 #define F_HEALTH_SHARE  0x35Cu
-#define F_MOMENTUM      0x374u
-#define F_MOMENTUM_TOP  0x378u
+#define F_STUN          0x374u          /* the stun meter (dizzy.md); builds 97-107 wrote the start "momentum" here */
+#define MOMENTUM_FULL   100.0f          /* the momentum meter's top (+0x364: floor 20, 98/99 the Blazin' snap) */
 #define G_SLOT_LEVEL    0x003B90A8u     /* each fighter slot's difficulty word (netplay.c cpu_level_apply) */
 #define G_PHASE         0x003B8F30u     /* the match's phase: 1 fighting, 2 decided, 3 finished */
 #define G_WINNER        0x003B8F40u     /* the winner's slot (phase 3) */
@@ -40,6 +41,20 @@
 #define G_RESULT_COUNT  0x003BE624u
 #define RESULTS_MAX     ((G_RESULT_COUNT - G_RESULTS) / 0x10u)
 #define PLAYER_LEVEL    1u              /* the climber's own slot word: Normal (the momentum scale reads slot 0's) */
+/* build 108, The Weekly's twists (docs/research/cheat-menu.md, dizzy.md): the tank (regeneration's ceiling), the
+ * fields sub_001A4F30 derives from the maximum (+0x360, the stun cap +0x378 = half of it), the real momentum meter
+ * (the Blazin' meter +0x364, 0..100) and its timer and state (+0x93E bit 0 ready, bit 1 active) */
+#define F_HEALTH_TANK   0x358u
+#define F_STUN_CAP      0x378u
+#define F_METER         0x364u
+#define F_BLAZIN_TIME   0x368u
+#define F_BLAZIN        0x93Eu
+#define METER_READY     0x42C60000u     /* 99.0: Blazin' ready, as the game parks it */
+#define BLAZIN_TIME     0x44E10000u     /* 1800.0 */
+#define MOMENTUM_AFTER  300u            /* fighting steps (5 s) before the hold starts: one given in the walk-in stopped
+                                           the match (cheats.c max_blazin) */
+extern void sub_001A5190(void);         /* momentum gain (record, amount) */
+extern void sub_000B0130(void);         /* Blazin' ready: the HUD and the sound (slot, 1) */
 
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
@@ -57,6 +72,9 @@ static int g_momentum_done;
 static int g_draw_loss;                 /* the run ended on a second draw on its floor */
 static int g_cpu_end_health;            /* the CPU's health % when the fight was decided (the report) */
 static int g_last_opp2 = -1;            /* build 106: the team floor's second CPU just fought */
+/* build 108, The Weekly's twists in the fight */
+static int g_glass_done, g_hits_scaled, g_momentum_refills;
+static unsigned g_fighting_steps;
 
 /* The results' Rematch prompt (YES / NO) has no place in a run. Build 100 armed its answer at the reward save and
  * sent it from the NEXT front-end call: a player who sat on the prompt made none, so it never came (report #204).
@@ -418,6 +436,89 @@ static int net_on(void)
 
 int towers_signed_in(void) { return net_on(); }
 
+/* ---------------------------------------------------------------- The Weekly's definition (build 108)
+ * GET /api/towers/weekly?format=text (public, no session), in the background: again every 5 minutes, after a failure
+ * every 30 s, and at once after the week's end. 404 (the service's switch off) or no answer: no Weekly. Never with
+ * RECOMP_TOWERS_OFFLINE (tests). */
+static TowerWeekly g_weekly;            /* the last definition (valid 0: none) */
+static int g_weekly_status = -1;        /* the last fetch: 200, 404 off, 0 unreachable, -1 never */
+static ULONGLONG g_weekly_at, g_weekly_tick;    /* when it was asked for; when the answer came */
+static volatile LONG g_weekly_busy;
+static int g_weekly_stale;              /* fetch again at the next look */
+
+static int weekly_allowed(void)
+{
+    const char *off = getenv("RECOMP_TOWERS_OFFLINE");
+    return !(off && *off && *off != '0');
+}
+
+/* Blocks (no lock held): the definition into g_weekly. 1 when there is a Weekly. */
+static int weekly_fetch(void)
+{
+    static char buf[8192];
+    TowerWeekly w;
+    int len = 0, status, ok;
+    InitOnceExecuteOnce(&g_once, init_once, NULL, NULL);
+    status = account_fetch("/api/towers/weekly?format=text", buf, (int)sizeof buf, &len);
+    buf[len >= 0 && len < (int)sizeof buf ? len : (int)sizeof buf - 1] = 0;
+    ok = status == 200 && towers_weekly_parse(buf, &w);
+    lock();
+    {
+        int changed = ok != (g_weekly.valid != 0) || (ok && (strcmp(w.week, g_weekly.week) || w.twist != g_weekly.twist));
+        if (ok) { g_weekly = w; g_weekly_tick = GetTickCount64(); }
+        else if (status == 404 || status == 200) memset(&g_weekly, 0, sizeof g_weekly);    /* off: hidden at once */
+        else if (g_weekly.valid && g_weekly.now + (long long)((GetTickCount64() - g_weekly_tick) / 1000) >= g_weekly.ends)
+            memset(&g_weekly, 0, sizeof g_weekly);  /* unreachable: an old definition only until its week ends */
+        g_weekly_status = ok ? 200 : status;
+        g_weekly_stale = 0;
+        if (changed || g_weekly_status != 200)
+            fprintf(stderr, "[TOWERS] the Weekly: %s (HTTP %d)%s%s%s%s\n", ok ? "on" : status == 404 ? "off" : "no answer", status,
+                    ok ? ", " : "", ok ? w.week : "", ok ? ", twist " : "", ok ? w.twist_key : "");
+        if (ok)
+            fprintf(stderr, "[TOWERS] the Weekly %s: %s (%s, rules %d%s), seed %u, %d floors, %d venue%s, ends in %lld s\n", w.week,
+                    w.title, w.twist_key, w.rules, w.twist ? "" : ", a twist this build does not know", w.seed, w.floors,
+                    w.venue_n, w.venue_n == 1 ? "" : "s", w.ends - w.now);
+        ok = g_weekly.valid;
+    }
+    unlock();
+    return ok;
+}
+
+static DWORD WINAPI weekly_thread(LPVOID unused)
+{
+    (void)unused;
+    weekly_fetch();
+    InterlockedExchange(&g_weekly_busy, 0);
+    return 0;
+}
+
+int towers_weekly(TowerWeekly *out)
+{
+    ULONGLONG now = GetTickCount64();
+    int valid, due;
+    if (out) memset(out, 0, sizeof *out);
+    if (!weekly_allowed()) return 0;
+    lock();
+    due = g_weekly_stale || !g_weekly_at || now - g_weekly_at > (g_weekly_status == 200 ? 300000ull : 30000ull) ||
+          (g_weekly.valid && g_weekly.now + (long long)((now - g_weekly_tick) / 1000) >= g_weekly.ends);
+    if (due && !InterlockedCompareExchange(&g_weekly_busy, 1, 0)) {
+        HANDLE h;
+        g_weekly_at = now;
+        g_weekly_stale = 0;
+        if ((h = CreateThread(NULL, 0, weekly_thread, NULL, 0, NULL)) != NULL) CloseHandle(h);
+        else InterlockedExchange(&g_weekly_busy, 0);
+    }
+    valid = g_weekly.valid;
+    if (valid && out) {
+        *out = g_weekly;
+        out->now = g_weekly.now + (long long)((now - g_weekly_tick) / 1000);     /* the service's clock, now */
+    }
+    unlock();
+    return valid;
+}
+
+int towers_weekly_status(void) { return g_weekly_status; }
+
 /* key=value line `key` of a text answer into out; 1 when present. */
 static int kv(const char *text, const char *key, char *out, int size)
 {
@@ -623,6 +724,7 @@ static int ids_have(const char *list, int a)
  * an offline climb with another roster). Five Boroughs: the service names the community fighters (1000 and up) the
  * run keeps (the live ones now); the others are dropped from pool[] (*pool_n shrinks) before the run is built. */
 static int g_start_f2 = -1, g_start_s2;    /* build 106: player 2 of the team run being started (-1: none) */
+static char g_start_week[12];              /* build 108: the week of the Weekly run being started */
 
 static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, const int *venues, int venue_n,
                      uint32_t *seed, char *run, int *board, char *why, int why_size)
@@ -640,6 +742,8 @@ static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, c
         if (partner && *partner && strlen(partner) < 128 && !strchr(partner, '"') && !strchr(partner, '\\'))
             n += snprintf(json + n, sizeof json - (size_t)n, "\"partner\":\"%s\",", partner);
     }
+    if (tower == TOWER_WEEKLY)      /* build 108: the weekly rules this game applies and the week it thinks it is */
+        n += snprintf(json + n, sizeof json - (size_t)n, "\"weekly\":%d,\"week\":\"%s\",", TOWER_WEEKLY_RULES, g_start_week);
     n += snprintf(json + n, sizeof json - (size_t)n, "\"pool\":[");
     for (i = 0; i < *pool_n && n < (int)sizeof json - 16; i++) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", i ? "," : "", pool[i]);
     n += snprintf(json + n, sizeof json - (size_t)n, "],\"venues\":[");
@@ -654,6 +758,19 @@ static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, c
         snprintf(g_start_error, sizeof g_start_error, "Some community fighters are missing on this PC: update your content "
                  "first (restart the launcher), then climb.");
         fprintf(stderr, "[TOWERS] service: refused, this PC's content is behind (missing %s)\n", missing);
+        run[0] = 0;
+        return -1;
+    }
+    if (tower == TOWER_WEEKLY && (status == 409 || status == 404)) {
+        /* build 108: the week turned over since the definition was read (409 week), or The Weekly was switched off
+         * (404): no climb of a tower the service does not hold */
+        snprintf(g_start_error, sizeof g_start_error, status == 404 ? "The Weekly is closed right now." :
+                 "A new week has started: open TOWERS again for this week's Weekly.");
+        {
+            int has_why = kv(reply, "why", v, sizeof v);
+            fprintf(stderr, "[TOWERS] service: the Weekly start refused (HTTP %d%s%s)\n", status, has_why ? ", why " : "", v);
+        }
+        g_weekly_stale = 1;
         run[0] = 0;
         return -1;
     }
@@ -690,10 +807,13 @@ void towers_net_text(char *out, int size)
         { "rules", "OLD RULES: NOT ON THE BOARD" }, { "roster", "CHANGED ROSTER: NOT ON THE BOARD" },
         { "order", "THE SERVER LOST TRACK: NOT ON THE BOARD" }, { "closed", "THE SERVER CLOSED THIS CLIMB" },
         { "offline", "OFFLINE: NOT ON THE BOARD" },
+        { "weekly_rules", "ANOTHER WEEKLY RULES VERSION: NOT ON THE BOARD" }, { "week", "THE WEEK IS OVER: NOT ON THE BOARD" },
     };
     size_t k;
     lock();
     if (g_run.floors <= 0) out[0] = 0;
+    else if (g_run.tower == TOWER_WEEKLY && g_run.run_id[0] && !g_run.board && !strcmp(g_net_why, "created"))
+        snprintf(out, (size_t)size, "YOUR OWN FIGHTER: NOT ON THE WEEKLY BOARD");
     else if (!g_run.run_id[0]) snprintf(out, (size_t)size, "OFFLINE: NOT ON THE BOARD");
     else if (g_run.board) snprintf(out, (size_t)size, "ON THE BOARD");
     else {
@@ -804,7 +924,7 @@ static int arm_fight(void)
         am.fighter[2] = opp;
         am.fighter[3] = towers_opponent2(&g_run, g_run.floor);
     }
-    towers_floor_rules(g_run.tower, g_run.floor, g_run.floors, &g_rules);
+    towers_run_floor_rules(&g_run, g_run.floor, &g_rules);     /* build 108: the Weekly's twist too */
     g_match_seen = g_decided = g_draw = 0;
     g_winner = -1;
     g_step = 0;
@@ -818,6 +938,11 @@ static int arm_fight(void)
             "momentum %.0f%%, health x%.2f%s)\n", towers_name(g_run.tower), g_run.floor, g_run.floors, g_run.fighter,
             opp, venue, g_rules.cpu_level, g_rules.cpu_damage, g_rules.cpu_momentum * 100.0f, g_rules.cpu_health,
             g_rules.boss ? ", boss floor" : "");
+    if (g_run.tower == TOWER_WEEKLY)
+        fprintf(stderr, "[TOWERS] THE WEEKLY %s floor %d: twist %s (hits x%.1f, max health x%.2f, CPU momentum %s, health %s, %s)\n",
+                g_run.week, g_run.floor, towers_twist_key(g_run.twist), g_rules.hit_scale, g_rules.max_health,
+                g_rules.momentum_hold ? "held full" : "as the ramp", g_rules.carry_health ? "carried" : "full",
+                g_rules.boss ? "a boss floor" : "no boss");
     return 1;
 }
 
@@ -834,8 +959,11 @@ static uint32_t new_seed(void)
 
 static int start_run(int tower, int fighter, int skin, int fighter2, int skin2);
 
+static int start_weekly(int fighter, int skin);
+
 int towers_start(int tower, int fighter, int skin)
 {
+    if (tower == TOWER_WEEKLY) return start_weekly(fighter, skin);
     if (tower != TOWER_UPTOWN && tower != TOWER_FIVE_BOROUGHS) return 0;
     return start_run(tower, fighter, skin, -1, 0);
 }
@@ -914,6 +1042,87 @@ static int start_run(int tower, int fighter, int skin, int fighter2, int skin2)
     return ok;
 }
 
+/* Build 108: a new run of The Weekly: the service's definition read again (blocks), the week's order, seed and venues,
+ * never shuffled nor boss-placed (the service holds this order and freezes a run that meets another). Signed in, the
+ * service opens the run (the start sends weekly=TOWER_WEEKLY_RULES and the week); without its answer the run is an
+ * offline climb of the same tower. */
+static int start_weekly(int fighter, int skin)
+{
+    static TowerRun fresh;
+    static int pool[TOWER_WEEKLY_MAX_FLOORS + 1];
+    TowerWeekly w;
+    int n, i, online, board = 0, ok;
+    uint32_t seed = 0;
+    char run[TOWER_RUN_ID_MAX + 1] = "", why[24] = "";
+    g_start_error[0] = 0;
+    if (netplay_active()) return 0;
+    if (!towers_climber_ok(TOWER_WEEKLY, fighter, ONLINE_NEW_FIGHTER(fighter))) {
+        snprintf(g_start_error, sizeof g_start_error, "The Weekly takes standard fighters only: pick one of the game's own fighters.");
+        fprintf(stderr, "[TOWERS] THE WEEKLY: fighter %d is not a standard fighter: no new climb\n", fighter);
+        return 0;
+    }
+    if (!weekly_allowed() || !weekly_fetch()) {
+        snprintf(g_start_error, sizeof g_start_error, "The Weekly is closed right now.");
+        fprintf(stderr, "[TOWERS] THE WEEKLY: no definition from the service: no climb\n");
+        return 0;
+    }
+    lock();
+    w = g_weekly;
+    unlock();
+    if (!(n = towers_new_weekly_run(&fresh, &w, fighter, skin))) {
+        snprintf(g_start_error, sizeof g_start_error, "This week's Weekly needs a newer game: update FFNY Online, then climb.");
+        fprintf(stderr, "[TOWERS] THE WEEKLY %s: twist %s, rules %d: this build cannot play it\n", w.week, w.twist_key, w.rules);
+        return 0;
+    }
+    for (i = 0; i < n; i++) {   /* every floor's fighter must be on this PC (stock fighters: always) */
+        if (!fighter_here(fresh.roster[i])) {
+            snprintf(g_start_error, sizeof g_start_error, "This week's Weekly meets a fighter this PC lacks: update FFNY Online.");
+            fprintf(stderr, "[TOWERS] THE WEEKLY: floor %d's fighter %d is not on this PC: no climb\n", i + 1, fresh.roster[i]);
+            return 0;
+        }
+        if (w.venue[i] >= 0 && towers_venue(&fresh, i + 1) != w.venue[i])     /* the service's TowerVenue, the same rule */
+            fprintf(stderr, "[TOWERS] THE WEEKLY: floor %d's venue %d here, %d on the service\n", i + 1, towers_venue(&fresh, i + 1), w.venue[i]);
+        pool[i] = fresh.roster[i];
+    }
+    pool[n] = w.spare;
+    snprintf(g_start_week, sizeof g_start_week, "%s", w.week);
+    g_net_bosses = 0;
+    g_start_f2 = -1;
+    {
+        int pn = w.spare >= 0 ? n + 1 : n;
+        online = net_start(TOWER_WEEKLY, fighter, skin, pool, &pn, w.venues, w.venue_n, &seed, run, &board, why, (int)sizeof why);
+    }
+    if (online < 0) return 0;      /* a new week, or switched off: g_start_error says so */
+    if (online && seed != w.seed)
+        fprintf(stderr, "[TOWERS] THE WEEKLY: the service's seed %u is not the week's %u\n", seed, w.seed);
+    lock();
+    file_load();
+    if (g_have[TOWER_WEEKLY - 1] && g_saved[TOWER_WEEKLY - 1].run_id[0] && strcmp(g_saved[TOWER_WEEKLY - 1].run_id, run))
+        net_end(&g_saved[TOWER_WEEKLY - 1], "new");
+    g_run = fresh;
+    g_run.started = (long long)time(NULL);
+    if (online) {
+        snprintf(g_run.run_id, sizeof g_run.run_id, "%s", run);
+        g_run.board = board;
+        snprintf(g_net_why, sizeof g_net_why, "%s", why);
+    } else
+        g_net_why[0] = 0;
+    test_overrides(0);
+    g_best_before = g_best[TOWER_WEEKLY - 1];
+    g_new_best = 0;
+    g_last_floor = 0;
+    g_last_opp = g_last_venue = g_last_opp2 = -1;
+    g_draw_loss = 0;
+    fprintf(stderr, "[TOWERS] run start: THE WEEKLY %s, twist %s (%s), seed %08X, fighter %d (skin %d), %d floors, %d venues, "
+            "roster %08X, %s\n", g_run.week, towers_twist_key(g_run.twist), w.title, g_run.seed, fighter, skin, g_run.floors,
+            g_run.venue_n, g_run.roster_hash, online ? (board ? "on the service, board" : "on the service, off the board") : "offline");
+    save_run();
+    ok = arm_fight();
+    g_window_due = ok;
+    unlock();
+    return ok;
+}
+
 /* A resumed online run whose community fighters (1000 and up, the floors still to climb) this PC lacks: the service
  * says which were withdrawn since the start (both sides skip their floors) and which are still live (this PC's content
  * is behind: 0, the resume is refused until it is updated). Blocks (no lock held). 1 to go on. */
@@ -955,6 +1164,23 @@ int towers_resume(int tower)
     TowerRun check;
     g_start_error[0] = 0;
     if (netplay_active() || tower < 1 || tower > TOWER_COUNT) return 0;
+    if (tower == TOWER_WEEKLY && towers_saved(tower, &check)) {
+        /* build 108: a Weekly climb lives as long as its week (the service ends it at the week's end) */
+        int have = weekly_allowed() && weekly_fetch(), twist;
+        char week[12];
+        lock();
+        snprintf(week, sizeof week, "%s", g_weekly.week);
+        twist = g_weekly.twist;
+        unlock();
+        if ((have && (strcmp(week, check.week) || twist != check.twist)) || (!have && (long long)time(NULL) >= check.week_end)) {
+            snprintf(g_start_error, sizeof g_start_error, "That Weekly climb is over: this week's Weekly is another tower (yours was %s).", check.week);
+            fprintf(stderr, "[TOWERS] THE WEEKLY: the saved climb of %s is over (this week: %s)\n", check.week, have ? week : "?");
+            lock();
+            drop_saved(tower);
+            unlock();
+            return 0;
+        }
+    }
     if (towers_saved(tower, &check) && !net_check_missing(&check)) return 0;
     lock();
     file_load();
@@ -1010,6 +1236,9 @@ void towers_match_start(void)
         g_results_left = 0;
         g_log_pairs = 0;
         g_log_count = 0;
+        g_glass_done = g_hits_scaled = g_momentum_refills = 0;
+        g_fighting_steps = 0;
+        towers_ai_boss_all(g_run.tower == TOWER_WEEKLY && g_run.twist == TOWER_TWIST_ALL_BOSSES);  /* build 108: BOSS RUSH */
         if (TOWER_IS_TEAM(g_run.tower)) towers_ai_begin_team(g_run.tower, g_run.floor, g_run.floors);  /* both CPUs */
         else towers_ai_begin(g_run.tower, g_run.floor, g_run.floors);     /* the CPU past Hard (towers_ai.c) */
         ac_start();
@@ -1079,7 +1308,48 @@ void towers_step(void)
         if (top > 0.0f) {
             MEMF(me + F_HEALTH_NOW) = top * (float)g_run.health_pct / 100.0f;
             MEMF(me + F_HEALTH_SHARE) = (float)g_run.health_pct / 100.0f;
-            fprintf(stderr, "[TOWERS] the climber starts at %d%% health\n", g_run.health_pct);
+            /* build 108, IRON MAN: no refill, not even by regeneration (it heals up to the tank only) */
+            if (g_rules.carry_health && MEMF(me + F_HEALTH_TANK) > MEMF(me + F_HEALTH_NOW))
+                MEMF(me + F_HEALTH_TANK) = MEMF(me + F_HEALTH_NOW);
+            fprintf(stderr, "[TOWERS] the climber starts at %d%% health%s\n", g_run.health_pct,
+                    g_rules.carry_health ? " (the Weekly's IRON MAN: carried from the last win)" : "");
+        }
+    }
+    if (!team && g_rules.max_health != 1.0f && !g_glass_done && g_step <= 60) {
+        /* build 108, GLASS JAW (weekly rules 2, owner 2026-11-22): the climber fights on half health, its bar half
+         * empty, and nothing heals it above that (regeneration's ceiling, the tank, goes down with it: the IRON MAN
+         * way); its maximum, the stun cap and the knockout threshold stay the fighter's own, so the danger zone comes
+         * twice as soon. The CPU keeps all of its health (rules 1 halved both maxima, which played as HEAVY HANDS). */
+        uint32_t c = ACTORS + STRIDE;
+        if (MEM32(me + F_SLOT) != 0xFFFFFFFFu && MEM32(c + F_SLOT) != 0xFFFFFFFFu && MEMF(me + F_HEALTH_TOP) > 0.0f &&
+            MEMF(c + F_HEALTH_TOP) > 0.0f) {
+            float top = MEMF(me + F_HEALTH_TOP);
+            MEMF(me + F_HEALTH_NOW) = top * g_rules.max_health;
+            MEMF(me + F_HEALTH_SHARE) = g_rules.max_health;
+            if (MEMF(me + F_HEALTH_TANK) > MEMF(me + F_HEALTH_NOW)) MEMF(me + F_HEALTH_TANK) = MEMF(me + F_HEALTH_NOW);
+            g_glass_done = 1;
+            fprintf(stderr, "[TOWERS] the Weekly's GLASS JAW: half health at step %u: climber %.1f of %.1f (tank %.1f), CPU %.1f of %.1f\n",
+                    g_step, MEMF(me + F_HEALTH_NOW), top, MEMF(me + F_HEALTH_TANK), MEMF(c + F_HEALTH_NOW), MEMF(c + F_HEALTH_TOP));
+        }
+    }
+    if (!team && g_rules.momentum_hold && !g_decided && MEM32(cpu + F_SLOT) != 0xFFFFFFFFu) {
+        /* build 108, BLAZIN' HOUR: the CPU's momentum meter held full, through the game's own gain (it sets the
+         * ready state and tells the HUD), from 5 s of fighting on; while Blazin' is ready or running nothing is
+         * touched (cheats.c max_blazin, the same way) */
+        if (MEM32(G_PHASE) == 1u) g_fighting_steps++;
+        if (g_fighting_steps >= MOMENTUM_AFTER && !(MEM8(cpu + F_BLAZIN) & 3u)) {
+            uint32_t args[2] = { cpu, 0x447A0000u /* 1000.0 */ };
+            guest_call(sub_001A5190, g_ecx, 2, args);
+            if (!(MEM8(cpu + F_BLAZIN) & 1u)) {
+                uint32_t ready[2] = { 1u, 1u };     /* record 1: slot 1, the CPU */
+                MEM32(cpu + F_METER) = METER_READY;
+                MEM32(cpu + F_BLAZIN_TIME) = BLAZIN_TIME;
+                MEM8(cpu + F_BLAZIN) |= 1u;
+                guest_call(sub_000B0130, g_ecx, 2, ready);
+            }
+            if (g_momentum_refills++ < 3)
+                fprintf(stderr, "[TOWERS] the Weekly's BLAZIN' HOUR: the CPU's meter full at step %u (%.1f, state %u)\n", g_step,
+                        (double)MEMF(cpu + F_METER), MEM8(cpu + F_BLAZIN));
         }
     }
     if (team) cpu = ACTORS + 2u * STRIDE;
@@ -1087,13 +1357,17 @@ void towers_step(void)
         int k;
         for (k = 0; k < (team ? 2 : 1); k++) {      /* build 106: both CPUs of a team floor */
             uint32_t c = cpu + STRIDE * (uint32_t)k;
-            float top = MEMF(c + F_MOMENTUM_TOP);
-            if (MEM32(c + F_SLOT) == 0xFFFFFFFFu || !(top > 0.0f)) continue;
+            float want = MOMENTUM_FULL * g_rules.cpu_momentum, was = MEMF(c + F_METER);
+            /* the record is set up once its health is (sub_001A4F30 sets the meter's floor of 20 with it) */
+            if (MEM32(c + F_SLOT) == 0xFFFFFFFFu || !(MEMF(c + F_HEALTH_TOP) > 0.0f)) continue;
             g_momentum_done = 1;
-            if (g_rules.cpu_momentum > 0.0f) {
-                MEMF(c + F_MOMENTUM) = top * g_rules.cpu_momentum;
-                fprintf(stderr, "[TOWERS] the CPU starts with %.0f%% momentum (%.1f of %.1f)\n",
-                        g_rules.cpu_momentum * 100.0f, (double)MEMF(c + F_MOMENTUM), (double)top);
+            /* build 108: the real momentum meter, +0x364 (0..100, the Blazin' meter). Builds 97-107 wrote this
+             * share into +0x374 / +0x378, the stun meter and its cap (docs/research/dizzy.md): the CPU started
+             * nearer to dizzy instead of nearer to a Blazin' */
+            if (g_rules.cpu_momentum > 0.0f && was == was && want > was) {
+                MEMF(c + F_METER) = want;
+                fprintf(stderr, "[TOWERS] the CPU starts with %.0f%% momentum (meter %.1f, was %.1f)\n",
+                        g_rules.cpu_momentum * 100.0f, (double)MEMF(c + F_METER), (double)was);
             }
         }
     }
@@ -1118,6 +1392,12 @@ void towers_step(void)
             towers_ai_end(d ? -1 : w, g_step);
             fprintf(stderr, "[TOWERS] floor %d decided at step %u: %s; the climber's health %d%%\n", g_run.floor,
                     g_step, d ? "a draw" : w == 0 ? (team ? "the team won" : "the climber won") : "the CPU won", g_end_health);
+            fprintf(stderr, "[TOWERS] the CPU at the decision: momentum %.1f, stun %.1f of %.1f, Blazin' state %u\n",
+                    (double)MEMF(cpu + F_METER), (double)MEMF(cpu + F_STUN), (double)MEMF(cpu + F_STUN_CAP), MEM8(cpu + F_BLAZIN));
+            if (g_run.tower == TOWER_WEEKLY)
+                fprintf(stderr, "[TOWERS] the Weekly at the decision: %d hit(s) scaled x%.1f, CPU meter refilled %d time(s) "
+                        "(now %.1f), max health climber %.1f, CPU %.1f\n", g_hits_scaled, g_rules.hit_scale, g_momentum_refills,
+                        (double)MEMF(cpu + F_METER), (double)top, (double)ctop);
         }
     }
     unlock();
@@ -1137,6 +1417,10 @@ void towers_health_change(void)
             MEMF(g_esp + 8) = delta / g_rules.cpu_health;
     } else if (r == ACTORS && g_rules.cpu_damage != 1.0f) MEMF(g_esp + 8) = delta * g_rules.cpu_damage;
     else if (r == ACTORS + STRIDE && g_rules.cpu_health > 1.0f) MEMF(g_esp + 8) = delta / g_rules.cpu_health;
+    if (g_rules.hit_scale != 1.0f && !TOWER_IS_TEAM(g_run.tower) && (r == ACTORS || r == ACTORS + STRIDE)) {
+        MEMF(g_esp + 8) = MEMF(g_esp + 8) * g_rules.hit_scale;     /* build 108, HEAVY HANDS: both ways */
+        g_hits_scaled++;
+    }
     towers_ai_health(r, MEMF(g_esp + 8));
 }
 
@@ -1176,6 +1460,7 @@ static void finish_fight(void)
         fprintf(stderr, "[TOWERS] floor %d: a draw, fought again (refight %d of %d)\n", beaten, g_run.refights, TOWER_MAX_REFIGHTS);
     } else if (g_decided && !d && w == 0) {
         int rule = TOWER_IS_TEAM(g_run.tower) ? TOWER_HEALTH_FULL :     /* the team towers: always full health */
+                   g_run.tower == TOWER_WEEKLY ? (g_rules.carry_health ? TOWER_HEALTH_CARRY : TOWER_HEALTH_FULL) :  /* its twist */
                    recomp_settings_get("towers", g_run.tower == 1 ? "health1" : "health2", TOWER_HEALTH_FULL);
         int refill = recomp_settings_get("towers", g_run.tower == 1 ? "refill1" : "refill2", 30);
         int chapter = env_int("RECOMP_TEST_TOWERS_CHAPTER", TOWER_CHAPTER);
@@ -1389,7 +1674,7 @@ void towers_view(TowersView *out)
     out->last_venue = g_last_venue;
     out->next_opponent = towers_opponent(&g_run, g_run.floor);
     out->next_venue = g_run.floor <= g_run.floors ? towers_venue(&g_run, g_run.floor) : -1;
-    if (g_run.floor <= g_run.floors) towers_floor_rules(g_run.tower, g_run.floor, g_run.floors, &out->next_rules);
+    if (g_run.floor <= g_run.floors) towers_run_floor_rules(&g_run, g_run.floor, &out->next_rules);
     out->save_point = g_save_point;
     out->left_fight = g_left;
     file_load();

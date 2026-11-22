@@ -16,6 +16,8 @@ extern "C" {
 #endif
 
 /* The floor's fight was set up (towers_match_start): slot 0 the climber, slot 1 the CPU. */
+/* Build 108, The Weekly's BOSS RUSH: the next begins take every floor as a boss floor (towers_ai_floor_ex). */
+void towers_ai_boss_all(int on);
 void towers_ai_begin(int tower, int floor, int floors);
 /* Build 106, the team towers: the same ramp on both CPU slots (2 against its diagonal opponent 1, 3 against 0). */
 void towers_ai_begin_team(int tower, int floor, int floors);

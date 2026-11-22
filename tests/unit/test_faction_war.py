@@ -71,7 +71,7 @@ def native():
 def test_faction_reward_ids(native):
     rows = native
     dmob, crow, top_dmob, top_crow, kinds = (int(v) for v in rows['kinds'])
-    assert (dmob, crow, top_dmob, top_crow) == (8, 9, 10, 11) and kinds == 12
+    assert (dmob, crow, top_dmob, top_crow) == (8, 9, 10, 11) and kinds == 14
     kind = {i: int(r[0]) for i, r in rows.items() if i.startswith(('fw-', 'tw-'))}
     assert kind['fw-winner-dmob-2026-11'] == dmob and kind['fw-winner-crow-2027-01'] == crow
     assert kind['fw-top-dmob-2026-12'] == top_dmob and kind['fw-top-crow-2026-11'] == top_crow

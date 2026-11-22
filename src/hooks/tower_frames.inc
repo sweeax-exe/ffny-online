@@ -47,6 +47,10 @@ const TrwStyle &trw_style(int kind)
           IM_COL32(255, 206, 72, 255), IM_COL32(255, 206, 72, 255), IM_COL32(255, 246, 200, 255) },
         { IM_COL32(255, 96, 96, 255), IM_COL32(190, 20, 36, 255), IM_COL32(30, 4, 8, 255),                // Crow, top
           IM_COL32(232, 228, 224, 255), IM_COL32(236, 60, 72, 255), IM_COL32(255, 230, 230, 255) },
+        { IM_COL32(255, 79, 216, 255), IM_COL32(63, 228, 255, 255), IM_COL32(20, 15, 28, 255),            // week: neon
+          IM_COL32(63, 228, 255, 255), IM_COL32(63, 228, 255, 255), IM_COL32(220, 250, 255, 255) },
+        { IM_COL32(255, 214, 90, 255), IM_COL32(255, 79, 216, 255), IM_COL32(28, 16, 10, 255),            // champ: gold
+          IM_COL32(255, 214, 90, 255), IM_COL32(255, 214, 90, 255), IM_COL32(255, 250, 225, 255) },         // and pink neon
     };
     return k[kind > 0 && kind < TRW_KINDS ? kind : 0];
 }
@@ -229,7 +233,9 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
         dl->PopClipRect();
     }
     switch (kind) {
-    case TRW_WEEKLY: {      // neon: a pink tube, a dark gap, a cyan tube, each with its glow
+    case TRW_WEEKLY: case TRW_WEEKLY_TOP: case TRW_WEEKLY_CHAMP: {
+        // neon: a pink tube, a dark gap, a cyan tube, each with its glow (build 108: a week's frames sign their week;
+        // the champion's tubes are gold and pink, with the pulsing crown)
         float g = fx & TRW_FX_GLOW ? tower_fx_pulse(t, 3.0f) : 0.5f;
         for (int k = 4; k >= 1; k--) {
             float e = k * (1.2f + 0.6f * g);
@@ -241,8 +247,12 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
         dl->AddRect(f.p(x, y), f.p(x + w, y + h), with_alpha(s.hi, a), 10 * f.s(), 0, 2.0f * f.s());
         dl->AddRect(f.p(x - 6, y - 6), f.p(x + w + 6, y + h + 6), with_alpha(s.mid, a), 12 * f.s(), 0, 2.0f * f.s());
         float fl = fx & TRW_FX_FLICKER ? tower_fx_flicker(t) : 1.0f;
-        float size = fit_size(f, g_stencil, std::max(10.0f, u * 0.12f), "WEEKLY", w - 16);
-        text(dl, f, g_stencil, size, cx, y + h * 0.05f, with_alpha(s.mid, a * 0.9f * fl), "WEEKLY", CENTER, 0);
+        char sign[32] = "WEEKLY";
+        tower_reward_week_sign(id, sign, (int)sizeof(sign));
+        float size = fit_size(f, g_stencil, std::max(10.0f, u * 0.12f), sign, w - 16);
+        text(dl, f, g_stencil, size, cx, y + h * 0.05f + (kind == TRW_WEEKLY_CHAMP ? u * 0.1f : 0), with_alpha(s.mid, a * 0.9f * fl),
+             sign, CENTER, 0);
+        if (kind == TRW_WEEKLY_CHAMP) trw_crown(dl, f, cx, y, u * 0.3f, pulse, a);
         return true;
     }
     case TRW_UNTOUCHABLE: {     // chrome with cut corners: a thick outline of the cut shape

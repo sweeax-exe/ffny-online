@@ -50,6 +50,9 @@ typedef struct TowerAiFloor {
 
 /* The floor's settings: tower and floors only for the boss floors (towers_is_boss). */
 void towers_ai_floor(int tower, int floor, int floors, TowerAiFloor *out);
+/* Build 108, The Weekly's BOSS RUSH: the same with every floor a boss (force_boss 1), also below the ramp's first floor
+ * (the ramp's bottom plus the boss's extra there). force_boss 0 is towers_ai_floor. */
+void towers_ai_floor_ex(int tower, int floor, int floors, int force_boss, TowerAiFloor *out);
 /* The skill to write for a fighter whose own (loaded Hard) skill is `own`: own -> 100 along t, + the boss's extra. */
 int towers_ai_skill(const TowerAiFloor *f, int own);
 /* Tendency k's value for a fighter whose own value is `own` (1..5): own -> the strongest value along t, rounded;

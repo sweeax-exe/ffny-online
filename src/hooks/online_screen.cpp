@@ -513,9 +513,14 @@ void corner_plate(ImDrawList *dl, const Frame &f, const char *line)
     rect(dl, f, 606 - w - 10, 8, w + 20, 20, IM_COL32(150, 14, 30, 230), 4);
     text(dl, f, g_title, size, 606, 11 + (12 - size) * 0.5f, WHITE, line, RIGHT, 1.0f);
 }
+// Build 108: the corner notice's lines end here this frame (0: no notice); a page's own top-right subtitle starts
+// below it (page_subtitle_y), as the Towers subtitle ran into the notice's second line.
+static float g_corner_notice_bottom = 0;
+float page_subtitle_y(float y) { return g_corner_notice_bottom > 0 && y < g_corner_notice_bottom + 4 ? g_corner_notice_bottom + 4 : y; }
 void page_title(ImDrawList *dl, const Frame &f, const char *title)
 {
     text(dl, f, g_stencil, 30, 50, 24, CREAM, title, LEFT, 1.6f);
+    g_corner_notice_bottom = 0;
     // A newer build stays announced on every online page, top right, until the player updates.
     int build = 0;
     if (updater_state() == UPDATER_AVAILABLE) updater_info(&build, nullptr, 0, nullptr, 0);
@@ -524,16 +529,19 @@ void page_title(ImDrawList *dl, const Frame &f, const char *title)
         snprintf(line, sizeof(line), "UPDATE: BUILD %d IS OUT", build);
         corner_plate(dl, f, line);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "close the game: the launcher installs it", RIGHT, 0.8f);
+        g_corner_notice_bottom = 44;
     } else if (content_problem(nullptr, 0)) {
         // build 83: the last content sync (or the game's own check) failed: this PC may lack packs others have
         const char *line = "COMMUNITY CONTENT NOT UPDATED";
         corner_plate(dl, f, line);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "start the game from the launcher again", RIGHT, 0.8f);
+        g_corner_notice_bottom = 44;
     } else if (content_news(nullptr, 0) > 0) {
         // build 82: new community content is out (the game's own catalogue check): announced the same way
         const char *line = "NEW COMMUNITY CONTENT IS OUT";
         corner_plate(dl, f, line);
         text(dl, f, g_hand, 11, 606, 30, ORANGE, "UPDATE NOW on the hub (Y): the game comes back by itself", RIGHT, 0.8f);
+        g_corner_notice_bottom = 44;
     } else {
         // build 87: community content to come (the daily release window): when, on this PC's clock, and what;
         // nothing to do yet, so it comes last. Once its time has passed, the notice above takes over.
@@ -542,6 +550,7 @@ void page_title(ImDrawList *dl, const Frame &f, const char *title)
             corner_plate(dl, f, head);
             float size = std::max(8.0f, fit_size(f, g_hand, 11, detail, 330));
             text(dl, f, g_hand, size, 606, 30, ORANGE, detail, RIGHT, 0.8f);
+            g_corner_notice_bottom = 44;
         }
     }
 }
@@ -6182,6 +6191,8 @@ void gallery_step()
                                          // rules, a saved climb, the start card), the climb at four moments, a boss
                                          // floor, the card over the load (the first floor too), a draw, the ends
                                          "hub-towers", "towers", "towers-t2", "towers-weekly", "towers-rules", "towers-saved",
+                                         // build 108: The Weekly (the gallery's sample week)
+                                         "towers-weekly-rules", "towers-weekly-board", "towers-weekly-start", "towers-weekly-climb",
                                          "towers-start", "towers-climb-0", "towers-climb-1", "towers-climb-2", "towers-climb-3",
                                          "towers-boss", "towers-card", "towers-first", "towers-draw", "towers-lost", "towers-cleared",
                                          "towers-board", "towers-board-all", "towers-art", "towers-starting",
