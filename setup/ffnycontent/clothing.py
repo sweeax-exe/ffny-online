@@ -6,12 +6,15 @@ A clothing pack never ships the database, the parts list or the name tables: its
 the same append-only edits on the player's ``assets/djv2.sod``, ``createplayer_parts.xml`` (in
 ``assets/v2cp_0.viv``) and ``cmusen/cmuken/cmfren.loc`` (in ``assets/misc.viv``), so IDs in saves stay valid. The
 new textures and thumbnails are the pack's ``add`` entries (deltas against the template item's own entries).
+
+An item op with a ``roster_part`` (build 108: the Eyepatch) has no entries at all: its part, texture and thumbnails
+are made from the player's own roster model and the template item's files (:func:`roster_files`, ``rosteritem``).
 """
 
 import re
 import struct
 
-from . import cpparts, loc, sod, sodwrite
+from . import cpparts, loc, rosteritem, sod, sodwrite
 
 SOD_PATH = "assets/djv2.sod"
 PARTS_ARCHIVE = "assets/v2cp_0.viv"
@@ -80,6 +83,10 @@ def apply_ops(sod_blob, parts_xml, name_tables, ops):
             words[5] = ed.add_string(text_hash=h_name)
             words[7] = words[7] + 1
             model = op.get("model")
+            if rosteritem.KEY in op:
+                problem = rosteritem.op_problem(op)
+                if problem:
+                    raise ClothingError(problem)
             if model:
                 # an item with a part of its own (build 108: the Eyepatch): the row's model number names the new
                 # part V2CP_<cat>_<num>_C, which goes into the parts list as a model of its own with the item's
@@ -104,3 +111,14 @@ def apply_ops(sod_blob, parts_xml, name_tables, ops):
         table = loc.Loc(blob)
         tables[name] = table.with_texts([(h, t) for h, t in texts if h not in table])
     return ed.finish(), parts_xml, tables
+
+
+def roster_files(sod_blob, op, read):
+    """[(archive, entry, bytes)] an item op with a ``roster_part`` makes (``rosteritem.item_files``): from the
+    template row of ``sod_blob`` its part and first texture; ``read(archive, entry)`` gives the player's own entries
+    (KeyError when there is none)."""
+    row = next((r for r in sod.Sod(sod_blob).clothing() if r.name == op["template"]), None)
+    if row is None:
+        raise ClothingError("no template item %r" % op["template"])
+    return rosteritem.item_files(read, op, row.model_name(),
+                                 "V2CP_%03d_%04d_%s_01" % (row.category, row.num, row.group))
