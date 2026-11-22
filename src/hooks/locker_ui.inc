@@ -324,18 +324,23 @@ void draw_tower_sheet(ImDrawList *dl, const Frame &f, const Pad &pad)
     static const char *const ids[7][2] = { { "tw-floor25", "Floor 25 Survivor" }, { "tw-floor50", "Floor 50 Survivor" },
         { "tw-uptown", "Uptown Champion" }, { "tw-untouchable", "Untouchable" }, { "tw-weekly", "Weekly Conqueror" },
         { "tw-boroughs", "King of the Five Boroughs" }, { "tw-legend-1-2026-11", "Tower Legend" } };
+    // build 108: the Team Tower's four below the solo seven
+    static const char *const team[4][2] = { { "tw-team-floor25", "Tag Team 25" }, { "tw-team-untouchable", "Untouchable Duo" },
+        { "tw-team-champions", "Tag Team Champions" }, { "tw-team-legend-4-2026-11", "Tag Team Legend" } };
     page_title(dl, f, "TOWER REWARDS");
-    const float w = 78, h = 150, gap = 7, x0 = 320 - (7 * w + 6 * gap) / 2, y = 120;
-    for (int i = 0; i < 7; i++) {
-        float x = x0 + i * (w + gap);
-        int kind = tower_reward_kind(ids[i][0], nullptr, nullptr, nullptr), rarity = tower_reward_rarity(kind);
-        glass(dl, f, x, y, w, h, 6, IM_COL32(10, 10, 13, 255), 0.62f);
-        portrait(dl, f, i == 5 ? 21 : i * 3, x + 4, y + 4, w - 8, (w - 8) * 1.5f);
-        tower_card_frame(dl, f, x, y, w, h, ids[i][0], (w - 8) * 1.5f + 4);
-        text(dl, f, g_hand, 11, x + w / 2, y + 112, CREAM, "PLAYER", CENTER, 1.0f);
-        tower_title_text(dl, f, x + w / 2, y + 128, 7.5f, ids[i][1], ids[i][0], w - 8);
-        text(dl, f, g_title, 8, x + w / 2, y + h + 14, rarity_col(rarity), tower_reward_rarity_name(rarity), CENTER, 0.5f);
-    }
+    const float w = 78, h = 150, gap = 7, x0 = 320 - (7 * w + 6 * gap) / 2, y = 64;
+    auto card = [&](const char *id, const char *title, int who, float x, float cy) {
+        int kind = tower_reward_kind(id, nullptr, nullptr, nullptr), rarity = tower_reward_rarity(kind);
+        glass(dl, f, x, cy, w, h, 6, IM_COL32(10, 10, 13, 255), 0.62f);
+        portrait(dl, f, who, x + 4, cy + 4, w - 8, (w - 8) * 1.5f);
+        tower_card_frame(dl, f, x, cy, w, h, id, (w - 8) * 1.5f + 4);
+        text(dl, f, g_hand, 11, x + w / 2, cy + 112, CREAM, "PLAYER", CENTER, 1.0f);
+        tower_title_text(dl, f, x + w / 2, cy + 128, 7.5f, title, id, w - 8);
+        text(dl, f, g_title, 8, x + w / 2, cy + h + 12, rarity_col(rarity), tower_reward_rarity_name(rarity), CENTER, 0.5f);
+    };
+    for (int i = 0; i < 7; i++) card(ids[i][0], ids[i][1], i == 5 ? 21 : i * 3, x0 + i * (w + gap), y);
+    const float tx0 = 320 - (4 * w + 3 * gap) / 2;
+    for (int i = 0; i < 4; i++) card(team[i][0], team[i][1], 4 + i * 5, tx0 + i * (w + gap), y + h + 30);
     if (pad.b) { LK.sheet = false; S.page = HUB; }
 }
 

@@ -26,6 +26,13 @@ enum {
     TRW_FW_CROW,        /* fw-winner-crow-<yyyy>-<mm>: Crow's Team won the season; red and black, a ribbon */
     TRW_FW_TOP_DMOB,    /* fw-top-dmob-<yyyy>-<mm>: D-Mob's Team's top scorer of the season; a crown, embers */
     TRW_FW_TOP_CROW,    /* fw-top-crow-<yyyy>-<mm>: Crow's Team's top scorer of the season; a crown, embers */
+    /* build 108: the Team Tower's own (both players of a team run earn them; a guest player 2 nothing). Each is drawn
+     * as its solo look (tower_reward_base) with the TAG TEAM plate on the card's foot. No team floor 50: a team
+     * tower is 48 floors with the standard roster, its top reward is the clear. */
+    TRW_TEAM_FLOOR25,   /* tw-team-floor25: Tag Team 25, steel as Floor 25 */
+    TRW_TEAM_UNTOUCHABLE,   /* tw-team-untouchable: Untouchable Duo, chrome as Untouchable */
+    TRW_TEAM_CHAMPIONS, /* tw-team-champions: Tag Team Champions, gold, a pulsing crown */
+    TRW_TEAM_LEGEND,    /* tw-team-legend-<tower 4|5>-<yyyy>-<mm>: Tag Team Legend, as Tower Legend */
     TRW_KINDS
 };
 
@@ -42,15 +49,19 @@ enum { TRW_RARE = 1, TRW_EPIC, TRW_LEGENDARY, TRW_MYTHIC };
 
 #define TRW_EMBERS 5
 
-/* The reward an item id is (TRW_NONE: not one); a legend's tower (1 Uptown, 2 Five Boroughs), year and month
- * (1..12) into the pointers (any may be NULL). */
+/* The reward an item id is (TRW_NONE: not one); a legend's tower (1 Uptown, 2 Five Boroughs, 4 Team Tower, 5 Team
+ * Tower Community), year and month (1..12) into the pointers (any may be NULL). */
 int tower_reward_kind(const char *id, int *tower, int *year, int *month);
+/* The solo look a kind is drawn as (a team kind's; any other kind is its own), and whether it is a team kind. */
+int tower_reward_base(int kind);
+int tower_reward_team(int kind);
 int tower_reward_rarity(int kind);
 const char *tower_reward_rarity_name(int rarity);      /* "RARE" .. "MYTHIC", "" none */
 unsigned tower_reward_effects(int kind);
 int tower_reward_effect_count(int kind);
-/* The Tower Legend's ribbon: "#1 UPTOWN · NOV 2026" (UTF-8 middle dot); a Faction War reward's: "D-MOB'S TEAM WON ·
- * NOV 2026", "#1 OF CROW'S TEAM · NOV 2026"; returns its length (0: none). */
+/* The Tower Legend's ribbon: "#1 UPTOWN · NOV 2026", a Tag Team Legend's "#1 TEAM TOWER · NOV 2026" (UTF-8 middle
+ * dot); a Faction War reward's: "D-MOB'S TEAM WON · NOV 2026", "#1 OF CROW'S TEAM · NOV 2026"; returns its length
+ * (0: none). */
 int tower_reward_ribbon(const char *id, char *out, int size);
 
 /* timing (t in seconds since any fixed point) */

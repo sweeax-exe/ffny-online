@@ -14,6 +14,7 @@
 #include "recomp_settings.h"
 #include "towers.h"
 #include "towers_ai.h"
+#include "towers_partner.h"
 #include "account.h"
 #include "anticheat.h"
 #include "automatch.h"
@@ -513,6 +514,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
             {   /* build 104: the frames and titles this floor earned (the Locker shows them) */
                 char got[160];
                 if (kv(reply, "rewards", got, sizeof got) && got[0]) fprintf(stderr, "[TOWERS] new rewards: %s\n", got);
+                if (kv(reply, "rewards2", got, sizeof got) && got[0]) fprintf(stderr, "[TOWERS] new rewards for player 2: %s\n", got);
             }
             if (status == 409 || status == 404 || (status == 200 && !strcmp(why, "order")))
                 net_drop_run(it.run, status == 404 ? "offline" : why);
@@ -629,16 +631,22 @@ static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, c
 {
     static char json[TOWER_MAX_ROSTER * 8 + TOWER_MAX_VENUES * 4 + 256];
     static char reply[8192];
-    char v[48];
+    char v[48], partner[128] = "", partner_name[64] = "";
     int n, i, status;
     if (!net_on()) return 0;
     n = snprintf(json, sizeof json, "{\"tower\":%d,\"fighter\":%d,\"skin\":%d,\"rules\":%d,\"bosses\":1,", tower, fighter, skin,
                  TOWER_RULES_VERSION);
-    if (TOWER_IS_TEAM(tower)) {     /* build 106: player 2, and player 2's own account when its session is given */
-        const char *partner = getenv("RECOMP_TOWERS_PARTNER_TOKEN");
+    if (TOWER_IS_TEAM(tower)) {     /* build 106: player 2, and player 2's own account when signed in */
+        /* build 108: the partner token of player 2's sign-in on this PC (towers_partner.c); else (tests) a session
+         * of player 2's own from RECOMP_TOWERS_PARTNER_TOKEN */
+        const char *env = getenv("RECOMP_TOWERS_PARTNER_TOKEN");
+        if (!towers_partner_token(partner, (int)sizeof partner, partner_name, (int)sizeof partner_name) && env && *env &&
+            strlen(env) < sizeof partner)
+            snprintf(partner, sizeof partner, "%s", env);
         n += snprintf(json + n, sizeof json - (size_t)n, "\"fighter2\":%d,\"skin2\":%d,", g_start_f2, g_start_s2);
-        if (partner && *partner && strlen(partner) < 128 && !strchr(partner, '"') && !strchr(partner, '\\'))
+        if (partner[0] && !strchr(partner, '"') && !strchr(partner, '\\'))
             n += snprintf(json + n, sizeof json - (size_t)n, "\"partner\":\"%s\",", partner);
+        else partner[0] = 0;
     }
     n += snprintf(json + n, sizeof json - (size_t)n, "\"pool\":[");
     for (i = 0; i < *pool_n && n < (int)sizeof json - 16; i++) n += snprintf(json + n, sizeof json - (size_t)n, "%s%d", i ? "," : "", pool[i]);
@@ -648,6 +656,11 @@ static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, c
     reply[0] = 0;
     status = account_call("POST", "/api/towers/start?format=text", json, reply, (int)sizeof reply, 8000, NULL);
     reply[sizeof reply - 1] = 0;
+    if (partner[0]) {       /* never kept beyond the request */
+        volatile char *z = json;
+        size_t k;
+        for (k = 0; k < sizeof json; k++) z[k] = 0;
+    }
     if (status == 409 && kv(reply, "why", v, sizeof v) && !strcmp(v, "update")) {
         char missing[160];
         kv(reply, "missing", missing, sizeof missing);
@@ -680,6 +693,18 @@ static int net_start(int tower, int fighter, int skin, int *pool, int *pool_n, c
     }
     fprintf(stderr, "[TOWERS] service: run %s, seed %08X, %d floors, roster %s, %s%s\n", run, *seed, kv_int(reply, "floors"),
             kv(reply, "roster", v, sizeof v) ? v : "?", *board ? "on the board" : "off the board: ", *board ? "" : why);
+    if (TOWER_IS_TEAM(tower)) {     /* build 108: player 2 as the service recorded them */
+        char rec[64];
+        kv(reply, "partner", rec, sizeof rec);
+        if (rec[0]) fprintf(stderr, "[TOWERS] service: player 2 is %s (signed in)\n", rec);
+        else fprintf(stderr, "[TOWERS] service: player 2 plays as a guest%s\n", partner[0] ? " (the token was not taken)" : "");
+        towers_partner_started(partner[0] != 0, rec);
+    }
+    {
+        volatile char *z = partner;
+        size_t k;
+        for (k = 0; k < sizeof partner; k++) z[k] = 0;
+    }
     return 1;
 }
 
@@ -1224,6 +1249,26 @@ void towers_play_sfx(int id)
     if (id >= 0 && id < 1000) InterlockedExchange(&g_sfx_due, (LONG)id + 1);
 }
 
+/* tests (build 108): RECOMP_TEST_TOWERS_PAIR=1 with a team tower: the partner sign-in first (the scenario claims the
+ * code as player 2 on the local service, RECOMP_TEST_TOWERS_P2_CONFIRM=1 confirms), then the team start */
+static DWORD WINAPI test_pair_then_start(LPVOID arg)
+{
+    const int *a = (const int *)arg;
+    PartnerView pv;
+    unsigned long long until = GetTickCount64() + 180000ull;
+    while (account_state() != ACCOUNT_IN && GetTickCount64() < until - 150000ull) Sleep(250);   /* the session's check */
+    if (!towers_partner_begin()) fprintf(stderr, "[TOWERS] test: the partner sign-in did not start\n");
+    for (;;) {
+        towers_partner_view(&pv);
+        if (pv.state == PARTNER_SIGNED || pv.state == PARTNER_FAILED || pv.state == PARTNER_NONE || GetTickCount64() > until) break;
+        Sleep(250);
+    }
+    fprintf(stderr, "[TOWERS] test: partner sign-in %s (%s)\n", pv.state == PARTNER_SIGNED ? "done" : "not done",
+            pv.state == PARTNER_SIGNED ? pv.name : pv.why);
+    if (!towers_start_team(a[0], a[1], a[2], a[3], a[4])) fprintf(stderr, "[TOWERS] test: the team run did not start\n");
+    return 0;
+}
+
 static void test_start(void)
 {
     /* tests: RECOMP_TEST_TOWERS="<tower>,<fighter>[,<skin>]" starts a run at the first settled main menu,
@@ -1238,8 +1283,16 @@ static void test_start(void)
     if (strchr(v, ',')) fighter = atoi(strchr(v, ',') + 1);
     if (strchr(v, ',') && strchr(strchr(v, ',') + 1, ',')) skin = atoi(strchr(strchr(v, ',') + 1, ',') + 1);
     if (TOWER_IS_TEAM(tower)) {     /* build 106: "<tower>,<fighter 1>,<skin 1>,<fighter 2>,<skin 2>" */
+        static int args[5];
         int f1 = 55, s1 = 0, f2 = 22, s2 = 0;
         sscanf(v, "%d,%d,%d,%d,%d", &tower, &f1, &s1, &f2, &s2);
+        if (env_int("RECOMP_TEST_TOWERS_PAIR", 0)) {     /* build 108: player 2 signs in first (the test claims the code) */
+            HANDLE h;
+            args[0] = tower; args[1] = f1; args[2] = s1; args[3] = f2; args[4] = s2;
+            h = CreateThread(NULL, 0, test_pair_then_start, args, 0, NULL);
+            if (h) CloseHandle(h);
+            return;
+        }
         if (!towers_start_team(tower, f1, s1, f2, s2)) fprintf(stderr, "[TOWERS] test: the team run did not start\n");
         return;
     }
