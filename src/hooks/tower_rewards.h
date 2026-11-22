@@ -45,6 +45,9 @@ enum { TRW_RARE = 1, TRW_EPIC, TRW_LEGENDARY, TRW_MYTHIC };
 /* The reward an item id is (TRW_NONE: not one); a legend's tower (1 Uptown, 2 Five Boroughs), year and month
  * (1..12) into the pointers (any may be NULL). */
 int tower_reward_kind(const char *id, int *tower, int *year, int *month);
+/* The viewer's Faction War side (0 none, 1 D-Mob, 2 Crow): the Locker's locked row "fw-winner-season" draws that side's
+ * winner frame (none: D-Mob's) and its ribbon says "<SIDE> · WINNER FRAME" (none: "SEASON WINNER FRAME"), never "WON". */
+void tower_reward_set_side(int side);
 int tower_reward_rarity(int kind);
 const char *tower_reward_rarity_name(int rarity);      /* "RARE" .. "MYTHIC", "" none */
 unsigned tower_reward_effects(int kind);

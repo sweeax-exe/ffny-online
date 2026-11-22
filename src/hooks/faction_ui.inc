@@ -440,6 +440,7 @@ FwMe fw_me()
     std::lock_guard<std::mutex> lock(FN.mu);
     return FN.me;
 }
+int fw_my_side() { FwMe m = fw_me(); return m.valid ? m.faction : FW_NONE; }
 FwBoard fw_board()
 {
     if (gallery_on()) { FwBoard b; fw_parse_board(FW_SAMPLE_BOARD, b); return b; }

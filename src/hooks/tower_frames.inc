@@ -208,6 +208,7 @@ void trw_shield(ImDrawList *dl, const Frame &f, float cx, float cy, float s, flo
 bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, const char *id, float foot,
                       float a)
 {
+    if (id && !strcmp(id, "fw-winner-season")) tower_reward_set_side(fw_my_side());    // build 109: the locked row, own side
     int kind = tower_reward_kind(id, nullptr, nullptr, nullptr);
     if (kind == TRW_NONE) return false;
     if (foot <= 0) foot = h * 0.66f;
@@ -322,6 +323,7 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
 bool tower_title_text(ImDrawList *dl, const Frame &f, float cx, float y, float size, const char *title, const char *id,
                       float maxw, float a)
 {
+    if (id && !strcmp(id, "fw-winner-season")) tower_reward_set_side(fw_my_side());
     int kind = tower_reward_kind(id, nullptr, nullptr, nullptr);
     if (kind == TRW_NONE || !title || !title[0]) return false;
     char up[96];

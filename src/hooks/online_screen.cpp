@@ -1927,6 +1927,7 @@ const int HUB_MUSIC = 15;
 bool faction_shown();   // faction_ui.inc
 void open_factions();
 void fw_hub_auto();
+int fw_my_side();       // build 109: 0 none, 1 D-Mob, 2 Crow (the Locker's locked winner frame)
 int G_fw_faction = 0, G_fw_locked = 0;     // the gallery's sample: the player's side, the closed side
 bool G_fw_shown = false;
 void fw_pill(ImDrawList *dl, const Frame &f, float x, float y, const std::string &faction);   // the room card's side
