@@ -7499,7 +7499,7 @@ static void test_tower_enter(const char *who, const char *file)
 
 /* The room's test steps; 1 when this pass is taken (no READY now). RECOMP_TEST_TOWER_LEAVE="<floor>[,<s>]": once
  * the summary after that floor shows, leave the room (as SAVE & QUIT); with s, join it again s seconds later.
- * RECOMP_TEST_TOWER_NEW=1: the host picks NEW CLIMB over a saved one, and after the end a new climb. */
+ * RECOMP_TEST_TOWER_NEW=1: after the end, the host starts a new climb (once). */
 static int test_tower_tick(const NetRoom *r, const char *who, const char *file)
 {
     static int left_after = -2, rejoin_s = -1, left, rejoined, newed, over_told;
@@ -7533,7 +7533,8 @@ static int test_tower_tick(const NetRoom *r, const char *who, const char *file)
             return 1;
         }
     }
-    if (left_after > 0 && !left && t.state == TOWERNET_SUMMARY && t.last_floor == left_after && t.last_how == TOWERNET_HOW_WIN) {
+    if (left_after > 0 && !left && (t.state == TOWERNET_SUMMARY || t.state == TOWERNET_WAITING) && t.last_floor == left_after &&
+        t.last_how == TOWERNET_HOW_WIN) {
         fprintf(stderr, "[NETPLAY] tests: leaving the Team Tower Online room after floor %d%s" "\n", left_after,
                 rejoin_s >= 0 ? " (back soon)" : "");
         netplay_lobby_leave();
@@ -7546,17 +7547,11 @@ static int test_tower_tick(const NetRoom *r, const char *who, const char *file)
             over_told = t.floor + 1000 * t.beaten + 1;
             fprintf(stderr, "[NETPLAY] tests: Team Tower Online climb over: %s, %d floors beaten (%s)" "\n", t.end, t.beaten, t.why);
         }
-        if (getenv("RECOMP_TEST_TOWER_NEW") && r->you == r->host && newed < 2) {
+        if (getenv("RECOMP_TEST_TOWER_NEW") && r->you == r->host && newed < 1) {
             static ULONGLONG at;
             if (!at) at = GetTickCount64();
             if (GetTickCount64() - at > 4000) { netplay_lobby_tower_choice(TOWERNET_CHOICE_NEW); newed++; at = 0; }
         }
-        return 1;
-    }
-    if (t.state == TOWERNET_SELECT && (t.flags & TOWERNET_FLAG_SAVED) && getenv("RECOMP_TEST_TOWER_NEW") && r->you == r->host &&
-        (t.flags & TOWERNET_FLAG_RESUME) && !newed) {
-        netplay_lobby_tower_choice(TOWERNET_CHOICE_NEW);
-        newed = 1;
         return 1;
     }
     return t.state == TOWERNET_STARTING || t.state == TOWERNET_PLAYING;

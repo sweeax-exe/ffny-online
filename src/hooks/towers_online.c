@@ -63,11 +63,14 @@ void towers_online_on_tower(const char *room, const uint8_t *b, int len)
     v.valid = 1;
     v.at = GetTickCount64();
     lock();
-    if (memcmp(&v, &g_view, offsetof(TowerNetView, at)) || strncmp(g_room, room, 7)) {
-        fprintf(stderr, "[TOWERS] online: room %.7s state %d, floor %d of %d (beaten %d), CPUs %d + %d, venue %d, secs %d, "
-                "saved %d, last %d how %d, voids %d%s%s%s%s\n", room, v.state, v.floor, v.floors, v.beaten, v.opp[0], v.opp[1],
-                v.venue, v.secs, v.saved_floor, v.last_floor, v.last_how, v.voids, v.end[0] ? ", end " : "", v.end,
-                v.why[0] ? ": " : "", v.why);
+    {
+        TowerNetView a = v, b = g_view;
+        a.secs = b.secs = 0;    /* a clock's tick is no change worth a line */
+        if (memcmp(&a, &b, offsetof(TowerNetView, at)) || strncmp(g_room, room, 7))
+            fprintf(stderr, "[TOWERS] online: room %.7s state %d, floor %d of %d (beaten %d), CPUs %d + %d, venue %d, secs %d, "
+                    "saved %d, last %d how %d, voids %d%s%s%s%s\n", room, v.state, v.floor, v.floors, v.beaten, v.opp[0], v.opp[1],
+                    v.venue, v.secs, v.saved_floor, v.last_floor, v.last_how, v.voids, v.end[0] ? ", end " : "", v.end,
+                    v.why[0] ? ": " : "", v.why);
     }
     g_view = v;
     snprintf(g_room, sizeof g_room, "%.7s", room);

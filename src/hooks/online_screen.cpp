@@ -8001,6 +8001,7 @@ bool draw_pages(ImVec2 display)
         NetRoom tr;
         lobby_room(&tr);
         if (v && !gallery_on() && (!strcmp(v, "rooms") || !strcmp(v, "towercard"))) {
+            if (!once && tr.in_room) once = 2;     // the tests' own steps were quicker: nothing to show
             if (!once && net_in_lobby() && !tr.in_room) {
                 once = 1;
                 if (!strcmp(v, "rooms")) { S.page = ROOMS; netplay_lobby_list(0xFF); S.last_list = GetTickCount64(); }
