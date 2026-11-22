@@ -45,7 +45,6 @@
  * fields sub_001A4F30 derives from the maximum (+0x360, the stun cap +0x378 = half of it), the real momentum meter
  * (the Blazin' meter +0x364, 0..100) and its timer and state (+0x93E bit 0 ready, bit 1 active) */
 #define F_HEALTH_TANK   0x358u
-#define F_HEALTH_DERIVED 0x360u
 #define F_STUN_CAP      0x378u
 #define F_METER         0x364u
 #define F_BLAZIN_TIME   0x368u
@@ -1317,21 +1316,20 @@ void towers_step(void)
         }
     }
     if (!team && g_rules.max_health != 1.0f && !g_glass_done && g_step <= 60) {
-        /* build 108, GLASS JAW (weekly rules 2, owner 2026-11-22): the climber's maximum health scaled and full of it,
-         * with the fields the game derives from the maximum (cheat-menu.md: +0x354, +0x350, +0x358, +0x360, +0x378);
-         * the CPU keeps its own (rules 1 halved both, which played as HEAVY HANDS) */
+        /* build 108, GLASS JAW (weekly rules 2, owner 2026-11-22): the climber fights on half health, its bar half
+         * empty, and nothing heals it above that (regeneration's ceiling, the tank, goes down with it: the IRON MAN
+         * way); its maximum, the stun cap and the knockout threshold stay the fighter's own, so the danger zone comes
+         * twice as soon. The CPU keeps all of its health (rules 1 halved both maxima, which played as HEAVY HANDS). */
         uint32_t c = ACTORS + STRIDE;
         if (MEM32(me + F_SLOT) != 0xFFFFFFFFu && MEM32(c + F_SLOT) != 0xFFFFFFFFu && MEMF(me + F_HEALTH_TOP) > 0.0f &&
             MEMF(c + F_HEALTH_TOP) > 0.0f) {
-            float before = MEMF(me + F_HEALTH_TOP);
-            MEMF(me + F_HEALTH_TOP) *= g_rules.max_health;
-            MEMF(me + F_HEALTH_NOW) *= g_rules.max_health;
-            MEMF(me + F_HEALTH_TANK) *= g_rules.max_health;
-            MEMF(me + F_HEALTH_DERIVED) *= g_rules.max_health;
-            MEMF(me + F_STUN_CAP) *= g_rules.max_health;
+            float top = MEMF(me + F_HEALTH_TOP);
+            MEMF(me + F_HEALTH_NOW) = top * g_rules.max_health;
+            MEMF(me + F_HEALTH_SHARE) = g_rules.max_health;
+            if (MEMF(me + F_HEALTH_TANK) > MEMF(me + F_HEALTH_NOW)) MEMF(me + F_HEALTH_TANK) = MEMF(me + F_HEALTH_NOW);
             g_glass_done = 1;
-            fprintf(stderr, "[TOWERS] the Weekly's GLASS JAW: max health x%.2f at step %u: climber %.1f -> %.1f, CPU %.1f (full)\n",
-                    g_rules.max_health, g_step, before, MEMF(me + F_HEALTH_TOP), MEMF(c + F_HEALTH_TOP));
+            fprintf(stderr, "[TOWERS] the Weekly's GLASS JAW: half health at step %u: climber %.1f of %.1f (tank %.1f), CPU %.1f of %.1f\n",
+                    g_step, MEMF(me + F_HEALTH_NOW), top, MEMF(me + F_HEALTH_TANK), MEMF(c + F_HEALTH_NOW), MEMF(c + F_HEALTH_TOP));
         }
     }
     if (!team && g_rules.momentum_hold && !g_decided && MEM32(cpu + F_SLOT) != 0xFFFFFFFFu) {

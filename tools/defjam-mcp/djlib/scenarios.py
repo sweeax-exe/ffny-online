@@ -3695,18 +3695,20 @@ def towers_weekly(timeout=None, lock_timeout=None, log=None, keep_roots=False, e
                     probs.append("the CPU's meter was not held full")
                 elif any(not (int(st) & 1) for _, _, st in full):
                     probs.append("the CPU's Blazin' was not ready after the refill (%s)" % full)
-            elif twist == "glass_jaw":     # weekly rules 2: the climber's maximum halved, the CPU's full
-                halved = re.findall(r"GLASS JAW: max health x0\.50 at step \d+: climber ([\d.]+) -> ([\d.]+), CPU ([\d.]+) \(full\)", text)
-                kept = re.findall(r"max health climber ([\d.]+), CPU ([\d.]+)", text)
-                p["halved"], p["kept"] = halved[:2], kept[:2]
-                if len(halved) < 2:
-                    probs.append("the climber's maximum health was not halved on both floors (%s)" % halved)
-                else:
-                    for (a, a2, b), (k1, k2) in zip(halved, kept):
-                        if abs(float(a) / 2 - float(a2)) > 0.2:
-                            probs.append("not half: %s" % [a, a2])
-                        if abs(float(k1) - float(a2)) > 0.2 or abs(float(k2) - float(b)) > 0.2:
-                            probs.append("the maxima moved by the decision (%s vs %s)" % ([k1, k2], [a2, b]))
+            elif twist == "glass_jaw":     # weekly rules 2: the climber on half health (capped), the CPU full
+                half = re.findall(r"GLASS JAW: half health at step \d+: climber ([\d.]+) of ([\d.]+) \(tank ([\d.]+)\), "
+                                  r"CPU ([\d.]+) of ([\d.]+)", text)
+                p["half"] = half[:2]
+                p["won_health"] = [int(h) for _, h in won]
+                if len(half) < 2:
+                    probs.append("the climber did not start on half health on both floors (%s)" % half)
+                for now, top, tank, cnow, ctop in half:
+                    if abs(float(top) / 2 - float(now)) > 0.2 or float(tank) > float(now) + 0.2:
+                        probs.append("not half (or healable above it): %s" % [now, top, tank])
+                    if abs(float(cnow) - float(ctop)) > 0.2:
+                        probs.append("the CPU did not start full: %s of %s" % (cnow, ctop))
+                if any(int(h) > 50 for _, h in won):
+                    probs.append("the climber ended a fight above half health: %s" % won)
             elif twist == "all_bosses":
                 if not re.search(r"THE WEEKLY floor 1 of 20: [^\n]*boss floor\)", text):
                     probs.append("floor 1 was no boss floor")
@@ -3749,10 +3751,12 @@ def towers_weekly(timeout=None, lock_timeout=None, log=None, keep_roots=False, e
             problems.append("rewards: the champion's title is %r" % rewards["champ_title"])
         if equips != [400, 200, 200]:
             problems.append("rewards: equips %s (want a top-10 frame refused as a title)" % equips)
-        # ... and on the game's Locker (frame, title) and the rewards sheet
-        rshots = os.path.join(s.dir, "overlay-rewards")
-        os.makedirs(rshots, exist_ok=True)
+        # ... and on the game's Locker (frame, title) and the rewards sheet: the online screens need a relay
+        relay_port = acc_port + 40
+        s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
         c, ok = _towers_phase(s, n, dict(base, RECOMP_TEST_OPEN_ONLINE="1", RECOMP_PAD_SCRIPT=page_script, RECOMP_SOCIAL="on",
+                                         RECOMP_NETPLAY_SERVER="127.0.0.1:%d" % relay_port,
+                                         RECOMP_NETPLAY_SERVER_EU="127.0.0.1:%d" % relay_port, RECOMP_NETPLAY_NAME="Copy 0",
                                          RECOMP_TEST_SOCIAL_UI="8:locker=frame;14:locker=title;20:locker=sheet;26:hub"),
                               (1, "[SOCIAL-UI] hub"), shots, [("[SOCIAL-UI] locker=frame", 1, 3.0, "w4-locker-frame"),
                                                              ("[SOCIAL-UI] locker=title", 1, 3.0, "w4-locker-title"),
@@ -3761,11 +3765,11 @@ def towers_weekly(timeout=None, lock_timeout=None, log=None, keep_roots=False, e
         phases[-1]["log"] = _relpath(c.log)
         try:
             from PIL import Image
-            for kind in ("locker", "towerframes"):
+            for kind in ("locker", "towerframes"):     # the middle of each run of the label (its end is the way out)
                 files = sorted(glob.glob(os.path.join(s.dir, "overlay%d" % (n - 1), "*-%s.bmp" % kind)))
                 if files:
                     out = os.path.join(s.dir, "w4-%s.png" % kind)
-                    Image.open(files[-1]).convert("RGB").save(out)
+                    Image.open(files[len(files) // 2]).convert("RGB").save(out)
                     shots.append(_relpath(out))
         except ImportError:
             pass

@@ -91,7 +91,7 @@ typedef struct TowerFloorRules {
     int boss;               /* a boss floor (the top of Uptown, each chapter's 10th floor in Five Boroughs) */
     /* build 108, The Weekly's twists (towers_run_floor_rules; 1 / 0 in every other tower) */
     float hit_scale;        /* double_damage: every hit, both ways, times this (on top of cpu_damage / cpu_health) */
-    float max_health;       /* glass_jaw: the climber's maximum health times this, full of it (the CPU's as it is) */
+    float max_health;       /* glass_jaw: the climber starts at this share of its health, capped there (the CPU full) */
     int momentum_hold;      /* cpu_momentum: the CPU's momentum meter (+0x364) held full, Blazin' ready */
     int carry_health;       /* low_health: the climber starts with the health the last win ended with */
 } TowerFloorRules;
@@ -176,7 +176,7 @@ const char *towers_name(int tower);
  * the top floor. GET /api/towers/weekly?format=text gives it (404 while the service's switch is off: no Weekly). The
  * twists and exactly what the game does for them (weekly rules version TOWER_WEEKLY_RULES, the service's
  * WeeklyRulesVersion; the start sends it, another version climbs off the board): */
-#define TOWER_WEEKLY_RULES      2   /* 2 (owner 2026-11-22): GLASS JAW halves the climber only */
+#define TOWER_WEEKLY_RULES      2   /* 2 (owner 2026-11-22): GLASS JAW, the climber on half health only */
 #define TOWER_WEEKLY_MAX_FLOORS 40
 enum {
     TOWER_TWIST_NONE = 0,       /* unknown to this build: the Weekly cannot be climbed (a newer game knows it) */
@@ -185,7 +185,7 @@ enum {
     TOWER_TWIST_DOUBLE_DAMAGE,  /* HEAVY HANDS: every hit does twice the damage, both ways, on top of the ramp */
     TOWER_TWIST_CPU_MOMENTUM,   /* BLAZIN' HOUR: the CPU's momentum meter held full (Blazin' ready) from 5 s of
                                    fighting on (one given in the walk-in stopped the match: cheats.c max_blazin) */
-    TOWER_TWIST_GLASS_JAW,      /* GLASS JAW: the climber's maximum health halved (starts full of it); the CPU's full */
+    TOWER_TWIST_GLASS_JAW,      /* GLASS JAW: the climber fights on half health, never healed above it; the CPU's full */
     TOWER_TWIST_ALL_BOSSES,     /* BOSS RUSH: every floor a boss floor (banner, name tag, boss AI and extras) */
     TOWER_TWIST_ONE_VENUE,      /* HOME TURF: all floors at the week's one venue (the service's list has one) */
     TOWER_TWIST_COUNT

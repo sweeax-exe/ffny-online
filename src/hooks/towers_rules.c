@@ -500,7 +500,7 @@ static const struct { const char *key, *text; } k_twists[TOWER_TWIST_COUNT] = {
     { "low_health", "No healing between floors: every fight starts with the health your last win ended with." },
     { "double_damage", "Every hit does double damage, yours and the CPU's." },
     { "cpu_momentum", "The CPU's momentum meter stays full: it can go Blazin' whenever it wants." },
-    { "glass_jaw", "You fight with half your health; the CPU keeps all of its." },
+    { "glass_jaw", "You start every fight on half health and nothing heals you above it; the CPU keeps all of its." },
     { "all_bosses", "Every floor is a boss fight: the boss AI and the boss extras on all 20." },
     { "one_venue", "All 20 floors at one venue." },
 };
