@@ -12,6 +12,10 @@ static const struct { const char *id; int kind; } k_ids[] = {
     { "tw-untouchable", TRW_UNTOUCHABLE }, { "tw-weekly", TRW_WEEKLY }, { "tw-boroughs", TRW_BOROUGHS },
 };
 
+/* the viewer's Faction War side for the Locker's locked row (0 none, 1 D-Mob, 2 Crow) */
+static int g_locked_side = 0;
+void tower_reward_set_side(int side) { g_locked_side = side == 1 || side == 2 ? side : 0; }
+
 int tower_reward_kind(const char *id, int *tower, int *year, int *month)
 {
     size_t i;
@@ -22,7 +26,10 @@ int tower_reward_kind(const char *id, int *tower, int *year, int *month)
     if (id && !strncmp(id, "fw-", 3)) {        /* build 108: fw-winner|top-<dmob|crow>-<yyyy>-<mm> */
         char side[8] = "";
         int top = !strncmp(id, "fw-top-", 7), win = !strncmp(id, "fw-winner-", 10);
-        if (!strcmp(id, "fw-winner-season")) return TRW_FW_DMOB;      /* the Locker's locked row */
+        if (!strcmp(id, "fw-winner-season")) {                        /* the Locker's locked row: the viewer's own side */
+            if (tower) *tower = g_locked_side == 2 ? 2 : 1;
+            return g_locked_side == 2 ? TRW_FW_CROW : TRW_FW_DMOB;
+        }
         if (!top && !win) return TRW_NONE;
         if (sscanf(id + (top ? 7 : 10), "%4[a-z]-%4d-%2d%n", side, &y, &m, &n) != 3 || id[(top ? 7 : 10) + n] != 0 || y < 2026 ||
             m < 1 || m > 12 || (strcmp(side, "dmob") && strcmp(side, "crow")))
@@ -98,7 +105,10 @@ int tower_reward_ribbon(const char *id, char *out, int size)
         int k = tower_reward_kind(id, &tower, &year, &month);
         if (k >= TRW_FW_DMOB && k <= TRW_FW_TOP_CROW) {
             const char *team = tower == 1 ? "D-MOB'S TEAM" : "CROW'S TEAM";
-            if (!year) n = snprintf(out, (size_t)size, "THE SEASON'S WINNING SIDE");
+            if (!year) {      /* the locked row: nothing is won yet */
+                if (g_locked_side) n = snprintf(out, (size_t)size, "%s \xC2\xB7 WINNER FRAME", team);
+                else n = snprintf(out, (size_t)size, "SEASON WINNER FRAME");
+            }
             else if (k == TRW_FW_DMOB || k == TRW_FW_CROW)
                 n = snprintf(out, (size_t)size, "%s WON \xC2\xB7 %s %d", team, months[month - 1], year);
             else n = snprintf(out, (size_t)size, "#1 OF %s \xC2\xB7 %s %d", team, months[month - 1], year);

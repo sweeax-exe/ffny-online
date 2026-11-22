@@ -30,6 +30,20 @@ int main(void)
         printf("id|%s|%d|%d|%d|%d|%d|%u|%d|%s\n", ids[i], k, t, y, m, tower_reward_rarity(k), tower_reward_effects(k),
                tower_reward_effect_count(k), rib);
     }
+    for (i = 0; i < 4; i++) {
+        static const int sides[] = { 1, 2, 0, 9 };
+        int t = 0, k;
+        tower_reward_set_side(sides[i]);
+        k = tower_reward_kind("fw-winner-season", &t, NULL, NULL);
+        tower_reward_ribbon("fw-winner-season", rib, (int)sizeof(rib));
+        printf("side%d|%d|%d|%s\n", sides[i], k, t, rib);
+    }
+    {   /* a held reward is unaffected by the side */
+        int t = 0, k;
+        tower_reward_set_side(2);
+        k = tower_reward_kind("fw-winner-dmob-2026-11", &t, NULL, NULL);
+        printf("held|%d|%d\n", k, t);
+    }
     printf("kinds|%d|%d|%d|%d|%d\n", TRW_FW_DMOB, TRW_FW_CROW, TRW_FW_TOP_DMOB, TRW_FW_TOP_CROW, TRW_KINDS);
     return 0;
 }
@@ -58,10 +72,10 @@ def test_faction_reward_ids(native):
     rows = native
     dmob, crow, top_dmob, top_crow, kinds = (int(v) for v in rows['kinds'])
     assert (dmob, crow, top_dmob, top_crow) == (8, 9, 10, 11) and kinds == 12
-    kind = {i: int(r[0]) for i, r in rows.items() if i != 'kinds'}
+    kind = {i: int(r[0]) for i, r in rows.items() if i.startswith(('fw-', 'tw-'))}
     assert kind['fw-winner-dmob-2026-11'] == dmob and kind['fw-winner-crow-2027-01'] == crow
     assert kind['fw-top-dmob-2026-12'] == top_dmob and kind['fw-top-crow-2026-11'] == top_crow
-    assert kind['fw-winner-season'] == dmob          # the Locker's locked row shows a winner's frame
+    assert kind['fw-winner-season'] == dmob          # the Locker's locked row shows a winner's frame (no side: D-Mob's)
     for bad in ('fw-winner-blaze-2026-11', 'fw-top-dmob-2026-13', 'fw-winner-dmob-2026-11x', 'fw-nope'):
         assert kind[bad] == 0, bad
     assert rows['fw-winner-crow-2027-01'][1:4] == ['2', '2027', '1']       # the side (2 Crow), the year, the month
@@ -71,18 +85,29 @@ def test_faction_reward_ids(native):
 
 def test_faction_reward_rarity_effects_ribbon(native):
     rows = native
-    rarity = {i: int(r[4]) for i, r in rows.items() if i != 'kinds'}
+    rarity = {i: int(r[4]) for i, r in rows.items() if i.startswith(('fw-', 'tw-'))}
     assert rarity['fw-winner-dmob-2026-11'] == rarity['fw-winner-crow-2027-01'] == 3     # LEGENDARY
     assert rarity['fw-top-dmob-2026-12'] == rarity['fw-top-crow-2026-11'] == 4           # MYTHIC
-    count = {i: int(r[6]) for i, r in rows.items() if i != 'kinds'}
+    count = {i: int(r[6]) for i, r in rows.items() if i.startswith(('fw-', 'tw-'))}
     assert count['fw-winner-dmob-2026-11'] > 2 and count['fw-top-crow-2026-11'] > count['fw-winner-dmob-2026-11']
     assert rows['fw-winner-dmob-2026-11'][7] == "D-MOB'S TEAM WON · NOV 2026"
     assert rows['fw-top-crow-2026-11'][7] == "#1 OF CROW'S TEAM · NOV 2026"
-    assert rows['fw-winner-season'][7] == "THE SEASON'S WINNING SIDE"
+    assert rows['fw-winner-season'][7] == "SEASON WINNER FRAME"     # locked: no "WON"
+    # the viewer's side picks the locked row's frame and ribbon
+    assert rows['side1'] == ['8', '1', "D-MOB'S TEAM · WINNER FRAME"]
+    assert rows['side2'] == ['9', '2', "CROW'S TEAM · WINNER FRAME"]
+    assert rows['side0'] == ['8', '1', 'SEASON WINNER FRAME'] and rows['side9'] == ['8', '1', 'SEASON WINNER FRAME']
+    assert rows['held'] == ['8', '1']       # a held reward ignores the viewer's side
 
 
 def read(name):
     return (HOOKS / name).read_text(encoding='utf-8')
+
+
+def test_locked_row_follows_viewers_side():
+    frames = read('tower_frames.inc')
+    assert frames.count('tower_reward_set_side(fw_my_side())') == 2         # the frame and the title
+    assert 'int fw_my_side()' in read('faction_ui.inc') and 'int fw_my_side();' in read('online_screen.cpp')
 
 
 def test_hub_tile_and_pages_wired():
