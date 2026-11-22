@@ -175,7 +175,8 @@ void draw_tower_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRo
         hx += hint(dl, f, hx, 452, "a", ready ? "WAITING FOR " : "CONTINUE");
         if (ready) text(dl, f, g_title, 13, hx - 12, 453, WHITE, upper(partner.c_str()).c_str(), LEFT, 1.0f, 140), hx += 120;
         hint(dl, f, hx, 452, "b", "SAVE & QUIT");
-        if (pad.a && !ready) netplay_lobby_ready(1, me ? me->fighter : fighter);
+        // the A that went through the results does not vote: the summary takes it after 2.5 s
+        if (pad.a && !ready && st >= 2.5f) netplay_lobby_ready(1, me ? me->fighter : fighter);
         tower_online_leave(pad, "The climb is saved: the same pair resumes it from the Team Tower card.", true);
         return;
     }
