@@ -22,14 +22,17 @@ int main(void)
 {
     static const char *const ids[] = { "tw-floor25", "tw-floor50", "tw-uptown", "tw-untouchable", "tw-weekly",
         "tw-boroughs", "tw-legend-1-2026-11", "tw-legend-2-2027-01", "tw-legend-month", "tw-legend-3-2026-11",
-        "tw-legend-1-2026-13", "tw-legend-1-2026-11x", "s1-classic-3", "", "tw-nope" };
-    char rib[64];
+        "tw-legend-1-2026-13", "tw-legend-1-2026-11x", "s1-classic-3", "", "tw-nope",
+        "tw-weekly-2026-W48", "tw-weekly-champ-2026-W48", "tw-weekly-week", "tw-weekly-2027-W01", "tw-weekly-2026-W5",
+        "tw-weekly-2026-W54", "tw-weekly-champ-2026-W48x", "tw-weekly-2025-W10" };
+    char rib[64], sign[32];
     int i;
     for (i = 0; i < (int)(sizeof(ids) / sizeof(ids[0])); i++) {
         int t, y, m, k = tower_reward_kind(ids[i], &t, &y, &m);
         tower_reward_ribbon(ids[i], rib, (int)sizeof(rib));
-        printf("id|%s|%d|%d|%d|%d|%d|%u|%d|%s\n", ids[i], k, t, y, m, tower_reward_rarity(k), tower_reward_effects(k),
-               tower_reward_effect_count(k), rib);
+        tower_reward_week_sign(ids[i], sign, (int)sizeof(sign));
+        printf("id|%s|%d|%d|%d|%d|%d|%u|%d|%s|%s\n", ids[i], k, t, y, m, tower_reward_rarity(k), tower_reward_effects(k),
+               tower_reward_effect_count(k), rib, sign);
     }
     printf("rarity|%s|%s|%s|%s|%s\n", tower_reward_rarity_name(1), tower_reward_rarity_name(2), tower_reward_rarity_name(3),
            tower_reward_rarity_name(4), tower_reward_rarity_name(9));
@@ -160,3 +163,17 @@ def test_drawing_is_visual_only_and_allocation_free():
         assert bad not in body, bad
     c = read('tower_rewards.c')
     assert 'malloc' not in c and 'netplay' not in c
+
+
+def test_the_weekly_per_week_rewards(native):
+    # build 108 (server tower_rewards.go): a week's top-10 frame and its champion's frame and title
+    rows, _ = native
+    top, champ = rows['tw-weekly-2026-W48'], rows['tw-weekly-champ-2026-W48']
+    assert int(top[0]) == 8 and int(champ[0]) == 9 and int(rows['tw-weekly-week'][0]) == 8
+    assert top[2:4] == ['2026', '48'] and rows['tw-weekly-2027-W01'][2:4] == ['2027', '1']
+    assert int(top[4]) == 2 and int(champ[4]) == 3            # EPIC, LEGENDARY
+    assert int(champ[6]) > int(top[6]) >= 2                    # the champion's frame moves more
+    assert top[8] == 'TOP 10 W48' and champ[8] == 'CHAMP W48' and rows['tw-weekly-week'][8] == 'WEEKLY'
+    assert rows['tw-weekly'][8] == '' and int(rows['tw-weekly'][0]) == 5   # Weekly Conqueror stays as it was
+    for bad in ('tw-weekly-2026-W5', 'tw-weekly-2026-W54', 'tw-weekly-champ-2026-W48x', 'tw-weekly-2025-W10'):
+        assert int(rows[bad][0]) == 0, bad

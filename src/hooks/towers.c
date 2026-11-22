@@ -1317,25 +1317,21 @@ void towers_step(void)
         }
     }
     if (!team && g_rules.max_health != 1.0f && !g_glass_done && g_step <= 60) {
-        /* build 108, GLASS JAW: both fighters' maximum health scaled and both full of it, with the fields the game
-         * derives from the maximum (cheat-menu.md: +0x354, +0x350, +0x358, +0x360, +0x378) */
+        /* build 108, GLASS JAW (weekly rules 2, owner 2026-11-22): the climber's maximum health scaled and full of it,
+         * with the fields the game derives from the maximum (cheat-menu.md: +0x354, +0x350, +0x358, +0x360, +0x378);
+         * the CPU keeps its own (rules 1 halved both, which played as HEAVY HANDS) */
         uint32_t c = ACTORS + STRIDE;
         if (MEM32(me + F_SLOT) != 0xFFFFFFFFu && MEM32(c + F_SLOT) != 0xFFFFFFFFu && MEMF(me + F_HEALTH_TOP) > 0.0f &&
             MEMF(c + F_HEALTH_TOP) > 0.0f) {
-            float before[2];
-            int k;
-            for (k = 0; k < 2; k++) {
-                uint32_t r = k ? c : me;
-                before[k] = MEMF(r + F_HEALTH_TOP);
-                MEMF(r + F_HEALTH_TOP) *= g_rules.max_health;
-                MEMF(r + F_HEALTH_NOW) *= g_rules.max_health;
-                MEMF(r + F_HEALTH_TANK) *= g_rules.max_health;
-                MEMF(r + F_HEALTH_DERIVED) *= g_rules.max_health;
-                MEMF(r + F_STUN_CAP) *= g_rules.max_health;
-            }
+            float before = MEMF(me + F_HEALTH_TOP);
+            MEMF(me + F_HEALTH_TOP) *= g_rules.max_health;
+            MEMF(me + F_HEALTH_NOW) *= g_rules.max_health;
+            MEMF(me + F_HEALTH_TANK) *= g_rules.max_health;
+            MEMF(me + F_HEALTH_DERIVED) *= g_rules.max_health;
+            MEMF(me + F_STUN_CAP) *= g_rules.max_health;
             g_glass_done = 1;
-            fprintf(stderr, "[TOWERS] the Weekly's GLASS JAW: max health x%.2f at step %u: climber %.1f -> %.1f, CPU %.1f -> %.1f\n",
-                    g_rules.max_health, g_step, before[0], MEMF(me + F_HEALTH_TOP), before[1], MEMF(c + F_HEALTH_TOP));
+            fprintf(stderr, "[TOWERS] the Weekly's GLASS JAW: max health x%.2f at step %u: climber %.1f -> %.1f, CPU %.1f (full)\n",
+                    g_rules.max_health, g_step, before, MEMF(me + F_HEALTH_TOP), MEMF(c + F_HEALTH_TOP));
         }
     }
     if (!team && g_rules.momentum_hold && !g_decided && MEM32(cpu + F_SLOT) != 0xFFFFFFFFu) {

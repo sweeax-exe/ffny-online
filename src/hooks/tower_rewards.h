@@ -18,9 +18,12 @@ enum {
     TRW_FLOOR50,        /* tw-floor50: Floor 50 Survivor, bronze, rivets, a "50" plate */
     TRW_UPTOWN,         /* tw-uptown: Uptown Champion, gold, a skyline crest */
     TRW_UNTOUCHABLE,    /* tw-untouchable: chrome, cut corners, a shield */
-    TRW_WEEKLY,         /* tw-weekly: Weekly Conqueror, neon (nothing grants it yet) */
+    TRW_WEEKLY,         /* tw-weekly: Weekly Conqueror, neon (#1 of any finished week of The Weekly) */
     TRW_BOROUGHS,       /* tw-boroughs: King of the Five Boroughs, platinum, a crown, five borough gems */
     TRW_LEGEND,         /* tw-legend-<tower>-<yyyy>-<mm>: Tower Legend, red lacquer, gold trim, laurel, a ribbon */
+    /* build 108, The Weekly's per-week rewards (server tower_rewards.go): */
+    TRW_WEEKLY_TOP,     /* tw-weekly-<yyyy>-W<ww>: Weekly Top 10, neon with the week on its sign (a frame only) */
+    TRW_WEEKLY_CHAMP,   /* tw-weekly-champ-<yyyy>-W<ww>: Weekly Champ, gold and pink neon, a crown; title "Weekly Champ W48" */
     TRW_KINDS
 };
 
@@ -38,7 +41,7 @@ enum { TRW_RARE = 1, TRW_EPIC, TRW_LEGENDARY, TRW_MYTHIC };
 #define TRW_EMBERS 5
 
 /* The reward an item id is (TRW_NONE: not one); a legend's tower (1 Uptown, 2 Five Boroughs), year and month
- * (1..12) into the pointers (any may be NULL). */
+ * (1..12) into the pointers (any may be NULL); a week's reward (build 108): its year and ISO week (1..53, in month). */
 int tower_reward_kind(const char *id, int *tower, int *year, int *month);
 int tower_reward_rarity(int kind);
 const char *tower_reward_rarity_name(int rarity);      /* "RARE" .. "MYTHIC", "" none */
@@ -46,6 +49,9 @@ unsigned tower_reward_effects(int kind);
 int tower_reward_effect_count(int kind);
 /* The Tower Legend's ribbon: "#1 UPTOWN · NOV 2026" (UTF-8 middle dot); returns its length (0: not a legend). */
 int tower_reward_ribbon(const char *id, char *out, int size);
+/* Build 108: the sign of a week's frame: "TOP 10 W48" / "CHAMP W48" ("WEEKLY" for the Locker's locked row); its
+ * length (0: not a week's reward). */
+int tower_reward_week_sign(const char *id, char *out, int size);
 
 /* timing (t in seconds since any fixed point) */
 float tower_fx_sweep(float t, float period);    /* the band's place 0..1 across the card, -1 while it rests */

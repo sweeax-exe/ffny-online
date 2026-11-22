@@ -143,10 +143,10 @@ const char *const TOWERS_BOARD_SAMPLE =
     "row=2|1|51|Kaze|88|5120|9|0\nrow=2|2|12|Blaze|61|3302|22|0\nrow=2|3|77|Rex|30|1650|4|0\n"
     "me=2|0|0|0\n";
 
-// The gallery's sample Weekly (the service's WeeklyText of 2026-W42) and its board.
+// The gallery's sample Weekly (the service's WeeklyText of 2026-W42, rules 2) and its board.
 const char *const TOWERS_WEEKLY_SAMPLE =
     "enabled=1\nweek=2026-W42\nname=The Weekly 2026-W42: HEAVY HANDS\ntwist=double_damage|HEAVY HANDS\n"
-    "rules=1\nseed=33094566\nfloors=20\nstarts=1791763200\nends=1792368000\nnow=1792270000\n"
+    "rules=2\nseed=33094566\nfloors=20\nstarts=1791763200\nends=1792368000\nnow=1792270000\n"
     "roster=C3BBACB2\nspare=22\nvenues=1|3|10|11|14|17\nfloor=1|91|11|0|0\nfloor=2|7|3|0|0\n"
     "floor=3|24|10|1|0\nfloor=4|77|17|1|0\nfloor=5|57|3|1|0\nfloor=6|50|17|1|0\nfloor=7|74|3|2|0\n"
     "floor=8|67|14|2|0\nfloor=9|14|11|2|0\nfloor=10|55|10|2|0\nfloor=11|2|3|2|0\nfloor=12|21|14|2|0\n"

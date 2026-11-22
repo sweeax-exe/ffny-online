@@ -22,6 +22,20 @@ int tower_reward_kind(const char *id, int *tower, int *year, int *month)
     if (!id || strncmp(id, "tw-", 3)) return TRW_NONE;
     for (i = 0; i < sizeof(k_ids) / sizeof(k_ids[0]); i++)
         if (!strcmp(id, k_ids[i].id)) return k_ids[i].kind;
+    /* build 108: tw-weekly-champ-<yyyy>-W<ww>, tw-weekly-<yyyy>-W<ww>; "tw-weekly-week" the Locker's locked row */
+    if (!strcmp(id, "tw-weekly-week")) return TRW_WEEKLY_TOP;
+    {
+        int champ = !strncmp(id, "tw-weekly-champ-", 16), w = 0;
+        const char *wk = id + (champ ? 16 : 10);
+        if ((champ || !strncmp(id, "tw-weekly-", 10)) && sscanf(wk, "%4d-W%2d%n", &y, &w, &n) == 2 && wk[n] == 0 &&
+            n == 8 && y >= 2026 && w >= 1 && w <= 53) {
+            if (year) *year = y;
+            if (month) *month = w;
+            return champ ? TRW_WEEKLY_CHAMP : TRW_WEEKLY_TOP;
+        }
+        y = 0;
+        n = 0;
+    }
     /* tw-legend-<tower>-<yyyy>-<mm>; "tw-legend-month" is the Locker's locked row (the frame shows as a legend) */
     if (!strcmp(id, "tw-legend-month")) return TRW_LEGEND;
     if (sscanf(id, "tw-legend-%d-%4d-%2d%n", &t, &y, &m, &n) == 3 && id[n] == 0 && (t == 1 || t == 2) && y >= 2026 &&
@@ -38,8 +52,8 @@ int tower_reward_rarity(int kind)
 {
     switch (kind) {
     case TRW_FLOOR25: case TRW_FLOOR50: return TRW_RARE;
-    case TRW_UPTOWN: case TRW_UNTOUCHABLE: case TRW_WEEKLY: return TRW_EPIC;
-    case TRW_BOROUGHS: return TRW_LEGENDARY;
+    case TRW_UPTOWN: case TRW_UNTOUCHABLE: case TRW_WEEKLY: case TRW_WEEKLY_TOP: return TRW_EPIC;
+    case TRW_BOROUGHS: case TRW_WEEKLY_CHAMP: return TRW_LEGENDARY;
     case TRW_LEGEND: return TRW_MYTHIC;
     default: return 0;
     }
@@ -56,7 +70,8 @@ unsigned tower_reward_effects(int kind)
     switch (kind) {
     case TRW_UPTOWN: return TRW_FX_SWEEP | TRW_FX_SHINE;
     case TRW_UNTOUCHABLE: return TRW_FX_GLINT;
-    case TRW_WEEKLY: return TRW_FX_GLOW | TRW_FX_FLICKER;
+    case TRW_WEEKLY: case TRW_WEEKLY_TOP: return TRW_FX_GLOW | TRW_FX_FLICKER;
+    case TRW_WEEKLY_CHAMP: return TRW_FX_GLOW | TRW_FX_FLICKER | TRW_FX_PULSE;     /* the crown pulses */
     case TRW_BOROUGHS: return TRW_FX_PULSE | TRW_FX_SWEEP | TRW_FX_SHINE;
     case TRW_LEGEND: return TRW_FX_EMBERS | TRW_FX_PULSE | TRW_FX_SWEEP | TRW_FX_SHINE;
     default: return 0;      /* RARE: the metal itself, no motion */
@@ -79,6 +94,18 @@ int tower_reward_ribbon(const char *id, char *out, int size)
     out[0] = 0;
     if (tower_reward_kind(id, &tower, &year, &month) != TRW_LEGEND || !tower) return 0;
     n = snprintf(out, (size_t)size, "#1 %s \xC2\xB7 %s %d", tower == 1 ? "UPTOWN" : "FIVE BOROUGHS", months[month - 1], year);
+    return n < 0 ? 0 : n >= size ? size - 1 : n;
+}
+
+int tower_reward_week_sign(const char *id, char *out, int size)
+{
+    int year, week, kind, n;
+    if (!out || size <= 0) return 0;
+    out[0] = 0;
+    kind = tower_reward_kind(id, NULL, &year, &week);
+    if (kind != TRW_WEEKLY_TOP && kind != TRW_WEEKLY_CHAMP) return 0;
+    if (!week) n = snprintf(out, (size_t)size, "WEEKLY");
+    else n = snprintf(out, (size_t)size, "%s W%d", kind == TRW_WEEKLY_CHAMP ? "CHAMP" : "TOP 10", week);
     return n < 0 ? 0 : n >= size ? size - 1 : n;
 }
 
