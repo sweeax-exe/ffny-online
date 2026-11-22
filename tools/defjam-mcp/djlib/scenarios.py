@@ -2780,7 +2780,7 @@ def stall_check(logs, relay_log, problems):
     except OSError:
         rl = ""
     m = re.search(r"downlink cut is over \((\d+) datagrams dropped\)", rl)
-    out["relay_cut"] = "the downlink of slot" in rl
+    out["relay_cut"] = "is cut for" in rl and "(c=" in rl
     out["relay_dropped"] = int(m.group(1)) if m else None
     if not out["relay_cut"] or m is None:
         problems.append("the relay never cut (or never restored) the downlink")
