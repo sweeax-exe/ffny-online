@@ -3141,7 +3141,9 @@ def lobby97(case="kick", timeout=None, relay_port=27900, lock_timeout=None, log=
 TOWERS_WATCH = ["[CRASH]", "[WATCHDOG]", "[TOWERS] window:", "decided at step", "[SOCIAL-UI] locker=", "[SOCIAL-UI] hub", "[TOWERS] run saved", " won (", " lost: the run",
                 "save and quit", "set up: slot levels", "[TOWERS] run start", "[TOWERS] run resumed",
                 "the game ends in floor 3", "[TOWERS] board (month)", "fight?format=text floor 3",
-                "test pad: r", "test pad: y", "test pad: x", "[TOWERS] board (week)", "page: the Weekly's card"]
+                "test pad: r", "test pad: y", "test pad: x", "[TOWERS] board (week)", "page: the Weekly's card",
+                # build 108: the Team Tower's player 2 sign-in
+                "partner sign-in: code", "waiting for player 2's confirm", "player 2 confirmed"]
 
 
 def _towers_overlay_pngs(folder, prefix, out_dir, shots, per_label=3):
@@ -3168,9 +3170,10 @@ def _towers_overlay_pngs(folder, prefix, out_dir, shots, per_label=3):
             shots.append(_relpath(path))
 
 
-def _towers_phase(s, i, env, until, shots, shot_plan, timeout):
+def _towers_phase(s, i, env, until, shots, shot_plan, timeout, hook=None):
     """One copy of the towers test: runs until the log has `until` (count, text) or the timeout; pictures by
-    shot_plan: (log text, its nth time, seconds after, name), and the overlay's own pictures of each TOWERS screen."""
+    shot_plan: (log text, its nth time, seconds after, name), and the overlay's own pictures of each TOWERS screen.
+    hook(copy), when given, runs on every poll (build 108: player 2's phone claims the sign-in code)."""
     env = dict(env)
     env["RECOMP_OVERLAY_SHOT_DIR"] = os.path.join(s.dir, "overlay%d" % i)
     os.makedirs(env["RECOMP_OVERLAY_SHOT_DIR"], exist_ok=True)
@@ -3185,6 +3188,8 @@ def _towers_phase(s, i, env, until, shots, shot_plan, timeout):
         if w.count("[CRASH]") or w.count("[WATCHDOG]"):
             time.sleep(2)
             break
+        if hook:
+            hook(c)
         for k, (text, nth, after, name) in enumerate(shot_plan):
             if k not in done and w.count(text) >= nth:
                 done.add(k)
@@ -3451,6 +3456,37 @@ def towers(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_en
 # ---- the Team Tower (build 106) ----------------------------------------------------------------------
 
 TEAM_WATCH = TOWERS_WATCH + ["team floor", "[TOWERS] team run"]
+PAIR_USER, PAIR_PASS = "PairTwo", "pair two's long password"
+
+
+def _pair_claimer(acc_port, claims, delay=0.0):
+    """Build 108: player 2's phone. Once the copy's log shows the partner sign-in code, type it on the service's
+    /auth/pair page and sign in there with PAIR_USER's username and password (POST /auth/pair/password, as the phone's form
+    does), delay seconds after the code showed. claims gets one dict per code: the code and what the page said."""
+    import urllib.parse
+    import urllib.request
+
+    seen = {}
+
+    def hook(c):
+        if c.watch.count("partner sign-in: code") <= len(claims):
+            return
+        if time.time() - seen.setdefault(len(claims), time.time()) < delay:     # the code's picture first
+            return
+        m = re.findall(r"partner sign-in: code ([A-Z0-9]{3}-[A-Z0-9]{3}) on (\S+)", logparse.read_text(c.log))
+        if len(m) <= len(claims):
+            return
+        code, url = m[len(claims)]
+        page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8", "replace")     # the address shown: /pair
+        body = urllib.parse.urlencode({"code": code.lower().replace("-", ""), "username": PAIR_USER,
+                                       "password": PAIR_PASS}).encode()
+        req = urllib.request.Request("http://127.0.0.1:%d/auth/pair/password" % acc_port, data=body,
+                                     headers={"Content-Type": "application/x-www-form-urlencoded",
+                                              "User-Agent": "Mozilla/5.0 (Linux; Android 14) Mobile"})
+        done = urllib.request.urlopen(req, timeout=10).read().decode("utf-8", "replace")
+        claims.append({"code": code, "url": url, "form": 'action="/auth/pair"' in page,
+                       "signed": "You're player 2: %s" % PAIR_USER in done})
+    return hook
 
 
 def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, extra_env=None, out_dir=None):
@@ -3463,8 +3499,15 @@ def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, ext
     2. Resumed on floor 4 and lost (the CPU team's knockout): the run ends with 3 floors, nothing saved.
     3. A new standard climb: floor 1 again (one loss sent it back), won.
     4. The community Team Tower: floor 1 won (its own board).
-    5. TOWERS with the Team Tower card chosen and its BOARD: pictures. Both boards are read back from the service:
-       Copy 0 + Copy 1 on each. Pictures (the overlay's own) go to out_dir too."""
+    5. Build 108, player 2 signs in on a phone: a new standard climb whose start first runs the partner sign-in
+       (RECOMP_TEST_TOWERS_PAIR); the test reads the code off the log, types it on the local service's /auth/pair page and
+       signs in there as PairTwo (a password account), player 2 confirms (RECOMP_TEST_TOWERS_P2_CONFIRM); the
+       service records PairTwo as player 2; floor 1 won.
+    6. The sign-in card itself (RECOMP_TEST_TOWERS_PAIR_CARD): the code and the page, then PairTwo's name to confirm,
+       player 2's A (RECOMP_TEST_TOWERS_P2_CONFIRM_UI), the start card with PLAYER 2: PairTwo: pictures.
+    7. TOWERS with the Team Tower card chosen and its BOARD: pictures. Both boards are read back from the service:
+       Copy 0 + Copy 1 on each, and Copy 0 + PairTwo on the standard one. Pictures (the overlay's own) go to out_dir
+       too."""
     import shutil
     import urllib.request
     t0 = time.time()
@@ -3474,7 +3517,15 @@ def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, ext
     try:
         h = harness()
         acc_port = 18960 + (os.getpid() % 20) * 2
-        tokens = s.accounts(acc_port, ["Copy 0", "Copy 1"], extra=["-towers"])
+        tokens = s.accounts(acc_port, ["Copy 0", "Copy 1"], extra=["-towers", "-password"])
+        # build 108: player 2's own account, made with a username and password (the phone signs in with it)
+        req = urllib.request.Request("http://127.0.0.1:%d/auth/password/create" % acc_port,
+                                     data=json.dumps({"username": PAIR_USER, "password": PAIR_PASS}).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req, timeout=10).read()
+        except OSError as error:
+            problems.append("pair: the password account was not made (%s)" % error)
         towers_file = os.path.join(s.dir, "towers-team.json")
         base = dict(VIRTUAL_PAD_ENV, RECOMP_INPUT_VIRTUAL_PADS="2", RECOMP_SCRIPT_ANCHOR=TITLE_ANCHOR,
                     RECOMP_TOWERS_FILE=towers_file, RECOMP_OVERLAY_SHOT_MS="500",
@@ -3492,10 +3543,10 @@ def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, ext
                 return None, None
             return next((r for r in data.get("runs", []) if r.get("tower") == tower), None), data.get("best")
 
-        def phase(i, name, env, until, plan):
+        def phase(i, name, env, until, plan, hook=None):
             e = dict(base, **env)
             e.update(extra_env or {})
-            c, ok = _towers_phase(s, i, e, until, shots, plan, timeout or 900)
+            c, ok = _towers_phase(s, i, e, until, shots, plan, timeout or 900, hook)
             text = logparse.read_text(c.log)
             p = {"phase": name, "reached": ok, "log": _relpath(c.log),
                  "levels": re.findall(r"team floor (\d+) set up: slot levels (\d+ \d+ \d+ \d+)", text),
@@ -3545,7 +3596,35 @@ def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, ext
                          (1, " won ("), [("set up: slot levels", 1, 10, "t4-fight-community")])
         if not ok or "run start: TEAM TOWER COMMUNITY" not in text:
             problems.append("team community: floor 1 was not won")
-        _towers_phase(s, 4, dict(base, RECOMP_TEST_OPEN_ONLINE="towers", RECOMP_TEST_OVERLAY_PAD="r,r,r,x",
+        # 5 (build 108): player 2 signs in on a phone before the start
+        claims = []
+        ok, text = phase(4, "team-pair", {"RECOMP_TEST_TOWERS": "4,55,0,22,0", "RECOMP_TEST_TOWERS_PAIR": "1",
+                                          "RECOMP_TEST_TOWERS_P2_CONFIRM": "1", "RECOMP_TOWERS_PARTNER_TOKEN": "",
+                                          "RECOMP_TEST_KO_STEP": "900,0", "RECOMP_PAD_SCRIPT": script(2)},
+                         (1, " won ("), [("set up: slot levels", 1, 10, "t5-fight-pair")], _pair_claimer(acc_port, claims))
+        phases[-1].update({"claims": claims, "recorded": re.findall(r"service: player 2 is (\S+) \(signed in\)", text)})
+        if not claims or not claims[0]["form"] or not claims[0]["signed"]:
+            problems.append("pair: the phone did not sign in with the code (%s)" % claims)
+        if "partner sign-in: player 2 confirmed (%s)" % PAIR_USER not in text:
+            problems.append("pair: player 2's confirm did not come")
+        if phases[-1]["recorded"] != [PAIR_USER]:
+            problems.append("pair: the service did not record %s as player 2 (%s)" % (PAIR_USER, phases[-1]["recorded"]))
+        if not ok:
+            problems.append("pair: floor 1 was not won")
+        # 6: the sign-in card, live
+        claims2 = []
+        c, ok = _towers_phase(s, 5, dict(base, RECOMP_TEST_OPEN_ONLINE="towers", RECOMP_TEST_TOWERS_PAIR_CARD="1",
+                                         RECOMP_TEST_TOWERS_P2_CONFIRM_UI="1", RECOMP_TOWERS_PARTNER_TOKEN="",
+                                         RECOMP_PAD_SCRIPT=h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"])),
+                              (1, "player 2 confirmed"), shots,
+                              [("partner sign-in: code", 1, 2.5, "t6-pair-code"),
+                               ("waiting for player 2's confirm", 1, 1.5, "t6-pair-confirm"),
+                               ("player 2 confirmed", 1, 2.0, "t6-start-team")], 300, _pair_claimer(acc_port, claims2, 5.0))
+        text = logparse.read_text(c.log)
+        phases.append({"phase": "team-pair-card", "reached": ok, "claims": claims2, "log": _relpath(c.log)})
+        if not ok or not claims2 or "the sign-in card of player 2 (open)" not in text:
+            problems.append("pair card: the card's sign-in did not reach player 2's confirm (%s)" % claims2)
+        _towers_phase(s, 6, dict(base, RECOMP_TEST_OPEN_ONLINE="towers", RECOMP_TEST_OVERLAY_PAD="r,r,r,x",
                                  RECOMP_PAD_SCRIPT=h.build_pad_script(["getscreeninfo(intmain/mainmenu=back@9999"])),
                       (1, "[TOWERS] board (month)"), shots, [("[TOWERS] board (month)", 1, 6.0, "t5-team-board")], 240)
         boards = {}
@@ -3561,6 +3640,8 @@ def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, ext
         for tower, pat in want.items():
             if not any(re.match(pat, l) for l in boards[tower]):
                 problems.append("board %d: no Copy 0 + Copy 1 row (%s)" % (tower, boards[tower]))
+        if not any(re.match(r"row=4\|\d\|\d+\|Copy 0\|1\|\d+\|55\|0\|%s\|22$" % PAIR_USER, l) for l in boards[4]):
+            problems.append("board 4: no Copy 0 + %s row (%s)" % (PAIR_USER, boards[4]))
         for p in phases:
             crashes = _faults(logparse.read_text(os.path.join(machine.REPO, p["log"])))
             if crashes:

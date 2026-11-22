@@ -29,6 +29,14 @@ enum {
     /* build 108, The Weekly's per-week rewards (server tower_rewards.go): */
     TRW_WEEKLY_TOP,     /* tw-weekly-<yyyy>-W<ww>: Weekly Top 10, neon with the week on its sign (a frame only) */
     TRW_WEEKLY_CHAMP,   /* tw-weekly-champ-<yyyy>-W<ww>: Weekly Champ, gold and pink neon, a crown; title "Weekly Champ W48" */
+    /* build 108: the Team Tower's own (both players of a team run earn them; a guest player 2 nothing). Each is drawn
+     * as its solo look (tower_reward_base) with the TAG TEAM plate on the card's foot. No team floor 50: a team
+     * tower is 48 floors with the standard roster, its top reward is the clear. */
+    TRW_TEAM_FLOOR25,   /* tw-team-floor25: Tag Team 25, steel as Floor 25 */
+    TRW_TEAM_UNTOUCHABLE,   /* tw-team-untouchable: Untouchable Duo, chrome as Untouchable */
+    TRW_TEAM_CHAMPIONS, /* tw-team-champions-4: Tag Team Champions (standard), gold, a pulsing crown */
+    TRW_TEAM_LEGEND,    /* tw-team-legend-<tower 4|5>-<yyyy>-<mm>: Tag Team Legend, as Tower Legend */
+    TRW_TEAM_CHAMPIONS_COMMUNITY,   /* tw-team-champions-5: Tag Team Champions (community), emerald, the crown, five gems */
     TRW_KINDS
 };
 
@@ -45,18 +53,23 @@ enum { TRW_RARE = 1, TRW_EPIC, TRW_LEGENDARY, TRW_MYTHIC };
 
 #define TRW_EMBERS 5
 
-/* The reward an item id is (TRW_NONE: not one); a legend's tower (1 Uptown, 2 Five Boroughs), year and month
- * (1..12) into the pointers (any may be NULL); a week's reward (build 108): its year and ISO week (1..53, in month). */
+/* The reward an item id is (TRW_NONE: not one); a legend's tower (1 Uptown, 2 Five Boroughs, 4 Team Tower, 5 Team
+ * Tower Community), year and month (1..12) into the pointers (any may be NULL); a week's reward (build 108): its
+ * year and ISO week (1..53, in month); a Faction War reward's side (1 D-Mob, 2 Crow) in tower. */
 int tower_reward_kind(const char *id, int *tower, int *year, int *month);
 /* The viewer's Faction War side (0 none, 1 D-Mob, 2 Crow): the Locker's locked row "fw-winner-season" draws that side's
  * winner frame (none: D-Mob's) and its ribbon says "<SIDE> · WINNER FRAME" (none: "SEASON WINNER FRAME"), never "WON". */
 void tower_reward_set_side(int side);
+/* The solo look a kind is drawn as (a team kind's; any other kind is its own), and whether it is a team kind. */
+int tower_reward_base(int kind);
+int tower_reward_team(int kind);
 int tower_reward_rarity(int kind);
 const char *tower_reward_rarity_name(int rarity);      /* "RARE" .. "MYTHIC", "" none */
 unsigned tower_reward_effects(int kind);
 int tower_reward_effect_count(int kind);
-/* The Tower Legend's ribbon: "#1 UPTOWN · NOV 2026" (UTF-8 middle dot); a Faction War reward's: "D-MOB'S TEAM WON ·
- * NOV 2026", "#1 OF CROW'S TEAM · NOV 2026"; returns its length (0: none). */
+/* The Tower Legend's ribbon: "#1 UPTOWN · NOV 2026", a Tag Team Legend's "#1 TEAM TOWER · NOV 2026" (UTF-8 middle
+ * dot); a Faction War reward's: "D-MOB'S TEAM WON · NOV 2026", "#1 OF CROW'S TEAM · NOV 2026"; returns its length
+ * (0: none). */
 int tower_reward_ribbon(const char *id, char *out, int size);
 /* Build 108: the sign of a week's frame: "TOP 10 W48" / "CHAMP W48" ("WEEKLY" for the Locker's locked row); its
  * length (0: not a week's reward). */

@@ -37,7 +37,9 @@ the exit code is 1 on any failure.
            the balance rule, the FACTION WAR page's live totals, 1 ON 1 (or 2 ON 2 with four copies) and the board)
     python tools/defjam-mcp/dj.py scenario towersteam [--out D:/DefJam/community/team-tower-shots]   (build 106: the
            Team Tower, 2 vs 2 with two pads, signed in on a local account service: 3 floors won and saved, resumed and
-           lost, a new climb on floor 1, the community Team Tower; both boards with both names)
+           lost, a new climb on floor 1, the community Team Tower; build 108: player 2 signs in on the local
+           service's /auth/pair page with the code off the screen, the start records them, the sign-in card's pictures;
+           both boards with both names; FFNY_SERVER_DIR: a server checkout with pair.go)
     python tools/defjam-mcp/dj.py scenario towersweekly [--twists low_health,glass_jaw] [--out DIR]   (build 108: The
            Weekly, tower 3, on a local account service from source with its switch off, then on: no card while off;
            two floors of each twist, checked against the service's floor list and the twist's own effect; the

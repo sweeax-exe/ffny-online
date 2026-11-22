@@ -10,6 +10,8 @@
 static const struct { const char *id; int kind; } k_ids[] = {
     { "tw-floor25", TRW_FLOOR25 }, { "tw-floor50", TRW_FLOOR50 }, { "tw-uptown", TRW_UPTOWN },
     { "tw-untouchable", TRW_UNTOUCHABLE }, { "tw-weekly", TRW_WEEKLY }, { "tw-boroughs", TRW_BOROUGHS },
+    { "tw-team-floor25", TRW_TEAM_FLOOR25 }, { "tw-team-untouchable", TRW_TEAM_UNTOUCHABLE },
+    { "tw-team-champions-4", TRW_TEAM_CHAMPIONS }, { "tw-team-champions-5", TRW_TEAM_CHAMPIONS_COMMUNITY },
 };
 
 /* the viewer's Faction War side for the Locker's locked row (0 none, 1 D-Mob, 2 Crow) */
@@ -65,12 +67,36 @@ int tower_reward_kind(const char *id, int *tower, int *year, int *month)
         if (month) *month = m;
         return TRW_LEGEND;
     }
+    /* build 108: tw-team-legend-<4|5>-<yyyy>-<mm>, the team towers' month #1; "tw-team-legend-month" the locked row */
+    if (!strcmp(id, "tw-team-legend-month")) return TRW_TEAM_LEGEND;
+    n = 0;
+    if (sscanf(id, "tw-team-legend-%d-%4d-%2d%n", &t, &y, &m, &n) == 3 && n > 0 && id[n] == 0 && (t == 4 || t == 5) &&
+        y >= 2026 && m >= 1 && m <= 12) {
+        if (tower) *tower = t;
+        if (year) *year = y;
+        if (month) *month = m;
+        return TRW_TEAM_LEGEND;
+    }
     return TRW_NONE;
 }
 
-int tower_reward_rarity(int kind)
+int tower_reward_base(int kind)
 {
     switch (kind) {
+    case TRW_TEAM_FLOOR25: return TRW_FLOOR25;
+    case TRW_TEAM_UNTOUCHABLE: return TRW_UNTOUCHABLE;
+    case TRW_TEAM_CHAMPIONS: case TRW_TEAM_CHAMPIONS_COMMUNITY:
+        return TRW_BOROUGHS;        /* the crown and the sweep, in gold or emerald (tower_frames.inc) */
+    case TRW_TEAM_LEGEND: return TRW_LEGEND;
+    default: return kind > TRW_NONE && kind < TRW_KINDS ? kind : TRW_NONE;
+    }
+}
+
+int tower_reward_team(int kind) { return kind >= TRW_TEAM_FLOOR25 && kind <= TRW_TEAM_CHAMPIONS_COMMUNITY; }
+
+int tower_reward_rarity(int kind)
+{
+    switch (tower_reward_base(kind)) {
     case TRW_FLOOR25: case TRW_FLOOR50: return TRW_RARE;
     case TRW_UPTOWN: case TRW_UNTOUCHABLE: case TRW_WEEKLY: case TRW_WEEKLY_TOP: return TRW_EPIC;
     case TRW_BOROUGHS: case TRW_WEEKLY_CHAMP: return TRW_LEGENDARY;
@@ -89,7 +115,7 @@ const char *tower_reward_rarity_name(int rarity)
 
 unsigned tower_reward_effects(int kind)
 {
-    switch (kind) {
+    switch (tower_reward_base(kind)) {
     case TRW_UPTOWN: return TRW_FX_SWEEP | TRW_FX_SHINE;
     case TRW_UNTOUCHABLE: return TRW_FX_GLINT;
     case TRW_WEEKLY: case TRW_WEEKLY_TOP: return TRW_FX_GLOW | TRW_FX_FLICKER;
@@ -113,11 +139,12 @@ int tower_reward_effect_count(int kind)
 int tower_reward_ribbon(const char *id, char *out, int size)
 {
     static const char *const months[] = { "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC" };
-    int tower, year, month, n;
+    static const char *const towers[] = { "", "UPTOWN", "FIVE BOROUGHS", "THE WEEKLY", "TEAM TOWER", "TEAM TOWER COMMUNITY" };
+    int tower, year, month, n, kind;
     if (!out || size <= 0) return 0;
     out[0] = 0;
     {
-        int k = tower_reward_kind(id, &tower, &year, &month);
+        int k = kind = tower_reward_kind(id, &tower, &year, &month);
         if (k >= TRW_FW_DMOB && k <= TRW_FW_TOP_CROW) {
             const char *team = tower == 1 ? "D-MOB'S TEAM" : "CROW'S TEAM";
             if (!year) {      /* the locked row: nothing is won yet */
@@ -130,8 +157,8 @@ int tower_reward_ribbon(const char *id, char *out, int size)
             return n < 0 ? 0 : n >= size ? size - 1 : n;
         }
     }
-    if (tower_reward_kind(id, &tower, &year, &month) != TRW_LEGEND || !tower) return 0;
-    n = snprintf(out, (size_t)size, "#1 %s \xC2\xB7 %s %d", tower == 1 ? "UPTOWN" : "FIVE BOROUGHS", months[month - 1], year);
+    if ((kind != TRW_LEGEND && kind != TRW_TEAM_LEGEND) || tower < 1 || tower > 5) return 0;
+    n = snprintf(out, (size_t)size, "#1 %s \xC2\xB7 %s %d", towers[tower], months[month - 1], year);
     return n < 0 ? 0 : n >= size ? size - 1 : n;
 }
 
