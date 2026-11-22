@@ -368,6 +368,14 @@ static int sha256_hex(const char *text, char *out)
     return ok;
 }
 
+int account_pair_secret(char secret[65], char login[65])
+{
+    random_hex(secret);
+    if (sha256_hex(secret, login)) return 1;
+    SecureZeroMemory(secret, 65);
+    return 0;
+}
+
 static DWORD WINAPI sign_in_thread(LPVOID param)
 {
     char secret[65], login[65], url[160], body[96], buf[4096];
@@ -1063,6 +1071,7 @@ int account_download(const char *path, unsigned long long from, int (*sink)(void
                      void *ctx, int *partial)
 { (void)path; (void)from; (void)sink; (void)ctx; if (partial) *partial = 0; return -1; }
 int account_test_server_local(void) { return 0; }
+int account_pair_secret(char secret[65], char login[65]) { secret[0] = login[0] = 0; return 0; }
 int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
 { (void)ctype; (void)body; (void)len; if (size > 0) out[0] = 0; return 0; }
 int account_send_report_note(const char *ctype, const void *body, int len, char *out, int size)

@@ -80,6 +80,7 @@
 #include "music_library.h"
 #include "pc_launcher_music.h"
 #include "towers.h"
+#include "towers_partner.h"
 #include "input_host.h"     // build 106: the Team Tower's player 2 joins on pad 2 (towers_ui.inc)
 #include "input_map.h"
 #include "hub_grid.h"            // build 98: the tile hub's layout and grid moves
@@ -6158,6 +6159,8 @@ void gallery_step()
                                          "towers-start", "towers-climb-0", "towers-climb-1", "towers-climb-2", "towers-climb-3",
                                          "towers-boss", "towers-card", "towers-first", "towers-draw", "towers-lost", "towers-cleared",
                                          "towers-board", "towers-board-all", "towers-art", "towers-starting",
+                                         // build 108: the Team Tower's player 2 sign-in (the code, the name, signed in)
+                                         "towers-pair", "towers-pair-confirm", "towers-start-team",
                                          // build 86: RUN THE STREETS (closed test): the hub entry, the page, its CPU count
                                          "hub-rts", "rts", "rts-online",
                                          // build 98: the tile hub (MY MUSIC chosen in the bar; every tile and chip shown)
@@ -7954,6 +7957,11 @@ bool draw_pages(ImVec2 display)
             once = 1;
             open_towers();
             if (getenv("RECOMP_TEST_TOWERS_BOARD")) TWU.board = true;     // tests: the BOARD over the page
+        }
+        static int pair_once;       // tests (build 108): player 2's sign-in card, once player 1's session is checked
+        if (once && !pair_once && getenv("RECOMP_TEST_TOWERS_PAIR_CARD") && S.page == TOWERS && towers_signed_in()) {
+            pair_once = 1;
+            towers_ui_test_pair();
         }
     }
     // TOWERS needs no relay either: the page, its fighter pick and its cards (towers_ui.inc).

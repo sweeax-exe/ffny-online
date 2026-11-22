@@ -34,7 +34,9 @@ the exit code is 1 on any failure.
            the crew battle there, the new holder on the map; protection, a member's read-only page; --off: hidden)
     python tools/defjam-mcp/dj.py scenario towersteam [--out D:/DefJam/community/team-tower-shots]   (build 106: the
            Team Tower, 2 vs 2 with two pads, signed in on a local account service: 3 floors won and saved, resumed and
-           lost, a new climb on floor 1, the community Team Tower; both boards with both names)
+           lost, a new climb on floor 1, the community Team Tower; build 108: player 2 signs in on the local
+           service's /auth/pair page with the code off the screen, the start records them, the sign-in card's pictures;
+           both boards with both names; FFNY_SERVER_DIR: a server checkout with pair.go)
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
     python tools/defjam-mcp/dj.py lock status | run -- <command...>      (any other test under the lock)

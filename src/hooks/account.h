@@ -73,6 +73,9 @@ int account_fetch(const char *path, void *buf, int size, int *len);
  * only). Returns the HTTP status, 0 when unreachable, cut off or ended by the sink, -1 when not signed in. */
 int account_download(const char *path, unsigned long long from, int (*sink)(void *ctx, const char *data, unsigned n),
                      void *ctx, int *partial);
+/* A new random sign-in secret (64 hex digits) and its SHA-256 (64 hex digits), as the Discord sign-in makes them: the
+ * Team Tower's partner sign-in (towers_partner.c). 0 when Windows could not make them. */
+int account_pair_secret(char secret[65], char login[65]);
 /* 1 when RECOMP_ACCOUNT_SERVER names a test account service on this PC (127.0.0.1 or localhost). */
 int account_test_server_local(void);
 /* Sign-in without Discord (server relay/accounts/password.go). Each blocks for one request (call it off the

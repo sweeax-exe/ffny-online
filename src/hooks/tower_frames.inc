@@ -12,6 +12,11 @@
 //   MYTHIC     Tower Legend: red lacquer with gold trim, laurel, the month's ribbon, rising embers, a pulsing
 //              crown, sweep, shine
 //
+// Build 108, the Team Tower's own: each is its solo look (tower_reward_base) with the TAG TEAM plate on the card's
+// foot (two linked rings and the words): Tag Team 25 (steel, the "25" plate), Untouchable Duo (chrome), Tag Team
+// Champions (LEGENDARY: gold with the pulsing crown, sweep and shine) and Tag Team Legend (the legend's lacquer,
+// laurel, embers and the team tower's month on the ribbon).
+//
 // Everything works on any card size (the room's 128 x 270, the watch screens', the hill's king, the Locker's
 // preview). Visual only and light: fixed arrays, no allocation, the time from GetTickCount64 (a fixed moment in the
 // gallery, so its captures match).
@@ -38,6 +43,15 @@ const TrwStyle &trw_style(int kind)
           IM_COL32(230, 233, 239, 255), IM_COL32(232, 195, 74, 255), IM_COL32(255, 255, 255, 255) },
         { IM_COL32(255, 90, 67, 255), IM_COL32(168, 24, 15, 255), IM_COL32(86, 8, 5, 255),                // lacquer
           IM_COL32(212, 166, 42, 255), IM_COL32(240, 179, 58, 255), IM_COL32(255, 243, 200, 255) },
+        // build 108, the team kinds
+        { IM_COL32(232, 238, 244, 255), IM_COL32(138, 148, 160, 255), IM_COL32(58, 64, 74, 255),          // steel
+          IM_COL32(196, 204, 214, 255), IM_COL32(176, 188, 200, 255), IM_COL32(255, 255, 255, 255) },
+        { IM_COL32(255, 255, 255, 255), IM_COL32(125, 135, 148, 255), IM_COL32(29, 35, 43, 255),          // chrome
+          IM_COL32(230, 237, 243, 255), IM_COL32(207, 214, 222, 255), IM_COL32(255, 255, 255, 255) },
+        { IM_COL32(255, 243, 184, 255), IM_COL32(217, 171, 50, 255), IM_COL32(122, 84, 16, 255),          // gold
+          IM_COL32(255, 226, 120, 255), IM_COL32(232, 190, 64, 255), IM_COL32(255, 250, 215, 255) },
+        { IM_COL32(255, 90, 67, 255), IM_COL32(168, 24, 15, 255), IM_COL32(86, 8, 5, 255),                // lacquer
+          IM_COL32(212, 166, 42, 255), IM_COL32(240, 179, 58, 255), IM_COL32(255, 243, 200, 255) },
     };
     return k[kind > 0 && kind < TRW_KINDS ? kind : 0];
 }
@@ -51,6 +65,21 @@ ImU32 rarity_col(int rarity)
     case TRW_MYTHIC: return IM_COL32(255, 107, 74, 255);
     default: return CREAM;
     }
+}
+
+// Build 108: the team kinds' TAG TEAM plate, centred at cx on the card's foot line y: a dark pill in the frame's
+// trim with two linked rings (the two players) and the words.
+void trw_team_plate(ImDrawList *dl, const Frame &f, float cx, float y, float u, const TrwStyle &s, float a)
+{
+    float size = std::max(7.0f, std::min(11.0f, u * 0.075f)), r = size * 0.42f;
+    float tw = text_width(f, g_title, size, "TAG TEAM"), w = tw + r * 4.6f + size * 1.4f, h = size * 1.55f;
+    float x = cx - w / 2, top = y - h / 2;
+    dl->AddRectFilled(f.p(x, top), f.p(x + w, top + h), with_alpha(IM_COL32(12, 10, 14, 255), a * 0.92f), h / 2 * f.s());
+    dl->AddRect(f.p(x, top), f.p(x + w, top + h), with_alpha(s.trim, a), h / 2 * f.s(), 0, 1.3f * f.s());
+    float rx = x + size * 0.7f + r, ry = top + h / 2;
+    dl->AddCircle(f.p(rx, ry), r * f.s(), with_alpha(s.hi, a), 14, 1.4f * f.s());
+    dl->AddCircle(f.p(rx + r * 1.25f, ry), r * f.s(), with_alpha(s.mid, a), 14, 1.4f * f.s());
+    text(dl, f, g_title, size, rx + r * 2.6f + tw / 2, top + (h - size) / 2 - 0.5f, with_alpha(s.title_hi, a), "TAG TEAM", CENTER, 0.4f);
 }
 
 // The effects' clock in seconds (the gallery: one fixed moment, a sweep half way across).
@@ -199,10 +228,11 @@ void trw_shield(ImDrawList *dl, const Frame &f, float cx, float cy, float s, flo
 bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, const char *id, float foot,
                       float a)
 {
-    int kind = tower_reward_kind(id, nullptr, nullptr, nullptr);
+    int kind = tower_reward_kind(id, nullptr, nullptr, nullptr), base = tower_reward_base(kind);
     if (kind == TRW_NONE) return false;
     if (foot <= 0) foot = h * 0.66f;
     const TrwStyle &s = trw_style(kind);
+    bool team = tower_reward_team(kind) != 0;
     unsigned fx = tower_reward_effects(kind);
     // u: the ornaments' measure, a portrait card's width (a wide card, as the Locker's versus preview, keeps them small)
     float t = trw_now(), u = std::min(w, h * 0.66f), b = std::max(3.0f, std::min(7.0f, u * 0.03f)), cx = x + w / 2;
@@ -218,7 +248,7 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
         }
         dl->PopClipRect();
     }
-    switch (kind) {
+    switch (base) {
     case TRW_WEEKLY: {      // neon: a pink tube, a dark gap, a cyan tube, each with its glow
         float g = fx & TRW_FX_GLOW ? tower_fx_pulse(t, 3.0f) : 0.5f;
         for (int k = 4; k >= 1; k--) {
@@ -244,6 +274,7 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
         dl->AddPolyline(pts, 6, with_alpha(s.hi, a * 0.9f), ImDrawFlags_Closed, b * 0.25f * f.s());
         trw_shield(dl, f, x + w - b - u * 0.09f, y + b + u * 0.1f, u * 0.13f, a);
         if (fx & TRW_FX_GLINT) trw_sweep(dl, f, x, y, w, h, tower_fx_sweep(t, 2.4f), true, a);
+        if (team) trw_team_plate(dl, f, cx, y + h - b / 2, u, s, a);
         return true;
     }
     case TRW_LEGEND:        // red lacquer inside a gold line, the gold trim inside
@@ -261,7 +292,7 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
         break;
     case TRW_BOROUGHS:
         trw_metal(dl, f, x, y, w, h, b, s, a);
-        trw_gems(dl, f, cx, y + h, u, a);
+        if (!team) trw_gems(dl, f, cx, y + h, u, a);     // Tag Team Champions: the TAG TEAM plate in their place
         trw_crown(dl, f, cx, y, u * 0.38f, pulse, a);
         break;
     case TRW_UPTOWN:
@@ -279,11 +310,12 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
         const float rx[2] = { x + o, x + w - o }, ry[3] = { y + o, y + h / 2, y + h - o };
         for (float px : rx)
             for (float py : ry) trw_rivet(dl, f, px, py, py == y + h / 2 ? r * 0.8f : r, s, a);
-        trw_plate(dl, f, cx, y, u, kind == TRW_FLOOR50 ? "50" : "25", s, a);
+        trw_plate(dl, f, cx, y, u, base == TRW_FLOOR50 ? "50" : "25", s, a);
         break;
     }
     }
-    if (fx & TRW_FX_SWEEP) trw_sweep(dl, f, x, y, w, h, tower_fx_sweep(t, kind == TRW_UPTOWN ? 5.0f : 3.2f), false, a);
+    if (fx & TRW_FX_SWEEP) trw_sweep(dl, f, x, y, w, h, tower_fx_sweep(t, base == TRW_UPTOWN ? 5.0f : 3.2f), false, a);
+    if (team) trw_team_plate(dl, f, cx, y + h - b / 2, u, s, a);
     return true;
 }
 
@@ -299,6 +331,7 @@ bool tower_title_text(ImDrawList *dl, const Frame &f, float cx, float y, float s
     for (const char *p = title; *p && n < (int)sizeof(up) - 1; p++) up[n++] = (*p >= 'a' && *p <= 'z') ? (char)(*p - 32) : *p;
     up[n] = 0;
     if (kind == TRW_LEGEND) snprintf(up, sizeof(up), "TOWER LEGEND");       // the ribbon carries the month
+    if (kind == TRW_TEAM_LEGEND) snprintf(up, sizeof(up), "TAG TEAM LEGEND");
     const TrwStyle &s = trw_style(kind);
     unsigned fx = tower_reward_effects(kind);
     float t = trw_now();

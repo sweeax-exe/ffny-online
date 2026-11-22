@@ -27,7 +27,13 @@
 // floor n (a save point); RECOMP_TEST_TOWERS_END=a|b answers the end screen after 3 s. Gallery pages: hub-towers,
 // towers, towers-rules, towers-saved, towers-start, towers-climb-0..3, towers-card, towers-first, towers-draw,
 // towers-lost, towers-cleared, towers-board, towers-board-all, towers-art (the drawn fallback beside the art),
-// towers-starting.
+// towers-starting; build 108: towers-pair, towers-pair-confirm, towers-start-team (player 2 signed in).
+//
+// Build 108, the Team Tower's player 2 sign-in (towers_partner.c): the start card shows PLAYER 2: GUEST (or the
+// account) and Y (either controller) opens the sign-in card: the page and the code for player 2's phone, then
+// player 2's name, confirmed with A on player 2's own controller (B: not me). Tests: RECOMP_TEST_TOWERS_PAIR_CARD=1
+// opens the sign-in card on the Team Tower (fighters 55 and 22) with the page; RECOMP_TEST_TOWERS_P2_CONFIRM_UI=1
+// is player 2's A 4 s after the name shows.
 
 void open_fighters_for(bool towers);       // below: the hub's grid for a tower's climber
 bool G_towers_starting = false;            // the gallery's towers-starting page
@@ -63,6 +69,10 @@ struct TowersUi {
     std::atomic<int> starting{0};   // 1 a start is asking the service, 2 it started, 3 it could not start
     bool sfx_move = false, sfx_land = false;
     bool gal_drawn = false;         // towers-art: the drawn fallback even with the art there
+    // build 108: the gallery's player 2 sign-in sample (towers-pair, towers-pair-confirm, towers-start-team)
+    bool gal_pair = false;
+    PartnerView gal_pv = {};
+    ULONGLONG confirm_seen = 0;     // the sign-in card first showed player 2's name then (the test's A)
 } TWU;
 
 // GET /api/towers/board?format=text (server relay/accounts/towers.go TowerBoardText), per season kind.
@@ -206,6 +216,32 @@ const ImU32 TOWER_COL[TOWER_COUNT] = { IM_COL32(255, 150, 40, 255), IM_COL32(80,
 int tw_card_tower(int k) { return k < 3 ? k + 1 : TWU.team_comm ? TOWER_TEAM_COMMUNITY : TOWER_TEAM; }
 
 // Build 106: player 2 presses A on the second controller (pad slot 1). Tests: RECOMP_TEST_TOWERS_P2_JOIN=1.
+// Build 108: a fresh press of one of player 2's buttons (INPUT_SRC_*) on the second controller. The first read
+// after a pause (the card not drawn last frame) only learns the state, so a button held from an earlier screen is
+// no press.
+bool tw_p2_edge(int src)
+{
+    static bool down[INPUT_SRC_COUNT];
+    static int last_frame[INPUT_SRC_COUNT];
+    InputRaw raw;
+    if (src < 0 || src >= INPUT_SRC_COUNT) return false;
+    int frame = ImGui::GetFrameCount();
+    bool now = xbox_HostInputRawPad(1, &raw) && raw.src[src] >= 16384;
+    bool fresh = last_frame[src] >= frame - 1 && now && !down[src];
+    down[src] = now;
+    last_frame[src] = frame;
+    return fresh;
+}
+
+// The partner view (the gallery's sample in the gallery).
+PartnerView tw_partner()
+{
+    PartnerView pv = {};
+    if (gallery_on()) return TWU.gal_pair ? TWU.gal_pv : pv;
+    towers_partner_view(&pv);
+    return pv;
+}
+
 bool tw_p2_pressed_a()
 {
     InputRaw raw;
@@ -603,6 +639,95 @@ void towers_run_card(ImDrawList *dl, const Frame &f, int tower, const TowerRun *
     }
 }
 
+// Build 108: the sign-in card of player 2 (towers_partner.c): the page and the code, then the name to confirm.
+void towers_pair_card(ImDrawList *dl, const Frame &f, int tower, const Pad &pad)
+{
+    ImU32 col = TOWER_COL[tower - 1];
+    PartnerView pv = tw_partner();
+    float pulse = 0.5f + 0.5f * (float)sin(ImGui::GetTime() * 4.0);
+    glass(dl, f, 140, 100, 360, 270, 14, IM_COL32(12, 10, 14, 255), 0.94f);
+    text(dl, f, g_stencil, 22, 320, 110, CREAM, "PLAYER 2: SIGN IN", CENTER, 1.4f);
+    rect(dl, f, 250, 138, 140, 2, col);
+    bool p2a = !gallery_on() && tw_p2_edge(INPUT_SRC_SOUTH), p2b = !gallery_on() && tw_p2_edge(INPUT_SRC_EAST);
+    float hx = 230;
+    switch (pv.state) {
+    case PARTNER_STARTING:
+        text(dl, f, g_title, 12, 320, 220, with_alpha(CREAM, 0.5f + 0.5f * pulse), "ASKING THE SERVER FOR A CODE...", CENTER, 0.8f);
+        hint(dl, f, 280, 344, "b", "BACK");
+        break;
+    case PARTNER_WAITING: {
+        std::string url = pv.url;
+        if (!url.compare(0, 8, "https://")) url = url.substr(8);
+        else if (!url.compare(0, 7, "http://")) url = url.substr(7);
+        text(dl, f, g_title, 11, 170, 152, GREY, "1   ON YOUR PHONE, OPEN", LEFT, 0.8f);
+        text(dl, f, g_title, std::min(19.0f, fit_size(f, g_title, 19, url.c_str(), 300)), 320, 168, WHITE, url.c_str(), CENTER, 1.0f);
+        text(dl, f, g_title, 11, 170, 200, GREY, "2   TYPE THIS CODE", LEFT, 0.8f);
+        glass(dl, f, 220, 216, 200, 52, 10, IM_COL32(20, 16, 12, 255), 0.9f);
+        frame_rect(dl, f, 220, 216, 200, 52, with_alpha(col, 0.9f), 1.5f);
+        text(dl, f, g_stencil, 34, 320, 222, col, pv.code, CENTER, 2.0f);
+        text(dl, f, g_title, 11, 170, 280, GREY, "3   SIGN IN WITH DISCORD OR YOUR FFNY USERNAME", LEFT, 0.8f, 320);
+        char line[96];
+        snprintf(line, sizeof line, "Waiting for player 2...  The code runs out in %d:%02d.", pv.secs_left / 60, pv.secs_left % 60);
+        text(dl, f, g_hand, 11, 320, 304, with_alpha(CREAM, 0.6f + 0.4f * pulse), line, CENTER, 0.8f);
+        text(dl, f, g_hand, 10, 320, 322, GREY, "This signs player 2 in for the Team Tower only, on this PC.", CENTER, 0.6f);
+        hx = 236;
+        hx += hint(dl, f, hx, 344, "y", "NEW CODE");
+        hint(dl, f, hx, 344, "b", "GUEST");
+        break;
+    }
+    case PARTNER_CONFIRM: {
+        if (!TWU.confirm_seen) TWU.confirm_seen = GetTickCount64();
+        text(dl, f, g_title, 12, 320, 170, GREY, "PLAYER 2 SIGNED IN AS", CENTER, 0.8f);
+        text(dl, f, g_stencil, std::min(30.0f, fit_size(f, g_stencil, 30, pv.name, 320)), 320, 190, GOLD, pv.name, CENTER, 1.6f);
+        glass(dl, f, 170, 252, 300, 30, 8, IM_COL32(14, 30, 18, 255), 0.9f);
+        text(dl, f, g_title, 13, 320, 259, with_alpha(col, 0.55f + 0.45f * pulse), "PLAYER 2: IS THAT YOU? PRESS A", CENTER, 1.0f);
+        text(dl, f, g_hand, 10, 320, 292, GREY, "A on player 2's own controller confirms. Not you? B: player 2 plays as a guest.",
+             CENTER, 0.6f, 320);
+        hx = 250;
+        hx += hint(dl, f, hx, 344, "a", "IT'S ME (P2)");
+        hint(dl, f, hx, 344, "b", "NOT ME");
+        const char *t = getenv("RECOMP_TEST_TOWERS_P2_CONFIRM_UI");
+        if (t && *t == '1' && GetTickCount64() - TWU.confirm_seen > 4000) p2a = true;     // tests: player 2's A
+        if (p2a && towers_partner_confirm()) {
+            say(std::string("Player 2 is ") + pv.name + ": both names go on the board.", 5000);
+            TWU.card = 2;
+            return;
+        }
+        if (p2b || pad.b) { towers_partner_reject(); say("Player 2 plays as a guest.", 4000); TWU.card = 2; return; }
+        return;
+    }
+    case PARTNER_SIGNED:
+        TWU.card = 2;
+        return;
+    case PARTNER_FAILED:
+        text(dl, f, g_title, 12, 320, 190, ORANGE, "PLAYER 2 COULD NOT SIGN IN", CENTER, 0.8f);
+        text(dl, f, g_hand, 12, 320, 214, CREAM, pv.why, CENTER, 0.8f, 320);
+        hx = 236;
+        hx += hint(dl, f, hx, 344, "y", "TRY AGAIN");
+        hint(dl, f, hx, 344, "b", "GUEST");
+        break;
+    default:
+        TWU.card = 2;
+        return;
+    }
+    if (gallery_on()) return;
+    if (pad.y || tw_p2_edge(INPUT_SRC_NORTH)) { towers_partner_begin(); return; }
+    if (pad.b || p2b) { towers_partner_cancel(); TWU.card = 2; }
+}
+
+// Tests (build 108): RECOMP_TEST_TOWERS_PAIR_CARD=1: the Team Tower's sign-in card with the page open.
+void towers_ui_test_pair()
+{
+    TWU.sel = 3;
+    TWU.team_comm = false;
+    TWU.pick = 55; TWU.pick_skin = 0;
+    TWU.pick2 = 22; TWU.pick2_skin = 0;
+    TWU.team_stage = 0;
+    TWU.card = towers_partner_begin() ? 5 : 2;
+    TWU.confirm_seen = 0;
+    fprintf(stderr, "[TOWERS] test: the sign-in card of player 2 (%s)\n", TWU.card == 5 ? "open" : "player 1 is signed out");
+}
+
 void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 display)
 {
     backdrop(dl, f, display, true, LOOK_STATS);
@@ -709,6 +834,10 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
         }
         return;
     }
+    if (TWU.card == 5) {    // build 108: player 2 signs in with their own account, on their phone
+        towers_pair_card(dl, f, tower, pad);
+        return;
+    }
     if (TWU.card == 3) {    // build 106: player 2 joins on the second controller
         towers_run_card(dl, f, tower, nullptr, TWU.pick, TWU.pick_skin);
         float pulse = 0.5f + 0.5f * (float)sin(ImGui::GetTime() * 4.0);
@@ -739,11 +868,28 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
             say(why && *why ? why : "This tower cannot be built on this PC: no fighters or venues were read from the game.", 8000);
         }
         bool signed_now = gallery_on() || towers_signed_in();     // build 99: the rule towers.c posts runs by
+        bool team = TOWER_IS_TEAM(tower) && signed_now;         // build 108: player 2's own account
         text(dl, f, g_hand, 11, 320, 318, signed_now ? GOLD : GREY, signed_now ? "Signed in: this climb goes on the board." :
              "Signed out: an offline climb, not on the board.", CENTER, 0.8f);
-        float hx = 196;
+        if (team) {
+            PartnerView pv = tw_partner();
+            bool p2 = pv.state == PARTNER_SIGNED;
+            std::string who = p2 ? std::string("PLAYER 2: ") + pv.name : "PLAYER 2: GUEST";
+            text(dl, f, g_title, 11, 290, 276, p2 ? GOLD : CREAM, who.c_str(), LEFT, 0.8f, 180);
+            text(dl, f, g_hand, 10, 290, 290, GREY, p2 ? "Both names on the board, both earn the team rewards." :
+                 "Sign in so player 2 earns the team rewards too.", LEFT, 0.6f, 190);
+            if (!gallery_on() && towers_partner_dropped())
+                say("Player 2's sign-in ran out: player 2 played as a guest. Press Y to sign in again.", 8000);
+        }
+        float hx = team ? 158 : 196;
         hx += hint(dl, f, hx, 336, "a", "START THE CLIMB");
+        if (team) hx += hint(dl, f, hx, 336, "y", "PLAYER 2 SIGN IN");
         hint(dl, f, hx, 336, "b", "BACK");
+        if (team && !gallery_on() && (pad.y || tw_p2_edge(INPUT_SRC_NORTH))) {     // either controller's Y
+            if (towers_partner_begin()) { TWU.card = 5; TWU.confirm_seen = 0; }
+            else say("Player 1 signs in first (Y in the hub), then player 2 can.", 5000);
+            return;
+        }
         if (pad.b) { TWU.card = 0; TWU.team_stage = 0; }
         else if (pad.a && !gallery_on()) {
             int t = tower, pick = TWU.pick, skin = TWU.pick_skin, pick2 = TWU.pick2, skin2 = TWU.pick2_skin;
@@ -1212,6 +1358,7 @@ bool towers_gallery(const std::string &p)
     TWU.board = false;
     TWU.gal_drawn = false;
     G_towers_starting = false;
+    TWU.gal_pair = false;
     S.towers_pick = false;
     if (p == "hub-towers") { S.page = HUB; S.hub_sel = HUB_TOWERS; return true; }
     S.page = TOWERS;
@@ -1224,6 +1371,17 @@ bool towers_gallery(const std::string &p)
     else if (p == "towers-starting") { TWU.sel = 0; TWU.card = 2; TWU.pick = 22; TWU.pick_skin = 0; G_towers_starting = true; }
     else if (p == "towers-saved") TWU.card = 1;
     else if (p == "towers-start") { TWU.sel = 1; TWU.card = 2; TWU.pick = 22; TWU.pick_skin = 0; }
+    else if (p == "towers-pair" || p == "towers-pair-confirm" || p == "towers-start-team") {     // build 108
+        TWU.sel = 3; TWU.team_comm = false; TWU.pick = 55; TWU.pick_skin = 0; TWU.pick2 = 22; TWU.pick2_skin = 0;
+        TWU.card = p == "towers-start-team" ? 2 : 5;
+        TWU.gal_pair = true;
+        TWU.gal_pv = PartnerView();
+        TWU.gal_pv.state = p == "towers-pair" ? PARTNER_WAITING : p == "towers-pair-confirm" ? PARTNER_CONFIRM : PARTNER_SIGNED;
+        snprintf(TWU.gal_pv.code, sizeof TWU.gal_pv.code, "K7Q-2MX");
+        snprintf(TWU.gal_pv.url, sizeof TWU.gal_pv.url, "https://play.defjam.online/auth/pair");
+        snprintf(TWU.gal_pv.name, sizeof TWU.gal_pv.name, "MASA");
+        TWU.gal_pv.secs_left = 9 * 60 + 41;
+    }
     else if (!p.compare(0, 13, "towers-climb-")) {      // the climb at 0.3, 1.0, 2.2 and 3.5 s
         static const float at[] = { 0.3f, 1.0f, 2.2f, 3.5f };
         int k = std::max(0, std::min(3, atoi(p.c_str() + 13)));
@@ -1283,6 +1441,7 @@ const char *towers_shot_label_impl()
         return TWU.v.state == TOWERS_WON || TWU.v.state == TOWERS_DRAW ? "towers-climb" : "towers-end";
     }
     if (GetTickCount64() - TWU.card_seen < 200) return "towers-card";
-    if (S.page == TOWERS) return TWU.board ? "towers-board" : TWU.card == 2 ? "towers-start" : TWU.card == 1 ? "towers-saved" : "towers";
+    if (S.page == TOWERS) return TWU.board ? "towers-board" : TWU.card == 5 ? "towers-pair" : TWU.card == 2 ? "towers-start" :
+                                 TWU.card == 1 ? "towers-saved" : "towers";
     return nullptr;
 }
