@@ -30,8 +30,8 @@
 #define F_HEALTH_NOW    0x350u
 #define F_HEALTH_TOP    0x354u
 #define F_HEALTH_SHARE  0x35Cu
-#define F_MOMENTUM      0x374u
-#define F_MOMENTUM_TOP  0x378u
+#define F_STUN          0x374u          /* the stun meter (dizzy.md); builds 97-107 wrote the start "momentum" here */
+#define MOMENTUM_FULL   100.0f          /* the momentum meter's top (+0x364: floor 20, 98/99 the Blazin' snap) */
 #define G_SLOT_LEVEL    0x003B90A8u     /* each fighter slot's difficulty word (netplay.c cpu_level_apply) */
 #define G_PHASE         0x003B8F30u     /* the match's phase: 1 fighting, 2 decided, 3 finished */
 #define G_WINNER        0x003B8F40u     /* the winner's slot (phase 3) */
@@ -1363,13 +1363,17 @@ void towers_step(void)
         int k;
         for (k = 0; k < (team ? 2 : 1); k++) {      /* build 106: both CPUs of a team floor */
             uint32_t c = cpu + STRIDE * (uint32_t)k;
-            float top = MEMF(c + F_MOMENTUM_TOP);
-            if (MEM32(c + F_SLOT) == 0xFFFFFFFFu || !(top > 0.0f)) continue;
+            float want = MOMENTUM_FULL * g_rules.cpu_momentum, was = MEMF(c + F_METER);
+            /* the record is set up once its health is (sub_001A4F30 sets the meter's floor of 20 with it) */
+            if (MEM32(c + F_SLOT) == 0xFFFFFFFFu || !(MEMF(c + F_HEALTH_TOP) > 0.0f)) continue;
             g_momentum_done = 1;
-            if (g_rules.cpu_momentum > 0.0f) {
-                MEMF(c + F_MOMENTUM) = top * g_rules.cpu_momentum;
-                fprintf(stderr, "[TOWERS] the CPU starts with %.0f%% momentum (%.1f of %.1f)\n",
-                        g_rules.cpu_momentum * 100.0f, (double)MEMF(c + F_MOMENTUM), (double)top);
+            /* build 108: the real momentum meter, +0x364 (0..100, the Blazin' meter). Builds 97-107 wrote this
+             * share into +0x374 / +0x378, the stun meter and its cap (docs/research/dizzy.md): the CPU started
+             * nearer to dizzy instead of nearer to a Blazin' */
+            if (g_rules.cpu_momentum > 0.0f && was == was && want > was) {
+                MEMF(c + F_METER) = want;
+                fprintf(stderr, "[TOWERS] the CPU starts with %.0f%% momentum (meter %.1f, was %.1f)\n",
+                        g_rules.cpu_momentum * 100.0f, (double)MEMF(c + F_METER), (double)was);
             }
         }
     }
@@ -1394,6 +1398,8 @@ void towers_step(void)
             towers_ai_end(d ? -1 : w, g_step);
             fprintf(stderr, "[TOWERS] floor %d decided at step %u: %s; the climber's health %d%%\n", g_run.floor,
                     g_step, d ? "a draw" : w == 0 ? (team ? "the team won" : "the climber won") : "the CPU won", g_end_health);
+            fprintf(stderr, "[TOWERS] the CPU at the decision: momentum %.1f, stun %.1f of %.1f, Blazin' state %u\n",
+                    (double)MEMF(cpu + F_METER), (double)MEMF(cpu + F_STUN), (double)MEMF(cpu + F_STUN_CAP), MEM8(cpu + F_BLAZIN));
             if (g_run.tower == TOWER_WEEKLY)
                 fprintf(stderr, "[TOWERS] the Weekly at the decision: %d hit(s) scaled x%.1f, CPU meter refilled %d time(s) "
                         "(now %.1f), max health climber %.1f, CPU %.1f\n", g_hits_scaled, g_rules.hit_scale, g_momentum_refills,
