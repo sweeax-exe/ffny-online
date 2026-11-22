@@ -69,6 +69,7 @@
 #include "start_countdown.h"
 #include "detmath/detmath.h"
 #include "towers.h"
+#include "towers_online.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -214,6 +215,7 @@ int netplay_local_slot(void) { return -1; }
 int netplay_rts_match(void) { return 0; }
 int netplay_rts_rules(void) { return 0; }
 int netplay_rts_room(void) { return 0; }
+void netplay_lobby_tower_choice(int c) { (void)c; }
 int netplay_fighter_of_room_slot(int s) { (void)s; return -1; }
 int netplay_relay_rts(void) { return 0; }
 int netplay_relay_rts_points(void) { return 0; }
@@ -307,6 +309,10 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                  *    u8 venue, locks[2], winner, n, choices[n], g, g x {venue, winner, f0, f1, how},
                                  *    str8 round, str8 why */
 #define T_TPICK       0x39      /* -> token 8, u8 venue */
+#define T_TOWER       0x3D      /* <- Team Tower Online: the climb (towers_online.c reads it), after every ROOM of a tower room */
+#define T_TCHOICE     0x3E      /* -> token 8, u8 choice (0 hello, 1 resume, 2 new climb), u8 the Towers rules version */
+#define TOWER_TRAILER 0x54      /* START: after the numbers trailer, the floor (u8 rules, tower, u16 floor, floors, cpu 1, cpu 2) */
+#define TOWER_RESULT  0xF7      /* RESULT: after the winner, u32 steps, u8 the team's health %, the CPUs' */
 #define TSET_RETRY_MS 2000      /* TJOIN again while no answer came (the relay asks the account service) */
 #define TSET_TRIES    15
 #define IDENT_OK      0
@@ -631,6 +637,11 @@ static struct {
     int rot_match;                  /* this START is an FFA rotation fight: up to four, the winner stays */
     int rts_match;                  /* this START is a Run the Streets fight (NETPLAY_MODE_RTS room) */
     int rts_rules;                  /* build 87: its round rules, START's rounds byte (never the game's own rules) */
+    int tower_match;                /* this START is a Team Tower Online floor (its tower trailer; towers.c plays it) */
+    int tower_res_on;               /* the RESULT to repeat carries the tower trailer: */
+    uint32_t tower_res_steps;       /* ... the step the floor was decided at */
+    uint8_t tower_res_health[2];    /* ... the team's and the CPUs' health % (255 unknown) */
+    char tower_hello[8];            /* the tower room this PC said hello in (TCHOICE 0) */
     int rot_out[MAXP];              /* FFA rotation: when each position was put out (1, 2, ...), 0 still in */
     int rot_outs;
     uint8_t koth_order[MAXP];       /* FFA rotation: the RESULT's finishing order (room slots, best first) */
@@ -937,6 +948,7 @@ static unsigned room_rb_class(void)
         return NETPLAY_RB_RANKED;
     if (NETPLAY_IS_FFAROT(mode)) return NETPLAY_RB_KOTH;    /* one fight per START, as on the hill */
     if (NETPLAY_IS_RTS(mode)) return NETPLAY_RB_FFA;
+    if (NETPLAY_IS_TOWER(mode)) return NETPLAY_RB_TEAM;     /* (its floors never roll back: every_player_rolls_back) */
     if (NETPLAY_IS_KOTH(mode))
         return N.crew.battle && !memcmp(N.crew_room, N.roomv.code, 7) ? NETPLAY_RB_CREW : NETPLAY_RB_KOTH;
     if (mode == ONLINE_MODE_TEAM) return NETPLAY_RB_TEAM;
@@ -2310,6 +2322,10 @@ static void end_hub_match(const char *why)
     disarm_crash_report();
     if (N.match_seen) fight_waits_log();
     memset(&g_fight_waits, 0, sizeof(g_fight_waits));
+    if (N.tower_match) {    /* Team Tower Online: the floor is over here (its RESULT was made: koth_check_result) */
+        N.tower_match = 0;
+        towers_online_floor(0, 0, 0, 0, 0, 0, 0);
+    }
     N.match_live = N.match_seen = 0;
     N.over_pending = 1;
     if (N.watching) {
@@ -3081,6 +3097,9 @@ static int every_player_rolls_back(void)
      * depth-8 soak ran clean offline, but no long online rollback run yet. Every PC knows the room's mode from ROOM.
      * Tests: RECOMP_ROLLBACK_RTS=1 on every copy lifts it. */
     if (N.rts_match && !(getenv("RECOMP_ROLLBACK_RTS") && *getenv("RECOMP_ROLLBACK_RTS") == '1')) return 0;
+    /* Team Tower Online stays in lockstep (owner, 2026-11-22: rollback later): its AI ramp's host state is in the
+     * checksum, not yet in the rollback snapshot. Every PC knows it from START's tower trailer. */
+    if (N.tower_match) return 0;
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
     if (match_has_created())
         for (i = 0; i < N.players; i++) if (!N.peer_rb_cp[i]) return 0;
@@ -3771,6 +3790,12 @@ static void on_room(const uint8_t *b, int len)
         }
     }
     LeaveCriticalSection(&g_cs);
+    if (NETPLAY_IS_TOWER(v.settings.mode) && v.you < 2 && strncmp(N.tower_hello, v.code, 7)) {
+        uint8_t hello[2] = { TOWERNET_CHOICE_HELLO, TOWER_RULES_VERSION };   /* this game's Towers rules (relay/tower.go) */
+        snprintf(N.tower_hello, sizeof(N.tower_hello), "%.7s", v.code);
+        fprintf(stderr, "[NETPLAY] tower room %s: hello with Towers rules %d" "\n", v.code, TOWER_RULES_VERSION);
+        request(T_TCHOICE, hello, 2);
+    }
     if (gone && HILL_WATCHING()) {
         /* build 70: a fighter of the watched hill fight left the room; its feed ends, back to the hill screen */
         fprintf(stderr, "[NETPLAY] watching: a fighter left the room (step %u); back to the hill screen\n", N.step);
@@ -4289,6 +4314,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     int count, i, j, slots[MAXP], fighters[MAXP], pos = -1, deferred, late = watching == 2, cpu = NETPLAY_CPU_HARD;
     int hill_watch = watching == 3, leaving = 0, ring_type = RING_NONE;
     int skin_of_slot[ROOMSLOTS], templ[MAXP], fixed = 0;
+    int tower_floor = 0, tower_floors = 0, tower_rules = 0, tower_tower = 0, tower_opp[2] = { 55, 55 };
     unsigned lineup = 0;
     memset(skin_of_slot, 0, sizeof(skin_of_slot));
     if (len < 4) return;
@@ -4343,6 +4369,20 @@ static void on_start_as(const uint8_t *b, int len, int watching)
                 fprintf(stderr, "[BANKS] START: slot %d plays community fighter %u\n", s, (unsigned)num);
             }
             if (r.bad) return;
+        }
+        tower_floor = 0;
+        if (r.i < r.n && rd8(&r) == TOWER_TRAILER) {    /* Team Tower Online: the floor and its CPUs (relay/tower.go) */
+            tower_rules = rd8(&r);
+            tower_tower = rd8(&r);
+            tower_floor = rd8(&r); tower_floor |= rd8(&r) << 8;
+            tower_floors = rd8(&r); tower_floors |= rd8(&r) << 8;
+            tower_opp[0] = rd8(&r); tower_opp[0] |= rd8(&r) << 8;
+            tower_opp[1] = rd8(&r); tower_opp[1] |= rd8(&r) << 8;
+            if (r.bad || !online_fighter_has_row(tower_opp[0]) || !online_fighter_has_row(tower_opp[1])) {
+                fprintf(stderr, "[NETPLAY] START: a tower trailer this game cannot play (floor %d, CPUs %d + %d)\n",
+                        tower_floor, tower_opp[0], tower_opp[1]);
+                return;
+            }
         }
         /* the four bank rows (124..127) are each PC's per-slot rows for the numbers: never a fighter of their own
          * online (an older client's place there); Doc on every PC that has them, as the relay's own fallback */
@@ -4409,6 +4449,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         for (i = count; mode && i < mode->fighters && i < MAXP; i++) {
             m.pad[i] = -1;
             m.fighter[i] = roster_count ? roster[mix32(seed ^ (0xC0FFEEu + (uint32_t)i)) % (uint32_t)roster_count].id : 55;
+            if (tower_floor && i >= 2 && i <= 3) m.fighter[i] = tower_opp[i - 2];   /* Team Tower Online: the floor's CPUs */
             m.count = i + 1;
         }
     }
@@ -4519,6 +4560,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     /* FFA rotation: the same, with up to four; a player who leaves is out and the others fight on */
     N.rot_match = NETPLAY_IS_FFAROT(N.roomv.settings.mode);
     N.rts_match = NETPLAY_IS_RTS(N.roomv.settings.mode);
+    /* Team Tower Online: a floor of the room's climb (the tower trailer); its RESULT goes to the relay as a set game's */
+    N.tower_match = !watching && tower_floor > 0 && NETPLAY_IS_TOWER(N.roomv.settings.mode) && count == 2 && m.type == 1;
     /* build 87: a Run the Streets room's rounds byte is its round rules (time limit, KO target; openworld.c reads it at
      * the set-up), never the game's own match rules, which stay 0 as before */
     N.rts_rules = N.rts_match && ow_rules_rts_valid(m.rules) ? m.rules : 0;
@@ -4533,8 +4576,13 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         N.set_match = 1;
         N.set_game = N.tset.game;
     }
+    if (N.tower_match) {
+        N.set_match = 1;
+        N.set_game = tower_floor;
+    }
     N.koth_fights = N.roomv.hill.fights;
     N.koth_winner = -1;
+    N.tower_res_on = 0;
     N.koth_fought = N.koth_done = 0;
     N.start_deferred = 0;
     N.vs_king = -1;                 /* the versus screen's crown: the king as the START found it */
@@ -4543,6 +4591,8 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         for (i = 0; i < count; i++) if (slots[i] == N.roomv.hill.king) N.vs_king = i;
     LeaveCriticalSection(&g_cs);
     reset_remote_pads();
+    /* Team Tower Online: the floor towers.c plays (and off for any other START) */
+    towers_online_floor(N.tower_match, tower_rules, tower_tower, tower_floor, tower_floors, tower_opp[0], tower_opp[1]);
     if (late)
         fprintf(stderr, "[NETPLAY] WATCHLATE: seed %08X, type %d, rules %d, venue %d, %d players; the match runs already: "
                 "this PC watches from the players' next fight\n", seed, m.type, m.rules, m.venue, count);
@@ -4849,6 +4899,9 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_TSET:        /* a tournament set's state, or a TJOIN refused (only to a client that announced CAPS_TSET) */
         if (N.lobby) on_tset(b + 6, len - 6);
+        break;
+    case T_TOWER:       /* Team Tower Online: the climb in this PC's tower room (towers_online.c) */
+        if (N.lobby && N.roomv.in_room && NETPLAY_IS_TOWER(N.roomv.settings.mode)) towers_online_on_tower(N.roomv.code, b + 6, len - 6);
         break;
     case T_PC:          /* the relay took this PC's fingerprint (build 46 relays) */
         if (N.lobby && len >= 7 && !N.pc_done) {
@@ -5386,11 +5439,17 @@ static DWORD WINAPI net_thread(LPVOID unused)
         /* King of the Hill: this PC's RESULT, repeated until a HILL shows the fight over */
         if (N.lobby && N.have_token && N.koth_winner >= 0 && now - N.koth_sent >= RETRY_MS) {
             if (N.koth_tries++ < RESULT_TRIES) {
-                uint8_t rb[6 + 8 + 5 + 1 + MAXP];
+                uint8_t rb[6 + 8 + 5 + 1 + MAXP + 7];
                 int n = header(rb, T_RESULT), k;
                 memcpy(rb + n, N.token, 8); n += 8;
                 put32(rb + n, N.start_seed); n += 4;
                 rb[n++] = (uint8_t)N.koth_winner;
+                if (N.tower_res_on) {   /* Team Tower Online: the floor's steps and the sides' health (relay/tower.go) */
+                    rb[n++] = TOWER_RESULT;
+                    put32(rb + n, N.tower_res_steps); n += 4;
+                    rb[n++] = N.tower_res_health[0];
+                    rb[n++] = N.tower_res_health[1];
+                }
                 /* FFA rotation (relays answering CAPS_FFAROT): the finishing order, best first */
                 if (N.rot_match && N.koth_order_n > 0 && N.koth_order_n <= MAXP && N.relay_caps > 0 && (N.relay_caps & CAPS_FFAROT)) {
                     rb[n++] = (uint8_t)N.koth_order_n;
@@ -6668,6 +6727,13 @@ int netplay_lobby_tset(NetTSet *out)
     return ok;
 }
 
+void netplay_lobby_tower_choice(int choice)
+{
+    uint8_t c[2] = { (uint8_t)choice, TOWER_RULES_VERSION };
+    fprintf(stderr, "[NETPLAY] tower room: the host chooses %s" "\n", choice == TOWERNET_CHOICE_RESUME ? "to resume the climb" : "a new climb");
+    request(T_TCHOICE, c, 2);
+}
+
 void netplay_lobby_tset_pick(int venue)
 {
     uint8_t v = (uint8_t)venue;
@@ -6700,6 +6766,8 @@ void netplay_lobby_leave(void)
     N.crew_want = 0;                /* a crew battle not entered yet: no more CREWJOIN */
     N.tset_wanting = 0;             /* a tournament match not entered yet: no more TJOIN */
     memset(&N.tset, 0, sizeof(N.tset));
+    N.tower_hello[0] = 0;           /* Team Tower Online: hello again in the next tower room (the same one too) */
+    towers_online_room_left();
     memset(&N.roomv, 0, sizeof(N.roomv));
     N.roomv.version = (unsigned)GetTickCount64();
     N.room[0] = 0;
@@ -8856,6 +8924,33 @@ static void shared_gen_reseed(uint32_t step)
  * ring and its code) says it in every case; a code without the decisive bit is an elimination
  * along the way. Also when the fight went on offline (one report decides after 10 s). `final`: the
  * game has left the fight; with nothing decisive recorded it counts as a draw, so the hill moves on. */
+/* Team Tower Online: a floor's RESULT is the side that won (0 the players, 1 the CPUs, a draw), from towers.c's own
+ * reading of the 2 vs 2 decision, with the steps and the sides' health; a floor this PC saw desync, or left with no
+ * decision, is void (fought again, relay/tower.go). */
+static void tower_check_result(int final)
+{
+    int side = -2, health = -1, cpu_health = -1;
+    unsigned steps = 0;
+    int winner;
+    if (!towers_online_result(&side, &health, &cpu_health, &steps) && !final && !N.desync) return;
+    winner = N.desync || side == -2 ? TOWERNET_WINNER_VOID : side < 0 ? (int)WINNER_DRAW : side;
+    EnterCriticalSection(&g_cs);
+    N.koth_done = 1;
+    N.koth_tries = 0;
+    N.koth_sent = 0;
+    N.koth_winner = winner;
+    N.tower_res_on = 1;
+    N.tower_res_steps = steps;
+    N.tower_res_health[0] = (uint8_t)(health >= 0 && health <= 100 ? health : 255);
+    N.tower_res_health[1] = (uint8_t)(cpu_health >= 0 && cpu_health <= 100 ? cpu_health : 255);
+    LeaveCriticalSection(&g_cs);
+    fight_waits_log();
+    fprintf(stderr, "[NETPLAY] tower floor: %s (side %d at step %u, health %d%% / %d%%%s); sending RESULT %d" "\n",
+            winner == TOWERNET_WINNER_VOID ? (N.desync ? "void: this PC saw the floor desync" : "void: no decision") :
+            winner == (int)WINNER_DRAW ? "a draw" : side == 0 ? "the team won" : "the CPUs won", side, steps, health, cpu_health,
+            final ? ", the game left the fight" : "", winner);
+}
+
 static void koth_check_result(int final)
 {
     uint32_t phase, count, code = 0, w = 0xFFFFFFFFu;
@@ -8868,6 +8963,7 @@ static void koth_check_result(int final)
     phase = MEM32(G_MATCH_PHASE);
     if (phase == 1u) N.koth_fought = 1;
     if (!N.koth_fought) return;
+    if (N.tower_match) { tower_check_result(final); return; }
     if (N.rot_match) {
         /* FFA rotation: who is put out when (the game marks a fighter it puts out as ended, +0x932 bit
          * 0x200, as report_missed_result reads it), for the finishing order the relay rotates the line by */
@@ -9421,6 +9517,10 @@ static void step_run(void)
     {   /* Big Arena's scores and respawns (0 and no change while no such fight runs) */
         uint32_t ow = ow_state_hash();
         if (ow) N.hash_at[k] = (N.hash_at[k] ^ ow) * 16777619u;
+    }
+    {   /* Team Tower Online: the floor's AI ramp and its counters (towers.c; 0 while no tower floor runs) */
+        uint32_t tw = towers_online_hash();
+        if (tw) N.hash_at[k] = (N.hash_at[k] ^ tw) * 16777619u;
     }
     {   /* the x87 control word the step starts with (its precision bits round every result): a
          * change is logged, at most 12 a match, to compare the PCs of a desynced match */

@@ -74,6 +74,8 @@ typedef struct AiCtx {
 } AiCtx;
 static AiCtx g_ctx[2], *A = &g_ctx[0];
 static int g_nctx = 1;
+static int g_online;                    /* Team Tower Online: the test switches are this PC's own, never applied */
+static const char *test_env(const char *name) { return g_online ? NULL : getenv(name); }
 #define g_f (A->f)
 #define g_tower (A->tower)
 #define g_floor (A->floor)
@@ -115,7 +117,7 @@ static void close_attack(void)
 
 static void ai_begin_one(int tower, int floor, int floors)
 {
-    const char *test = getenv("RECOMP_TEST_TOWERS_AI");
+    const char *test = test_env("RECOMP_TEST_TOWERS_AI");
     g_tower = tower;
     g_floor = floor;
     towers_ai_floor(tower, floor, floors, &g_f);
@@ -124,15 +126,15 @@ static void ai_begin_one(int tower, int floor, int floors)
     if (test && !strncmp(test, "def=", 4)) g_f.defence = atoi(test + 4) < 1 ? 1 : atoi(test + 4) > 5 ? 5 : atoi(test + 4);
     if (test && !strncmp(test, "skill=", 6)) g_skill_test = atoi(test + 6);
     {   /* tests: RECOMP_TEST_TOWERS_HOLD=<cap> (0: none) for every floor from 7 */
-        const char *h = getenv("RECOMP_TEST_TOWERS_HOLD");
+        const char *h = test_env("RECOMP_TEST_TOWERS_HOLD");
         if (h && *h && g_f.on) g_f.hold_cap = atoi(h);
     }
     g_hold_seen = 0;
     g_hold_cuts = 0;
     g_on = g_f.on && !g_mode_off;
     towers_ai_adapt_reset(&g_adapt);
-    g_adapt_on = g_on && towers_ai_adapt_on(&g_f, floor) && !(getenv("RECOMP_TEST_TOWERS_ADAPT") &&
-                                                               *getenv("RECOMP_TEST_TOWERS_ADAPT") == '0');
+    g_adapt_on = g_on && towers_ai_adapt_on(&g_f, floor) && !(test_env("RECOMP_TEST_TOWERS_ADAPT") &&
+                                                               *test_env("RECOMP_TEST_TOWERS_ADAPT") == '0');
     g_boost = 0;
     g_reads = g_boost_writes = g_read_cuts = 0;
     g_loaded = 0;
@@ -280,7 +282,7 @@ static void ai_step_one(unsigned step, int decided)
         g_loaded = 1;
         take_own();
     }
-    /* the CPU slot must be a CPU, the climber's not (online rooms never get here: towers.c) */
+    /* the CPU slot must be a CPU, the climber's not (online only a Team Tower Online floor gets here: towers.c) */
     if (!g_on || !MEM32(G_CPU_FLAG(CPU)) || MEM32(G_CPU_FLAG(ME))) return;
     if (began && g_adapt_on && towers_ai_adapt_note(&g_adapt, key, step)) {
         if (++g_reads <= 3)
@@ -358,4 +360,90 @@ void towers_ai_end(int winner, unsigned steps)
 {
     int i;
     for (i = 0; i < g_nctx; i++) { A = &g_ctx[i]; ai_end_one(winner, steps); }
+}
+
+/* ---------------------------------------------------------------- Team Tower Online (lockstep) */
+
+void towers_ai_set_online(int on) { g_online = on != 0; }
+
+static uint32_t fnv_u32(uint32_t h, uint32_t v)
+{
+    int i;
+    for (i = 0; i < 4; i++) h = (h ^ ((v >> (8 * i)) & 0xFFu)) * 16777619u;
+    return h;
+}
+
+static uint32_t fnv_f(uint32_t h, float f)
+{
+    uint32_t v;
+    memcpy(&v, &f, 4);
+    return fnv_u32(h, v);
+}
+
+/* Every field of the contexts that steers what the AI writes (field by field: no padding bytes), and the counters it
+ * keeps: two PCs whose CPUs think alike hash alike. 0 when no context runs. */
+uint32_t towers_ai_hash(void)
+{
+    uint32_t h = 2166136261u;
+    int i, set, k, m, j;
+    for (i = 0; i < g_nctx; i++) {
+        const AiCtx *c = &g_ctx[i];
+        h = fnv_u32(h, (uint32_t)c->cpu);
+        h = fnv_u32(h, (uint32_t)c->me);
+        h = fnv_u32(h, (uint32_t)c->f.on);
+        h = fnv_f(h, c->f.t);
+        h = fnv_u32(h, (uint32_t)c->f.boss);
+        h = fnv_u32(h, (uint32_t)c->f.defence);
+        h = fnv_u32(h, (uint32_t)c->f.hold_cap);
+        h = fnv_u32(h, (uint32_t)c->on);
+        h = fnv_u32(h, (uint32_t)c->loaded);
+        h = fnv_u32(h, (uint32_t)c->mode_off);
+        h = fnv_u32(h, (uint32_t)c->skill_test);
+        h = fnv_u32(h, (uint32_t)c->own_skill);
+        h = fnv_u32(h, (uint32_t)c->skill);
+        for (set = 0; set < TOWER_AI_SETS; set++)
+            for (k = 0; k < TOWER_AI_TENDENCIES; k++) {
+                h = fnv_u32(h, (uint32_t)c->own[set][k]);
+                h = fnv_u32(h, (uint32_t)c->want[set][k]);
+            }
+        h = fnv_u32(h, c->writes);
+        h = fnv_u32(h, (uint32_t)c->hold_prev[0]);
+        h = fnv_u32(h, (uint32_t)c->hold_prev[1]);
+        h = fnv_u32(h, (uint32_t)c->hold_seen);
+        h = fnv_u32(h, c->hold_cuts);
+        h = fnv_u32(h, (uint32_t)c->adapt.n);
+        for (m = 0; m < c->adapt.n && m < TOWER_AI_ADAPT_MOVES; m++) {
+            h = fnv_u32(h, c->adapt.m[m].key);
+            h = fnv_u32(h, c->adapt.m[m].last);
+            h = fnv_u32(h, c->adapt.m[m].read_until);
+            h = fnv_u32(h, (uint32_t)c->adapt.m[m].count);
+            for (j = 0; j < TOWER_AI_REPEAT_COUNT; j++) h = fnv_u32(h, c->adapt.m[m].seen[j]);
+        }
+        h = fnv_u32(h, (uint32_t)c->adapt_on);
+        h = fnv_u32(h, (uint32_t)c->boost);
+        h = fnv_u32(h, c->reads);
+        h = fnv_u32(h, c->boost_writes);
+        h = fnv_u32(h, c->read_cuts);
+        h = fnv_u32(h, c->s.attacks);
+        h = fnv_u32(h, c->s.landed);
+        h = fnv_u32(h, c->s.blocked);
+        h = fnv_u32(h, c->s.countered);
+        h = fnv_u32(h, c->s.cpu_attacks);
+        h = fnv_u32(h, c->s.hits_on_cpu);
+        h = fnv_u32(h, c->s.hits_on_me);
+        h = fnv_f(h, c->s.dmg_on_cpu);
+        h = fnv_f(h, c->s.dmg_on_me);
+        h = fnv_u32(h, c->s.cpu_changes);
+        h = fnv_u32(h, c->s.cpu_longest);
+        h = fnv_u32(h, c->s.cpu_run);
+        h = fnv_u32(h, c->s.me_state);
+        h = fnv_u32(h, c->s.cpu_state);
+        h = fnv_u32(h, c->s.at);
+        h = fnv_u32(h, (uint32_t)c->s.open);
+        h = fnv_u32(h, (uint32_t)c->s.saw_block);
+        h = fnv_u32(h, (uint32_t)c->s.cpu_hurt);
+        h = fnv_u32(h, (uint32_t)c->s.me_hurt);
+        h = fnv_u32(h, c->now);
+    }
+    return h ? h : 1u;
 }

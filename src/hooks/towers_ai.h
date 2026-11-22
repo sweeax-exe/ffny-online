@@ -25,6 +25,10 @@ void towers_ai_step(unsigned step, int decided);
 void towers_ai_health(uint32_t record, float delta);
 /* The fight was decided: the numbers go to the log. winner 0 the climber, 1 the CPU, -1 a draw. */
 void towers_ai_end(int winner, unsigned steps);
+/* Team Tower Online: on, the test switches (RECOMP_TEST_TOWERS_AI, _HOLD, _ADAPT) are ignored (both PCs of a floor must
+ * think alike); the contexts' hash for the lockstep checksum (netplay.c, as ow_state_hash). */
+void towers_ai_set_online(int on);
+uint32_t towers_ai_hash(void);
 
 #ifdef __cplusplus
 }
