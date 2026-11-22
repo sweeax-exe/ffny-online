@@ -149,7 +149,8 @@ def test_the_results_screen_never_holds_the_next_fight():
     assert 'p[13] = (uint8_t)(N.delay_fixed ? N.delay : 0);' in NETPLAY_C
     # build 45: byte 14, rollback also with a created fighter (rollback-plan-2026-11.md, fifth round)
     # build 52: bit 1, the server makes rollback mandatory for the match's mode on the sender
-    assert 'p[14] = (uint8_t)(1 | (N.peer_rb_must[N.pos] ? 2 : 0));' in NETPLAY_C
+    # build 110: bit 2, the sender's player set Rollback: Off (byte 7 is 0 then)
+    assert 'p[14] = (uint8_t)(1 | (N.peer_rb_must[N.pos] ? 2 : 0) | (N.peer_rb_off[N.pos] ? 4 : 0));' in NETPLAY_C
     # build 54: bytes 15-16, the sender's rollback ping limit for the match (rb_path_limit takes the lowest)
     assert 'p[15] = (uint8_t)N.peer_rb_max[N.pos];' in NETPLAY_C
     assert 'N.peer_rb_max[from] = len >= 17 ? (p[15] | (p[16] << 8)) : 0;' in NETPLAY_C

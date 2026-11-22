@@ -68,6 +68,7 @@ static const char *const k_ow_camera[] = { "stock", "follow", "behind", NULL };
 static const char *const k_ow_camera_distance[] = { "near", "normal", "far", NULL };   /* build 95 */
 static const char *const k_rts_round_mode[] = { "knockouts", "points", NULL };          /* build 95 */
 static const char *const k_quick_max_ping[] = { "off", "100", "150", "200", NULL };      /* build 97 (netlobby_max_ping_ms) */
+static const char *const k_rollback_choice[] = { "on", "off", NULL };                  /* build 110 (netplay.c, rollback_choice_off) */
 
 /* A four-fighter match holds about 2 GiB of replacements. At 512 MiB the cache evicted and
  * re-decoded dozens of textures every two seconds in a fight on the Steam Deck. */
@@ -165,6 +166,10 @@ static RecompSetting g_display_settings[] = {
       "when you start a search (Quick Match per match type, King of the Hill, FFA rotation, Ranked), so the same "
       "choice is ready next time. One bit per match type (0..23; King of the Hill 24 and 25, FFA rotation 26; "
       "Ranked 28). 0: all fighters everywhere." },
+    { "online", "rollback_choice", RECOMP_SETTING_ENUM, 0, 0, 0, k_rollback_choice, NULL, 0,
+      "Rollback in online fights: on (the default) or off. Off: always use input delay: steadier, a bit slower to "
+      "respond. A fight plays with input delay when either player has it off, in every mode (ranked, Faction War and "
+      "tournament sets too). Applies from the next match." },
     { "online", "rollback", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, NULL, RECOMP_SETTING_RESTART,
       "Beta: rollback netcode in online fights, used only when every player in the match has it on. Your presses "
       "count at once and the game corrects itself when the other player's arrive late. It can still crash." },

@@ -481,6 +481,21 @@ Same header and version; a relay without it drops `SPECTATE` silently.
   they decide alike; when a player sends no limit (an older build, which uses 300 ms by itself) the match uses
   300 ms. Over the limit the players see "This match runs without rollback: the ping is too high (N ms)".
 
+### The player's Rollback: On / Off (build 110)
+
+- A player setting, `[online] rollback_choice` (`on`, the default, or `off`; tests: `RECOMP_ROLLBACK_PREF=off`),
+  in the settings' Online section: "Off: always use input delay: steadier, a bit slower to respond." Off, the
+  game says at `START` that it does not roll back: `P_RTT` byte 7 is 0, whatever the relay allows or makes
+  mandatory. Since a match rolls back only when every player's byte 7 is set, both games (and spectators,
+  which take the players' agreed delay) play that fight in lockstep with input delay, in every mode: rooms,
+  quick match, ranked, Faction War, tournament sets and the hill. Nothing changes at the relay, and an older
+  build reads byte 7 the same way, so a mixed match decides alike; an older build never sends Off, so it counts
+  as On (the behaviour before).
+- `P_RTT` byte 14 bit 2 (`4`): the sender's byte 7 is 0 because its player chose Off. It only says why: the
+  versus screen's line reads "PING N MS - DELAY (ROLLBACK OFF)", the log "rollback off for this match: <who>
+  set Rollback: Off", and the other player gets "This match runs without rollback: <who> turned rollback off".
+  Older builds ignore the bit. The ranked queue's rollback flag is unchanged (this session can roll back).
+
 ## Relay status (choosing a relay)
 
 Since build 30 there is more than one relay (Europe `play.defjam.online`, US East
