@@ -189,7 +189,7 @@ void draw_tower_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRo
         bool away = have && t.state == TOWERNET_WAITING;
         text(dl, f, g_title, 15, 320, 112, CREAM, away ? "YOUR PARTNER LEFT THE ROOM" : r.settings.is_public ?
              "IN THE ROOM LIST FOR EVERYONE  -  OR GIVE THE CODE" : "TELL YOUR PARTNER THE CODE", CENTER, 1.0f);
-        text(dl, f, g_title, 12, 320, 300, GOLD, upper(r.settings.name).c_str(), CENTER, 0.8f, 380);
+        text(dl, f, g_title, 12, 320, 270, GOLD, upper(r.settings.name).c_str(), CENTER, 0.8f, 380);
         text(dl, f, g_stencil, 54, 320, 140, WHITE, r.code, CENTER, 1.6f);
         text(dl, f, g_hand, 12, 320, 212, ORANGE, r.settings.is_public ? "ON THEIR PC: FIND A ROOM, OR TOWERS > TEAM TOWER > RT ONLINE" : "ON THEIR PC: TOWERS > TEAM TOWER > RT ONLINE > JOIN BY CODE", CENTER, 0.8f, 380);
         if (away) {
@@ -199,7 +199,7 @@ void draw_tower_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRo
             float pulse = 0.5f + 0.5f * (float)sin(ImGui::GetTime() * 3.0);
             text(dl, f, g_title, 13, 320, 246, with_alpha(CREAM, 0.4f + 0.6f * pulse), "WAITING FOR YOUR PARTNER...", CENTER, 0.8f);
         }
-        text(dl, f, g_hand, 11, 320, 290, GREY, "Both players sign in with their own FFNY Online account. Standard fighters only.",
+        text(dl, f, g_hand, 11, 320, 298, GREY, "Both players sign in with their own FFNY Online account. Standard fighters only.",
              CENTER, 0.6f, 380);
         float hx = 240;
         hint(dl, f, hx, 392, "b", "LEAVE ROOM");

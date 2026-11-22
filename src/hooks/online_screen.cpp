@@ -3154,6 +3154,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         const NetServerRoom &e = list[S.rooms_sel];
         const NetRoomInfo &r = e.room;
         if (NETPLAY_IS_KOTH(r.mode)) say("King of the Hill rooms are watched from inside the hill.");
+        else if (NETPLAY_IS_TOWER(r.mode)) say("A Team Tower climb is for its two players: it is not watched.");
         else if (NETPLAY_IS_FFAROT(r.mode)) say("FFA rotation rooms are watched from inside the room: join the line.");
         else if (e.server >= 0 && e.server != here) {   // build 96: the hub moves there and watches in one press
             if (!gallery_on()) netservers_spectate_on(e.server, r.code, hub_name().c_str());
