@@ -20,7 +20,9 @@ that does not write it, still shows the line and the bar.
   file, its size and its SHA-256.
 - `latest.json.sig` is an ECDSA P-256 signature over the manifest's exact bytes. The launcher has
   the public key built in (`src/hooks/updater.c`) and ignores a manifest that does not verify.
-- The setup is only started when its SHA-256 matches the signed manifest.
+- The setup is only started when its SHA-256 matches the signed manifest. Since build 108 the
+  setup and the launcher are also Authenticode-signed (docs/releasing.md, "FFNY Online builds");
+  `latest.json` names the signed setup's SHA-256 and size, so the launcher needs no change.
 - So neither the server nor the connection has to be trusted, and plain HTTP is enough.
 - The private key is `%USERPROFILE%\.defjam\update-signing-key.pem` on the publisher's PC, never
   in the repository or on the server. **Back it up.** Losing it means shipping a setup with a new

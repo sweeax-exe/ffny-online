@@ -134,7 +134,8 @@ Download `DefJamSetup-<version>-windows-x64.exe` from the
 The installer contains no game. It takes your disc image or extracted dump,
 checks it, then translates and compiles the game on your machine. It bundles
 Python and the pinned build sources and can install Microsoft's C++ Build Tools
-if they are missing. The installer is unsigned, so Windows may warn about it.
+if they are missing. The installer and the launcher are code-signed; while the certificate is new,
+Windows SmartScreen may still warn about it.
 
 ![The setup: it finds and checks your game, picks an install folder, then installs](docs/media/setup-wizard.png)
 
