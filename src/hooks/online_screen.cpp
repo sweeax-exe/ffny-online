@@ -7771,7 +7771,6 @@ const char *shot_label()
     if (const char *rts = rts_shot_label()) return rts;
     if (const char *tw = towers_shot_label_impl()) return tw;
     if (const char *fw = faction_shot_label()) return fw;
-    if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
     {   // Team Tower Online: the room by its state, also while the floor's match is still "connected" (between floors)
         NetRoom r;
         lobby_room(&r);
@@ -7779,10 +7778,12 @@ const char *shot_label()
             TowerNetView tv;
             static const char *const st[] = { "toweronline-select", "toweronline-starting", "toweronline-playing",
                                               "toweronline-summary", "toweronline-waiting", "toweronline-over", "toweronline" };
-            if (r.player_count < 2) return "toweronline-wait";
-            return towers_online_view_net(&tv) ? st[tv.state < 7 ? tv.state : 6] : "toweronline";
+            bool have = towers_online_view_net(&tv);
+            if (r.player_count < 2) return have && tv.state == TOWERNET_WAITING ? "toweronline-waiting" : "toweronline-wait";
+            return have ? st[tv.state < 7 ? tv.state : 6] : "toweronline";
         }
     }
+    if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
     if (!gallery_on() && !g_versus_up && net_state() != NETPLAY_CONNECTED) {    // the crew battle screen (stage 3)
         NetRoom r;
         NetCrew cb;
