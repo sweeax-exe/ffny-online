@@ -7438,6 +7438,11 @@ static void test_tower_enter(const char *who, const char *file)
     int host = role && !strcmp(role, "host"), i;
     char old[16] = "";
     NetRoom tr;
+    if (!host && getenv("RECOMP_TEST_TOWER_JOIN_DELAY_S")) {   /* the host's waiting page (and the list) shows a while */
+        int d = atoi(getenv("RECOMP_TEST_TOWER_JOIN_DELAY_S"));
+        fprintf(stderr, "[NETPLAY] tests: joining the Team Tower room in %d s""\n", d);
+        for (i = 0; i < d * 10 && !N.stop; i++) Sleep(100);
+    }
     if (!host && file && *file) {   /* a code left from an earlier session is not this one's */
         FILE *f = fopen(file, "r");
         if (f) { if (!fgets(old, sizeof(old), f)) old[0] = 0; fclose(f); }

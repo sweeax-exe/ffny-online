@@ -4196,7 +4196,8 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
                           not any(phases[variant]["desyncs"]), "no_void": voids == 0,
                           "delayed": "sets the match up 4000 ms late" in texts[1]}
         else:
-            stop, texts, logs = run_phase("climb", {0: {"RECOMP_TEST_TOWER_LEAVE": str(floors)}, 1: {"RECOMP_TEST_TOWER_LEAVE": str(floors)}},
+            stop, texts, logs = run_phase("climb", {0: {"RECOMP_TEST_TOWER_LEAVE": str(floors)},
+                                                    1: {"RECOMP_TEST_TOWER_LEAVE": str(floors), "RECOMP_TEST_TOWER_JOIN_DELAY_S": "40"}},
                                           lambda cs: all(c.watch.count(leaving) for c in cs), timeout)
             fl = agree(texts, "climb")
             phases["climb"] = {"stop": stop, "floors": fl, "logs": logs}
