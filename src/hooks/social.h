@@ -115,6 +115,7 @@ struct Look {
      * -1) and the title's rarity (0: not a tower title). Shown ranked on or off. */
     std::string frame_id, title_id;
     int title_rarity = 0;
+    std::string faction;        /* build 108: Faction War's side ("dmob", "crow"; "" none) */
 };
 struct LockerItem {
     std::string id, name, mode, title, role, how, label;

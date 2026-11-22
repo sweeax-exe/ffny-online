@@ -21,6 +21,11 @@ enum {
     TRW_WEEKLY,         /* tw-weekly: Weekly Conqueror, neon (nothing grants it yet) */
     TRW_BOROUGHS,       /* tw-boroughs: King of the Five Boroughs, platinum, a crown, five borough gems */
     TRW_LEGEND,         /* tw-legend-<tower>-<yyyy>-<mm>: Tower Legend, red lacquer, gold trim, laurel, a ribbon */
+    /* build 108, Faction War (server relay/accounts/factions.go): the season's winning side and each side's top scorer */
+    TRW_FW_DMOB,        /* fw-winner-dmob-<yyyy>-<mm>: D-Mob's Team won the season; green and gold, a ribbon */
+    TRW_FW_CROW,        /* fw-winner-crow-<yyyy>-<mm>: Crow's Team won the season; red and black, a ribbon */
+    TRW_FW_TOP_DMOB,    /* fw-top-dmob-<yyyy>-<mm>: D-Mob's Team's top scorer of the season; a crown, embers */
+    TRW_FW_TOP_CROW,    /* fw-top-crow-<yyyy>-<mm>: Crow's Team's top scorer of the season; a crown, embers */
     TRW_KINDS
 };
 
@@ -44,7 +49,8 @@ int tower_reward_rarity(int kind);
 const char *tower_reward_rarity_name(int rarity);      /* "RARE" .. "MYTHIC", "" none */
 unsigned tower_reward_effects(int kind);
 int tower_reward_effect_count(int kind);
-/* The Tower Legend's ribbon: "#1 UPTOWN · NOV 2026" (UTF-8 middle dot); returns its length (0: not a legend). */
+/* The Tower Legend's ribbon: "#1 UPTOWN · NOV 2026" (UTF-8 middle dot); a Faction War reward's: "D-MOB'S TEAM WON ·
+ * NOV 2026", "#1 OF CROW'S TEAM · NOV 2026"; returns its length (0: none). */
 int tower_reward_ribbon(const char *id, char *out, int size);
 
 /* timing (t in seconds since any fixed point) */

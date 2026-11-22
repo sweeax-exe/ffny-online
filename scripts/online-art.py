@@ -30,8 +30,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hd_assets  # noqa: E402
 
-VERSION = 7       # 5: the PlayStation-style glyphs ui/ps_*.png; 6: the rank emblems ranks/*.png;
+VERSION = 8       # 5: the PlayStation-style glyphs ui/ps_*.png; 6: the rank emblems ranks/*.png;
                   # 7: the fight HUD's FIGHT! lettering and its grain (ui/hud_fight.png, ui/hud_grain.png), TeaChest.ttf
+                  # 8: Faction War's two bosses, factions/dmob.png and factions/crow.png
 
 # (output name, screens.viv entry, SHPX image name). See docs/research/frontend-menu-integration.md §6.
 UI_IMAGES = [
@@ -52,6 +53,9 @@ UI_IMAGES = [
     ("glow", "screens/intMain/support/mainMenuButtons.big", "77"),
 ]
 MATCH_LOGO = "screens/match/2_type/mTypeLogo_%s_e.big"
+# Faction War (build 108): the two crews' bosses as CHOOSE FIGHTER shows them large, the full-length render with the
+# name lettering (screens/portrait/<Battle ID + 1>_2p.big, 512x512): D-Mob (59) and Crow (58).
+FACTION_RENDERS = [("dmob", 59), ("crow", 58)]
 FONTS = ["TradeBld.ttf", "TradeCon.ttf", "SchwartzHand_Bold2.ttf", "FERRO___.TTF",
          "TradeGothicLTStd-BoldExt.ttf", "AachenStd-Bold.ttf", "TeaChest.ttf"]
 # The fight HUD's call-outs (assets/misc.viv, hud.xsh): one 512x256 texture "Over" with the words the game
@@ -277,6 +281,20 @@ def keep_skin_pictures(old, new):
     return kept
 
 
+def write_faction_renders(entries, tmp, manifest):
+    """factions/<faction>.png: the bosses' large CHOOSE FIGHTER renders (Faction War's picker and page)."""
+    manifest.setdefault("factions", [])
+    for name, fid in FACTION_RENDERS:
+        entry = "screens/portrait/%d_2p.big" % (fid + 1)
+        imgs = images(entries[entry]) if entry in entries else None
+        if not imgs:
+            manifest["missing"].append(entry)
+            continue
+        (tmp / "factions").mkdir(parents=True, exist_ok=True)
+        next(iter(imgs.values())).save(tmp / "factions" / ("%s.png" % name))
+        manifest["factions"].append(name)
+
+
 def build(data, out):
     screens = Path(data) / "extracted" / "screens" / "screens.viv"
     fonts = Path(data) / "extracted" / "fonts" / "fonts.viv"
@@ -310,6 +328,7 @@ def build(data, out):
                 else:
                     image.save(tmp / "venues" / ("%d_name.png" % fe))
 
+    write_faction_renders(entries, tmp, manifest)
     cache = {}
     for out_name, entry, image_name in UI_IMAGES:
         if entry not in entries:
