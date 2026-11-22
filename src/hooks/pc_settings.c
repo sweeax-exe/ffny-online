@@ -91,6 +91,9 @@ static RecompSetting g_display_settings[] = {
       "host or host:port (port 27777 if left out).", "auto" },
     { "online", "name", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Your name, shown to the other player.", "Player" },
+    { "online", "faction_seen", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
+      "Faction War (build 108): the season (yyyy-mm) whose side picker the hub last opened by itself; at a new season it "
+      "opens once more.", "" },
     /* build 95: up to the fighter numbers (1000 and up, fighter_banks.h): 0..255 saved 1008 as 255, which READY sent
      * and every PC of the match crashed on (builds 93/94, community/crash-hoodiebatman.md) */
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 2147483647, NULL, NULL, 0,
