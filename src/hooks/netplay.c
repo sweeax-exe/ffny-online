@@ -10117,6 +10117,7 @@ static void step_run(void)
     for (;;) {
         int ready = 1, i, late = -1;
         static int rmode_was;               /* build 110: the fight resume's mode of this wait (resume_wait) */
+        static int rmode_logged;            /* the mode its log line named */
         uint32_t t = need;
         if (N.rb_on) { t = N.final_step + 1; if (t <= (uint32_t)N.delay) t = (uint32_t)N.delay + 1; }
         EnterCriticalSection(&g_cs);
@@ -10126,7 +10127,8 @@ static void step_run(void)
         LeaveCriticalSection(&g_cs);
         if (ready || !N.lockstep) {
             ULONGLONG waited = GetTickCount64() - waited_since;
-            if (ready && rmode_was > 0) resume_wait_over(N.last_late, waited, rmode_was == 2, "back");
+            if (rmode_was > 0)      /* the entries came, or lockstep went off meanwhile (the ROOM: the held one was removed) */
+                resume_wait_over(N.last_late, waited, rmode_was == 2, ready ? "back" : "gone");
             rmode_was = 0;
             if (ready && waited >= 100 && s > (uint32_t)N.delay + 1 && N.fighting_seen && MEM32(G_MATCH_PHASE) == 1u) {
                 g_fight_waits.n++;
@@ -10164,11 +10166,12 @@ static void step_run(void)
             if (late >= 0 && late < MAXP && N.lobby && !N.watching && g_steps_match[late] == N.match &&
                 need > (uint32_t)N.delay + 1 && !(N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u))
                 rmode = resume_wait(late, now, waited_since, &stall_limit, &rleft);
-            if (rmode > 0 && rmode != rmode_was)
+            if (rmode > 0 && now - waited_since < 3000) rmode_logged = 0;
+            if (rmode > 0 && now - waited_since >= 3000 && rmode != rmode_logged && (rmode_logged = rmode) != 0)  /* long waits only */
                 fprintf(stderr, "[NETPLAY] resume: %s (step %u, waiting since %.1f s, up to %.1f s)\n",
                         rmode == 2 ? "this PC is cut off: reconnecting" : "waiting for the held player", s,
                         (now - waited_since) / 1000.0, stall_limit / 1000.0);
-            if (rmode > 0) rmode_was = rmode;
+            if (rmode > rmode_was) rmode_was = rmode;     /* 2 (this PC cut off) stays for the wait's end */
             if (rmode == 1 && resume_stop_pressed(waited_since, now)) rstop = 1;
             /* build 109: a wait mid-fight says so on screen while it lasts (stall_notice), not only once it is over */
             if (late >= 0 && late < MAXP && N.lobby && !N.watching && g_steps_match[late] == N.match &&
@@ -10258,7 +10261,7 @@ static void step_run(void)
                  * player stopped waiting (START: today's give-up, then back to the room); its hold ran out */
                 if (!decided && (rmode != 0 || rmode_was > 0)) {
                     int lost = R.lost != 0;
-                    resume_wait_over(late, now - waited_since, lost || rmode == 2 || (rmode == 0 && rmode_was == 2),
+                    resume_wait_over(late, now - waited_since, lost || rmode == 2 || rmode_was == 2,
                                      lost ? "lost" : rstop ? "start" : rmode < 0 ? "gone" : "limit");
                     if (rstop) R.f_stopped++;
                     if (lost) {
