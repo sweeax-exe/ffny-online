@@ -3098,7 +3098,7 @@ def lobby97(case="kick", timeout=None, relay_port=27900, lock_timeout=None, log=
 
 # ---- towers (T0) -----------------------------------------------------------------------------------
 
-TOWERS_WATCH = ["[CRASH]", "[WATCHDOG]", "[TOWERS] window:", "decided at step", "[TOWERS] run saved", " won (", " lost: the run",
+TOWERS_WATCH = ["[CRASH]", "[WATCHDOG]", "[TOWERS] window:", "decided at step", "[SOCIAL-UI] locker=", "[SOCIAL-UI] hub", "[TOWERS] run saved", " won (", " lost: the run",
                 "save and quit", "set up: slot levels", "[TOWERS] run start", "[TOWERS] run resumed",
                 "the game ends in floor 3", "[TOWERS] board (month)", "fight?format=text floor 3",
                 "test pad: r", "test pad: y", "test pad: x", "[TOWERS] board (week)", "page: the Weekly's card"]
@@ -3536,7 +3536,18 @@ def towers_team(timeout=None, lock_timeout=None, log=None, keep_roots=False, ext
 
 # ---- The Weekly (build 108) -------------------------------------------------------------------------
 
-WEEKLY_TWISTS = ["low_health", "double_damage", "cpu_momentum", "glass_jaw", "all_bosses", "one_venue"]
+WEEKLY_TWISTS = ["all_bosses", "low_health", "double_damage", "cpu_momentum", "glass_jaw", "one_venue"]
+
+
+def _weekly_last_week_runs(week, at):
+    """Last week's Weekly board as the service stores it (build 108): Copy 0 (the first test account) the #1 with 14
+    floors, eleven other accounts below it, rules 2, on the board."""
+    def run(rid, account, beaten):
+        return {"id": rid, "account": account, "tower": 3, "fighter": 55, "rules": 2, "seed": 1, "order": [1] * 20,
+                "venues": [1], "start": at, "last": at, "board": True, "next": beaten + 1, "beaten": beaten,
+                "steps": 30000, "reached": at, "ended": True, "end": "loss", "ended_at": at, "week": week}
+    runs = [run("wk-last-copy0", 1, 14)] + [run("wk-last-%02d" % i, 1000 + i, 13 - i) for i in range(11)]
+    return {"runs": {r["id"]: r for r in runs}, "open": {}, "inputs": {}}
 TOWERS_WEEKLY_SHOTS = os.environ.get("DJ_TOWERS_WEEKLY_SHOTS", r"D:\DefJam\community\weekly-tower-shots")
 
 
@@ -3593,7 +3604,14 @@ def towers_weekly(timeout=None, lock_timeout=None, log=None, keep_roots=False, e
         with open(switch, "w", encoding="utf-8") as f:
             f.write("weekly=0\n")
         set_twist(None)
-        tokens = s.accounts(acc_port, ["Copy 0"], extra=["-towers", "-towers-switch", switch])
+        # build 108: last week's board as the service stored it (Copy 0 the #1 of 12): its start-up rewards pass
+        # grants the week's top-10 frames and the champion's frame and title (server tower_rewards.go)
+        last = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+        liso = last.isocalendar()
+        last_week = "%04d-W%02d" % (liso[0], liso[1])
+        with open(os.path.join(s.dir, "towers.json"), "w", encoding="utf-8") as fh:
+            json.dump(_weekly_last_week_runs(last_week, last.strftime("%Y-%m-%dT12:00:00Z")), fh)
+        tokens = s.accounts(acc_port, ["Copy 0"], extra=["-towers", "-towers-switch", switch, "-social"])
         towers_file = os.path.join(s.dir, "towers-weekly-run.json")
         base = dict(RECOMP_SCRIPT_ANCHOR=TITLE_ANCHOR, RECOMP_TOWERS_FILE=towers_file, RECOMP_OVERLAY_SHOT_MS="500",
                     RECOMP_ACCOUNT_SERVER="127.0.0.1:%d" % acc_port, RECOMP_ACCOUNT_TEST_TOKEN=tokens["Copy 0"])
@@ -3677,18 +3695,18 @@ def towers_weekly(timeout=None, lock_timeout=None, log=None, keep_roots=False, e
                     probs.append("the CPU's meter was not held full")
                 elif any(not (int(st) & 1) for _, _, st in full):
                     probs.append("the CPU's Blazin' was not ready after the refill (%s)" % full)
-            elif twist == "glass_jaw":
-                halved = re.findall(r"GLASS JAW: max health x0\.50 at step \d+: climber ([\d.]+) -> ([\d.]+), CPU ([\d.]+) -> ([\d.]+)", text)
+            elif twist == "glass_jaw":     # weekly rules 2: the climber's maximum halved, the CPU's full
+                halved = re.findall(r"GLASS JAW: max health x0\.50 at step \d+: climber ([\d.]+) -> ([\d.]+), CPU ([\d.]+) \(full\)", text)
                 kept = re.findall(r"max health climber ([\d.]+), CPU ([\d.]+)", text)
                 p["halved"], p["kept"] = halved[:2], kept[:2]
                 if len(halved) < 2:
-                    probs.append("the maximum health was not halved on both floors (%s)" % halved)
+                    probs.append("the climber's maximum health was not halved on both floors (%s)" % halved)
                 else:
-                    for (a, a2, b, b2), (k1, k2) in zip(halved, kept):
-                        if abs(float(a) / 2 - float(a2)) > 0.2 or abs(float(b) / 2 - float(b2)) > 0.2:
-                            probs.append("not half: %s" % [a, a2, b, b2])
-                        if abs(float(k1) - float(a2)) > 0.2 or abs(float(k2) - float(b2)) > 0.2:
-                            probs.append("the game put the maximum back by the decision (%s vs %s)" % ([k1, k2], [a2, b2]))
+                    for (a, a2, b), (k1, k2) in zip(halved, kept):
+                        if abs(float(a) / 2 - float(a2)) > 0.2:
+                            probs.append("not half: %s" % [a, a2])
+                        if abs(float(k1) - float(a2)) > 0.2 or abs(float(k2) - float(b)) > 0.2:
+                            probs.append("the maxima moved by the decision (%s vs %s)" % ([k1, k2], [a2, b]))
             elif twist == "all_bosses":
                 if not re.search(r"THE WEEKLY floor 1 of 20: [^\n]*boss floor\)", text):
                     probs.append("floor 1 was no boss floor")
@@ -3703,6 +3721,54 @@ def towers_weekly(timeout=None, lock_timeout=None, log=None, keep_roots=False, e
                 if len(srv) != 1 or venues != srv:
                     probs.append("not one venue: fought at %s, the service's %s" % (sorted(venues), sorted(srv)))
             problems += ["%s: %s" % (twist, x) for x in probs]
+        # build 108: last week's rewards as the service granted them; worn as frame and title
+        def call(method, path, body=None):
+            req = urllib.request.Request("http://127.0.0.1:%d%s" % (acc_port, path), method=method,
+                                         data=None if body is None else json.dumps(body).encode("utf-8"),
+                                         headers={"Authorization": "Bearer " + tokens["Copy 0"],
+                                                  "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read() or b"null")
+            except urllib.error.HTTPError as e:
+                return e.code, None
+            except OSError:
+                return 0, None
+        top_id, champ_id = "tw-weekly-" + last_week, "tw-weekly-champ-" + last_week
+        _, locker = call("GET", "/api/social/locker")
+        held = {i["id"]: i for i in (locker or {}).get("items", []) if i.get("tower") and i.get("unlocked")}
+        equips = [call("POST", "/api/social/locker/equip", {"slot": "title", "id": top_id})[0],
+                  call("POST", "/api/social/locker/equip", {"slot": "frame", "id": champ_id})[0],
+                  call("POST", "/api/social/locker/equip", {"slot": "title", "id": champ_id})[0]]
+        rewards = {"week": last_week, "held": sorted(held), "champ_title": held.get(champ_id, {}).get("title"),
+                   "equip_top_as_title_frame_title": equips}
+        phases.append({"phase": "rewards", **rewards})
+        if top_id not in held or champ_id not in held:
+            problems.append("rewards: last week's #1 holds no frame (%s)" % sorted(held))
+        if rewards["champ_title"] != "Weekly Champ W%02d" % liso[1]:
+            problems.append("rewards: the champion's title is %r" % rewards["champ_title"])
+        if equips != [400, 200, 200]:
+            problems.append("rewards: equips %s (want a top-10 frame refused as a title)" % equips)
+        # ... and on the game's Locker (frame, title) and the rewards sheet
+        rshots = os.path.join(s.dir, "overlay-rewards")
+        os.makedirs(rshots, exist_ok=True)
+        c, ok = _towers_phase(s, n, dict(base, RECOMP_TEST_OPEN_ONLINE="1", RECOMP_PAD_SCRIPT=page_script, RECOMP_SOCIAL="on",
+                                         RECOMP_TEST_SOCIAL_UI="8:locker=frame;14:locker=title;20:locker=sheet;26:hub"),
+                              (1, "[SOCIAL-UI] hub"), shots, [("[SOCIAL-UI] locker=frame", 1, 3.0, "w4-locker-frame"),
+                                                             ("[SOCIAL-UI] locker=title", 1, 3.0, "w4-locker-title"),
+                                                             ("[SOCIAL-UI] locker=sheet", 1, 3.0, "w4-rewards-sheet")], 240)
+        n += 1
+        phases[-1]["log"] = _relpath(c.log)
+        try:
+            from PIL import Image
+            for kind in ("locker", "towerframes"):
+                files = sorted(glob.glob(os.path.join(s.dir, "overlay%d" % (n - 1), "*-%s.bmp" % kind)))
+                if files:
+                    out = os.path.join(s.dir, "w4-%s.png" % kind)
+                    Image.open(files[-1]).convert("RGB").save(out)
+                    shots.append(_relpath(out))
+        except ImportError:
+            pass
         # 3: the page with the Weekly (its card, the rules, this week's board)
         set_twist("double_damage")
         c, ok = _towers_phase(s, n, dict(base, RECOMP_TEST_OPEN_ONLINE="towers", RECOMP_PAD_SCRIPT=page_script,
