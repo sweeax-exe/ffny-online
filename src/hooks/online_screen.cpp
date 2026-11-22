@@ -1361,7 +1361,8 @@ float room_tag(ImDrawList *dl, const Frame &f, float right, float y, const char 
 int content_news(char *names, int size)
 {
     if (gallery_on()) {     // the gallery: only its news pages show it (RECOMP_TEST_CONTENT_NEWS)
-        int n = G.page && !strcmp(G.page, "hub-news") ? pc_content_news(names, size) : 0;
+        size_t pl = G.page ? strlen(G.page) : 0;    // build 110: "hub-news" and the room pages' "<page>-news" (hill-news, room-team-news)
+        int n = pl >= 5 && !strcmp(G.page + pl - 5, "-news") ? pc_content_news(names, size) : 0;
         if (!n && names && size > 0) names[0] = 0;
         return n;
     }
@@ -4806,10 +4807,12 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     page_title(dl, f, r.settings.name);
     NetRingCard ring;
     bool is_ring = ring_room(r, &ring);     // F0: an official ring: its title and the crown banner
-    text(dl, f, g_title, 16, 590, 26, GOLD, is_ring ? ring_title_of(ring.type).c_str() : v.rot ? "FFA ROTATION" : "KING OF THE HILL", RIGHT, 1.2f);
+    // build 110: below the corner notice, as the Towers subtitle (page_subtitle_y); the code follows it
+    float mode_y = page_subtitle_y(26), code_y = mode_y > 26 ? mode_y + 15 : 58;
+    text(dl, f, g_title, 16, 590, mode_y, GOLD, is_ring ? ring_title_of(ring.type).c_str() : v.rot ? "FFA ROTATION" : "KING OF THE HILL", RIGHT, 1.2f);
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
-    text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
+    text(dl, f, g_title, 14, 590, code_y, ORANGE, code, RIGHT);
     if (is_ring) ring_banner(dl, f, ring, 40, 52, 478);
 
     // left: the line, numbered from the top
@@ -5052,12 +5055,16 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) kick_x[i] = kick_y[i] = -1;
     if (!kickable) { S.kick_mode = false; S.kick_confirm = -1; }
     page_title(dl, f, r.settings.name);
-    image_fit(dl, f, tex(mode_logo(r.settings.mode)), 360, 22, 220, 30);
+    // build 110: the mode logo and the code sit below the corner notice when there is one (page_subtitle_y)
+    // (one row then: the logo left of the code, the server line below stays clear)
+    float logo_y = page_subtitle_y(22), code_y = logo_y > 22 ? logo_y + 4 : 58;
+    if (logo_y > 22) image_fit(dl, f, tex(mode_logo(r.settings.mode)), 330, logo_y, 150, 22);
+    else image_fit(dl, f, tex(mode_logo(r.settings.mode)), 360, 22, 220, 30);
     if (ranked) ranked_banner(dl, f, r, ri, 50);     // a little higher: the cards' rank patches under it
     else if (tour) tset_banner(dl, f, r, tset, 50);
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
-    text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
+    text(dl, f, g_title, 14, 590, code_y, ORANGE, code, RIGHT);
 
     // The server, and a warning when a match here would have a high ping: the path between two
     // players goes through the relay, about half of each one's round trip.
@@ -6106,7 +6113,7 @@ void gallery_step()
                                          // build 97: VENUES on "Community maps" (with RECOMP_TEST_EXTRA_VENUES, or a
                                          // content root with community venues)
                                          "create-community-maps",
-                                         "fighters-new", "vote-new", "hub-news",
+                                         "fighters-new", "vote-new", "hub-news", "hill-news", "room-team-news", "room-news",
                                          // build 87: content to come at the next release window ("NEW CONTENT AT 17:00")
                                          "hub-release",
                                          // build 86: QUICK MATCH set to original fighters only (One on One, King of the
@@ -6374,6 +6381,7 @@ void gallery_step()
     for (int &k : S.ftab_sel) k = -1;
     G.rts = false;
     std::string p = page;
+    if (p.size() > 5 && p != "hub-news" && p.compare(p.size() - 5, 5, "-news") == 0) p.erase(p.size() - 5);  // the page plus the corner notice
     // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
     G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
     for (auto &o : G.cp_online) o.clear();
