@@ -5044,7 +5044,15 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         ImVec2 at((io.DisplaySize.x - t.x) * 0.5f, io.DisplaySize.y * 0.16f);
         fg->AddRectFilled(ImVec2(at.x - size, at.y - size * 0.5f), ImVec2(at.x + t.x + size, at.y + t.y + size * 0.5f),
                           IM_COL32(0, 0, 0, 200), size * 0.3f);
-        fg->AddText(font, size, at, IM_COL32(255, 168, 26, 255), notice);
+        // each line centred: a notice may have two (build 110, the fight resume's "START: stop waiting")
+        for (const char *line = notice; ; at.y += size) {
+            const char *end = strchr(line, '\n');
+            if (!end) end = line + strlen(line);
+            float w = font->CalcTextSizeA(size, FLT_MAX, 0, line, end).x;
+            fg->AddText(font, size, ImVec2((io.DisplaySize.x - w) * 0.5f, at.y), IM_COL32(255, 168, 26, 255), line, end);
+            if (!*end) break;
+            line = end + 1;
+        }
     }
 
     ImGui::Render();
