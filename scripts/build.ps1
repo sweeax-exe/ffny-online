@@ -16,15 +16,16 @@ try {
         python (Join-Path $PSScriptRoot "pipeline-state.py") verify-lift --toolkit $tk
         if ($LASTEXITCODE) { throw "generated code freshness check failed" }
     }
-    if (-not $runtimeOnly) {
-        python (Join-Path $PSScriptRoot "pipeline-state.py") begin-build --toolkit $tk --preset $Preset
-        if ($LASTEXITCODE) { throw "build input snapshot failed" }
-    }
+    # Clean first: begin-build writes its snapshot into build\, so cleaning after it lost the state record-build needs
     if ($Clean) {
         $buildRoot = [IO.Path]::GetFullPath((Join-Path $repo "build")) + [IO.Path]::DirectorySeparatorChar
         $cleanTarget = [IO.Path]::GetFullPath((Join-Path $repo "build\$Preset"))
         if (-not $cleanTarget.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "clean target is outside build directory" }
         Remove-Item -LiteralPath $cleanTarget -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not $runtimeOnly) {
+        python (Join-Path $PSScriptRoot "pipeline-state.py") begin-build --toolkit $tk --preset $Preset
+        if ($LASTEXITCODE) { throw "build input snapshot failed" }
     }
     $buildGame = if ($runtimeOnly) { "OFF" } else { "ON" }
     cmake --preset $Preset "-DXBOXRECOMP_DIR=$tk" "-DDEFJAM_BUILD_GAME=$buildGame"; if ($LASTEXITCODE) { throw "configure failed" }
