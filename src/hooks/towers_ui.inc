@@ -635,7 +635,8 @@ void towers_run_card(ImDrawList *dl, const Frame &f, int tower, const TowerRun *
         text(dl, f, g_title, 11, x, y + 42, CREAM, tower == TOWER_FIVE_BOROUGHS ? "CHAPTERS OF 10, A BOSS AT THE END OF EACH"
                                                                                : "SAVED AFTER EVERY FLOOR", LEFT, 0.8f, 180);
         text(dl, f, g_title, 11, x, y + 64, ORANGE, "NO CONTINUES: ONE LOSS ENDS IT", LEFT, 0.8f, 180);
-        text(dl, f, g_hand, 11, x, y + 86, GREY, "A fresh seed for every climb: nobody gets the same order.", LEFT, 0.8f, 180);
+        if (!TOWER_IS_TEAM(tower) || !(gallery_on() || towers_signed_in()))     // build 108: the team's player 2 line there
+            text(dl, f, g_hand, 11, x, y + 86, GREY, "A fresh seed for every climb: nobody gets the same order.", LEFT, 0.8f, 180);
     }
 }
 
@@ -875,8 +876,8 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
             PartnerView pv = tw_partner();
             bool p2 = pv.state == PARTNER_SIGNED;
             std::string who = p2 ? std::string("PLAYER 2: ") + pv.name : "PLAYER 2: GUEST";
-            text(dl, f, g_title, 11, 290, 276, p2 ? GOLD : CREAM, who.c_str(), LEFT, 0.8f, 180);
-            text(dl, f, g_hand, 10, 290, 290, GREY, p2 ? "Both names on the board, both earn the team rewards." :
+            text(dl, f, g_title, 11, 290, 258, p2 ? GOLD : CREAM, who.c_str(), LEFT, 0.8f, 180);
+            text(dl, f, g_hand, 10, 290, 273, GREY, p2 ? "Both names on the board, both earn the team rewards." :
                  "Sign in so player 2 earns the team rewards too.", LEFT, 0.6f, 190);
             if (!gallery_on() && towers_partner_dropped())
                 say("Player 2's sign-in ran out: player 2 played as a guest. Press Y to sign in again.", 8000);
