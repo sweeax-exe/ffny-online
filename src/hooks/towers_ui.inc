@@ -757,7 +757,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
 {
     backdrop(dl, f, display, true, LOOK_STATS);
     page_title(dl, f, "TOWERS");
-    text(dl, f, g_hand, 14, 590, 34, ORANGE, "CLIMB NEW YORK, ONE FIGHTER AT A TIME", RIGHT, 1.0f);
+    text(dl, f, g_hand, 14, 590, page_subtitle_y(34), ORANGE, "CLIMB NEW YORK, ONE FIGHTER AT A TIME", RIGHT, 1.0f);
     tw_weekly_refresh();        // build 108: the Weekly's card while the service has one
     int cards = tw_card_count();
     TWU.sel = std::max(0, std::min(cards - 1, TWU.sel));
@@ -817,14 +817,20 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
         if (k == TWU.sel && TWU.card == 0) selector(dl, f, cx - 72, base + 8, 144, plate_h);
         text(dl, f, g_title, TOWER_IS_TEAM(t) ? 15.0f : 17.0f, cx, base + 10, with_alpha(k == TWU.sel ? CREAM : GREY, dim),
              TOWER_IS_TEAM(t) ? "TEAM TOWER" : towers_name(t), CENTER, 1.2f);
-        if (TOWER_IS_TEAM(t))       // build 106: the fighter rule, LB / RB
-            text(dl, f, g_title, 9.5f, cx, base + plate_h + 12, with_alpha(k == TWU.sel ? TOWER_COL[t - 1] : GREY, dim),
-                 t == TOWER_TEAM ? "<  STANDARD  >" : "<  WITH COMMUNITY  >", CENTER, 0.6f);
         char line[64];
         if (hr) snprintf(line, sizeof line, "FLOOR %d / %d", r.floor, r.floors);
         else if (best > 0) snprintf(line, sizeof line, "BEST %d  -  %d FLOORS", best, floors);
         else snprintf(line, sizeof line, "%d FLOORS", floors);
-        text(dl, f, g_title, 11, cx, base + 32, with_alpha(hr ? TOWER_COL[t - 1] : ORANGE, dim), line, CENTER, 0.8f);
+        if (TOWER_IS_TEAM(t)) {     // build 106: the fighter rule, LB / RB; build 108: in the plate's line (under the
+            // plate it ran into the tower's description below), with the LB / RB arrows on the plate's edges
+            char rule[96];
+            snprintf(rule, sizeof rule, "%s  -  %s", t == TOWER_TEAM ? "STANDARD" : "WITH COMMUNITY", line);
+            float sz = std::min(11.0f, fit_size(f, g_title, 11, rule, 120));
+            text(dl, f, g_title, sz, cx, base + 32 + (11 - sz) * 0.5f, with_alpha(hr ? TOWER_COL[t - 1] : ORANGE, dim), rule, CENTER, 0.8f);
+            ImU32 ac = with_alpha(k == TWU.sel ? TOWER_COL[t - 1] : GREY, dim);
+            text(dl, f, g_title, 11, cx - 66, base + 32, ac, "<", CENTER, 0.6f);
+            text(dl, f, g_title, 11, cx + 66, base + 32, ac, ">", CENTER, 0.6f);
+        } else text(dl, f, g_title, 11, cx, base + 32, with_alpha(hr ? TOWER_COL[t - 1] : ORANGE, dim), line, CENTER, 0.8f);
         if (t == TOWER_WEEKLY) {    // build 108: the place on this week's board, else the time to the reset
             const TowerBoardTower &bt = week.t[TOWER_WEEKLY - 1];
             std::string cd = tw_weekly_countdown(TWU.wk);
