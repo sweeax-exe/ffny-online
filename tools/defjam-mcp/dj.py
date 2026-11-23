@@ -104,7 +104,7 @@ def cmd_scenario(a):
                              maintenance=a.maintenance, cpu_level=a.cpu_level, linger=a.linger, reports=a.reports,
                              fighter_rules=a.fighter_rules, max_ping=a.max_ping, room_menu=a.room_menu,
                              results_leave=a.results_leave, hill_pick=a.hill_pick, hill_idle=a.hill_idle,
-                             password=a.password, drop_downlink=a.drop_downlink,
+                             password=a.password, drop_downlink=a.drop_downlink, cut=a.cut, cut_expect=a.cut_expect,
                              banned_tier=[int(x) for x in a.banned_tier.split(",") if x.strip()] if a.banned_tier is not None else None,
                              **common)
     elif a.kind == "offline":
@@ -279,6 +279,13 @@ def main(argv=None):
     sc.add_argument("--drop-downlink", help="online (build 109): SLOT:STEP:DURATION, the relay cuts every datagram to "
                     "the copy in relay slot SLOT for DURATION once the fight's STEPS reach STEP (relay -test-drop-downlink, e.g. 1:900:4s); "
                     "the resend window must close the gap: no copy gives up, the stall notice shows")
+    sc.add_argument("--cut", help="online (build 110, the fight resume): N@STEP:MS[:newport][:in|:out][,STEP:MS...], copy N's "
+                    "connection is cut (every datagram in and out; in/out one way) from fight step STEP for MS "
+                    "(RECOMP_TEST_NET_CUT; newport: a new socket after it); up to four cuts")
+    sc.add_argument("--cut-expect", choices=["resume", "end", "limit", "none", "stop"], default="resume",
+                    help="online, with --cut: resume (the fight goes on in sync), end (the hold runs out: today's end), "
+                    "limit (the third cut is not held), none (no hold: an older copy, after the KO), stop (the other "
+                    "copy stops waiting with START: RECOMP_TEST_RESUME_STOP_MS on it)")
     sc.add_argument("--fast-ko", type=int, default=600, help="knockout at this fight step (0: off)")
     sc.add_argument("--ko-winner", help="slot, alt or humans (only the human fighters; default alt; koth 0)")
     sc.add_argument("--cpu-level", choices=["easy", "normal", "hard"],

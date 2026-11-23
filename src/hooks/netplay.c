@@ -286,6 +286,7 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define T_WATCHLATE   0x36      /* the same, for a match that already ran when this PC came (CAPS bit 11) */
 #define T_YIELD       0x26      /* give up my spot in the line (relays since build 36, CAPS bit 2) */
 #define T_NOTICE      0x27      /* relay -> game: a countdown before a relay restart (build 37 on) */
+#define T_RESUME      0x3D      /* relay -> game (build 110): the fight resume's notice (server relay/resume.go) */
 #define T_FIGHTER     0x28      /* created fighters (build 38): this client's record, u16 length + record */
 #define T_RECORD      0x29      /* a room member's record (slot, u16 length, record); slot 0xFE: the relay's copy of ours */
 #define T_RECGET      0x2A      /* the record of the member in a slot, again */
@@ -451,6 +452,11 @@ uint32_t netplay_client_caps(void)
 }
 #define CP_WAIT_MS   10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
+/* Build 110: every CAPS bit is taken (109 used the last), so new features go in an extension word after the caps
+ * word (server relay/resume.go). An older relay drops that longer CAPS as malformed: the first CAPS_EXT_TRIES go
+ * with it, the rest without, so an older relay still answers within the tries. */
+#define EXT_RESUME    1u        /* the fight resume, both ways */
+#define CAPS_EXT_TRIES 2
 #define WINNER_DRAW   0xFFu
 #define SET_MENU_MS   4000u     /* a ranked set's game: the results' Rematch menu goes back to the room by itself */
 #define SET_LEAVE_MS  15000u    /* ... and when it has not reached the menus this long after that, it is forced */
@@ -595,6 +601,7 @@ static struct {
     /* King of the Hill */
     int relay_caps;                 /* the relay's CAPS answer, -1 not yet */
     int relay_quickcap;             /* build 109: that answer has CAPS_QUICKCAP (bit 31, left out of relay_caps) */
+    int relay_ext;                  /* build 110: the extension word of that answer (EXT_RESUME), 0 none */
     int caps_tries;
     ULONGLONG caps_sent;
     int pc_tries, pc_done;          /* one session per PC (T_PC): sent, and answered or given up */
@@ -1612,6 +1619,97 @@ static const char *player_name(int pos)
     return pos >= 0 && pos < MAXP && N.report_names[pos][0] ? N.report_names[pos] : "the other player";
 }
 
+static const char *g_quit_why;  /* build 110: why desync_quit leaves the fight (NULL: out of sync) */
+
+/* ---- build 110: the fight resume (community/fight-resume-design.md; server relay/resume.go) ----------------
+ * The owner's decisions of 2026-11-22: pause with a notice, hold 20 s per drop, 2 holds and 30 s per player per
+ * fight, the same rules in every online mode, network drops only. A 2-human fight whose relay said RESUME ON
+ * (both games announced EXT_RESUME): a player cut off mid-fight keeps its seat up to 20 s from its last packet,
+ * the relay says so every second (RESUME HELD), and both games keep waiting at the same step instead of giving
+ * up at STALL_LIMIT_MS. The waiting one shows "Waiting for <name> to reconnect (N s)" (START stops the wait:
+ * today's give-up, the other takes the loss), the cut one "Reconnecting... (N s)" and, with nothing from the
+ * relay for RESUME_SOCK_MS, a new socket (the same token: the relay's "moved to a new address"; never a new
+ * HELLO). Build 109's resend window refills the entries either PC lacks once packets flow again. Without a word
+ * from the relay (a downlink-only cut: the relay hears that player) each game counts the long waits itself, by
+ * the same limits. A menu leave or a quit is never held (the ROOM says the player left: lockstep off at once). */
+#define RESUME_ON      0
+#define RESUME_HELD    1
+#define RESUME_BACK    2
+#define RESUME_GONE    3
+#define RESUME_NOHOLD  4
+#define RESUME_MARGIN_MS 2000   /* a held player's wait lasts this much past the relay's deadline */
+#define RESUME_FRESH_MS  2500   /* a HELD notice counts this long (the relay sends one every second) */
+#define RESUME_SOCK_MS   3000   /* nothing from the relay this long in a held fight: a new socket, at most this often */
+typedef struct { int state; unsigned holds; ULONGLONG at, deadline; } ResumeSlot;
+static struct {
+    uint32_t on_seed;           /* the START the relay said RESUME ON for (0: none) */
+    unsigned hold_ms, budget_ms, max_holds;
+    ResumeSlot slot[ROOMSLOTS]; /* under g_cs: the relay's last notice for each room slot */
+    uint32_t count_seed;        /* this PC's own count of each player's long waits (for the START count_seed) */
+    unsigned holds[MAXP];
+    ULONGLONG used[MAXP];
+    volatile LONG lost;         /* the relay gave this PC's seat up (ERROR 7 or RESUME GONE for it mid-fight) */
+    ULONGLONG sock_at;          /* the last new socket */
+    unsigned sockets;
+    /* this match's facts (net_json "resume"): long waits, their length, those that went on, this PC's longest
+     * time without the relay, START presses, how the last long wait ended */
+    unsigned f_holds, f_resumed, f_stopped;
+    ULONGLONG f_held_ms, f_cut_ms;
+    char f_end[12];
+} R;
+
+/* The fight resume is on for this fight: the relay said so for this START (never for a spectator). */
+static int resume_on(void)
+{
+    return N.lobby && !N.watching && N.start_seed && R.on_seed == N.start_seed && R.hold_ms > 0;
+}
+
+/* Under g_cs: this PC's counts start again at each START. */
+static void resume_counts(void)
+{
+    if (R.count_seed != N.start_seed) {
+        R.count_seed = N.start_seed;
+        memset(R.holds, 0, sizeof(R.holds));
+        memset(R.used, 0, sizeof(R.used));
+    }
+}
+
+/* T_RESUME's body: u8 slot, u8 state, u16 a, u8 holds, u8 max holds, u16 b (server relay/resume.go). */
+static void on_resume(const uint8_t *b, int len)
+{
+    static const char *const what[] = { "on", "held", "back", "gone (its hold ran out)", "not held" };
+    ULONGLONG now = GetTickCount64();
+    unsigned slot, state, a, holds, max, bb;
+    if (len < 8) return;
+    slot = b[0]; state = b[1]; a = (unsigned)b[2] | (unsigned)b[3] << 8; holds = b[4]; max = b[5];
+    bb = (unsigned)b[6] | (unsigned)b[7] << 8;
+    if (state > RESUME_NOHOLD) return;
+    EnterCriticalSection(&g_cs);
+    if (state == RESUME_ON && slot == 0xFF) {
+        if (R.on_seed != N.start_seed || R.hold_ms != a)
+            fprintf(stderr, "[NETPLAY] resume: on for this fight (a seat is held %u ms from the last packet, %u holds "
+                    "and %u ms per player)\n", a, max, bb);
+        R.on_seed = N.start_seed;
+        R.hold_ms = a;
+        R.max_holds = max;
+        R.budget_ms = bb;
+    } else if (slot < ROOMSLOTS && state != RESUME_ON) {
+        ResumeSlot *r = &R.slot[slot];
+        int again = state == RESUME_HELD && r->state == RESUME_HELD && now - r->at < RESUME_FRESH_MS;
+        int mine = N.pos >= 0 && N.pos < MAXP && N.start_slots[N.pos] == (int)slot;
+        r->state = (int)state;
+        r->holds = holds;
+        r->at = now;
+        if (state == RESUME_HELD) r->deadline = now + a;
+        if (!again)
+            fprintf(stderr, "[NETPLAY] resume: slot %u%s %s (hold %u of %u, silent %.1f s%s)\n", slot,
+                    mine ? " (this PC)" : "", what[state], holds, max, bb / 1000.0, state == RESUME_HELD ? ", held" : "");
+        if (state == RESUME_GONE && mine && N.match_live && N.lockstep) InterlockedExchange(&R.lost, 1);
+    }
+    LeaveCriticalSection(&g_cs);
+    SetEvent(N.arrived);
+}
+
 static uint32_t mix32(uint32_t x)
 {
     x ^= x >> 16; x *= 0x7FEB352Du;
@@ -1656,6 +1754,7 @@ static struct {
 static int g_rx_direct;         /* net thread: on_data's packet came on the direct path */
 static void on_data(int from, const uint8_t *p, int len);
 static void send_raw(const uint8_t *b, int len);
+static int net_cut(int out);
 static int p2p_setting(void) { return recomp_settings_get("online", "p2p_direct", 0) != 0; }
 
 static void p2p_end(const char *why)
@@ -1691,7 +1790,7 @@ static void p2p_send(int kind, const uint8_t *body, int n)
 {
     uint8_t b[1200];
     int len = netp2p_packet(b, (int)sizeof(b), P.key, kind, body, n);
-    if (len && !P.cut && N.sock != INVALID_SOCKET) {
+    if (len && !P.cut && N.sock != INVALID_SOCKET && !net_cut(1)) {
         sendto(N.sock, (const char *)b, len, 0, (const struct sockaddr *)&P.peer, (int)sizeof(P.peer));
         if (kind == NETP2P_DATA) P.sent++;
     }
@@ -1816,8 +1915,99 @@ static void p2p_tick(ULONGLONG now)
     }
 }
 
+/* Tests (build 110, dj.py scenario online --cut): RECOMP_TEST_NET_CUT=<step>:<ms>[:newport][:in|:out][,...] drops
+ * every datagram in and out (in: only arriving ones, out: only leaving ones) from that fight step of the START's
+ * matches for ms, as a pulled cable or a Wi-Fi drop; newport: a new socket when it ends (a router that gave a new
+ * port). Up to four cuts, each once, in order. */
+#define NET_CUTS 4
+static struct {
+    int parsed, n, cur, done[NET_CUTS];
+    uint32_t step[NET_CUTS];
+    unsigned ms[NET_CUTS];
+    int newport[NET_CUTS], dir[NET_CUTS];       /* dir 0 both, 1 in, 2 out */
+    volatile ULONGLONG start;
+    volatile LONG renew;                        /* a new socket due (net_thread) */
+} g_cut;
+
+static void net_cut_parse(void)
+{
+    const char *v = getenv("RECOMP_TEST_NET_CUT");
+    g_cut.parsed = 1;
+    while (v && *v && g_cut.n < NET_CUTS) {
+        unsigned step = 0, ms = 0;
+        const char *end = strchr(v, ','), *p;
+        size_t len = end ? (size_t)(end - v) : strlen(v);
+        char one[64];
+        snprintf(one, sizeof(one), "%.*s", (int)(len < sizeof(one) ? len : sizeof(one) - 1), v);
+        if (sscanf(one, "%u:%u", &step, &ms) == 2 && step && ms) {
+            g_cut.step[g_cut.n] = step;
+            g_cut.ms[g_cut.n] = ms;
+            g_cut.newport[g_cut.n] = strstr(one, ":newport") != NULL;
+            p = strrchr(one, ':');
+            g_cut.dir[g_cut.n] = p && !strcmp(p, ":in") ? 1 : p && !strcmp(p, ":out") ? 2 : 0;
+            fprintf(stderr, "[NETPLAY] tests: the connection is cut at fight step %u for %u ms%s%s\n", step, ms,
+                    g_cut.dir[g_cut.n] == 1 ? " (arriving data only)" : g_cut.dir[g_cut.n] == 2 ? " (leaving data only)" : "",
+                    g_cut.newport[g_cut.n] ? ", then a new socket" : "");
+            g_cut.n++;
+        }
+        v = end ? end + 1 : NULL;
+    }
+}
+
+/* Whether the test cut drops this datagram (out: one this PC sends). Either thread. */
+static int net_cut(int out)
+{
+    ULONGLONG now, start;
+    int c;
+    if (!g_cut.parsed) net_cut_parse();
+    if (g_cut.cur >= g_cut.n) return 0;
+    c = g_cut.cur;
+    now = GetTickCount64();
+    start = g_cut.start;
+    if (!start) {
+        if (!N.lockstep || !N.match_live || N.watching || N.step < g_cut.step[c]) return 0;
+        g_cut.start = start = now;
+        fprintf(stderr, "[NETPLAY] tests: the connection is cut now (step %u, %u ms)\n", N.step, g_cut.ms[c]);
+    }
+    if (now - start >= g_cut.ms[c]) {
+        if (InterlockedCompareExchange((volatile LONG *)&g_cut.done[c], 1, 0) == 0) {
+            fprintf(stderr, "[NETPLAY] tests: the cut is over (step %u, %.1f s)\n", N.step, (now - start) / 1000.0);
+            if (g_cut.newport[c]) InterlockedExchange(&g_cut.renew, 1);
+            g_cut.start = 0;
+            g_cut.cur = c + 1;
+        }
+        return 0;
+    }
+    return g_cut.dir[c] == 0 || g_cut.dir[c] == (out ? 2 : 1);
+}
+
+/* Build 110 (the fight resume): a new UDP socket for this session, the same options; the next packet carries the
+ * same token, and the relay moves the session to its new address. Never a new HELLO. Network thread only. */
+static void resume_new_socket(ULONGLONG now, const char *why)
+{
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP), old;
+    R.sock_at = now;
+    if (s == INVALID_SOCKET) {
+        fprintf(stderr, "[NETPLAY] resume: no new socket (%s): error %d\n", why, WSAGetLastError());
+        return;
+    }
+    {
+        u_long nonblocking = 1;
+        BOOL reset = FALSE;
+        DWORD ret = 0;
+        ioctlsocket(s, FIONBIO, &nonblocking);
+        WSAIoctl(s, _WSAIOW(IOC_VENDOR, 12) /* SIO_UDP_CONNRESET */, &reset, sizeof(reset), NULL, 0, &ret, NULL, NULL);
+    }
+    old = N.sock;
+    N.sock = s;
+    if (old != INVALID_SOCKET) closesocket(old);
+    R.sockets++;
+    fprintf(stderr, "[NETPLAY] resume: a new socket (%s; %u this session), the same session token\n", why, R.sockets);
+}
+
 static void send_raw(const uint8_t *b, int len)
 {
+    if (net_cut(1)) return;     /* tests: RECOMP_TEST_NET_CUT */
     if (N.sock != INVALID_SOCKET)
         sendto(N.sock, (const char *)b, len, 0, (const struct sockaddr *)&N.server, N.server_len);
 }
@@ -4914,6 +5104,13 @@ static void on_packet(const uint8_t *b, int len)
                 fprintf(stderr, "[NETPLAY] the relay %s the Quick Match ping ceiling (build 109)\n",
                         get32(b + 6) >> 31 ? "applies" : "does not know");
             N.relay_quickcap = (int)(get32(b + 6) >> 31);
+            {   /* build 110: the extension word after the rollback ping limit (only to a CAPS that carried one) */
+                int ext = (get32(b + 6) & CAPS_RB_MODES) && (get32(b + 6) & CAPS_RB_PING) && len >= 22 ? (int)get32(b + 18) : 0;
+                if (ext != N.relay_ext)
+                    fprintf(stderr, "[NETPLAY] the relay's extension word: %08X%s\n", (unsigned)ext,
+                            ext & EXT_RESUME ? " (the fight resume)" : "");
+                N.relay_ext = ext;
+            }
             if (had != N.relay_caps)
                 fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
@@ -4987,6 +5184,9 @@ static void on_packet(const uint8_t *b, int len)
         break;
     case T_WATCHLATE:   /* spectator mode: a match that runs already; this PC watches its next fight */
         if (N.lobby && !NETPLAY_IS_HILL(N.roomv.settings.mode) && SPECTATOR_HERE()) on_start_as(b + 6, len - 6, 2);
+        break;
+    case T_RESUME:      /* build 110: the fight resume (on_resume) */
+        if (N.lobby) on_resume(b + 6, len - 6);
         break;
     case T_NOTICE:      /* u16 seconds left, u8 length, text: the relay restarts soon (maintenance) */
         if (len >= 9 && b[8] == len - 9) {
@@ -5166,6 +5366,12 @@ static void on_packet(const uint8_t *b, int len)
                 fprintf(stderr, "[NETPLAY] refused: %s\n", text);
                 break;
             }
+            if (N.lobby && code == 7 && N.match_live && N.lockstep && resume_on()) {
+                /* build 110: mid-fight, the relay no longer knows this session: its hold ran out */
+                fprintf(stderr, "[NETPLAY] resume: the relay no longer knows this session (its seat was given up)\n");
+                InterlockedExchange(&R.lost, 1);
+                SetEvent(N.arrived);
+            }
             if (N.lobby && code == 7) {             /* the server restarted: enter again */
                 N.have_token = 0;
                 N.started = GetTickCount64();
@@ -5326,7 +5532,15 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 N.last_ping = now;
                 send_token_only(T_PING, N.ping_nonce, 1);
             }
-            if (now - N.last_rx > 15000) {
+            /* build 110: in a fight with the fight resume, a held seat lasts longer than this limit */
+            ULONGLONG rx_limit = resume_on() && N.match_live && N.lockstep && R.hold_ms + 5000u > 15000u ? R.hold_ms + 5000u : 15000u;
+            if (resume_on() && N.match_live && N.lockstep && !R.lost && now - N.last_rx >= RESUME_SOCK_MS &&
+                now - R.sock_at >= RESUME_SOCK_MS) {
+                char why[64];
+                snprintf(why, sizeof(why), "nothing from the relay for %.1f s mid-fight", (now - N.last_rx) / 1000.0);
+                resume_new_socket(now, why);
+            }
+            if (now - N.last_rx > rx_limit) {
                 InterlockedExchange(&N.lockstep, 0);
                 assign_input(0);
                 InterlockedExchange(&N.state, NETPLAY_FAILED);
@@ -5354,7 +5568,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
          * displace a JOIN or READY); no answer after CAPS_TRIES: an older relay, no King of the Hill */
         if (N.lobby && N.have_token && N.state == NETPLAY_LOBBY && N.relay_caps < 0 && now - N.caps_sent >= RETRY_MS) {
             if (N.caps_tries++ < CAPS_TRIES) {
-                uint8_t cb[6 + 8 + 4];
+                uint8_t cb[6 + 8 + 4 + 4];
                 int n = header(cb, T_CAPS);
                 memcpy(cb + n, N.token, 8); n += 8;
                 /* (netplay_client_caps says the same for RINGS; tests/unit/test_rings_native.py keeps the two alike) */
@@ -5362,6 +5576,8 @@ static DWORD WINAPI net_thread(LPVOID unused)
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
                               CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
                               CAPS_SKINS | CAPS_SKINSWIDE_OPT | CAPS_RTS_POINTS | CAPS_QUICKCAP | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                /* build 110: the extension word (the fight resume), in the first tries only (an older relay drops it) */
+                if (N.caps_tries <= CAPS_EXT_TRIES && !getenv("RECOMP_TEST_NO_RESUME")) { put32(cb + n, EXT_RESUME); n += 4; }
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -5575,6 +5791,14 @@ static DWORD WINAPI net_thread(LPVOID unused)
             FD_ZERO(&rd);
             FD_SET(N.sock, &rd);
             got = select(0, &rd, NULL, NULL, &tv) > 0 ? recv(N.sock, (char *)b, sizeof(b), 0) : 0;
+        }
+        if (got > 0 && net_cut(0)) got = 0;     /* tests: RECOMP_TEST_NET_CUT */
+        if (InterlockedExchange(&g_cut.renew, 0)) resume_new_socket(GetTickCount64(), "tests: the cut's new port");
+        if (got >= 6 && N.match_live) {         /* build 110: this PC's longest time without the relay this match */
+            ULONGLONG gap = GetTickCount64() - N.last_rx;
+            if (gap > R.f_cut_ms) R.f_cut_ms = gap;
+            if (gap >= 1500 && N.lockstep)
+                fprintf(stderr, "[NETPLAY] data from the relay again after %.1f s (step %u)\n", gap / 1000.0, N.step);
         }
         if (got >= 6 && b[5] == NETP2P_T_DIRECT) {     /* the direct connection's own packets (P2P), key-checked */
             p2p_on_packet(b, got);
@@ -6930,6 +7154,11 @@ static int net_json(char *json, int size, int n)
         if (g_conn.gave && n < size - 100)
             n += snprintf(json + n, (size_t)(size - n), ",\"gave\":{\"need\":%u,\"late\":%u,\"relay_ms\":%u,\"peer_ms\":%u}",
                           g_conn.gave_need, g_conn.gave_late_pos, g_conn.gave_relay_ms, g_conn.gave_peer_ms);
+        /* build 110: the fight resume, when it was on for this fight */
+        if (R.on_seed && R.on_seed == N.start_seed && n < size - 140)
+            n += snprintf(json + n, (size_t)(size - n), ",\"resume\":{\"holds\":%u,\"held_ms\":%u,\"resumed\":%u,"
+                          "\"cut_ms\":%u,\"stopped\":%u,\"end\":\"%s\"}", R.f_holds, (unsigned)R.f_held_ms, R.f_resumed,
+                          (unsigned)R.f_cut_ms, R.f_stopped, R.f_end);
         n += snprintf(json + n, (size_t)(size - n), "}");
         LeaveCriticalSection(&g_cs);
     }
@@ -8570,6 +8799,10 @@ static void match_start_body(void)
     N.match = mix32(N.session ^ (N.match_count * 0x9E3779B9u));   /* the same on every PC, new per match */
     N.step = 0;
     memset(&g_conn, 0, sizeof(g_conn));     /* build 109: this match's connection facts */
+    R.f_holds = R.f_resumed = R.f_stopped = 0;  /* build 110: the fight resume's */
+    R.f_held_ms = R.f_cut_ms = 0;
+    R.f_end[0] = 0;
+    InterlockedExchange(&R.lost, 0);
     /* every match of a START is reported on its own (the results screen's rematch runs a
      * second match without a new START): the key gets the match's number */
     if (N.report_key[0]) {
@@ -9368,7 +9601,30 @@ static void spec_step(uint32_t s)
         }
         {
             int decided = N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u;
-            if (now - since > (decided ? DECIDED_LIMIT_MS : s <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : STALL_LIMIT_MS)) {
+            ULONGLONG limit = STALL_LIMIT_MS;
+            {   /* build 110, the fight resume: a fighter whose seat the relay holds; the feed waits for it */
+                int ls = late >= 0 && late < MAXP ? N.start_slots[late] : -1;
+                ResumeSlot r;
+                memset(&r, 0, sizeof(r));
+                EnterCriticalSection(&g_cs);
+                if (ls >= 0 && ls < ROOMSLOTS) r = R.slot[ls];
+                LeaveCriticalSection(&g_cs);
+                if (!decided && r.state == RESUME_HELD && r.at >= since && now - r.at < RESUME_FRESH_MS) {
+                    ULONGLONG lim = r.deadline + RESUME_MARGIN_MS > since ? r.deadline + RESUME_MARGIN_MS - since : 0;
+                    if (lim > limit) limit = lim;
+                    if (now - since >= 1000) {     /* the notice, over the last picture presented again */
+                        extern void d3d11_translator_present_again(void);
+                        static ULONGLONG presented;
+                        EnterCriticalSection(&g_cs);
+                        snprintf(N.toast, sizeof(N.toast), "Waiting for %s to reconnect (%u s)", player_name(late),
+                                 r.deadline > now ? (unsigned)((r.deadline - now + 999) / 1000) : 0u);
+                        N.toast_until = now + 1500;
+                        LeaveCriticalSection(&g_cs);
+                        if (now - presented >= 33) { presented = now; d3d11_translator_present_again(); }
+                    }
+                }
+            }
+            if (now - since > (decided ? DECIDED_LIMIT_MS : s <= (uint32_t)N.delay + 1 ? START_LIMIT_MS : limit)) {
                 InterlockedExchange(&N.lockstep, 0);
                 if (decided) {
                     fprintf(stderr, "[NETPLAY] watching: the match is decided and the players went on (step %u): "
@@ -9461,7 +9717,9 @@ static void step_body(void)
 #define STALL_PRESENT_MS 33
 #define SILENT_SELF_MS   1500     /* the relay answers this PC's ping every second */
 extern void d3d11_translator_present_again(void);
-static void stall_notice(int late, ULONGLONG now, ULONGLONG waited, ULONGLONG *last_present)
+/* Build 110: mode 1 the fight resume waits for a held player (left: seconds of its hold), mode 2 this PC is the
+ * one cut off (resume_wait). */
+static void stall_notice(int late, ULONGLONG now, ULONGLONG waited, ULONGLONG *last_present, int mode, unsigned left)
 {
     static int present = -1, last_cause = -1;
     static uint32_t told_match;
@@ -9476,7 +9734,11 @@ static void stall_notice(int late, ULONGLONG now, ULONGLONG waited, ULONGLONG *l
     else if (g_peer_acks[late] && g_peer_ack_match[late] == N.match && g_peer_ack[late] < N.local_last &&
              g_peer_ack_seen[late] >= g_peer_ack_at[late] + STALL_NOTICE_MS && now - g_peer_ack_seen[late] < ACK_FRESH_MS) cause = 2;
     else cause = 3;
-    if (cause == 0) snprintf(text, sizeof(text), "Connection problem: you are not receiving any data (%u s)", secs);
+    if (mode == 1) cause = 4;
+    else if (mode == 2) cause = 5;
+    if (cause == 4) snprintf(text, sizeof(text), "Waiting for %s to reconnect (%u s)\nSTART: stop waiting", player_name(late), left);
+    else if (cause == 5) snprintf(text, sizeof(text), "Reconnecting... (%u s)", left);
+    else if (cause == 0) snprintf(text, sizeof(text), "Connection problem: you are not receiving any data (%u s)", secs);
     else if (cause == 1) snprintf(text, sizeof(text), "Connection problem: %s is not sending (%u s)", player_name(late), secs);
     else if (cause == 2) snprintf(text, sizeof(text), "Connection problem: %s is not receiving your data (%u s)", player_name(late), secs);
     else snprintf(text, sizeof(text), "Connection problem: waiting for %s... (%u s)", player_name(late), secs);
@@ -9488,14 +9750,104 @@ static void stall_notice(int late, ULONGLONG now, ULONGLONG waited, ULONGLONG *l
     if (cause != last_cause || !*last_present || told_match != N.match) {
         told_match = N.match;
         last_cause = cause;
+        char flat[160];
+        int k;
+        snprintf(flat, sizeof(flat), "%s", text);
+        for (k = 0; flat[k]; k++) if (flat[k] == '\n') flat[k] = '|';     /* one log line */
         fprintf(stderr, "[NETPLAY] stall notice (step %u, player %d, %.1f s; relay heard %.1f s ago, player %.1f s ago): %s\n",
-                N.step, late + 1, waited / 1000.0, relay_ms / 1000.0, peer_ms / 1000.0, text);
+                N.step, late + 1, waited / 1000.0, relay_ms / 1000.0, peer_ms / 1000.0, flat);
     }
     if (!*last_present) *last_present = 1;
     if (present && now - *last_present >= STALL_PRESENT_MS) {
         *last_present = now;
         d3d11_translator_present_again();
     }
+}
+
+/* Build 110, the fight resume: mid-fight, while this PC waits for player `late`'s entries since `since`, how long
+ * the wait may last (ms from since) and what it shows. 0: today's wait (STALL_LIMIT_MS: the resume is off, the
+ * relay said the player is not held, or the limits are used); 1: a held player (its countdown, START stops the
+ * wait); 2: this PC is the one cut off; -1: the hold is over (RESUME GONE, or the relay gave this PC's seat up):
+ * give up now. *left: the countdown's seconds. Without a word from the relay (it arrives 3 s into a full cut; a
+ * downlink-only cut gets none) the wait is the hold this PC's own counts allow. */
+static int resume_wait(int late, ULONGLONG now, ULONGLONG since, ULONGLONG *limit, unsigned *left)
+{
+    int ls, me, own, who;
+    ULONGLONG deadline = 0;
+    *limit = STALL_LIMIT_MS;
+    *left = 0;
+    if (!resume_on() || late < 0 || late >= MAXP || N.pos < 0 || N.pos >= MAXP) return 0;
+    if (R.lost) return -1;
+    ls = N.start_slots[late];
+    me = N.start_slots[N.pos];
+    own = now > N.last_rx && now - N.last_rx >= SILENT_SELF_MS;
+    EnterCriticalSection(&g_cs);
+    resume_counts();
+    if (ls >= 0 && ls < ROOMSLOTS && R.slot[ls].at >= since) {
+        const ResumeSlot *r = &R.slot[ls];
+        if (r->state == RESUME_GONE) { LeaveCriticalSection(&g_cs); return -1; }
+        if (r->state == RESUME_NOHOLD) { LeaveCriticalSection(&g_cs); return 0; }
+        if (r->state == RESUME_HELD && now - r->at < RESUME_FRESH_MS) deadline = r->deadline;
+    }
+    if (!deadline && me >= 0 && me < ROOMSLOTS && R.slot[me].at >= since && R.slot[me].state == RESUME_HELD &&
+        now - R.slot[me].at < RESUME_FRESH_MS) {
+        deadline = R.slot[me].deadline;     /* this PC's uplink is cut: the relay holds its seat */
+        own = 1;
+    }
+    who = own ? N.pos : late;
+    if (!deadline) {
+        ULONGLONG hold = R.hold_ms;
+        if (R.holds[who] >= R.max_holds || R.used[who] >= R.budget_ms) { LeaveCriticalSection(&g_cs); return 0; }
+        if (R.budget_ms - R.used[who] < hold) hold = R.budget_ms - R.used[who];
+        deadline = since + hold;
+    }
+    LeaveCriticalSection(&g_cs);
+    *limit = deadline + RESUME_MARGIN_MS > since ? deadline + RESUME_MARGIN_MS - since : 0;
+    if (*limit < STALL_LIMIT_MS) *limit = STALL_LIMIT_MS;
+    *left = deadline > now ? (unsigned)((deadline - now + 999) / 1000) : 0;
+    return own ? 2 : 1;
+}
+
+/* Build 110: a long wait of the fight resume is over (the entries came, or it ended): this PC's counts (per START,
+ * the same limits as the relay's) and the match's facts. own: this PC was the one cut off. */
+static void resume_wait_over(int late, ULONGLONG waited, int own, const char *end)
+{
+    int who = own ? N.pos : late;
+    if (!resume_on() || waited < STALL_LIMIT_MS || who < 0 || who >= MAXP) return;
+    EnterCriticalSection(&g_cs);
+    resume_counts();
+    R.holds[who]++;
+    R.used[who] += waited;
+    LeaveCriticalSection(&g_cs);
+    R.f_holds++;
+    R.f_held_ms += waited;
+    if (!strcmp(end, "back")) R.f_resumed++;
+    snprintf(R.f_end, sizeof(R.f_end), "%s", end);
+    fprintf(stderr, "[NETPLAY] resume: a %.1f s wait for %s ended: %s (step %u; %s long waits this START: %u, %.1f s)\n",
+            waited / 1000.0, own ? "this PC's own connection" : player_name(late), end, N.step,
+            own ? "this PC's" : "that player's", R.holds[who], R.used[who] / 1000.0);
+}
+
+/* START pressed on this PC's own controller during the wait since `since` (an edge; a press already held when the
+ * wait began is not one). Tests: RECOMP_TEST_RESUME_STOP_MS=<ms> presses it once the wait is that long. */
+static int resume_stop_pressed(ULONGLONG since, ULONGLONG now)
+{
+    static ULONGLONG armed_for;
+    static int was_down, test_ms = -1;
+    XBOX_INPUT_STATE st;
+    int down;
+    if (test_ms < 0) test_ms = getenv("RECOMP_TEST_RESUME_STOP_MS") ? atoi(getenv("RECOMP_TEST_RESUME_STOP_MS")) : 0;
+    if (test_ms > 0 && now - since >= (ULONGLONG)test_ms) {
+        fprintf(stderr, "[NETPLAY] tests: START pressed during the wait (RECOMP_TEST_RESUME_STOP_MS)\n");
+        test_ms = 0;
+        return 1;
+    }
+    memset(&st, 0, sizeof(st));
+    down = xbox_HostInputGetLocalState(&st) == ERROR_SUCCESS && (st.Gamepad.wButtons & 0x0010);
+    if (armed_for != since) { armed_for = since; was_down = down; return 0; }
+    if (down && !was_down) { was_down = 1; return 1; }
+    was_down = down;
+    return 0;
 }
 
 static void step_run(void)
@@ -9764,6 +10116,8 @@ static void step_run(void)
     last_note = 0;
     for (;;) {
         int ready = 1, i, late = -1;
+        static int rmode_was;               /* build 110: the fight resume's mode of this wait (resume_wait) */
+        static int rmode_logged;            /* the mode its log line named */
         uint32_t t = need;
         if (N.rb_on) { t = N.final_step + 1; if (t <= (uint32_t)N.delay) t = (uint32_t)N.delay + 1; }
         EnterCriticalSection(&g_cs);
@@ -9773,6 +10127,9 @@ static void step_run(void)
         LeaveCriticalSection(&g_cs);
         if (ready || !N.lockstep) {
             ULONGLONG waited = GetTickCount64() - waited_since;
+            if (rmode_was > 0)      /* the entries came, or lockstep went off meanwhile (the ROOM: the held one was removed) */
+                resume_wait_over(N.last_late, waited, rmode_was == 2, ready ? "back" : "gone");
+            rmode_was = 0;
             if (ready && waited >= 100 && s > (uint32_t)N.delay + 1 && N.fighting_seen && MEM32(G_MATCH_PHASE) == 1u) {
                 g_fight_waits.n++;
                 if (waited > g_fight_waits.longest) g_fight_waits.longest = waited;
@@ -9802,11 +10159,27 @@ static void step_run(void)
             if (late >= 0 && g_steps_match[late] != N.match && now - waited_since >= 1500) last_note = now;
             if (now - last_send >= 50) { if (N.local_last) send_steps(N.local_last); last_send = now; }   /* the others may be waiting for ours */
             gone_send();
+            /* build 110: the fight resume (resume_wait): how long this wait may last, and what it shows */
+            ULONGLONG stall_limit = STALL_LIMIT_MS;
+            unsigned rleft = 0;
+            int rmode = 0, rstop = 0;
+            if (late >= 0 && late < MAXP && N.lobby && !N.watching && g_steps_match[late] == N.match &&
+                need > (uint32_t)N.delay + 1 && !(N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u))
+                rmode = resume_wait(late, now, waited_since, &stall_limit, &rleft);
+            if (rmode > 0 && now - waited_since < 3000) rmode_logged = 0;
+            if (rmode > 0 && now - waited_since >= 3000 && rmode != rmode_logged && (rmode_logged = rmode) != 0)  /* long waits only */
+                fprintf(stderr, "[NETPLAY] resume: %s (step %u, waiting since %.1f s, up to %.1f s)\n",
+                        rmode == 2 ? "this PC is cut off: reconnecting" : "waiting for the held player", s,
+                        (now - waited_since) / 1000.0, stall_limit / 1000.0);
+            if (rmode > rmode_was) rmode_was = rmode;     /* 2 (this PC cut off) stays for the wait's end */
+            if (rmode == 1 && resume_stop_pressed(waited_since, now)) rstop = 1;
             /* build 109: a wait mid-fight says so on screen while it lasts (stall_notice), not only once it is over */
             if (late >= 0 && late < MAXP && N.lobby && !N.watching && g_steps_match[late] == N.match &&
                 need > (uint32_t)N.delay + 1 && now - waited_since >= STALL_NOTICE_MS &&
                 !(N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u))
-                stall_notice(late, now, now - waited_since, &last_present);
+                stall_notice(late, now, now - waited_since, &last_present,
+                             /* the resume's text once the wait is long (a short stall keeps build 109's causes) */
+                             rmode > 0 && now - waited_since >= 3000 ? rmode : 0, rleft);
             /* The fight decided (KO, time): what follows is the winner's scene and the results, the same
              * on every PC however they part, and a PC that skips ahead stops sending steps. Waiting the
              * mid-fight ten seconds there froze the winner's scene and then said the fight would not
@@ -9881,9 +10254,44 @@ static void step_run(void)
                 N.rematch_resent = now;
                 rematch_send(N.match_count - 1u, REMATCH_F_RESEND);
             }
-            if (rematch_lost || now - waited_since > (decided ? DECIDED_LIMIT_MS :
-                                      need <= (uint32_t)N.delay + 1 && !unheard ? START_LIMIT_MS : STALL_LIMIT_MS)) {
+            if (rematch_lost || rmode < 0 || rstop || now - waited_since > (decided ? DECIDED_LIMIT_MS :
+                                      need <= (uint32_t)N.delay + 1 && !unheard ? START_LIMIT_MS : stall_limit)) {
                 uint32_t u;
+                /* build 110: the fight resume's ends (resume_wait): the relay gave this PC's seat up; this PC's
+                 * player stopped waiting (START: today's give-up, then back to the room); its hold ran out */
+                if (!decided && (rmode != 0 || rmode_was > 0)) {
+                    int lost = R.lost != 0;
+                    resume_wait_over(late, now - waited_since, lost || rmode == 2 || rmode_was == 2,
+                                     lost ? "lost" : rstop ? "start" : rmode < 0 ? "gone" : "limit");
+                    if (rstop) R.f_stopped++;
+                    if (lost) {
+                        fprintf(stderr, "[NETPLAY] resume: this PC's seat was given up (its hold ran out, step %u): the "
+                                "fight goes on offline\n", s);
+                        rmode_was = 0;
+                        InterlockedExchange(&N.lockstep, 0);
+                        set_status("Your connection dropped for too long; continuing offline.");
+                        toast(10000, "Your connection dropped for too long: the fight goes on offline and counts as your "
+                              "loss if you were signed in. START quits.");
+                        break;
+                    }
+                    if (rmode == 2 || (rmode == 0 && rmode_was == 2)) {
+                        fprintf(stderr, "[NETPLAY] resume: this PC did not get back in time (step %u, %.1f s): continuing "
+                                "offline; no player is named\n", s, (now - waited_since) / 1000.0);
+                        rmode_was = 0;
+                        InterlockedExchange(&N.lockstep, 0);
+                        set_status("Your connection is unstable; continuing offline.");
+                        toast(10000, "Could not reconnect in time. The fight goes on offline; a drop on your side can "
+                              "count as your loss. START quits.");
+                        break;
+                    }
+                    if (rstop) {
+                        fprintf(stderr, "[NETPLAY] resume: this PC's player stopped waiting for player %d (START, step %u, "
+                                "%.1f s): back to the room\n", late + 1, s, (now - waited_since) / 1000.0);
+                        g_quit_why = "stopped waiting";
+                        N.desync_quit = 1;      /* desync_quit_tick, between two updates: back to the room */
+                    }
+                }
+                rmode_was = 0;
                 if (decided) {
                     fprintf(stderr, "[NETPLAY] the match is decided and player %d went on ahead (step %u): the rest "
                             "runs on this PC alone\n", late, s);
@@ -9979,6 +10387,10 @@ static void step_run(void)
                 set_status("A player stopped answering during the fight; continuing offline.");
                 if (late >= 0 && N.fighting_seen && need > (uint32_t)N.delay + 60 && !N.desync) {
                     report_left(1u << late);
+                    if (rstop)      /* build 110: START stopped the wait */
+                        toast(10000, "You stopped waiting: it counts as %s's loss if they were signed in. Back to the room.",
+                              player_name(late));
+                    else
                     toast(10000, "%s stopped answering: it counts as their loss if they were signed in. START quits.",
                           player_name(late));
                 } else
@@ -11024,9 +11436,9 @@ static void desync_quit_tick(void)
 {
     static unsigned tries;
     int r;
-    if (!N.desync_quit) { tries = 0; return; }
-    if (!N.lobby || N.watching || !N.match_live) { N.desync_quit = 0; tries = 0; return; }
-    r = spec_quit_fight("out of sync");
+    if (!N.desync_quit) { tries = 0; g_quit_why = NULL; return; }
+    if (!N.lobby || N.watching || !N.match_live) { N.desync_quit = 0; tries = 0; g_quit_why = NULL; return; }
+    r = spec_quit_fight(g_quit_why ? g_quit_why : "out of sync");     /* build 110: or the fight resume's START */
     if (r > 0 || (r < 0 && ++tries > 600)) {
         if (r < 0) fprintf(stderr, "[NETPLAY] out of sync: the fight screen is not up; the game goes on by itself\n");
         N.desync_quit = 0;
