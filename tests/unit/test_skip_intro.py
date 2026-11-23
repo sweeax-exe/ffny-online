@@ -33,6 +33,9 @@ void cheats_start_game(uint32_t gamedata) { (void)gamedata; }  /* src/patches/ch
 void cheats_start_game_done(uint32_t gamedata) { (void)gamedata; }
 void new_fighters_start_game_done(uint32_t gamedata) { (void)gamedata; }
 void fighter_skins_start_game_done(uint32_t gd) { (void)gd; }      /* src/hooks/fighter_skins.c (build 85) */
+/* src/hooks/item_ext.c (build 110): a container's retail and new items; here its own count, no new ones. */
+uint32_t item_ext_retail_count(uint32_t c) { return MEM32(c + 8); }
+uint32_t item_ext_new_count(uint32_t c) { (void)c; return 0; }
 int content_update_restarted(void) { return 0; }    /* src/hooks/content_update.c (build 86): no UPDATE NOW restart */
 /* src/hooks/save_unlock_live.cpp (build 98): the current profile's items; this fixture has no profile. */
 int saves_unlock_profile_slot(uint8_t *slot, uint32_t size, const uint32_t items[6], const uint32_t states[6])
