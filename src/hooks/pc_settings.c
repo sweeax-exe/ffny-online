@@ -97,6 +97,12 @@ static RecompSetting g_display_settings[] = {
     { "online", "faction_seen", RECOMP_SETTING_STRING, 0, 0, 0, NULL, NULL, 0,
       "Faction War (build 108): the season (yyyy-mm) whose side picker the hub last opened by itself; at a new season it "
       "opens once more.", "" },
+    /* build 110: the room settings' CUSTOM venue checklist (netplay_room_venues.h); RECOMP_ROOM_VENUES for tests */
+    { "online", "room_venues", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_ROOM_VENUES", 0,
+      "The venues you ticked in a room's VENUES checklist (Custom), as venue numbers separated by commas; empty: none "
+      "ticked yet. Set in the room settings.", "" },
+    { "online", "room_venues_on", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_ROOM_VENUES_ON", 0,
+      "Your next room starts on that Custom list (the last room you opened used it); else on every venue." },
     /* build 95: up to the fighter numbers (1000 and up, fighter_banks.h): 0..255 saved 1008 as 255, which READY sent
      * and every PC of the match crashed on (builds 93/94, community/crash-hoodiebatman.md) */
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 2147483647, NULL, NULL, 0,

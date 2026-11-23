@@ -151,7 +151,8 @@ def test_venue_presets(rows):
     assert by(rows, 'step') == [['5', '0', '4', '0', '4', '2', '0']]
     ui = _src('src/hooks/online_screen.cpp')
     assert 'list.push_back({ "Community maps"' in ui and 'netlobby_venue_sig(ids.data()' in ui
-    assert 'netlobby_preset_step(preset_of(s), step, (int)pl.size(), usable.data())' in ui
+    # build 110: the presets, then Custom (the remembered checklist)
+    assert 'int to = netlobby_preset_step(cur, step, custom + 1, usable.data());' in ui
     assert '"create-community-maps"' in ui
     assert 'RECOMP_TEST_EXTRA_VENUES' in _src('src/hooks/online_data.c')
 
