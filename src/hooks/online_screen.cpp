@@ -1038,6 +1038,7 @@ struct State {
     // FIGHTERS (build 90): the tab (FFNY, COMMUNITY, CREATED; fighter_tabs.h; -1: not read from [online] fighter_tab
     // yet), the style filter (0 All, 1.. online_styles) and each tab's last selected card
     int ftab = -1, fstyle = 0, ftab_sel[FTAB_COUNT] = { -1, -1, -1 };
+    int ftab_click = -1;            // build 110: the tab clicked in the header, opened at the next frame's start
     // build 97: the host's REMOVE PLAYER (LB): choosing a card (kick_mode, kick_sel the room slot), then the prompt
     // (kick_confirm the slot, -1 none; kick_yes: YES has the cursor)
     bool kick_mode = false;
@@ -3811,6 +3812,23 @@ float trigger_plate(ImDrawList *dl, const Frame &f, float x, float y, bool right
     return 22;
 }
 
+// RECOMP_TEST_FTAB_CLICK=<tab>,... (tests): clicks on the header's tabs, the first 60 frames after the page opened
+// and one every 30 after that (the gallery takes no mouse).
+bool tab_test_click(int t)
+{
+    static const char *at = getenv("RECOMP_TEST_FTAB_CLICK");
+    static int next = -1;
+    if (!at || !*at) return false;
+    int frame = ImGui::GetFrameCount();
+    if (next < 0) next = frame + 60;
+    if (frame < next || atoi(at) != t) return false;
+    fprintf(stderr, "[FIGHTERS] test click: tab %d\n", t);
+    next = frame + 30;
+    at += strcspn(at, ",");
+    if (*at) at++;
+    return true;
+}
+
 void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chosen, int *fighter)
 {
     // build 85: while the skin window is open the grid takes no input (the window does, below)
@@ -3912,6 +3930,13 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         S.fighter_top = 0;
         if (!gallery_on() && recomp_settings_set("online", "fighter_tab", to) > 0) pc_settings_save();
     };
+    // build 110: a click on the header waits for here, where the cards are not chosen yet. The header is drawn after
+    // the selection became a card of this tab, and go_tab leaves it -1 in a tab not opened before: the rest of that
+    // frame then read list[-1] and gkey[-1] (15 crash reports, builds 96-109, in groups[gkey[-1]]).
+    if (S.ftab_click >= 0) {
+        if (S.ftab_click < FTAB_COUNT && offered[S.ftab_click]) go_tab(S.ftab_click);
+        S.ftab_click = -1;
+    }
     if (pad.lt || pad.rt) {
         int dir = pad.rt ? 1 : -1, to = fighter_tab_step(tab, dir, offered);
         if (to != tab) go_tab(to);
@@ -3981,19 +4006,19 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         float x = gx - 6, y = 54;
         bool can_l = fighter_tab_step(tab, -1, offered) != tab, can_r = fighter_tab_step(tab, 1, offered) != tab;
         x += trigger_plate(dl, f, x, y, false, can_l) + 5;
-        if (mouse_click(f, x - 27, y, 22, 14) && can_l) go_tab(fighter_tab_step(tab, -1, offered));
+        if (mouse_click(f, x - 27, y, 22, 14) && can_l) S.ftab_click = fighter_tab_step(tab, -1, offered);
         for (int t = 0; t < FTAB_COUNT; t++) {
             float tw = text_width(f, g_title, 12, FTAB_NAMES[t]), w = tw + 16;
             bool lit = t == tab && !searching;
             rect(dl, f, x, y - 2, w, 18, lit ? with_alpha(RED, 0.9f) : IM_COL32(0, 0, 0, 150), 4);
             ImU32 col = lit ? WHITE : offered[t] ? with_alpha(CREAM, 0.85f) : with_alpha(GREY, 0.35f);
             text(dl, f, g_title, 12, x + 8, y, col, FTAB_NAMES[t], LEFT, 0.8f);
-            if (mouse_click(f, x, y - 2, w, 18) && offered[t]) go_tab(t);
+            if ((mouse_click(f, x, y - 2, w, 18) || tab_test_click(t)) && offered[t]) S.ftab_click = t;
             x += w + 3;
         }
         x += 2;
         trigger_plate(dl, f, x, y, true, can_r);
-        if (mouse_click(f, x, y, 22, 14) && can_r) go_tab(fighter_tab_step(tab, 1, offered));
+        if (mouse_click(f, x, y, 22, 14) && can_r) S.ftab_click = fighter_tab_step(tab, 1, offered);
         // the filter: "ALL STYLES", or the style on an orange plate
         std::string st = filter ? upper(filter) : std::string("ALL STYLES");
         float right = gx + cols * (cw + 4) - 4, room = right - (x + 30) - 22;
@@ -4155,15 +4180,17 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             text(dl, f, g_title, 10, gx, sy + 2, GREY, "TAB: SEARCH BY NAME    Z / C: TABS    R: STYLE", LEFT, 0.6f);
         }
     }
+    // build 110: the card chosen now: a click (a tap has no hover before it) may have moved the choice off `cur` above
+    const OnlineFighter &card = list[S.fighter_sel];
     if (pad.a && card_blocked(S.fighter_sel)) {
-        if (ONLINE_NEW_FIGHTER(cur.id) && standard_only(rules_room.settings.fighter_rules))
+        if (ONLINE_NEW_FIGHTER(card.id) && standard_only(rules_room.settings.fighter_rules))
             say("This room is STANDARD ONLY: community fighters are off here. Pick another fighter.");
-        else say("This room's FIGHTER RULES leave " + std::string(cur.name) + " out: pick another fighter.");
+        else say("This room's FIGHTER RULES leave " + std::string(card.name) + " out: pick another fighter.");
         const_cast<Pad &>(pad).a = false;
     }
     if (pad.a) {
         int pick = S.fighter_sel;
-        S.random_pick = cur.id == FIGHTER_RANDOM;
+        S.random_pick = card.id == FIGHTER_RANDOM;
         if (S.random_pick) {    // RANDOM is the last card: one of the others the room's rules allow
             std::vector<int> allowed;      // build 90: of the cards shown (this tab, this style)
             for (int i : searching ? vis : pool)     // build 96: every version of a group, not one card a group
@@ -6370,6 +6397,7 @@ void gallery_step()
     G.my_crew = false;
     G.original = 0;                     // build 86: all fighters unless the page says
     S.ftab = FTAB_FFNY;                 // build 90: the FFNY tab, every style, unless the page says
+    S.ftab_click = -1;
     S.fstyle = 0;
     for (int &k : S.ftab_sel) k = -1;
     G.rts = false;
