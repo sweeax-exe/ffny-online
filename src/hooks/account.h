@@ -47,6 +47,8 @@ int account_ranked_ticket(char out[33]);
 int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size);
 /* The note added after an online match to that report: POST /api/report/note (bug_report.c). */
 int account_send_report_note(const char *ctype, const void *body, int len, char *out, int size);
+/* How the last run ended (run_end.h): POST /api/report/end. Blocks; the HTTP status (202 taken), 0 unreachable. */
+int account_send_run_end(const char *json);
 /* The social features (social.cpp): one request to the account service with this session's token.
  * method "GET"/"POST"/..., path with its query (UTF-8), json the body or NULL; the answer goes to buf.
  * Blocks (off the game's threads only). receive_ms > 0: how long the answer may take (the long-poll).

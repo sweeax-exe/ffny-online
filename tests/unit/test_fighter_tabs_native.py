@@ -112,3 +112,18 @@ def test_grid_wiring():
     for page in ('fighters-tab-community', 'fighters-style', 'fighters-tab-created', 'fighters-tab-created-style',
                  'fighters-tab-original'):
         assert '"%s"' % page in screen
+
+
+def test_a_click_on_a_tab_waits_for_the_next_frame():
+    """Build 110: the header is drawn after the selection became a card of the tab shown. A click there must not change
+    the tab at once (go_tab leaves the selection -1 in a tab not opened before, and list[-1] / gkey[-1] followed: 15
+    crash reports, builds 96-109), only ask for it."""
+    screen = src('src/hooks/online_screen.cpp')
+    fighters = screen.split('void draw_fighters(', 1)[1].split('// ---- the room ----', 1)[0]
+    header = fighters.split('auto header = [&]() {', 1)[1].split('\n    };\n', 1)[0]
+    assert 'go_tab(' not in header and header.count('S.ftab_click = ') == 3
+    ask, pick = fighters.index('if (S.ftab_click >= 0)'), fighters.index('S.fighter_sel = vis[at];')
+    assert ask < pick and fighters.index('go_tab(to);') < pick       # every tab change before the selection is settled
+    assert 'go_tab(' not in fighters[pick:]
+    # the card picked is the one chosen now: a tap moves the choice and presses A in the same frame
+    assert fighters.index('const OnlineFighter &card = list[S.fighter_sel];') < fighters.index('S.random_pick = card.id == FIGHTER_RANDOM;')

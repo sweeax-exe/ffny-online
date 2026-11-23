@@ -81,6 +81,7 @@ extern "C" {
 #include "rts.h"
 #include "hd_build.h"
 #include "updater.h"
+#include "run_end.h"
 #include "next_song.h"
 
 #ifndef DEFJAM_VERSION
@@ -284,6 +285,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "voice_auto_level", "Level my microphone"},
         {"online", "discord_status", "Discord status"},
         {"online", "hill_watch", "Watch fights while waiting"},
+        {"online", "run_end_reports", "Help us find crashes"},
         {"online", "perfect_banner", "PERFECT banner"},
         {"online", "name_tags", "Player names in the fight"},
         {"online", "delay_display", "Show the input delay"},
@@ -840,6 +842,8 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool s
                 return std::string(!strcmp(choice, "on") ? "On (default)" : "Off");
             if (!strcmp(s->key, "quick_max_ping"))      // build 97
                 return std::string(!strcmp(choice, "off") ? "Off" : choice) + (strcmp(choice, "off") ? " ms" : "");
+            if (!strcmp(s->key, "run_end_reports"))     // build 110
+                return std::string(!strcmp(choice, "ask") ? "Ask me" : !strcmp(choice, "on") ? "On" : "Off");
             std::string text = choice;
             std::replace(text.begin(), text.end(), '_', ' ');
             return text;
@@ -1964,6 +1968,8 @@ static void discord_status_setting()
     ImGui::PopTextWrapPos();
 }
 
+static void run_end_setting();      // pc_launcher_run_end.inc
+
 // Online: the connection settings. The hub itself (quick match, rooms, the venue vote) is in the
 // game, behind the main menu's ONLINE entry (src/hooks/online_screen.cpp).
 static void page_online(UiMode mode)
@@ -1988,6 +1994,7 @@ static void page_online(UiMode mode)
     settings_group("online", { "quick_max_ping", "quick_far" });     // build 97; 109: far opponents
     crossplay_setting();
     p2p_setting();
+    run_end_setting();
     ImGui::Spacing();
     ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.1f);
     ImGui::TextColored(k_gold, "Online play is in the game: choose ONLINE in the main menu.");
@@ -2939,6 +2946,7 @@ static void page_basics()
     settings_group("online", { "quick_max_ping", "quick_far" });     // build 97; 109: far opponents
     crossplay_setting();
     p2p_setting();
+    run_end_setting();
     ImGui::SeparatorText("Gameplay");
     offline_countdown_setting();
     rts_settings();
@@ -3346,6 +3354,7 @@ static void settings_dialog(ImVec2 o, float w, float h, float s, int &tab, int &
 #include "pc_launcher_password.inc"   // sign in without Discord (username and password)
 #include "pc_launcher_graphics.inc"   // the Graphics card and dialog (Enhanced graphics), the same glass
 #include "pc_launcher_content.inc"    // the Content page (community packs from our signed catalogue)
+#include "pc_launcher_run_end.inc"    // "Help us find crashes?": the question and the setting
 #include "pc_launcher_studio.inc"     // the FFNY Studio card (get, open and update Studio)
 
 #if defined(_WIN32)
@@ -3515,6 +3524,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     crash_popup();
     outside_launcher_notice();
     gpu_notice();
+    run_end_question(result);
     // Cloud saves (build 91): once per run, signed in: the saves go up when they changed here, or a question
     // when the cloud has saves this PC does not (pc_launcher_cloud.h). The launcher opens again when the game
     // closes, so this is also the upload after a game.
@@ -4979,6 +4989,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         int answer = g_note.open ? 0 : online_screen::draw_exit_prompt(io.DisplaySize);
         if (answer == 2 && g_window) {
             // the window's own close: the log line, the pads stopped, exit code 0 (d3d11_translator.c)
+            run_end_quit();
             PostMessageW(g_window, WM_CLOSE, 0, 0);
         } else if (answer) {
             close_request = true;

@@ -46,6 +46,7 @@
 #include "patches/widescreen.h"
 #include "patches/picture.h"
 #include "patches/cheats.h"
+#include "run_end.h"
 
 /* Picture shape: the console's 4:3, stretched, or widescreen (docs/widescreen); the widescreen
  * choices are indices 2.. and are read once at start-up (src/patches/widescreen.c). */
@@ -67,6 +68,7 @@ static const char *const k_crowd_near[] = { "fade", "hide", NULL };
 static const char *const k_ow_camera[] = { "stock", "follow", "behind", NULL };
 static const char *const k_ow_camera_distance[] = { "near", "normal", "far", NULL };   /* build 95 */
 static const char *const k_rts_round_mode[] = { "knockouts", "points", NULL };          /* build 95 */
+static const char *const k_run_end[] = { "ask", "on", "off", NULL };     /* build 110 (run_end.h) */
 static const char *const k_quick_max_ping[] = { "off", "100", "150", "200", NULL };      /* build 97 (netlobby_max_ping_ms) */
 static const char *const k_rollback_choice[] = { "on", "off", NULL };                  /* build 110 (netplay.c, rollback_choice_off) */
 
@@ -130,6 +132,13 @@ static RecompSetting g_display_settings[] = {
       "Show \"Playing FFNY Online\" in your Discord profile while the Discord app runs on this PC: where you are "
       "(launcher, menus, Story, Battle, the online lobby or a room), and in an online match the mode, the venue, your "
       "fighter and the other players' names. Everyone who can see your Discord profile sees it." },
+    { "online", "run_end_reports", RECOMP_SETTING_ENUM, 0, 0, 0, k_run_end, NULL, 0,
+      "Help us find crashes: when the launcher starts, signed in, it tells the FFNY Online server how the last run of the "
+      "game ended (closed, crashed and where in the program, or ended from outside, and whether it stood still), with "
+      "the build, the compiler version, the time and your account. No logs. Kept for 30 days. ask: the launcher asks, "
+      "nothing is kept or sent before a yes; on; off." },
+    { "online", "run_end_asked", RECOMP_SETTING_INT, 0, 0, 2, NULL, NULL, 0,
+      "How often the launcher's question about run_end_reports was open without an answer (two: it counts as no)." },
     { "online", "hill_watch", RECOMP_SETTING_BOOL, 1, 0, 0, NULL, "RECOMP_HILL_WATCH", 0,
       "Watch fights while waiting: in King of the Hill and FFA rotation rooms the current fight runs live on your "
       "screen while you wait for your turn (START goes back to the hill screen for that fight). Off: the hill screen "
@@ -997,6 +1006,7 @@ static void start_game_process(int reopen_launcher)
         WaitForSingleObject(pi.hProcess, INFINITE);
         graphics_mod_settled();
         GetExitCodeProcess(pi.hProcess, &code);
+        run_end_exit_code(code);
         /* build 91: no launcher opens after the game, so its saves go up from here (pc_launcher_cloud.h) */
         if (!cu_after_child_exit(code)) cloud_saves_after_game();
         /* build 86: the game closed for UPDATE NOW: the launcher, in update mode, gets the content */
@@ -1012,6 +1022,7 @@ static void start_game_process(int reopen_launcher)
     /* build 86: the game closed for UPDATE NOW (content_update.c): the launcher opens in update mode (it presses
      * PLAY once the new content is in); otherwise as it was started, without the update mode */
     GetExitCodeProcess(pi.hProcess, &code);
+    run_end_exit_code(code);        /* what the launcher opened next sends (run_end.h) */
     int for_update = cu_after_child_exit(code);
     n = wcslen(line) + 64;
     cmd = (WCHAR *)malloc(n * sizeof(WCHAR));
@@ -1062,6 +1073,7 @@ static void run_launcher_if_wanted(void)
         return;
     }
     discord_presence_launcher();
+    run_end_send();     /* how the run before ended */
     if (!pc_launcher_run()) {
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
         fflush(stderr);
@@ -1088,6 +1100,7 @@ static void run_launcher_if_wanted(void)
                             host_posix_shift_held(), test_run))
         return;
     discord_presence_launcher();
+    run_end_send();     /* how the run before ended */
     if (!pc_launcher_run()) {
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
         fflush(stderr);

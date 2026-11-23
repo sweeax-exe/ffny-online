@@ -980,6 +980,12 @@ int account_send_report_note(const char *ctype, const void *body, int len, char 
     return send_report_body(L"/api/report/note?format=text", ctype, body, len, out, size);
 }
 
+int account_send_run_end(const char *json)
+{
+    char answer[128];
+    return send_report_body(L"/api/report/end", "application/json", json, (int)strlen(json), answer, sizeof(answer));
+}
+
 void account_report_match(const char *json)
 {
     char *copy;
@@ -1074,6 +1080,7 @@ int account_test_server_local(void) { return 0; }
 int account_pair_secret(char secret[65], char login[65]) { secret[0] = login[0] = 0; return 0; }
 int account_send_bug_report(const char *ctype, const void *body, int len, char *out, int size)
 { (void)ctype; (void)body; (void)len; if (size > 0) out[0] = 0; return 0; }
+int account_send_run_end(const char *json) { (void)json; return 0; }
 int account_send_report_note(const char *ctype, const void *body, int len, char *out, int size)
 { (void)ctype; (void)body; (void)len; if (size > 0) out[0] = 0; return 0; }
 

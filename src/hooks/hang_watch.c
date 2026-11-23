@@ -11,7 +11,8 @@
  * thread and of the game thread (registers, the guest functions on the call chain, a stack scan like the
  * [CRASH] block's), the last indirect-call targets, the netplay and rollback state, and leaves a
  * "<log>.hang" mark that the next start offers as a report (bug_report_last_crash). If the game moves
- * again the mark goes and the watch is armed again. It never kills or changes anything.
+ * again the mark goes and the watch is armed again. The fight resume's wait (netplay.c, up to 22 s with its notice
+ * up) is not a hang. It never kills or changes anything.
  *
  * The threads are suspended one at a time only to copy their registers and walk the unwind data: a
  * suspended thread may hold the C runtime's locks, so nothing here prints or allocates meanwhile.
@@ -25,6 +26,7 @@
 #include <string.h>
 
 #include "hang_watch.h"
+#include "run_end.h"
 
 #if defined(_WIN32)
 
@@ -39,6 +41,7 @@
 #include "nv2a/nv2a_pgraph_d3d11.h"         /* the guest's frames: the window itself is presented without them */
 
 void netplay_hang_dump(void);   /* netplay.c: no locks taken */
+int netplay_resume_waiting(void);   /* netplay.c: the fight resume's wait and its notice are up (build 110) */
 void rollback_hang_dump(void);  /* rollback.c: no locks taken */
 
 #define HANG_SECS        20u    /* no present and no load's reads */
@@ -334,6 +337,9 @@ static DWORD WINAPI hang_thread(LPVOID unused)
         /* the PC slept, or this thread had no time: that is not the game's hang */
         if (now - tick > 5000u) last = now;
         tick = now;
+        /* build 110: the fight resume waits up to 22 s for a cut-off player with its notice up: not a hang (no block, no
+         * ".hang" mark, no "stood still" in the run's end) */
+        if (netplay_resume_waiting()) last = now;
         pgraph_d3d11_get_stats(&st);
         p = (LONG)st.frames;
         u = s_updates;
@@ -353,6 +359,7 @@ static DWORD WINAPI hang_thread(LPVOID unused)
                 if (s_mark[0]) DeleteFileA(s_mark);
                 s_mark[0] = 0;
                 hung = 0;
+                run_end_note("moved");
             }
             last = now;
             continue;
@@ -364,6 +371,7 @@ static DWORD WINAPI hang_thread(LPVOID unused)
                 hung = 1;
                 blocks++;
                 write_mark();
+                run_end_note("hung");
                 fprintf(stderr, "[HANG] no present and no load's reads for %.0f s; game updates in the last second: %ld "
                         "(screen manager state %u)\n", (double)(now - last) / 1000.0, (long)(u - updates), state);
                 dump_threads();

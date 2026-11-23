@@ -9738,6 +9738,14 @@ static void step_body(void)
 #define STALL_PRESENT_MS 33
 #define SILENT_SELF_MS   1500     /* the relay answers this PC's ping every second */
 extern void d3d11_translator_present_again(void);
+volatile LONG g_netplay_step_wait;  /* how long this step has waited mid-fight, ms (d3d11_translator.c's test) */
+static volatile LONGLONG g_resume_shown;    /* when the fight resume's notice was last up (modes 1 and 2) */
+/* The hang watch: the game stands still because the fight resume waits (up to 22 s, past HANG_SECS), and says so. */
+int netplay_resume_waiting(void)
+{
+    LONGLONG at = InterlockedCompareExchange64(&g_resume_shown, 0, 0);
+    return at && (LONGLONG)GetTickCount64() - at < 1500;
+}
 /* Build 110: mode 1 the fight resume waits for a held player (left: seconds of its hold), mode 2 this PC is the
  * one cut off (resume_wait). */
 static void stall_notice(int late, ULONGLONG now, ULONGLONG waited, ULONGLONG *last_present, int mode, unsigned left)
@@ -9757,6 +9765,7 @@ static void stall_notice(int late, ULONGLONG now, ULONGLONG waited, ULONGLONG *l
     else cause = 3;
     if (mode == 1) cause = 4;
     else if (mode == 2) cause = 5;
+    if (mode) InterlockedExchange64(&g_resume_shown, (LONGLONG)now);
     if (cause == 4) snprintf(text, sizeof(text), "Waiting for %s to reconnect (%u s)\nSTART: stop waiting", player_name(late), left);
     else if (cause == 5) snprintf(text, sizeof(text), "Reconnecting... (%u s)", left);
     else if (cause == 0) snprintf(text, sizeof(text), "Connection problem: you are not receiving any data (%u s)", secs);
@@ -10133,6 +10142,7 @@ static void step_run(void)
     need = N.predicting ? (s > RB_AHEAD ? s - RB_AHEAD : 0) : s;
     if (need <= (uint32_t)N.delay) return;
     waited_since = last_send = GetTickCount64();
+    InterlockedExchange(&g_netplay_step_wait, 0);
     QueryPerformanceCounter(&g_wait_q0);    /* fight pacing (netplay_on_step) */
     last_note = 0;
     for (;;) {
@@ -10180,6 +10190,7 @@ static void step_run(void)
             if (late >= 0 && g_steps_match[late] != N.match && now - waited_since >= 1500) last_note = now;
             if (now - last_send >= 50) { if (N.local_last) send_steps(N.local_last); last_send = now; }   /* the others may be waiting for ours */
             gone_send();
+            if (need > (uint32_t)N.delay + 60) InterlockedExchange(&g_netplay_step_wait, (LONG)(now - waited_since));
             /* build 110: the fight resume (resume_wait): how long this wait may last, and what it shows */
             ULONGLONG stall_limit = STALL_LIMIT_MS;
             unsigned rleft = 0;
