@@ -804,6 +804,7 @@ static struct {
     int peer_rb[MAXP];                  /* each position rolls back (its P_RTT says so) */
     int peer_rb_cp[MAXP];               /* ... also when a created fighter plays (P_RTT byte 14, build 45) */
     int peer_rb_must[MAXP];             /* ... the server makes it mandatory for the match's mode there (byte 14 bit 1, build 52) */
+    int peer_rb_off[MAXP];              /* ... its player set Rollback: Off (byte 14 bit 2, build 110; byte 7 is 0 then) */
     /* rollback everywhere (build 52): the relay's CAPS answer carried the mode mask (CAPS_RB_MODES), and
      * the modes in which rollback is mandatory (0: none, the players' setting decides) */
     int rb_modes_known;
@@ -978,12 +979,23 @@ int netplay_room_rollback_mandatory(void)
     return on;
 }
 
+/* Build 110: the player's Rollback: On / Off ([online] rollback_choice, on by default; RECOMP_ROLLBACK_PREF=off or on
+ * for tests). Off: this PC says "no rollback" in P_RTT (byte 7 0, as every build since 17 reads it; byte 14 bit 2 says
+ * why), so every PC of the match, older builds too, plays that fight in lockstep with input delay, in every mode. */
+static int rollback_choice_off(void)
+{
+    const char *t = getenv("RECOMP_ROLLBACK_PREF");
+    if (t && *t) return !strcmp(t, "off") || !strcmp(t, "0");
+    return recomp_settings_get("online", "rollback_choice", 0) == 1;
+}
+
 /* Whether this PC rolls back the room's next match, as far as it decides (P_RTT byte 7): this session
  * can (the audio arena), the relay allows it, and the relay makes it mandatory for the room's mode, or,
  * with no mask from the relay, the player opted in (the setting). In a mode the mask leaves out every
  * match plays in lockstep: that is the server's per-mode kill switch. */
 static int this_pc_rolls_back(void)
 {
+    if (rollback_choice_off()) return 0;    /* build 110: the player's choice, whatever the server allows */
     if (!rollback_wanted() || !relay_allows_rb()) return 0;
     return rb_server_decides() ? rb_mandatory_here() : rollback_opted_in();
 }
@@ -1606,6 +1618,7 @@ int netplay_versus(NetVersus *out)
             if (N.delay_fixed || known) {
                 out->path_ms = path_ping_ms();
                 out->rollback = N.delay_fixed ? N.rb_match != 0 : every_player_rolls_back();
+                for (i = 0; i < N.players && i < MAXP; i++) if (N.peer_rb_off[i]) out->rb_choice_off = 1;   /* build 110 */
                 out->frames = N.delay_fixed ? N.delay : 0;
             }
         }
@@ -3234,7 +3247,7 @@ static void send_rtt(void)
     /* builds before 45 send 14: no rollback with a created fighter (bit 0); builds before 52 never set
      * bit 1: the server makes rollback mandatory for this match's mode on the sender (rollback
      * everywhere), which lifts the hill's lockstep only when every player of the fight sends it */
-    p[14] = (uint8_t)(1 | (N.peer_rb_must[N.pos] ? 2 : 0));
+    p[14] = (uint8_t)(1 | (N.peer_rb_must[N.pos] ? 2 : 0) | (N.peer_rb_off[N.pos] ? 4 : 0));  /* bit 2: build 110 */
     /* builds before 54 send 15: the rollback ping limit this PC uses for the match (its relay's, or
      * RB_PATH_DEFAULT_MS); every PC takes the lowest of the players' (rb_path_limit) */
     p[15] = (uint8_t)N.peer_rb_max[N.pos];
@@ -3464,6 +3477,7 @@ static void on_data(int from, const uint8_t *p, int len)
             N.peer_rb[from] = len >= 8 && p[7] == 1;
             N.peer_rb_cp[from] = len >= 15 && (p[14] & 1);
             N.peer_rb_must[from] = len >= 15 && (p[14] & 2);   /* build 52: the server makes it mandatory there */
+            N.peer_rb_off[from] = len >= 15 && (p[14] & 4);    /* build 110: its player set Rollback: Off */
             N.peer_rb_max[from] = len >= 17 ? (p[15] | (p[16] << 8)) : 0;   /* build 54: its rollback ping limit */
             N.peer_rb_r0[from] = len >= 18 ? p[17] : 0;                     /* build 78: its R0 (hybrid delay) */
             if (len >= 19 && N.peer_lineup[from] != p[18])                  /* build 95: the fighters it lacks */
@@ -4762,6 +4776,7 @@ static void on_start_as(const uint8_t *b, int len, int watching)
     N.delay_fixed = 0;
     for (i = 0; i < MAXP; i++) N.peer_rtt[i] = -1, N.peer_rb[i] = N.peer_rb_cp[i] = N.peer_rb_must[i] = 0, N.peer_results[i] = N.peer_on_results[i] = 0;
     for (i = 0; i < MAXP; i++) N.peer_delay[i] = 0, N.peer_rb_max[i] = 0, N.peer_rb_r0[i] = 0;
+    for (i = 0; i < MAXP; i++) N.peer_rb_off[i] = 0;
     for (i = 0; i < MAXP; i++) N.peer_lineup[i] = 0, N.start_template[i] = i < count ? templ[i] : 55;
     N.lineup_mine = lineup;
     if (pos >= 0 && pos < MAXP) N.peer_rb_max[pos] = own_rb_limit();   /* the relay's answer came before START */
@@ -4781,8 +4796,10 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         N.peer_rb[pos] = this_pc_rolls_back();
         N.peer_rb_cp[pos] = 1;
         N.peer_rb_must[pos] = rb_mandatory_here();
+        N.peer_rb_off[pos] = rollback_choice_off();     /* build 110: kept for this START (P_RTT is sent again) */
         if (!N.peer_rb[pos]) {
-            const char *why = !relay_allows_rb() ? (rollback_wanted() ? "rollback is switched off on the server" : NULL)
+            const char *why = N.peer_rb_off[pos] ? "the player set Rollback: Off (input delay)"
+                            : !relay_allows_rb() ? (rollback_wanted() ? "rollback is switched off on the server" : NULL)
                             : rb_server_decides() && !rb_mandatory_here() ? "the server leaves this mode in lockstep"
                             : rb_mandatory_here() && !rollback_wanted() ? "this session started without rollback (a restart turns it on)"
                             : NULL;
@@ -7394,7 +7411,7 @@ static void rb_off_reasons(void)
 {
     char first[120] = "";
     int i, koth = getenv("RECOMP_ROLLBACK_KOTH") && *getenv("RECOMP_ROLLBACK_KOTH") == '1';
-    int meant = N.pos >= 0 && N.pos < MAXP && (N.peer_rb[N.pos] || N.peer_rb_must[N.pos]);
+    int meant = N.pos >= 0 && N.pos < MAXP && (N.peer_rb[N.pos] || N.peer_rb_must[N.pos]) && !N.peer_rb_off[N.pos];
     if (N.koth_match && !koth && !every_player_must()) {
         if (N.pos >= 0 && N.pos < MAXP && N.peer_rb_must[N.pos])
             snprintf(first, sizeof(first), "the other player's game is an older build");
@@ -7410,7 +7427,9 @@ static void rb_off_reasons(void)
         if (i == N.pos) snprintf(who, sizeof(who), "this PC (player %d)", i + 1);
         else if (!netplay_room_name(slot, who, (int)sizeof(who)))
             snprintf(who, sizeof(who), "player %d", i + 1);
-        if (i == N.pos && N.peer_rb_must[i] && !rollback_wanted())
+        if (N.peer_rb_off[i])       /* build 110 */
+            snprintf(why, sizeof(why), "set Rollback: Off");
+        else if (i == N.pos && N.peer_rb_must[i] && !rollback_wanted())
             snprintf(why, sizeof(why), "started without rollback (a restart turns it on)");
         else if (i == N.pos && rb_server_decides() && !N.peer_rb_must[i])
             snprintf(why, sizeof(why), "has it off (the server leaves this mode in lockstep)");
@@ -7422,7 +7441,9 @@ static void rb_off_reasons(void)
             snprintf(why, sizeof(why), "has it off");
         fprintf(stderr, "[NETPLAY] rollback off for this match: %s %s; lockstep\n", who, why);
         if (!first[0]) {
-            if (i == N.pos) snprintf(first, sizeof(first), "%s", N.peer_rb_must[i] ? "restart your game once to turn it on" : "it is off here");
+            if (i == N.pos) snprintf(first, sizeof(first), "%s", N.peer_rb_off[i] ? "it is off in your settings" :
+                                     N.peer_rb_must[i] ? "restart your game once to turn it on" : "it is off here");
+            else if (N.peer_rb_off[i]) snprintf(first, sizeof(first), "%.30s turned rollback off", who);
             else snprintf(first, sizeof(first), "%.30s %s", who, rb > 0 && (rb & 2) ? "must restart their game" :
                           N.peer_rtt[i] < 0 ? "did not answer in time" : "has an older build or rollback off");
         }

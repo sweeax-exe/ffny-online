@@ -263,6 +263,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "name", "Your name"},
         {"online", "input_delay", "Input delay (steps)"},
         {"online", "rollback", "Rollback netcode (beta)"},
+        {"online", "rollback_choice", "Rollback"},
         {"online", "crossplay_android", "Play with Android players"},
         {"online", "p2p_direct", "Direct connection (P2P) in 1v1 fights"},
         {"online", "quick_max_ping", "Quick Match max ping"},
@@ -835,6 +836,8 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool s
             if (!strcmp(s->key, "button_icons"))
                 return std::string(!strcmp(choice, "auto") ? "Auto (from player 1's controller)" :
                                    !strcmp(choice, "xbox") ? "Xbox" : "PlayStation");
+            if (!strcmp(s->key, "rollback_choice"))     // build 110
+                return std::string(!strcmp(choice, "on") ? "On (default)" : "Off");
             if (!strcmp(s->key, "quick_max_ping"))      // build 97
                 return std::string(!strcmp(choice, "off") ? "Off" : choice) + (strcmp(choice, "off") ? " ms" : "");
             std::string text = choice;
@@ -906,6 +909,14 @@ static void offline_countdown_setting()
     // Build 99: the slow motion of big hits, Blazin moves and knockouts, offline only (recording_mode.h)
     settings_group("gameplay", { "slow_motion" });
     ImGui::TextDisabled("Online matches always have slow motion. Applies from the next fight.");
+}
+
+// Build 110: the player's Rollback: On / Off ([online] rollback_choice, netplay.c rollback_choice_off). Off on either
+// side: that fight plays with input delay; both games decide it from the same START data (P_RTT).
+static void rollback_choice_setting()
+{
+    settings_group("online", { "rollback_choice" });
+    ImGui::TextDisabled("Off: always use input delay: steadier, a bit slower to respond.");
 }
 
 static void crossplay_setting()
@@ -1973,6 +1984,7 @@ static void page_online(UiMode mode)
     }
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });
+    rollback_choice_setting();      // build 110
     settings_group("online", { "quick_max_ping", "quick_far" });     // build 97; 109: far opponents
     crossplay_setting();
     p2p_setting();
@@ -2908,14 +2920,18 @@ static void page_basics()
     ImGui::SeparatorText("Music");
     settings_group("audio", { "next_song_key", "next_song_pad", "prev_song_key", "prev_song_pad" });
     ImGui::TextDisabled("Next or previous song in the menus and in fights. Only you hear it, online too.");
+    {   // RECOMP_LAUNCHER_PAGE=basics-online (screenshots, build 110): the page opens scrolled to its Online part
+        static bool scrolled;
+        const char *want = getenv("RECOMP_LAUNCHER_PAGE");
+        if (!scrolled && want && !strcmp(want, "basics-online")) { ImGui::SetScrollHereY(0.0f); scrolled = true; }
+    }
     ImGui::SeparatorText("Online");
     settings_group("ui", { "button_icons" });
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });
     // build 52: while the server makes rollback mandatory (its last answer, kept) there is no choice to offer
     if (recomp_settings_get("online", "rollback_server", 0) && recomp_settings_get("online", "rollback_modes", 0)) {
-        ImGui::TextUnformatted("Rollback netcode: on in online matches");
-        ImGui::TextDisabled("The server sets it for every match. A match plays without it only when a PC can't keep up.");
+        rollback_choice_setting();      // build 110: the player's own On / Off
     } else {
         settings_group("online", { "rollback" });
         ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
@@ -2941,7 +2957,7 @@ static int initial_page()
 {
     static const char *const names[] = { "display", "textures", "controllers", "pad", "keyboard", "voice", "general" };
     const char *want = getenv("RECOMP_LAUNCHER_PAGE");
-    if (want && !strcmp(want, "basics")) return PAGE_COUNT;
+    if (want && (!strcmp(want, "basics") || !strcmp(want, "basics-online"))) return PAGE_COUNT;
     // names has fewer entries than PAGE_COUNT: an unknown name ("saves", the Saves dialog) read past it
     for (int i = 0; want && i < (int)(sizeof(names) / sizeof(names[0])); i++)
         if (!strcmp(want, names[i])) return i;

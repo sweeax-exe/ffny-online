@@ -5897,7 +5897,9 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
         // build 109: the pair's ping and how the fight plays, under it ("PING 95 MS - DELAY")
         if (v.path_ms >= 0 && v.rollback >= 0) {
             char pair[64];
-            snprintf(pair, sizeof(pair), "PING %d MS - %s", v.path_ms, v.rollback ? "ROLLBACK" : "DELAY");
+            // build 110: "DELAY (ROLLBACK OFF)" when a player of the fight set Rollback: Off
+            snprintf(pair, sizeof(pair), "PING %d MS - %s", v.path_ms,
+                     v.rollback ? "ROLLBACK" : v.rb_choice_off ? "DELAY (ROLLBACK OFF)" : "DELAY");
             text(dl, f, g_title, 10, 596, 42, v.rollback ? GREEN : ORANGE, pair, RIGHT, 0.8f);
         }
     }
@@ -5994,8 +5996,9 @@ NetVersus sample_versus(const std::string &page)
         v.ping[i] = v.cpu[i] ? -1 : 38 + 41 * i;
     }
     // build 109: the pair line ("versus-1v1" a delay-based fight, the others rollback)
-    v.path_ms = page == "versus-1v1" ? 95 : 41;
-    v.rollback = page == "versus-1v1" ? 0 : 1;
+    v.path_ms = page == "versus-1v1" ? 95 : page == "versus-rboff" ? 38 : 41;
+    v.rollback = page == "versus-1v1" || page == "versus-rboff" ? 0 : 1;
+    v.rb_choice_off = page == "versus-rboff";     // build 110: a player set Rollback: Off
     if (page == "versus-rot") {     // FFA rotation: Cal won the last one and stays on
         v.room_mode = NETPLAY_MODE_FFAROT;
         v.venue = 11;
@@ -6146,6 +6149,7 @@ void gallery_step()
                                          "room-kick", "room-kick-prompt", "room-afk", "room-quick-maxping", "room-quick-stage",
                                          // the versus screen while a match loads
                                          "versus-1v1", "versus-3way", "versus-ffa", "versus-team", "versus-koth",
+                                         "versus-rboff",     // build 110: DELAY (ROLLBACK OFF)
                                          // build 37: created fighters
                                          "grid-created", "room-created", "versus-created",
                                          // several created fighters, the second one picked
