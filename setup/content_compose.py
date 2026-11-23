@@ -4,7 +4,10 @@
 
 A composed pack (``install.json`` in its folder, docs/content-packs.md) never carries the game's bytes: its
 entries are deltas against the player's own archive entries and its ops edit the player's own database, parts
-list, name tables, venue list and entity list. This module builds the result for the game:
+list, name tables, venue list and entity list. A clothing item op with a ``roster_part`` (build 110: the Eyepatch)
+has no entries at all: its part, texture and shop thumbnails are made here from the player's own roster model and
+template item (``ffnycontent/rosteritem.py``) and added as a delta's ``add`` would be. This module builds the result
+for the game:
 
 * the base of a game-relative path P is ``<data>/override/P`` when it exists (the port's own patched files),
   else ``<game>/P``;
@@ -45,7 +48,7 @@ import re
 import shutil
 import struct
 
-from ffnycontent import clothing, cpparts, delta, fighterart, loc, newfighter, newvenue, unlimited, viv
+from ffnycontent import clothing, cpparts, delta, fighterart, loc, newfighter, newvenue, rosteritem, unlimited, viv
 from ffnycontent import sod as sodmod
 
 SCHEMA = 1
@@ -64,6 +67,9 @@ MAX_RESULT = 64 * 1024**2
 MAX_DELTA = 40 * 1024**2     # one delta file: the account service's PackMaxFile (40 MiB from build 82; a venue with 32 MB of
 #                               textures packs its texture file at 33-35 MiB)
 CLOTHING_OPS = ('colour', 'item')
+CLOTHING_OP_KEYS = {'colour': {'op', 'item', 'item_id', 'number', 'label', 'section', 'textures'},
+                    'item': {'op', 'template', 'name', 'price', 'bundle', 'group', 'colours', 'variants', 'section',
+                             'row_name', 'model', rosteritem.KEY}}
 VENUE_OPS = ('new-venue',)
 FIGHTER_OPS = ('new-fighter',)
 PATH = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*')
@@ -127,6 +133,22 @@ def check_install(info):
         if not isinstance(op, dict) or op.get('op') not in allowed:
             raise ComposeError('op %r is not allowed in a %s pack' % (op.get('op') if isinstance(op, dict) else op,
                                                                       info['type']))
+    if info['type'] == 'clothing':
+        built = set()
+        for op in ops:
+            unknown = sorted(set(op) - CLOTHING_OP_KEYS[op['op']])
+            if unknown:
+                raise ComposeError('a %s op has the unknown field %s' % (op['op'], unknown[0]))
+            if rosteritem.KEY in op:
+                # build 110: the part, texture and thumbnails of a roster piece are made from the player's files
+                problem = rosteritem.op_problem(op)
+                if problem:
+                    raise ComposeError(problem)
+                built |= {(a.lower(), e.lower()) for a, e in rosteritem.built_entries(op)}
+        for e in entries:
+            if (e['archive'].lower(), e['entry'].lower()) in built:
+                raise ComposeError('%s|%s is made from your game files; the pack must not carry it'
+                                   % (e['archive'], e['entry']))
     if info['type'] == 'new-fighter':
         if len(ops) != 1:
             raise ComposeError('a new-fighter pack holds exactly one new-fighter op')
@@ -514,6 +536,15 @@ def apply_pack(work, folder, info, fe_id=None, new=False, skin=False, skin_of=No
         work.replace(clothing.PARTS_ARCHIVE, clothing.PARTS_XML, parts.encode('latin-1'))
         for name, blob in tables.items():
             work.replace(clothing.NAMES_ARCHIVE, name, blob)
+        for op in clothing_ops:
+            if op['op'] != 'item' or rosteritem.KEY not in op:
+                continue
+            # a roster piece (build 110): its files made from the player's own roster model and template item, added
+            # as a delta's add would be (the bases as the deltas read them: the player's own, whatever language)
+            for rel, entry, data in clothing.roster_files(sod_blob, op, work.bases.read_original):
+                if work.exists(rel, entry):
+                    raise ComposeError('%s|%s exists already' % (rel, entry))
+                work.add(rel, entry, data)
     crowd = None
     models = {}
     for op in info.get('ops', []):

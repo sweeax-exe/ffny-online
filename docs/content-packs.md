@@ -32,6 +32,15 @@ own entry plus the modder's bytes) that `replace`s or `add`s one archive entry o
 `venue.xml` and `entity.xml`. The catalogue lists them with the capability `content-v1`; content.ini marks them
 `composed=1`.
 
+A clothing `item` op may name a part of its own (`"model": {"num", "name"}`, build 110). With
+`"roster_part": {"model": "V2IP_130A", "material": "emc3_jewelry-eye_w", "bone": 58}` beside it (exactly those
+keys; one colour, no variants) the pack carries no entry for that part at all: the composer makes the part
+`<name>.o`, its texture and its two shop thumbnails from the player's own roster model (the material's first draw,
+every vertex on `bone`, its image cut from the model's atlas) and the template item's part, texture and thumbnails
+(`setup/ffnycontent/rosteritem.py`, the same text as FFNY Studio's; integer image arithmetic, so every PC composes
+the same bytes). A pack that also lists a delta for one of those four entries is refused. Clothing packs need
+`items-v1` (launchers from build 110).
+
 A new venue may carry its own far crowd (the rows drawn at the bones of a locator file in `assets/icrowd.viv`):
 the op's optional `"crowd_locator": "icl_<code>"` and exactly one entry, the `add` of `assets/icrowd.viv|icl_<code>.o`
 from a retail locator (`icl_<template code>.o`), an ELF file of the same size. The new entity's

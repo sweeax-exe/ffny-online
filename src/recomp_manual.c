@@ -86,6 +86,26 @@ void sub_001A50B0_enter(void)
         cheats_health_change(); /* [cheats] infinite_health, no_regen (src/patches/cheats.c); never online */
     ow_health_change();
 }
+/* New items (src/hooks/item_ext.h): items beyond the dump's database keep the profile's item-state layout as
+ * retail has it. sub_000148B0 lays a profile slot's six state arrays out from the containers' item counts
+ * (thiscall (slot), args (slot index, database, containers), ret 0xC): afterwards the pointers are laid out
+ * again from the dump's counts. sub_000168E0 is the containers' "every item to one state" (vtable +0x14, also
+ * called directly): it stops at the retail items. The other container methods come through
+ * recomp_lookup_manual (item_ext_lookup). */
+#include "hooks/item_ext.h"
+extern void sub_000148B0_gen(void);
+void sub_000148B0(void)
+{
+    uint32_t slot = g_ecx, index = MEM32(g_esp + 4), containers = MEM32(g_esp + 0xC);
+    sub_000148B0_gen();
+    item_ext_layout(slot, index, containers);
+}
+extern void sub_000168E0_gen(void);
+void sub_000168E0(void)
+{
+    if (!item_ext_set_all())
+        sub_000168E0_gen();
+}
 void ow_roam_input(uint32_t rec);     /* Run the Streets free roam: the target cache and inputs (openworld.c) */
 void ow_roam_walk(void);              /* Run the Streets free roam: the walking speed (openworld.c) */
 /* sub_001BA800 (the input history) runs for each fighter right after sub_001A4A30 cached its target's angle and
@@ -2347,6 +2367,11 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
 {
     if (xbox_va == 0x000766B0u)
         return sub_000766B0;
+    {
+        recomp_func_t items = item_ext_lookup(xbox_va);     /* the item containers' methods (item_ext.h) */
+        if (items)
+            return items;
+    }
     if (xbox_va == 0x000689B0u)         /* the front end's custom-control draw: freed controls */
         return fe_custom_ctrl_guard;
     if (xbox_va == 0x001BAA00u && input_latency_on())

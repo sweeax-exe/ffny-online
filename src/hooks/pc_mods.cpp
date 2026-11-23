@@ -138,6 +138,9 @@ static bool helper_args(const std::string &command, const std::string &id, std::
     args.insert(args.end(), {"--capability", "content-v1"});
     // A new venue's breakable objects (the new-venue op's "models", setup/ffnycontent/newvenue.py), build 83.
     args.insert(args.end(), {"--capability", "venue-models-v1"});
+    // Build 110: clothing packs (new rows and colours, items with a part of their own such as the Eyepatch) keep
+    // the profile's item-state layout here (src/hooks/item_ext.h); older builds moved every profile's states.
+    args.insert(args.end(), {"--capability", "items-v1"});
     // New fighters' own voice lines (build 80, setup/fightervoice.py: .sch/.asf banks composed into speech2.viv).
     // The account service marks such packs voice-v1; without it every launcher skipped them.
     args.insert(args.end(), {"--capability", "voice-v1"});
