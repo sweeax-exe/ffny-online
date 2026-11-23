@@ -2415,8 +2415,9 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         char line[96];
         snprintf(line, sizeof(line), "BUILD %d IS OUT: UPDATE IN THE LAUNCHER TO PLAY ONLINE", newer);
         text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
-    } else if (g_art_missing && !gallery_on()) {
-        // build 110: names without portraits: what the player can do
+    } else if (g_art_missing && signed_in && news <= 0 && !gallery_on()) {
+        // build 110: names without portraits: what the player can do (signing in and UPDATE NOW keep their line
+        // and their button: the update goes through the launcher, which repairs the art too)
         const char *line = "MENU PICTURES ARE MISSING: CLOSE THE GAME AND START IT FROM THE LAUNCHER, WHICH REPAIRS THEM";
         text(dl, f, g_title, fit_size(f, g_title, 14, line, 556), 50, 56, ORANGE, line, LEFT, 1.2f);
     } else if (content_bad && signed_in) {
