@@ -166,6 +166,33 @@ std::wstring art_root()
     return root + L"online-art\\";
 }
 
+// Build 110: the art or the fonts are not there (an update could not put them in place, or a repair failed): the hub
+// says so in one line. The launcher's start repairs them (scripts/online-art.py --repair).
+bool g_art_missing = false;
+
+// <data>/online-art-status.ini (scripts/online-art.py: the last build's or repair's outcome) into the log, so a crash
+// or F9 report says why the art is missing: "[ONLINE] art status: time=... result=failed step=setup detail=..."
+void art_status_log()
+{
+    std::wstring path = art_root();
+    const size_t tail = wcslen(L"online-art\\");
+    path.replace(path.size() - tail, tail, L"online-art-status.ini");
+    FILE *f = _wfopen(path.c_str(), L"r");
+    if (!f) {
+        if (g_art_missing) fprintf(stderr, "[ONLINE] art status: no online-art-status.ini (the art was last made by a build before 110)\n");
+        return;
+    }
+    char line[512], all[1024] = "";
+    int o = 0;
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (strchr(line, '=') && line[0] != ';' && o < (int)sizeof(all) - 1)
+            o += snprintf(all + o, sizeof(all) - (size_t)o, " %s", line);
+    }
+    fclose(f);
+    if (g_art_missing || !strstr(all, "result=ok")) fprintf(stderr, "[ONLINE] art status:%s\n", all);
+}
+
 bool load_png(const std::wstring &path, Tex &t)
 {
     IWICImagingFactory *factory = nullptr;
@@ -2390,6 +2417,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         char line[96];
         snprintf(line, sizeof(line), "BUILD %d IS OUT: UPDATE IN THE LAUNCHER TO PLAY ONLINE", newer);
         text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
+    } else if (g_art_missing && signed_in && news <= 0 && !gallery_on()) {
+        // build 110: names without portraits: what the player can do (signing in and UPDATE NOW keep their line
+        // and their button: the update goes through the launcher, which repairs the art too)
+        const char *line = "MENU PICTURES ARE MISSING: CLOSE THE GAME AND START IT FROM THE LAUNCHER, WHICH REPAIRS THEM";
+        text(dl, f, g_title, fit_size(f, g_title, 14, line, 556), 50, 56, ORANGE, line, LEFT, 1.2f);
     } else if (content_bad && signed_in) {
         // build 83: the last sync failed (e.g. the PC's root store or clock), so this PC may lack packs the others
         // have and see none of their rooms: the reason in plain words, on one line where it fits
@@ -7128,8 +7160,10 @@ void prepare(void *device)
             cfg.OversampleH = 2;
             g_numbers = ImGui::GetIO().Fonts->AddFontFromFileTTF(path, 24.0f, &cfg);
         }
+        g_art_missing = !tex("ui/online_poster.png").srv || !g_title;
         fprintf(stderr, "[ONLINE] art %s, fonts %s\n", tex("ui/online_poster.png").srv ? "found" : "missing",
                 g_title ? "found" : "missing");
+        art_status_log();
     }
 }
 
