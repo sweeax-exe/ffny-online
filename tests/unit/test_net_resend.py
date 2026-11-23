@@ -79,3 +79,12 @@ def test_the_fight_resumes_wait_is_not_a_hang():
     # only the resume's own notice (a held player, or this PC cut off): a frozen wait of another kind is still reported
     assert 'if (mode) InterlockedExchange64(&g_resume_shown, (LONGLONG)now);' in notice
     assert NETPLAY.count('&g_resume_shown') == 2
+
+
+def test_start_stops_the_resumes_wait_only_under_its_notice():
+    """Build 110: the waits of a few milliseconds every online fight has run through resume_wait too; a START pressed in
+    one of them must not end the fight (only once the notice with "START: stop waiting" is up)."""
+    run = NETPLAY.split('static void step_run(void)\n{', 1)[1]
+    call = 'if (rmode == 1 && now - waited_since >= RESUME_NOTICE_MS && resume_stop_pressed(waited_since, now)) rstop = 1;'
+    assert call in run and NETPLAY.count('resume_stop_pressed(') == 2
+    assert 'rmode > 0 && now - waited_since >= RESUME_NOTICE_MS ? rmode : 0, rleft);' in run

@@ -1652,6 +1652,7 @@ static const char *g_quit_why;  /* build 110: why desync_quit leaves the fight (
 #define RESUME_NOHOLD  4
 #define RESUME_MARGIN_MS 2000   /* a held player's wait lasts this much past the relay's deadline */
 #define RESUME_FRESH_MS  2500   /* a HELD notice counts this long (the relay sends one every second) */
+#define RESUME_NOTICE_MS 3000   /* a wait this long shows the resume's notice (and START stops it): shorter ones keep build 109's */
 #define RESUME_SOCK_MS   3000   /* nothing from the relay this long in a held fight: a new socket, at most this often */
 typedef struct { int state; unsigned holds; ULONGLONG at, deadline; } ResumeSlot;
 static struct {
@@ -10216,20 +10217,22 @@ static void step_run(void)
             if (late >= 0 && late < MAXP && N.lobby && !N.watching && g_steps_match[late] == N.match &&
                 need > (uint32_t)N.delay + 1 && !(N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u))
                 rmode = resume_wait(late, now, waited_since, &stall_limit, &rleft);
-            if (rmode > 0 && now - waited_since < 3000) rmode_logged = 0;
-            if (rmode > 0 && now - waited_since >= 3000 && rmode != rmode_logged && (rmode_logged = rmode) != 0)  /* long waits only */
+            if (rmode > 0 && now - waited_since < RESUME_NOTICE_MS) rmode_logged = 0;
+            if (rmode > 0 && now - waited_since >= RESUME_NOTICE_MS && rmode != rmode_logged && (rmode_logged = rmode) != 0)  /* long waits only */
                 fprintf(stderr, "[NETPLAY] resume: %s (step %u, waiting since %.1f s, up to %.1f s)\n",
                         rmode == 2 ? "this PC is cut off: reconnecting" : "waiting for the held player", s,
                         (now - waited_since) / 1000.0, stall_limit / 1000.0);
             if (rmode > rmode_was) rmode_was = rmode;     /* 2 (this PC cut off) stays for the wait's end */
-            if (rmode == 1 && resume_stop_pressed(waited_since, now)) rstop = 1;
+            /* START stops the wait only once the notice that says so is up (below): in the short waits of every fight
+             * a pressed START (the pause habit; the fight itself never sees it) ended the fight at once */
+            if (rmode == 1 && now - waited_since >= RESUME_NOTICE_MS && resume_stop_pressed(waited_since, now)) rstop = 1;
             /* build 109: a wait mid-fight says so on screen while it lasts (stall_notice), not only once it is over */
             if (late >= 0 && late < MAXP && N.lobby && !N.watching && g_steps_match[late] == N.match &&
                 need > (uint32_t)N.delay + 1 && now - waited_since >= STALL_NOTICE_MS &&
                 !(N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u))
                 stall_notice(late, now, now - waited_since, &last_present,
                              /* the resume's text once the wait is long (a short stall keeps build 109's causes) */
-                             rmode > 0 && now - waited_since >= 3000 ? rmode : 0, rleft);
+                             rmode > 0 && now - waited_since >= RESUME_NOTICE_MS ? rmode : 0, rleft);
             /* The fight decided (KO, time): what follows is the winner's scene and the results, the same
              * on every PC however they part, and a PC that skips ahead stops sending steps. Waiting the
              * mid-fight ten seconds there froze the winner's scene and then said the fight would not
