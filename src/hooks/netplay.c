@@ -9461,6 +9461,7 @@ static void step_body(void)
 #define STALL_PRESENT_MS 33
 #define SILENT_SELF_MS   1500     /* the relay answers this PC's ping every second */
 extern void d3d11_translator_present_again(void);
+volatile LONG g_netplay_step_wait;  /* how long this step has waited mid-fight, ms (d3d11_translator.c's test) */
 static void stall_notice(int late, ULONGLONG now, ULONGLONG waited, ULONGLONG *last_present)
 {
     static int present = -1, last_cause = -1;
@@ -9760,6 +9761,7 @@ static void step_run(void)
     need = N.predicting ? (s > RB_AHEAD ? s - RB_AHEAD : 0) : s;
     if (need <= (uint32_t)N.delay) return;
     waited_since = last_send = GetTickCount64();
+    InterlockedExchange(&g_netplay_step_wait, 0);
     QueryPerformanceCounter(&g_wait_q0);    /* fight pacing (netplay_on_step) */
     last_note = 0;
     for (;;) {
@@ -9802,6 +9804,7 @@ static void step_run(void)
             if (late >= 0 && g_steps_match[late] != N.match && now - waited_since >= 1500) last_note = now;
             if (now - last_send >= 50) { if (N.local_last) send_steps(N.local_last); last_send = now; }   /* the others may be waiting for ours */
             gone_send();
+            if (need > (uint32_t)N.delay + 60) InterlockedExchange(&g_netplay_step_wait, (LONG)(now - waited_since));
             /* build 109: a wait mid-fight says so on screen while it lasts (stall_notice), not only once it is over */
             if (late >= 0 && late < MAXP && N.lobby && !N.watching && g_steps_match[late] == N.match &&
                 need > (uint32_t)N.delay + 1 && now - waited_since >= STALL_NOTICE_MS &&

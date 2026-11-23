@@ -680,6 +680,32 @@ static void log_display_pacing(void)
  * this every frame is rendered correctly and then discarded, which looks
  * exactly like a renderer that does nothing. */
 void defjam_occluder_frame_end(void);
+
+/* Whose the present is: the executor's thread owns the D3D11 contexts and presents every frame (below); the game's
+ * thread presents only a stall's picture again (present_again), and only while the executor has nothing to run.
+ * There is no ID3D11Multithread protection: the two must never be in D3D together. */
+enum { PRESENT_FREE, PRESENT_EXECUTOR, PRESENT_AGAIN };
+static volatile LONG s_present_owner = PRESENT_FREE;
+
+/* RECOMP_TEST_SLOW_EXECUTOR=<ms> (tests): one frame's end takes this long, the first one that comes while an online
+ * fight has waited 8 ms or more for another player: what a driver's stall then looks like to present_again. */
+static void test_slow_executor(void)
+{
+    extern volatile LONG g_netplay_step_wait;
+    static int ms = -1;
+    if (ms < 0) {
+        const char *e = getenv("RECOMP_TEST_SLOW_EXECUTOR");
+        ms = e && *e ? atoi(e) : 0;
+    }
+    if (ms > 0 && InterlockedCompareExchange(&g_netplay_step_wait, 0, 0) >= 8) {
+        int t = ms;
+        ms = 0;
+        fprintf(stderr, "[TRANS] test: the executor sleeps %d ms in a frame's end (thread %lu)\n", t, (unsigned long)GetCurrentThreadId());
+        Sleep((DWORD)t);
+        fprintf(stderr, "[TRANS] test: the executor goes on\n");
+    }
+}
+
 void d3d11_translator_frame_end(void)
 {
     defjam_occluder_frame_end();
@@ -689,6 +715,9 @@ void d3d11_translator_frame_end(void)
         return;
     dev = xbox_GetD3DDevice();
     if (dev) {
+        while (InterlockedCompareExchange(&s_present_owner, PRESENT_EXECUTOR, PRESENT_FREE) != PRESENT_FREE)
+            Sleep(0);       /* a present_again under way: at most a display refresh */
+        test_slow_executor();
         double capture_ms = 0.0, present_at = 0.0;
         int recording = recorder_on();
         capture_backbuffer(dev);
@@ -715,6 +744,7 @@ void d3d11_translator_frame_end(void)
 #if defined(_WIN32)
         log_display_pacing();
 #endif
+        InterlockedExchange(&s_present_owner, PRESENT_FREE);
     }
     d3d11_translator_pump();
     d3d11_translator_report();
@@ -1018,15 +1048,46 @@ void d3d11_translator_pump(void)
  * while an online fight waits for another player's entries (netplay.c stall_notice): the game draws nothing
  * meanwhile, so a wait of seconds was a frozen picture with nothing said. The present path scales the title's
  * last frame and puts its pipeline state back (d3d8_present.c), and the overlay restores its own; the frame
- * capture and the recorder are left out. */
+ * capture and the recorder are left out.
+ *
+ * Build 110: only while the executor has run everything the title submitted (the GPU's GET is at PUT: it writes GET
+ * once a run is over, and only a submission moves PUT again, which the waiting game does not do) and is not in a
+ * frame's end. Until then, e.g. a shader compile or a driver's stall over a second into the wait, the picture is left
+ * alone; nothing here waits for the executor, the next try is 33 ms later. */
+#define NV2A_USER_PUT 0x800040u
+#define NV2A_USER_GET 0x800044u
+static int executor_idle(void)
+{
+    extern volatile uint32_t *xbox_Nv2aRegPtr(uint32_t offset);
+    volatile uint32_t *put = xbox_Nv2aRegPtr(NV2A_USER_PUT), *get = xbox_Nv2aRegPtr(NV2A_USER_GET);
+    int idle = put && get && ((*put ^ *get) & 0x0FFFFFFFu) == 0;
+    MemoryBarrier();        /* what the executor wrote before GET is seen after it */
+    return idle;
+}
+
 void d3d11_translator_present_again(void)
 {
+    static unsigned done, skipped;
     IDirect3DDevice8 *dev;
     if (!s_ready)
         return;
     dev = xbox_GetD3DDevice();
-    if (dev)
+    if (!dev)
+        return;
+    if (!executor_idle() ||
+        InterlockedCompareExchange(&s_present_owner, PRESENT_AGAIN, PRESENT_FREE) != PRESENT_FREE) {
+        if (skipped++ % 100 == 0)
+            fprintf(stderr, "[TRANS] present again: skipped, the executor is at work (#%u, %u done)\n", skipped, done);
+        return;
+    }
+    if (!executor_idle()) {     /* a run begun in between: its frame's end waits for this, its draws would not */
+        skipped++;
+    } else {
+        if (done++ == 0)
+            fprintf(stderr, "[TRANS] present again: on thread %lu\n", (unsigned long)GetCurrentThreadId());
         dev->lpVtbl->Present(dev, NULL, NULL, NULL, NULL);
+    }
+    InterlockedExchange(&s_present_owner, PRESENT_FREE);
 }
 
 /* What the translator actually did, which is the only way to tell "no methods

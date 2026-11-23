@@ -56,6 +56,14 @@ def test_stall_notice_and_report():
     assert 'd3d11_translator_present_again();' in NETPLAY
     trans = (ROOT / 'src' / 'hooks' / 'd3d11_translator.c').read_text(encoding='utf-8')
     assert 'void d3d11_translator_present_again(void)' in trans
+    # build 110: the executor's thread owns the D3D11 context; the stall's picture only while it has nothing to run, and
+    # the game's thread never waits for it
+    again = trans.split('void d3d11_translator_present_again(void)\n{', 1)[1].split('\n}\n', 1)[0]
+    assert again.count('executor_idle()') == 2 and again.index('executor_idle()') < again.index('lpVtbl->Present')
+    assert 'Sleep(' not in again and 'while' not in again
+    end = trans.split('void d3d11_translator_frame_end(void)\n{', 1)[1].split('\n}\n', 1)[0]
+    assert end.index('PRESENT_EXECUTOR, PRESENT_FREE') < end.index('capture_backbuffer(dev)')
+    assert end.index('lpVtbl->Present') < end.index('InterlockedExchange(&s_present_owner, PRESENT_FREE)')
     if RELAY:   # the account service keeps the "conn" facts
         facts = (RELAY / 'accounts' / 'netfacts.go').read_text(encoding='utf-8')
         assert 'Conn *NetConn `json:"conn,omitempty"`' in facts
