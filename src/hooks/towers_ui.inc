@@ -1197,9 +1197,11 @@ void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersVi
     if (tower == TOWER_WEEKLY && run.tower == TOWER_WEEKLY)     // build 108: the week's twist under the name
         text(dl, f, g_title, 12, 52, 50, col, (std::string(run.week) + "  -  " + tw_twist_title(run.twist)).c_str(), LEFT, 0.8f);
     char line[96];
-    snprintf(line, sizeof line, "SEED %08X", v.seed);
-    text(dl, f, g_body, 10, 590, 30, with_alpha(GREY, 0.9f), line, RIGHT, 0);
-    if (first) text(dl, f, g_hand, 15, 590, 44, ORANGE, "THE CLIMB BEGINS", RIGHT, 1.0f);
+    if (v.seed) {       // an online climb's seed is the server's: not shown
+        snprintf(line, sizeof line, "SEED %08X", v.seed);
+        text(dl, f, g_body, 10, 590, 30, with_alpha(GREY, 0.9f), line, RIGHT, 0);
+    }
+    if (first && (!v.team || v.seed || v.floor == 1)) text(dl, f, g_hand, 15, 590, 44, ORANGE, "THE CLIMB BEGINS", RIGHT, 1.0f);
     else if (draw) text(dl, f, g_hand, 15, 590, 44, ORANGE, "A DRAW: THIS FLOOR AGAIN", RIGHT, 1.0f);
 
     // the tower's column on the left: nine floors around the climber, the marker climbing one

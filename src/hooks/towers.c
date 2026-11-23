@@ -1259,6 +1259,7 @@ static struct {
     int momentum_done, decided, winner, draw, end_health, cpu_health;
     unsigned decided_step;
 } g_net;
+static int g_played_floor[2], g_played_opp[2][2];      /* the last two online floors started here (the summary) */
 static int g_net_desynced_floor;
 static int side_health(uint32_t first, int n);     /* below */    /* tests: RECOMP_TEST_TOWERS_ONLINE_DESYNC parts this floor's checksum once */
 
@@ -1276,6 +1277,13 @@ void towers_online_floor(int on, int rules, int tower, int floor, int floors, in
         g_net.opp[1] = opp2;
         g_net.winner = -1;
         towers_floor_rules(tower, floor, floors, &g_net.r);
+        if (g_played_floor[0] != floor) {
+            g_played_floor[1] = g_played_floor[0];
+            memcpy(g_played_opp[1], g_played_opp[0], sizeof g_played_opp[0]);
+        }
+        g_played_floor[0] = floor;
+        g_played_opp[0][0] = opp1;
+        g_played_opp[0][1] = opp2;
         fprintf(stderr, "[TOWERS] online floor %d of %d (%s): CPUs %d + %d, level %d, damage x%.2f, health x%.2f, momentum %.0f%%%s"
                 "%s\n", floor, floors, towers_name(tower), opp1, opp2, g_net.r.cpu_level, (double)g_net.r.cpu_damage,
                 (double)g_net.r.cpu_health, (double)g_net.r.cpu_momentum * 100.0, g_net.r.boss ? ", a boss floor" : "",
@@ -1286,6 +1294,16 @@ void towers_online_floor(int on, int rules, int tower, int floor, int floors, in
 }
 
 int towers_online_match(void) { return g_net.on; }
+
+int towers_online_played(int floor, int opp[2])
+{
+    int k, got = 0;
+    lock();
+    for (k = 0; k < 2 && !got; k++)
+        if (floor > 0 && g_played_floor[k] == floor) { opp[0] = g_played_opp[k][0]; opp[1] = g_played_opp[k][1]; got = 1; }
+    unlock();
+    return got;
+}
 
 int towers_online_cpu(int pos, int *fighter)
 {

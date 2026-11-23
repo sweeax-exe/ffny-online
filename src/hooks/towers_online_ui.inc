@@ -15,8 +15,6 @@
 // The relay runs all of it (server relay/tower.go): the page only shows TOWER and sends READY / TCHOICE.
 
 struct TowerOnlineUi {
-    int played_floor[2] = { 0, 0 };     // the last two floors this PC saw START (their CPUs for the BEATEN card)
-    int played_opp[2][2] = { { -1, -1 }, { -1, -1 } };
     ULONGLONG summary_since = 0;
     int summary_key = -1;
 } TWO;
@@ -33,20 +31,6 @@ std::string tower_partner_name(const NetRoom &r)
     return p ? std::string(p->name) : std::string();
 }
 
-// The floors this PC played (their CPUs): noted while a floor's match is set up (towers.c's online floor).
-void tower_online_note_floor()
-{
-    TowersOnlineFloor tf;
-    towers_online_view(&tf);
-    if (!tf.on || tf.floor == TWO.played_floor[0]) return;
-    TWO.played_floor[1] = TWO.played_floor[0];
-    TWO.played_opp[1][0] = TWO.played_opp[0][0];
-    TWO.played_opp[1][1] = TWO.played_opp[0][1];
-    TWO.played_floor[0] = tf.floor;
-    TWO.played_opp[0][0] = tf.opp[0];
-    TWO.played_opp[0][1] = tf.opp[1];
-}
-
 // TOWER as the two-pads climb scene sees it (towers_scene): the floor just fought and the next one.
 TowersView tower_online_scene_view(const TowerNetView &t)
 {
@@ -59,12 +43,11 @@ TowersView tower_online_scene_view(const TowerNetView &t)
     v.last_floor = t.last_how == TOWERNET_HOW_WIN ? t.last_floor : 0;
     v.state = t.last_how == TOWERNET_HOW_WIN ? TOWERS_WON : t.last_how == TOWERNET_HOW_NONE ? TOWERS_ARMED : TOWERS_DRAW;
     v.last_opponent = v.last_opponent2 = -1;
-    for (int k = 0; k < 2; k++)
-        if (TWO.played_floor[k] == t.last_floor && t.last_floor > 0) {
-            v.last_opponent = TWO.played_opp[k][0];
-            v.last_opponent2 = TWO.played_opp[k][1];
-        }
-    if (v.last_opponent < 0) v.last_floor = 0;      // no card for a floor this PC did not see
+    int beat[2];
+    if (v.state == TOWERS_WON && towers_online_played(t.last_floor, beat)) {
+        v.last_opponent = beat[0];
+        v.last_opponent2 = beat[1];
+    }
     v.next_opponent = t.opp[0];
     v.next_opponent2 = t.opp[1];
     v.next_venue = t.venue;
@@ -141,7 +124,6 @@ void draw_tower_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRo
     if (fighter == NETPLAY_CREATED_FIGHTER || fighter >= 99) fighter = 55;      // standard fighters only
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
-    tower_online_note_floor();
 
     // between floors: the climb scene itself, with the vote over it
     if (have && t.state == TOWERNET_SUMMARY && r.player_count >= 2) {
@@ -156,25 +138,24 @@ void draw_tower_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRo
         run.floor = v.floor;
         towers_scene(dl, f, ImGui::GetIO().DisplaySize, v, run, std::min(st, 3.5f), false);
         text(dl, f, g_hand, 13, 590, 62, CREAM, ("TEAM TOWER ONLINE  -  WITH " + upper(partner.c_str())).c_str(), RIGHT, 0.8f, 300);
-        const char *head = t.last_how == TOWERNET_HOW_WIN ? "FLOOR CLEARED" : t.last_how == TOWERNET_HOW_DRAW ? "A DRAW: THIS FLOOR AGAIN"
+        const char *head = t.last_how == TOWERNET_HOW_WIN ? "PRESS A TO CLIMB ON" : t.last_how == TOWERNET_HOW_DRAW ? "A DRAW: THIS FLOOR AGAIN"
                          : t.last_how == TOWERNET_HOW_VOID || t.last_how == TOWERNET_HOW_NORESULT ? "NO CONTEST: THIS FLOOR AGAIN"
                          : "NEXT FLOOR";
         // the vote strip at the foot
-        glass(dl, f, 150, 404, 340, 40, 8, IM_COL32(12, 12, 15, 255), 0.9f);
-        text(dl, f, g_title, 12, 162, 408, CREAM, head, LEFT, 0.8f);
+        glass(dl, f, 130, 420, 250, 30, 8, IM_COL32(12, 12, 15, 255), 0.9f);
+        text(dl, f, g_title, 11, 140, 422, CREAM, head, LEFT, 0.6f, 190);
         for (int s = 0; s < 2; s++) {
             const NetRoomPlayer *p = tower_player(r, s);
             std::string who = p ? upper(p->name) : std::string("-");
-            float x = 162 + s * 160;
-            rect(dl, f, x, 425, 10, 10, p && p->ready ? IM_COL32(60, 200, 90, 255) : IM_COL32(70, 70, 76, 255), 2);
-            text(dl, f, g_title, 10, x + 16, 423, p && p->ready ? WHITE : GREY, who.c_str(), LEFT, 0.6f, 130);
+            float x = 140 + s * 96;
+            rect(dl, f, x, 438, 8, 8, p && p->ready ? IM_COL32(60, 200, 90, 255) : IM_COL32(70, 70, 76, 255), 2);
+            text(dl, f, g_title, 9, x + 12, 436, p && p->ready ? WHITE : GREY, who.c_str(), LEFT, 0.6f, 80);
         }
-        text(dl, f, g_title, 22, 480, 410, t.secs <= 15 ? RED : CREAM, tower_clock(t.secs).c_str(), RIGHT, 1.2f);
-        if (t.why[0]) text(dl, f, g_hand, 11, 320, 386, ORANGE, t.why, CENTER, 0.6f, 560);
-        float hx = 54;
-        hx += hint(dl, f, hx, 452, "a", ready ? "WAITING FOR " : "CONTINUE");
-        if (ready) text(dl, f, g_title, 13, hx - 12, 453, WHITE, upper(partner.c_str()).c_str(), LEFT, 1.0f, 140), hx += 120;
-        hint(dl, f, hx, 452, "b", "SAVE & QUIT");
+        text(dl, f, g_title, 20, 372, 423, t.secs <= 15 ? RED : CREAM, tower_clock(t.secs).c_str(), RIGHT, 1.2f);
+        if (t.why[0]) text(dl, f, g_hand, 11, 250, 404, ORANGE, t.why, CENTER, 0.6f, 240);
+        float hx = 390;
+        hx += hint(dl, f, hx, 428, "a", ready ? "WAITING" : "CONTINUE");
+        hint(dl, f, hx, 428, "b", "SAVE & QUIT");
         // the A that went through the results does not vote: the summary takes it after 2.5 s
         if (pad.a && !ready && st >= 2.5f) netplay_lobby_ready(1, me ? me->fighter : fighter);
         tower_online_leave(pad, "The climb is saved: the same pair resumes it from the Team Tower card.", true);

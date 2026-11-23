@@ -67,6 +67,8 @@ typedef struct TowersOnlineFloor {
     TowerFloorRules rules;
 } TowersOnlineFloor;
 void towers_online_view(TowersOnlineFloor *out);
+/* The CPUs of a floor this PC played (one of the last two STARTs), for the summary's BEATEN card. 0: not seen here. */
+int towers_online_played(int floor, int opp[2]);
 
 #ifdef __cplusplus
 }
