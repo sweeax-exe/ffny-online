@@ -67,3 +67,15 @@ def test_stall_notice_and_report():
     if RELAY:   # the account service keeps the "conn" facts
         facts = (RELAY / 'accounts' / 'netfacts.go').read_text(encoding='utf-8')
         assert 'Conn *NetConn `json:"conn,omitempty"`' in facts
+
+
+def test_the_fight_resumes_wait_is_not_a_hang():
+    """Build 110: the resume waits up to 22 s with its notice up; the hang watch (20 s) must not write a [HANG] block,
+    leave the ".hang" mark or tell the run's end (run_end.c) that the game stood still."""
+    hang = (ROOT / 'src' / 'hooks' / 'hang_watch.c').read_text(encoding='utf-8')
+    loop = hang.split('static DWORD WINAPI hang_thread', 1)[1]
+    assert loop.index('if (netplay_resume_waiting()) last = now;') < loop.index('run_end_note("hung")')
+    notice = NETPLAY.split('static void stall_notice(', 1)[1].split('\n}\n', 1)[0]
+    # only the resume's own notice (a held player, or this PC cut off): a frozen wait of another kind is still reported
+    assert 'if (mode) InterlockedExchange64(&g_resume_shown, (LONGLONG)now);' in notice
+    assert NETPLAY.count('&g_resume_shown') == 2

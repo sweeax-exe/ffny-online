@@ -2845,6 +2845,7 @@ def resume_check(logs, relay_log, cutter, expect, problems):
              "sockets": text.count("[NETPLAY] resume: a new socket"),
              "gave_up": text.count("[NETPLAY] gave up"), "lost": text.count("seat was given up"),
              "not_in_time": text.count("did not get back in time"), "stopped": text.count("stopped waiting for player"),
+             "hang_blocks": text.count("[HANG] no present"),
              "desync": text.count("[NETPLAY] desync in"), "left_report": text.count("left the match before it was decided"),
              "room_left": text.count("[NETPLAY] a player left the match")}
         out["copies"][i] = c
@@ -2856,6 +2857,8 @@ def resume_check(logs, relay_log, cutter, expect, problems):
             problems.append("copy %d never heard RESUME ON" % i)
         if c["desync"]:
             problems.append("copy %d went out of sync" % i)
+        if c["hang_blocks"]:    # a held fight stands still up to 22 s with its notice up: no hang (hang_watch.c)
+            problems.append("copy %d: the hang watch took the hold for a hang" % i)
     if expect == "resume":
         if not held or back < held:
             problems.append("the relay held %d and %d came back" % (held, back))
