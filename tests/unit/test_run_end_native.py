@@ -12,6 +12,7 @@ HOOKS = ROOT / 'src/hooks'
 
 DRIVER = r'''
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "run_end.h"
 int main(int argc, char **argv)
@@ -20,7 +21,10 @@ int main(int argc, char **argv)
     size_t n;
     RunEnd r;
     FILE *f = fopen(argv[1], "rb");
-    (void)argc;
+    if (argc > 2) {     /* the question: mode, times asked */
+        printf("%d\n", run_end_ask_due(atoi(argv[1]), atoi(argv[2])));
+        return 0;
+    }
     n = fread(text, 1, sizeof text - 1, f);
     text[n] = 0;
     fclose(f);
@@ -48,10 +52,13 @@ def ends(tmp_path_factory):
                         str(HOOKS / 'run_end_rules.c'), '/Fe:' + str(exe)], cwd=tmp, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
 
+    ends_exe = str(exe)
+
     def ends_(text):
         (tmp / 'run-end.txt').write_bytes(text.encode('utf-8'))
         out = subprocess.run([str(exe), str(tmp / 'run-end.txt')], capture_output=True, text=True).stdout.strip()
         return None if out == 'none' else json.loads(out)
+    ends_.exe = ends_exe
     return ends_
 
 
@@ -91,6 +98,13 @@ def test_only_plain_characters_leave(ends):
     assert ends(BEGIN + 'crash code=C0000005 at=' + 'x' * 500 + '+10\r\n')['end'] == 'crash'
 
 
+def test_asked_twice_at_most(ends):
+    due = lambda mode, asked: int(subprocess.run([ends.exe, str(mode), str(asked)], capture_output=True, text=True).stdout)
+    ask, on, off = 0, 1, 2
+    assert [due(ask, n) for n in (0, 1, 2)] == [1, 1, 2]        # ask, ask once more, then no
+    assert [due(m, n) for m in (on, off) for n in (0, 1, 2)] == [0] * 6
+
+
 def src(name):
     return (ROOT / name).read_text(encoding='utf-8')
 
@@ -113,5 +127,17 @@ def test_wiring():
     assert 'run_end_send();' in settings.split('static void run_launcher_if_wanted(void)', 1)[1]
     # only with a sign-in, and only what the header says: no log, no path
     send = src('src/hooks/run_end.c')
-    assert 'if (account_state() == ACCOUNT_IN) status = account_send_run_end(json);' in send
+    assert 'if (account_state() == ACCOUNT_IN && allowed()) status = account_send_run_end(json);' in send
+    # ask by default; nothing is written or sent before a yes, off deletes what is pending
+    assert '{ "online", "run_end_reports", RECOMP_SETTING_ENUM, 0, 0, 0, k_run_end,' in settings
+    assert 'k_run_end[] = { "ask", "on", "off", NULL }' in settings
+    begin = send.split('void run_end_begin(int build)', 1)[1].split('\n}\n', 1)[0]
+    assert begin.index('DeleteFileA(RUN_END_FILE);') < begin.index('if (!allowed()) return;') < begin.index('CreateFileA(')
+    start = send.split('void run_end_send(void)', 1)[1].split('\n}\n', 1)[0]
+    assert start.index('if (!allowed()) {') < start.index('DeleteFileA(') < start.index('CreateFileA(')
+    ask = src('src/hooks/pc_launcher_run_end.inc')
+    assert ask.count('run_end_answer(RUN_END_ON') == 0 and 'run_end_answer(choice == 0 ? RUN_END_ON : RUN_END_OFF)' in ask
+    assert 'if (i == 2) ImGui::SetItemDefaultFocus();' in ask and 'k_red' not in ask        # Yes is not picked for the player
+    assert 'account_state() == ACCOUNT_IN && notice_may_open()' in ask
+    assert ui.count('    run_end_setting();\n') == 2
     assert 'run-*.log' not in send and 'strrchr(path,' in send

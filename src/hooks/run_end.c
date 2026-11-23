@@ -13,11 +13,22 @@
 #include <windows.h>
 
 #include "account.h"
+#include "recomp_settings.h"
 
 #define RUN_END_FILE "logs\\run-end.txt"
 
 static HANDLE g_file = INVALID_HANDLE_VALUE;    /* the game's process: open for the run, so a crash only writes */
 static volatile LONG g_quit;
+
+static int allowed(void) { return recomp_settings_get("online", "run_end_reports", RUN_END_ASK) == RUN_END_ON; }
+
+void run_end_setting_changed(void)
+{
+    if (allowed()) return;      /* on: from the next start of the game */
+    if (g_file != INVALID_HANDLE_VALUE) CloseHandle(g_file);
+    g_file = INVALID_HANDLE_VALUE;
+    DeleteFileA(RUN_END_FILE);
+}
 
 static void line(HANDLE h, const char *text)
 {
@@ -30,8 +41,9 @@ void run_end_begin(int build)
 {
     char text[96];
     fprintf(stderr, "[BUILD] build %d, compiled by cl %ld\n", build, RUN_END_CL);
-    CreateDirectoryA("logs", NULL);
     DeleteFileA(RUN_END_FILE);
+    if (!allowed()) return;
+    CreateDirectoryA("logs", NULL);
     g_file = CreateFileA(RUN_END_FILE, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
                          OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     snprintf(text, sizeof text, "begin build=%d cl=%ld at=%lld\r\n", build, RUN_END_CL, (long long)time(NULL));
@@ -97,10 +109,10 @@ static DWORD WINAPI send_thread(LPVOID param)
     char *json = (char *)param;
     ULONGLONG until = GetTickCount64() + SIGN_IN_WAIT_MS;
     int status = -1;
-    while (account_state() != ACCOUNT_IN && GetTickCount64() < until) Sleep(500);
-    if (account_state() == ACCOUNT_IN) status = account_send_run_end(json);
+    while (account_state() == ACCOUNT_CHECKING && GetTickCount64() < until) Sleep(500);    /* the saved sign-in */
+    if (account_state() == ACCOUNT_IN && allowed()) status = account_send_run_end(json);
     fprintf(stderr, "[RUN-END] the last run: %s: %s (%d)\n", json,
-            status == 202 ? "sent" : status == -1 ? "not signed in, not sent" : "not taken", status);
+            status == 202 ? "sent" : status == -1 ? "not signed in or turned off, not sent" : "not taken", status);
     fflush(stderr);
     free(json);
     return 0;
@@ -114,6 +126,10 @@ void run_end_send(void)
     RunEnd r;
     HANDLE h, t;
     if (InterlockedExchange(&once, 1)) return;
+    if (!allowed()) {           /* not asked yet, or off: what there is goes unsent */
+        if (DeleteFileA(RUN_END_FILE)) fprintf(stderr, "[RUN-END] not allowed: the last run's file deleted unsent\n");
+        return;
+    }
     account_init();
     h = CreateFileA(RUN_END_FILE, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
                     FILE_ATTRIBUTE_NORMAL, NULL);       /* a game still running has it open for writing: not now */
@@ -132,6 +148,7 @@ void run_end_send(void)
 #else
 
 void run_end_begin(int build) { (void)build; }
+void run_end_setting_changed(void) {}
 void run_end_note(const char *how) { (void)how; }
 void run_end_quit(void) {}
 void run_end_closing(void) {}

@@ -12,7 +12,10 @@
  *     exit code=0x... at=<unix time>              by the launcher that waited for the game's process
  * The next launcher start reads it, deletes it and, signed in, sends what the lines say with the build number
  * (account_send_run_end: POST /api/report/end). No path, no name, nothing of the fight or the log; the log itself
- * still goes only when the player presses Send crash report. Not signed in: deleted unsent. Windows only. */
+ * still goes only when the player presses Send crash report. Not signed in: deleted unsent. Windows only.
+ *
+ * Only after a yes ([online] run_end_reports = on): with ask (the default) or off the game writes no such file, and the
+ * launcher deletes one it finds unsent. The question is pc_launcher_run_end.inc. */
 #ifndef DEFJAM_RUN_END_H
 #define DEFJAM_RUN_END_H
 
@@ -27,11 +30,17 @@
 #define RUN_END_CL 0L
 #endif
 
+enum { RUN_END_ASK = 0, RUN_END_ON = 1, RUN_END_OFF = 2 };  /* [online] run_end_reports (pc_settings.c k_run_end) */
+#define RUN_END_ASK_TIMES 2     /* the question opens at most this often without an answer, then it counts as no */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 void run_end_begin(int build);              /* once, in the process that runs the game */
+void run_end_setting_changed(void);         /* not on any more: the file goes, nothing is kept or sent */
+/* What the launcher does about the question: 0 nothing, 1 ask, 2 asked often enough: no. */
+int run_end_ask_due(int mode, int asked);
 void run_end_note(const char *how);         /* "closed", "quit", "update", "hung", "moved" */
 void run_end_quit(void);                    /* the EXIT in the game: the close that follows is a quit */
 void run_end_closing(void);                 /* the window's close */

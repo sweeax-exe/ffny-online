@@ -71,6 +71,12 @@ int run_end_parse(const char *text, RunEnd *out)
     return 1;
 }
 
+int run_end_ask_due(int mode, int asked)
+{
+    if (mode != RUN_END_ASK) return 0;
+    return asked < RUN_END_ASK_TIMES ? 1 : 2;
+}
+
 int run_end_json(const RunEnd *r, long long now, char *out, size_t size)
 {
     long long ago = r->at > 0 && now > r->at ? now - r->at : 0;
