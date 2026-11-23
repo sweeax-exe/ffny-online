@@ -1811,6 +1811,43 @@ DRAFT_SHOTS = {"[NETPLAY] draft: game 1 step 1 turn": "draft-ban", "[NETPLAY] dr
                "[NETPLAY] draft: game 2 step 4 turn": "draft-venue-ban", "[NETPLAY] draft: game 2 step 7 turn": "draft-counterpick"}
 
 
+def _created_room(s, i, timeout, pad=""):
+    """The code of the room copy i opened (RECOMP_TEST_CREATE_ROOM), once its log names it and its overlay pad script
+    (RECOMP_TEST_OVERLAY_PAD, `pad`) is through: nobody joins while it changes the room's settings."""
+    until = time.time() + timeout
+    while time.time() < until:
+        s.poll()
+        text = logparse.read_text(s.copies[i].log)
+        m = re.search(r"\[NETPLAY\] tests: room (\w{6}) created", text)
+        if m and text.count("[UI] test pad: ") >= len(pad):
+            return m.group(1)
+        if not s.copies[i].alive():
+            break
+        time.sleep(0.5)
+    raise RuntimeError("copy %d opened no room (or did not finish its pad script) within %d s" % (i, timeout))
+
+
+def room_venues_check(logs, relay_log, want, problems):
+    """build 110: a room on a CUSTOM venue list: the votes' candidates (the relay's log) and the venue of every START."""
+    rtext = logparse.read_text(relay_log) if os.path.isfile(relay_log) else ""
+    votes = [[int(v) for v in re.findall(r"\d+", m)] for m in re.findall(r"voting \(\d+ candidates: \[([\d ]*)\]", rtext)]
+    hill = [int(v) for v in re.findall(r"koth: fight venue=(\d+)", rtext)]      # the hill: no vote, the relay draws it
+    out = {"want": want, "candidates": votes, "hill": hill, "venues": {}}
+    if not votes and not hill:
+        problems.append("room venues: no vote in the relay's log")
+    if not set(hill) <= set(want):
+        problems.append("room venues: the hill drew %s, not %s" % (hill, want))
+    for v in votes:
+        if not set(v) <= set(want) or len(v) != min(3, len(want)):
+            problems.append("room venues: a vote offered %s, not %s" % (v, want))
+    for i, path in logs.items():
+        text = logparse.read_text(path)
+        out["venues"][str(i)] = played = [int(v) for v in re.findall(r"\[NETPLAY\] START: [^\n]*?venue (\d+)", text)]
+        if not played or not set(played) <= set(want):
+            problems.append("room venues: copy %d played at %s, not %s" % (i, played, want))
+    return out
+
+
 def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast_ko=600, ko_winner=None,
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
@@ -1818,8 +1855,13 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
            rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None,
            linger=None, reports=False, fighter_rules=None, max_ping=None, banned_tier=None, room_menu=None,
-           results_leave=None, hill_pick=None, hill_idle=None, password=False, social=False, drop_downlink=None):
-    """social (build 92): a local account service with -social and test accounts "Copy N" (not ranked): the relay knows the
+           results_leave=None, hill_pick=None, hill_idle=None, password=False, social=False, drop_downlink=None, room_venues=None):
+    """room_venues (build 110): "4,14,21": no quick match; copy 0 opens a private room by CREATE A ROOM's own settings on
+    that remembered CUSTOM list (RECOMP_TEST_CREATE_ROOM, RECOMP_ROOM_VENUES) and the other copies, started once it is
+    there, join it by its code. Every vote's candidates (relay log) and every match's venue must be on the list
+    (room_venues_check, the result's `room_venues`). The list is what is expected: with RECOMP_ROOM_VENUES@0= (empty) in
+    the environment and a RECOMP_TEST_OVERLAY_PAD for copy 0, that script makes the choice in the room's own settings.
+    social (build 92): a local account service with -social and test accounts "Copy N" (not ranked): the relay knows the
     copies' accounts (their room chat lines carry them) and the chat window's lists are on; copy_env can drive the chat
     window (RECOMP_TEST_SOCIAL_UI) and the room chat (RECOMP_TEST_ROOM_CHAT). See mute().
     password (sign-in without Discord): a local account service with -password; copy N makes the account PwCopyN
@@ -1925,6 +1967,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     if hill_idle:
         who, _, k = str(hill_idle).partition("@")
         idle_copy = (int(who), int(k or 1))
+    if room_venues:
+        room_venues = [int(v) for v in str(room_venues).split(",") if v.strip()]
+        result["params"]["room_venues"] = room_venues
     if hill_pick or hill_idle:
         result["params"].update({"hill_pick": hill_pick, "hill_idle": hill_idle})
     shots, problems = [], []
@@ -2077,11 +2122,18 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             if password:
                 env.update({"RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % (relay_port + 100),
                             "RECOMP_TEST_PASSWORD": "%s:PwCopy%d:%s" % ("create" if i == 0 else "signin", i, pw_secrets[i])})
+            if room_venues and i == 0:
+                env.update({"RECOMP_TEST_CREATE_ROOM": "private", "RECOMP_ROOM_VENUES_ON": "1",
+                            "RECOMP_ROOM_VENUES": ",".join(str(v) for v in room_venues)})
+            elif room_venues:
+                env["RECOMP_TEST_JOIN_CODE"] = _created_room(s, 0, 180, pad0)
             for k, v in (extra_env or {}).items():     # NAME@N: only copy N gets it
                 name, _, only = k.partition("@")
                 if not only or (only.isdigit() and int(only) == i):
                     env[name] = v
             env.update((copy_env or {}).get(i, {}))
+            if room_venues and i == 0:
+                pad0 = re.sub(r"[, ]", "", env.get("RECOMP_TEST_OVERLAY_PAD", ""))
             if reports and env.get("RECOMP_TEST_REPORT_NOTE"):
                 note_copies.append(i)
             if maintenance and i == 0:
@@ -2306,6 +2358,8 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         result["late_spectators"] = late_spectator_check(analyses, players, spectators, problems)
     if drop_downlink:
         result["stall"] = stall_check(logs, rot_relay_log or "", problems)
+    if room_venues:
+        result["room_venues"] = room_venues_check(logs, rot_relay_log or "", room_venues, problems)
     if leaver:
         result["leave"] = leave_check(logs, leaver, players, problems)
         analyses.pop(leaver[0], None)

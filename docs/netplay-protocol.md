@@ -716,6 +716,19 @@ New ERROR codes: **16** removed from the room by its host (and, to a JOIN, QUICK
   duration) without a restart. The game sends ACTIVE every 5 s from the hub on, before every QUICK, and at once on
   input during the warning, which it shows as "STILL THERE?" over the room page.
 
+## Build 110: custom venue lists
+
+No change on the wire. CREATE A ROOM's and ROOM SETTINGS' VENUES row opens a checklist (A) of every venue the room may
+have, and the ticked ones go out as the `Settings` block's `pool` (1..32 feIDs), as a preset's always have: `CREATE` and
+`SETTINGS` to the relay, `ROOM` to every member. The relay draws the vote's candidates, a RANDOM win, a King of the
+Hill fight's random venue and an FFA rotation's venue from that pool, and holds it to the mode and to STANDARD ONLY as
+before (`roomSettings`, `contentPool`). So any game and relay of the hub works with it: a game of build 109 or older in
+such a room votes on the same candidates, and names the pool "Custom (n)" when it becomes the host and opens the
+settings. Quick match, ranked, tournament sets, crew battles and Faction War have pools of their own.
+
+The checklist is remembered in `online.room_venues`, as text ("1,6,11"); `online.room_venues_on` says the last room
+opened used it, so the next CREATE A ROOM starts on it. Game side: `src/hooks/netplay_room_venues.h`.
+
 ## Server operation
 
 The relay is one static binary (`server/relay`, Go). `relay -listen :27777` serves; it logs

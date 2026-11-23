@@ -10,7 +10,7 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario online --matches 3 [--mode 1v1|ffa|team|koth|ffarot] [--players 2]
            (ffarot: an FFA rotation room, 3 or 4 copies; checks the relay's calls, fights and line rotation)
            [--fighters 55,22] [--rollback on|off] [--fast-ko 600|0] [--bot [60|p1=aggressive,p2=counter]]
-           [--spectators 1]
+           [--spectators 1] [--room-venues 4,14,21]
     python tools/defjam-mcp/dj.py scenario offline [--type 0] [--venue 1] [--f0 55] [--f1 22] [--human]
            [--bot] [--fast-ko 600] [--turbo] [--fixture <save folder>]
     python tools/defjam-mcp/dj.py scenario boot [--goto battle|story|rewards|online|slotN|exit]
@@ -104,7 +104,7 @@ def cmd_scenario(a):
                              maintenance=a.maintenance, cpu_level=a.cpu_level, linger=a.linger, reports=a.reports,
                              fighter_rules=a.fighter_rules, max_ping=a.max_ping, room_menu=a.room_menu,
                              results_leave=a.results_leave, hill_pick=a.hill_pick, hill_idle=a.hill_idle,
-                             password=a.password, drop_downlink=a.drop_downlink,
+                             password=a.password, drop_downlink=a.drop_downlink, room_venues=a.room_venues,
                              banned_tier=[int(x) for x in a.banned_tier.split(",") if x.strip()] if a.banned_tier is not None else None,
                              **common)
     elif a.kind == "offline":
@@ -305,6 +305,8 @@ def main(argv=None):
     sc.add_argument("--pick-random", action="store_true", help="online: every copy picks a RANDOM fighter (RECOMP_NETPLAY_FIGHTER=random)")
     sc.add_argument("--vote-random", action="store_true", help="online: every copy votes RANDOM for the venue (RECOMP_NETPLAY_TEST_VOTE=random)")
     sc.add_argument("--venues", help="online: the venue feIDs every vote offers in turn (relay -test-venues), e.g. 26")
+    sc.add_argument("--room-venues", help="online (build 110): copy 0 opens a private room on this CUSTOM venue list, e.g. 4,14,21, "
+                    "the others join it by code; every vote and match must stay on the list")
     sc.add_argument("--rematch", action="store_true", help="online: matches after the first are Rematch from the results menu")
     sc.add_argument("--ranked", help="online: a ranked set (classic, open, classic,open or draft) against a local account service "
                                      "with test accounts (accounts -ranked -test-accounts)")

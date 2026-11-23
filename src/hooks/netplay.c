@@ -7485,6 +7485,8 @@ static int test_vote(const NetRoom *r, int want_random)
 void faction_test_search(int size);
 void faction_test_tick(void);
 int faction_test_seated(void);
+/* build 110: CREATE A ROOM's settings for tests (online_screen.cpp) */
+void online_test_room_settings(NetRoomSettings *out, int mode, int max, int is_public);
 
 static DWORD WINAPI autostart_thread(LPVOID unused)
 {
@@ -7651,7 +7653,23 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                         repick, want, kept);
             }
         }
-        if (getenv("RECOMP_TEST_JOIN_CODE") && *getenv("RECOMP_TEST_JOIN_CODE")) {
+        const char *cr = getenv("RECOMP_TEST_CREATE_ROOM");
+        if (cr && *cr) {
+            /* RECOMP_TEST_CREATE_ROOM=private|listed (tests, build 110): CREATE A ROOM's OPEN THE ROOM, with the settings
+             * that page starts on (RECOMP_ROOM_VENUES, RECOMP_ROOM_VENUES_ON=1: the remembered venue list) */
+            NetRoomSettings rs;
+            NetRoom made;
+            online_test_room_settings(&rs, qmode, qmax, strcmp(cr, "private") != 0);
+            netplay_lobby_create(&rs);
+            moves = 6;                  /* no quick search: it waits here */
+            for (i = 0, made.in_room = 0; i < 100 && !N.stop; i++) {
+                netplay_lobby_room(&made);
+                if (made.in_room) break;
+                Sleep(100);
+            }
+            fprintf(stderr, "[NETPLAY] tests: room %s created (%s, %d venues)\n", made.in_room ? made.code : "NONE", cr,
+                    made.in_room ? made.settings.pool_count : 0);
+        } else if (getenv("RECOMP_TEST_JOIN_CODE") && *getenv("RECOMP_TEST_JOIN_CODE")) {
             /* RECOMP_TEST_JOIN_CODE=<code> (tests, ticket #200): JOIN BY CODE as the hub's page does it; a relay that does
              * not know the room is followed by the others (netservers_code_begin / netservers_tick) */
             const char *jc = getenv("RECOMP_TEST_JOIN_CODE");
