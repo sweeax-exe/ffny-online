@@ -24,6 +24,7 @@
 #include "pc_content.h"
 #include "pc_input.h"
 #include "pc_mods.h"
+#include "run_end.h"
 
 int pc_settings_start_content_update(void);     /* pc_settings.c: the launcher in UPDATE NOW mode */
 
@@ -173,6 +174,7 @@ static void close_for_update(void)
         return;
     }
     pc_input_stop();            /* a pad must not be left vibrating */
+    run_end_note("update");
     fprintf(stderr, "[CONTENT] UPDATE NOW: the game closes (%s)\n",
             child ? "the launcher waiting for it opens in update mode" : "the launcher was started in update mode");
     fflush(stderr);

@@ -46,6 +46,7 @@
 #include "patches/widescreen.h"
 #include "patches/picture.h"
 #include "patches/cheats.h"
+#include "run_end.h"
 
 /* Picture shape: the console's 4:3, stretched, or widescreen (docs/widescreen); the widescreen
  * choices are indices 2.. and are read once at start-up (src/patches/widescreen.c). */
@@ -992,6 +993,7 @@ static void start_game_process(int reopen_launcher)
         WaitForSingleObject(pi.hProcess, INFINITE);
         graphics_mod_settled();
         GetExitCodeProcess(pi.hProcess, &code);
+        run_end_exit_code(code);
         /* build 91: no launcher opens after the game, so its saves go up from here (pc_launcher_cloud.h) */
         if (!cu_after_child_exit(code)) cloud_saves_after_game();
         /* build 86: the game closed for UPDATE NOW: the launcher, in update mode, gets the content */
@@ -1007,6 +1009,7 @@ static void start_game_process(int reopen_launcher)
     /* build 86: the game closed for UPDATE NOW (content_update.c): the launcher opens in update mode (it presses
      * PLAY once the new content is in); otherwise as it was started, without the update mode */
     GetExitCodeProcess(pi.hProcess, &code);
+    run_end_exit_code(code);        /* what the launcher opened next sends (run_end.h) */
     int for_update = cu_after_child_exit(code);
     n = wcslen(line) + 64;
     cmd = (WCHAR *)malloc(n * sizeof(WCHAR));
@@ -1057,6 +1060,7 @@ static void run_launcher_if_wanted(void)
         return;
     }
     discord_presence_launcher();
+    run_end_send();     /* how the run before ended */
     if (!pc_launcher_run()) {
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
         fflush(stderr);
@@ -1083,6 +1087,7 @@ static void run_launcher_if_wanted(void)
                             host_posix_shift_held(), test_run))
         return;
     discord_presence_launcher();
+    run_end_send();     /* how the run before ended */
     if (!pc_launcher_run()) {
         fprintf(stderr, "[UI] the launcher was closed; not starting the game\n");
         fflush(stderr);

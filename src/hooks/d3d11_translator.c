@@ -46,6 +46,7 @@
 #include "pc_ui.h"
 #include "recomp_settings.h"
 #include "recorder.h"
+#include "run_end.h"
 #include "d3d8_readback.h"
 
 /* The title sets a 640x480 mode. Matching it keeps the translator's screen
@@ -270,6 +271,7 @@ static LRESULT CALLBACK translator_wndproc(HWND h, UINT msg, WPARAM wp, LPARAM l
      * log line keeps a deliberate close from reading like a crash. */
     if (msg == WM_CLOSE) {
         pc_input_stop();        /* a pad must not be left vibrating */
+        run_end_closing();
         fprintf(stderr, "[TRANS] window closed by the user; exiting\n");
         fflush(stderr);
         fflush(stdout);

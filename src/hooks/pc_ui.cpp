@@ -81,6 +81,7 @@ extern "C" {
 #include "rts.h"
 #include "hd_build.h"
 #include "updater.h"
+#include "run_end.h"
 #include "next_song.h"
 
 #ifndef DEFJAM_VERSION
@@ -4963,6 +4964,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         int answer = g_note.open ? 0 : online_screen::draw_exit_prompt(io.DisplaySize);
         if (answer == 2 && g_window) {
             // the window's own close: the log line, the pads stopped, exit code 0 (d3d11_translator.c)
+            run_end_quit();
             PostMessageW(g_window, WM_CLOSE, 0, 0);
         } else if (answer) {
             close_request = true;

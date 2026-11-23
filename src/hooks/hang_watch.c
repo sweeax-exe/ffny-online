@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "hang_watch.h"
+#include "run_end.h"
 
 #if defined(_WIN32)
 
@@ -353,6 +354,7 @@ static DWORD WINAPI hang_thread(LPVOID unused)
                 if (s_mark[0]) DeleteFileA(s_mark);
                 s_mark[0] = 0;
                 hung = 0;
+                run_end_note("moved");
             }
             last = now;
             continue;
@@ -364,6 +366,7 @@ static DWORD WINAPI hang_thread(LPVOID unused)
                 hung = 1;
                 blocks++;
                 write_mark();
+                run_end_note("hung");
                 fprintf(stderr, "[HANG] no present and no load's reads for %.0f s; game updates in the last second: %ld "
                         "(screen manager state %u)\n", (double)(now - last) / 1000.0, (long)(u - updates), state);
                 dump_threads();
