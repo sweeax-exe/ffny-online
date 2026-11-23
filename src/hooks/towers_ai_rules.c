@@ -16,14 +16,19 @@ const int TOWER_AI_DEFENCE_BEST = 1;
 
 void towers_ai_floor(int tower, int floor, int floors, TowerAiFloor *out)
 {
+    towers_ai_floor_ex(tower, floor, floors, 0, out);
+}
+
+void towers_ai_floor_ex(int tower, int floor, int floors, int force_boss, TowerAiFloor *out)
+{
     float t;
     out->on = 0;
     out->t = 0.0f;
-    out->boss = towers_is_boss(tower, floor, floors);
+    out->boss = force_boss || towers_is_boss(tower, floor, floors);
     out->defence = TOWER_AI_DEFENCE_BEST;
     out->hold_cap = 0;
-    if (floor < TOWER_AI_FIRST_FLOOR) return;
-    t = (float)(floor - TOWER_AI_FIRST_FLOOR) / (float)(TOWER_AI_RAMP_TOP - TOWER_AI_FIRST_FLOOR);
+    if (floor < TOWER_AI_FIRST_FLOOR && !force_boss) return;
+    t = floor < TOWER_AI_FIRST_FLOOR ? 0.0f : (float)(floor - TOWER_AI_FIRST_FLOOR) / (float)(TOWER_AI_RAMP_TOP - TOWER_AI_FIRST_FLOOR);
     if (t > 1.0f) t = 1.0f;
     if (out->boss) t += TOWER_AI_BOSS_EXTRA;
     if (t > 1.0f) t = 1.0f;

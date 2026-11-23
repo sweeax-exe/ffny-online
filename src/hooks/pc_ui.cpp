@@ -266,6 +266,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "crossplay_android", "Play with Android players"},
         {"online", "p2p_direct", "Direct connection (P2P) in 1v1 fights"},
         {"online", "quick_max_ping", "Quick Match max ping"},
+        {"online", "quick_far", "Allow far opponents"},
         {"gameplay", "offline_countdown", "Start countdown in offline fights"},
         {"gameplay", "slow_motion", "Slow motion in offline fights"},
         {"recording", "key", "Recording mode key"},
@@ -1972,7 +1973,7 @@ static void page_online(UiMode mode)
     }
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });
-    settings_group("online", { "quick_max_ping" });     // build 97
+    settings_group("online", { "quick_max_ping", "quick_far" });     // build 97; 109: far opponents
     crossplay_setting();
     p2p_setting();
     ImGui::Spacing();
@@ -2919,7 +2920,7 @@ static void page_basics()
         settings_group("online", { "rollback" });
         ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
     }
-    settings_group("online", { "quick_max_ping" });     // build 97
+    settings_group("online", { "quick_max_ping", "quick_far" });     // build 97; 109: far opponents
     crossplay_setting();
     p2p_setting();
     ImGui::SeparatorText("Gameplay");

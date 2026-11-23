@@ -141,6 +141,12 @@ int netservers_sum_move(int my_relay, int my_age, const int *mine, int their_rel
 #define QUICK_STAGE2_S      45      /* from this wait, any pair */
 #define QUICK_STAGE0_MS     120
 #define QUICK_STAGE1_MS     180
+/* Build 109 (server relay/quick_cap.go): the ceiling at every stage, for a player who does not allow far opponents
+ * ([online] quick_far, "Allow far opponents"). The relay's -quick-ping-cap / quick-ping-cap file sets it and lists it
+ * in ROOMLIST (with each seat's QUICK_SEAT_* byte); this is the game's default when no list said one. */
+#define QUICK_CAP_MS        300
+#define QUICK_SEAT_BOUND    1       /* the seat's player is bound by the ceiling (a build-109 game, far not allowed) */
+#define QUICK_SEAT_FAR      2       /* ... it allows far opponents */
 
 typedef struct NetQuickSeat {
     int relay;                      /* the relay its quick room is on */
@@ -148,13 +154,16 @@ typedef struct NetQuickSeat {
     int max_ping;                   /* build 97: its player's own Quick Match max ping, ms (0 off) */
     int pings[NETSERVER_COUNT];     /* its player's pings by relay index, 0 unknown */
     char code[8];                   /* the room's code (the tie rule) */
+    int flags;                      /* build 109: QUICK_SEAT_* (0: an older game or relay, never bound) */
+    int cap_ms;                     /* build 109: the ceiling its relay listed (0: none, or an older relay) */
 } NetQuickSeat;
 
 /* The pair-ping limit after waiting `age_s` seconds; 0 = any ping. */
 int netservers_pool_limit(int age_s);
 /* Build 97: the relay seats a and b would play on (the smallest sum of their pings; a tie: the lower worse ping, then
  * the lower relay index), or -1 when their sum there is over `limit` ms (0: any) or over either seat's max_ping, or
- * no relay has both pings; *sum and *worse (may be NULL) are that relay's. */
+ * no relay has both pings; *sum and *worse (may be NULL) are that relay's. Build 109: also -1 over the ceiling (the
+ * lower of the two seats' cap_ms that are set) when either seat is QUICK_SEAT_BOUND, as the relay's quickPair. */
 int netservers_pair_relay(const NetQuickSeat *a, const NetQuickSeat *b, int limit, int *sum, int *worse);
 /* The pool's pairs: partner[i] (-1 unpaired) and relay[i] (where seat i plays, -1 unpaired) for every seat. Two
  * seats on the same relay are never paired (the relay joins them itself). n at most QUICK_POOL_MAX. */

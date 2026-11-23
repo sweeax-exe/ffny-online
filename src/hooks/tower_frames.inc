@@ -53,6 +53,10 @@ const TrwStyle &trw_style(int kind)
           IM_COL32(255, 206, 72, 255), IM_COL32(255, 206, 72, 255), IM_COL32(255, 246, 200, 255) },
         { IM_COL32(255, 96, 96, 255), IM_COL32(190, 20, 36, 255), IM_COL32(30, 4, 8, 255),                // Crow, top
           IM_COL32(232, 228, 224, 255), IM_COL32(236, 60, 72, 255), IM_COL32(255, 230, 230, 255) },
+        { IM_COL32(255, 79, 216, 255), IM_COL32(63, 228, 255, 255), IM_COL32(20, 15, 28, 255),            // week: neon
+          IM_COL32(63, 228, 255, 255), IM_COL32(63, 228, 255, 255), IM_COL32(220, 250, 255, 255) },
+        { IM_COL32(255, 214, 90, 255), IM_COL32(255, 79, 216, 255), IM_COL32(28, 16, 10, 255),            // champ: gold
+          IM_COL32(255, 214, 90, 255), IM_COL32(255, 214, 90, 255), IM_COL32(255, 250, 225, 255) },         // and pink neon
         // build 108, the team kinds
         { IM_COL32(232, 238, 244, 255), IM_COL32(138, 148, 160, 255), IM_COL32(58, 64, 74, 255),          // steel
           IM_COL32(196, 204, 214, 255), IM_COL32(176, 188, 200, 255), IM_COL32(255, 255, 255, 255) },
@@ -240,6 +244,7 @@ void trw_shield(ImDrawList *dl, const Frame &f, float cx, float cy, float s, flo
 bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w, float h, const char *id, float foot,
                       float a)
 {
+    if (id && !strcmp(id, "fw-winner-season")) tower_reward_set_side(fw_my_side());    // build 109: the locked row, own side
     int kind = tower_reward_kind(id, nullptr, nullptr, nullptr), base = tower_reward_base(kind);
     if (kind == TRW_NONE) return false;
     if (foot <= 0) foot = h * 0.66f;
@@ -261,7 +266,9 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
         dl->PopClipRect();
     }
     switch (base) {
-    case TRW_WEEKLY: {      // neon: a pink tube, a dark gap, a cyan tube, each with its glow
+    case TRW_WEEKLY: case TRW_WEEKLY_TOP: case TRW_WEEKLY_CHAMP: {
+        // neon: a pink tube, a dark gap, a cyan tube, each with its glow (build 108: a week's frames sign their week;
+        // the champion's tubes are gold and pink, with the pulsing crown)
         float g = fx & TRW_FX_GLOW ? tower_fx_pulse(t, 3.0f) : 0.5f;
         for (int k = 4; k >= 1; k--) {
             float e = k * (1.2f + 0.6f * g);
@@ -273,8 +280,12 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
         dl->AddRect(f.p(x, y), f.p(x + w, y + h), with_alpha(s.hi, a), 10 * f.s(), 0, 2.0f * f.s());
         dl->AddRect(f.p(x - 6, y - 6), f.p(x + w + 6, y + h + 6), with_alpha(s.mid, a), 12 * f.s(), 0, 2.0f * f.s());
         float fl = fx & TRW_FX_FLICKER ? tower_fx_flicker(t) : 1.0f;
-        float size = fit_size(f, g_stencil, std::max(10.0f, u * 0.12f), "WEEKLY", w - 16);
-        text(dl, f, g_stencil, size, cx, y + h * 0.05f, with_alpha(s.mid, a * 0.9f * fl), "WEEKLY", CENTER, 0);
+        char sign[32] = "WEEKLY";
+        tower_reward_week_sign(id, sign, (int)sizeof(sign));
+        float size = fit_size(f, g_stencil, std::max(10.0f, u * 0.12f), sign, w - 16);
+        text(dl, f, g_stencil, size, cx, y + h * 0.05f + (kind == TRW_WEEKLY_CHAMP ? u * 0.1f : 0), with_alpha(s.mid, a * 0.9f * fl),
+             sign, CENTER, 0);
+        if (kind == TRW_WEEKLY_CHAMP) trw_crown(dl, f, cx, y, u * 0.3f, pulse, a);
         return true;
     }
     case TRW_UNTOUCHABLE: {     // chrome with cut corners: a thick outline of the cut shape
@@ -359,6 +370,7 @@ bool tower_card_frame(ImDrawList *dl, const Frame &f, float x, float y, float w,
 bool tower_title_text(ImDrawList *dl, const Frame &f, float cx, float y, float size, const char *title, const char *id,
                       float maxw, float a)
 {
+    if (id && !strcmp(id, "fw-winner-season")) tower_reward_set_side(fw_my_side());
     int kind = tower_reward_kind(id, nullptr, nullptr, nullptr);
     if (kind == TRW_NONE || !title || !title[0]) return false;
     char up[96];

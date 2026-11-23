@@ -252,6 +252,11 @@ int netservers_pair_relay(const NetQuickSeat *a, const NetQuickSeat *b, int limi
     if (best >= 0 && ((limit > 0 && best_sum > limit) || (a->max_ping > 0 && best_sum > a->max_ping) ||
                       (b->max_ping > 0 && best_sum > b->max_ping)))
         return -1;
+    /* build 109: the ceiling, at every stage, while a bound player is in the pair */
+    if (best >= 0 && ((a->flags | b->flags) & QUICK_SEAT_BOUND)) {
+        int cap = a->cap_ms > 0 && (b->cap_ms <= 0 || a->cap_ms < b->cap_ms) ? a->cap_ms : b->cap_ms;
+        if (cap > 0 && best_sum > cap) return -1;
+    }
     return best;
 }
 

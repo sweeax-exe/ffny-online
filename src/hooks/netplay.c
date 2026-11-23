@@ -158,6 +158,8 @@ void netplay_note_input(void) {}
 int netplay_afk_left(void) { return 0; }
 int netplay_quick_max_ping(void) { return 0; }
 int netplay_quick_search_s(void) { return -1; }
+int netplay_quick_far(void) { return 0; }
+int netplay_quick_cap_ms(void) { return 0; }
 void netplay_lobby_yield(void) {}
 void netplay_lobby_crew_join(unsigned b) { (void)b; }
 int netplay_lobby_crew(NetCrew *o) { memset(o, 0, sizeof(*o)); return 0; }
@@ -352,6 +354,11 @@ void netplay_crowd_update(void) { sub_00081170(); }
 #define CAPS_HILL_CREATED 524288u /* created fighters in King of the Hill and FFA rotation rooms (build 76), both
                                  * ways: the relay plays READY 99 there (not in crew battles) and names the
                                  * records in START and WATCH as in other rooms; the grid offers them there */
+/* 1 << 31 (build 109, server relay/quick_cap.go), both ways: the Quick Match ping ceiling. This client applies it
+ * (unless its player allows far opponents) and, once the relay answers the bit, sends ACTIVE's flags byte; its
+ * ROOMLIST requests get the ceiling and each seat's byte. The answer's bit lives in N.relay_quickcap (relay_caps is
+ * signed and keeps bits 0-30). */
+#define CAPS_QUICKCAP 2147483648u
 #define CAPS_ROOMRULES 65536u   /* room rules (build 68), both ways: FIGHTER RULES and MAX PING after CREATE's /
                                  * SETTINGS' CPU level, this PC's ping after JOIN / QUICK, the rules and the
                                  * blocked fighters after ROOM's CPU level; ERROR 13: the ping is over MAX PING */
@@ -446,7 +453,7 @@ uint32_t netplay_client_caps(void)
     return CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
            CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
            CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
-           CAPS_SKINS | CAPS_SKINSWIDE_OPT | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED;
+           CAPS_SKINS | CAPS_SKINSWIDE_OPT | CAPS_RTS_POINTS | CAPS_QUICKCAP | CAPS_XPLAY_OPT | CAPS_HILL_CREATED;
 }
 #define CP_WAIT_MS   10000     /* START: how long to wait for a created fighter's missing record */
 #define CAPS_TRIES    5         /* CAPS every RETRY_MS; no answer after these: an older relay */
@@ -593,6 +600,7 @@ static struct {
     int pos_of_slot[ROOMSLOTS];     /* room slot -> position, -1 none */
     /* King of the Hill */
     int relay_caps;                 /* the relay's CAPS answer, -1 not yet */
+    int relay_quickcap;             /* build 109: that answer has CAPS_QUICKCAP (bit 31, left out of relay_caps) */
     int caps_tries;
     ULONGLONG caps_sent;
     int pc_tries, pc_done;          /* one session per PC (T_PC): sent, and answered or given up */
@@ -1535,6 +1543,9 @@ static void room_streak_key(char *out, int size)
     snprintf(out, (size_t)size, "%.6s %s", N.roomv.code[0] ? N.roomv.code : N.room, N.roomv.settings.name);
 }
 
+static int path_ping_ms(void);
+static int every_player_rolls_back(void);
+
 int netplay_versus(NetVersus *out)
 {
     ULONGLONG now, start, end, from;
@@ -1593,6 +1604,18 @@ int netplay_versus(NetVersus *out)
         out->ms = (int)(now - start);
         out->loaded = N.match_seen;
         out->alpha = !end || now < from ? 1.0f : 1.0f - (float)(now - from) / (float)VS_FADE_MS;
+        /* build 109: the pair ping and rollback or delay: the agreed values once the sync point fixed them, before
+         * that the same reading of every player's P_RTT (what the sync point will decide) */
+        out->path_ms = out->rollback = -1;
+        if (!N.watching && N.players >= 2) {
+            int known = 1;
+            for (i = 0; i < N.players && i < MAXP; i++) if (N.peer_rtt[i] < 0) known = 0;
+            if (N.delay_fixed || known) {
+                out->path_ms = path_ping_ms();
+                out->rollback = N.delay_fixed ? N.rb_match != 0 : every_player_rolls_back();
+                out->frames = N.delay_fixed ? N.delay : 0;
+            }
+        }
     }
     LeaveCriticalSection(&g_cs);
     return 1;
@@ -1915,6 +1938,22 @@ int netplay_quick_max_ping(void)
     return netlobby_max_ping_ms(recomp_settings_get("online", "quick_max_ping", 0));
 }
 
+/* Build 109: [online] quick_far, "Allow far opponents" (RECOMP_TEST_QUICK_FAR=1: tests) */
+int netplay_quick_far(void)
+{
+    const char *t = getenv("RECOMP_TEST_QUICK_FAR");
+    if (t && *t) return *t == '1';
+    return recomp_settings_get("online", "quick_far", 0) != 0;
+}
+
+/* Build 109: the Quick Match ping ceiling this player's search keeps to (ms of ping sum; 0: none: far opponents
+ * allowed, or a relay without it) */
+int netplay_quick_cap_ms(void)
+{
+    if (!N.lobby || N.relay_caps <= 0 || !N.relay_quickcap || netplay_quick_far()) return 0;
+    return netservers_quick_cap_ms();
+}
+
 int netplay_quick_search_s(void)
 {
     ULONGLONG since = L97.search_since;
@@ -1946,6 +1985,8 @@ static void send_active(ULONGLONG now)
     n = header(b, NETLOBBY_T_ACTIVE);
     memcpy(b + n, N.token, 8); n += 8;
     n += netlobby_active_body(b + n, idle, netplay_quick_max_ping(), search);
+    if (N.relay_caps > 0 && N.relay_quickcap)       /* build 109: the flags byte, to a relay that answered it */
+        b[n++] = netplay_quick_far() ? NETLOBBY_ACTIVE_FAR : 0;
     send_raw(b, n);
     L97.active_sent = now;
 }
@@ -2476,6 +2517,63 @@ static ULONGLONG g_steps_at[MAXP];          /* when each player's latest STEPS a
 #define SILENT_OWN_MS 4000                 /* nobody heard this long: this PC's own connection (give-up notice) */
 static uint32_t g_steps_match[MAXP];       /* the match of each player's latest STEPS: 0 or older while it still loads */
 
+/* ---- the resend window (build 109, community/connection-report-2026-11-22.md, fight-resume-design.md 2.3) ----
+ *
+ * Every STEPS packet repeats the sender's last REDUNDANT entries, and nothing older ever went again. A PC
+ * that lost a burst of packets (Wi-Fi, a short cut of its downlink) lacked entries the other PC had sent
+ * before its window: in rollback the other one is up to delay + RB_AHEAD steps ahead, in lockstep up to
+ * the delay, and its window started 2 x delay + 1 (lockstep) to 2 x delay + 8 (rollback) steps past the
+ * entry the first PC waited for. Both kept sending, both waited, and after STALL_LIMIT_MS each named the
+ * other as gone: 83% of the "games disagree on who left" endings (connection report, 1.3-2% of fights).
+ *
+ * Now every STEPS packet ends with what this PC holds of every other player's entries: after the entries
+ * the byte ACK_MARK, a count, and per player its position and the step H up to which this PC has all its
+ * entries of the match. A PC whose entries a player lacks (H below its window) and whose packets kept saying
+ * the same H for ACK_STUCK_MS (they arrive, so that player is there and does lack them; a PC that hears
+ * nothing has no news, not a loss) sends a resend packet from H + 1 (at most RESEND_MAX entries: 10 + 32 x 32 + trailer is
+ * far below MaxPayload), as often as RESEND_GAP_MS, before its normal packet. The bound above is at most
+ * 2 x 11 + 1 = 23 in lockstep and 2 x 10 + 8 = 28 in rollback, so one resend closes any gap.
+ *
+ * Compatible both ways without a CAPS bit: the trailer is its own version mark. Every build's store_steps
+ * reads `count` entries and ignores the bytes after them (since build 1, ed14dc85), and so does the
+ * relay's recording (record.go) and a spectator; a PC resends only to a player whose packets carry the
+ * trailer (g_peer_acks), so a match with an older build keeps the old window. */
+#define ACK_MARK       0xACu
+#define RESEND_MAX     32
+#define ACK_STUCK_MS   250
+#define ACK_FRESH_MS   1000           /* ... and the last of them came this recently */
+#define RESEND_GAP_MS  50
+static uint32_t g_have[MAXP], g_have_match;        /* under g_cs: each player's entries held, contiguous (have_of) */
+static uint32_t g_peer_ack[MAXP], g_peer_ack_match[MAXP];  /* each player's H of this PC's entries (its trailer) */
+static ULONGLONG g_peer_ack_at[MAXP];               /* when that H last changed */
+static ULONGLONG g_peer_ack_seen[MAXP];             /* when a packet of that player last said it (changed or not) */
+static int g_peer_acks[MAXP];                       /* that player's STEPS carry the trailer (build 109+) */
+static ULONGLONG g_last_resend;
+/* this match's connection facts (the "conn" of the reports, net_json): STEPS packets and the last step from
+ * each player, resend packets sent and entries in them, entries that came in a resend, the give-up's numbers */
+static struct {
+    unsigned rx[MAXP], resends, resent, refilled, stalls;
+    uint32_t last[MAXP];
+    uint32_t gave_need, gave_late_pos, gave_relay_ms, gave_peer_ms;
+    int gave;
+} g_conn;
+
+static int entry_known(int i, uint32_t t);
+
+/* Under g_cs: the step up to which this PC has every entry of player i for this match (steps up to the delay
+ * have none: they are at rest). */
+static uint32_t have_of(int i)
+{
+    uint32_t h;
+    int n;
+    if (i < 0 || i >= MAXP) return 0;
+    if (g_have_match != N.match) { memset(g_have, 0, sizeof(g_have)); g_have_match = N.match; }
+    h = g_have[i] > (uint32_t)N.delay ? g_have[i] : (uint32_t)N.delay;
+    for (n = 0; n < RING / 2 && entry_known(i, h + 1); n++) h++;
+    g_have[i] = h;
+    return h;
+}
+
 /* ---- a player gone mid-fight while two or more stay -------------------------------------------
  *
  * One player of a four-player Free for All left mid-fight: each PC that stayed dropped out of the
@@ -2702,6 +2800,25 @@ static void store_steps(int from, const uint8_t *p, int len)
     g_steps_last[from] = last;
     if (len < 9 + count * ENTRY) return;
     EnterCriticalSection(&g_cs);
+    if (match == N.match) {
+        int t = 9 + count * ENTRY, j;
+        g_conn.rx[from]++;
+        if (last > g_conn.last[from]) g_conn.last[from] = last;
+        /* build 109: the sender's trailer, what it holds of each player's entries (the resend window above) */
+        if (len >= t + 2 && p[t] == ACK_MARK) {
+            g_peer_acks[from] = 1;
+            for (j = 0; j < p[t + 1] && t + 2 + j * 5 + 5 <= len; j++) {
+                uint32_t h = get32(p + t + 3 + j * 5);
+                if (p[t + 2 + j * 5] != N.pos) continue;
+                if (g_peer_ack_match[from] != match || g_peer_ack[from] != h) {
+                    g_peer_ack[from] = h;
+                    g_peer_ack_match[from] = match;
+                    g_peer_ack_at[from] = GetTickCount64();
+                }
+                g_peer_ack_seen[from] = GetTickCount64();
+            }
+        }
+    }
     if (N.gone_mask >> from & 1) {      /* gone: its entries come in the P_GONE of the PCs that stay */
         LeaveCriticalSection(&g_cs);
         return;
@@ -2710,6 +2827,8 @@ static void store_steps(int from, const uint8_t *p, int len)
         uint32_t s = last - (uint32_t)(count - 1 - i);
         uint32_t k = s % RING;
         if (s == 0) continue;
+        if (count > REDUNDANT && match == N.match && (N.in_tag[from][k] != s + 1 || N.in_match[from][k] != match))
+            g_conn.refilled++;          /* build 109: an entry that came in a resend */
         if (N.in_tag[from][k] != s + 1 && P.phase >= P2P_PUNCHING) {     /* P2P: which path brought it first */
             if (g_rx_direct) P.first_direct++;
             else P.first_relay++;
@@ -4864,6 +4983,10 @@ static void on_packet(const uint8_t *b, int len)
         if (N.lobby && len >= 10) {
             int had = N.relay_caps;
             N.relay_caps = (int)(get32(b + 6) & 0x7FFFFFFFu);
+            if (N.relay_quickcap != (int)(get32(b + 6) >> 31))
+                fprintf(stderr, "[NETPLAY] the relay %s the Quick Match ping ceiling (build 109)\n",
+                        get32(b + 6) >> 31 ? "applies" : "does not know");
+            N.relay_quickcap = (int)(get32(b + 6) >> 31);
             if (had != N.relay_caps)
                 fprintf(stderr, "[NETPLAY] the relay supports %08X%s%s%s%s%s%s\n", (unsigned)N.relay_caps,
                         N.relay_caps & CAPS_KOTH ? " (King of the Hill)" : "",
@@ -5314,7 +5437,7 @@ static DWORD WINAPI net_thread(LPVOID unused)
                 put32(cb + n, CAPS_KOTH | NETPLAY_CAP_RTS | CAPS_ORIGINAL | CAPS_CREATED | CAPS_SPECTATE | CAPS_STATS_ERR | CAPS_SPEC_REMATCH | CAPS_CHAT |
                               CAPS_CREW | CAPS_RB_MODES | CAPS_RB_PING | CAPS_RB_FRAMES | CAPS_SPEC_LATE | CAPS_CPULEVEL | CAPS_ROOMRULES | CAPS_UNLIMITED_OPT |
                               CAPS_PINGSUM | CAPS_DIRECT | CAPS_RELAYS | CAPS_TSET | CAPS_FFAROT | CAPS_RANDOM_VENUE | CAPS_HILL_WATCH | CAPS_HILL_READYUP |
-                              CAPS_SKINS | CAPS_SKINSWIDE_OPT | CAPS_RTS_POINTS | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
+                              CAPS_SKINS | CAPS_SKINSWIDE_OPT | CAPS_RTS_POINTS | CAPS_QUICKCAP | CAPS_XPLAY_OPT | CAPS_HILL_CREATED); n += 4;
                 send_raw(cb, n);
             } else {
                 N.relay_caps = 0;
@@ -6876,6 +6999,30 @@ static int net_json(char *json, int size, int n)
                       N.rbm.snaps ? (int)(N.rbm.snap_sum * 1000.0 / N.rbm.snaps + 0.5) : 0,
                       (int)(N.rbm.snap_max * 1000.0 + 0.5),
                       N.rbm.adv_windows ? (int)(N.rbm.adv_sum * 100.0 / N.rbm.adv_windows + (N.rbm.adv_sum >= 0 ? 0.5 : -0.5)) : 0);
+    }
+    /* Build 109: the match's connection (the resend window at g_steps_match): waits that showed the notice, resend
+     * packets and their entries, entries that came in one; per other player the STEPS packets and the last step that
+     * came from it, the entries this PC holds of it (have) and what it said it holds of this PC's (ack, -1: an older
+     * build); after a give-up the step waited for, whose, and how long the relay and that player had been silent.
+     * So a lost downlink (the relay heard it, its packets did not come) shows apart from a stalled game. */
+    if (n < size - 320) {
+        int first = 1;
+        EnterCriticalSection(&g_cs);
+        n += snprintf(json + n, (size_t)(size - n), ",\"conn\":{\"stalls\":%u,\"resends\":%u,\"resent\":%u,\"refilled\":%u,"
+                      "\"local\":%u,\"peers\":[", g_conn.stalls, g_conn.resends, g_conn.resent, g_conn.refilled, N.local_last);
+        for (i = 0; i < N.players && i < MAXP && n < size - 120; i++) {
+            if (i == N.pos) continue;
+            n += snprintf(json + n, (size_t)(size - n), "%s{\"pos\":%d,\"rx\":%u,\"last\":%u,\"have\":%u,\"ack\":%d}",
+                          first ? "" : ",", i, g_conn.rx[i], g_conn.last[i], have_of(i),
+                          g_peer_acks[i] && g_peer_ack_match[i] == N.match ? (int)g_peer_ack[i] : -1);
+            first = 0;
+        }
+        n += snprintf(json + n, (size_t)(size - n), "]");
+        if (g_conn.gave && n < size - 100)
+            n += snprintf(json + n, (size_t)(size - n), ",\"gave\":{\"need\":%u,\"late\":%u,\"relay_ms\":%u,\"peer_ms\":%u}",
+                          g_conn.gave_need, g_conn.gave_late_pos, g_conn.gave_relay_ms, g_conn.gave_peer_ms);
+        n += snprintf(json + n, (size_t)(size - n), "}");
+        LeaveCriticalSection(&g_cs);
     }
     n += snprintf(json + n, (size_t)(size - n), "}");
     return n < size ? n : size;
@@ -8666,6 +8813,7 @@ static void match_start_body(void)
     N.match_count++;
     N.match = mix32(N.session ^ (N.match_count * 0x9E3779B9u));   /* the same on every PC, new per match */
     N.step = 0;
+    memset(&g_conn, 0, sizeof(g_conn));     /* build 109: this match's connection facts */
     /* every match of a START is reported on its own (the results screen's rematch runs a
      * second match without a new START): the key gets the match's number */
     if (N.report_key[0]) {
@@ -8712,16 +8860,16 @@ static void match_start_body(void)
 
 void netplay_on_pad_pass(void) {}
 
-static void send_steps(uint32_t last)
+/* Under g_cs: a STEPS packet of this PC's entries first..last into p, with the trailer (build 109, the resend
+ * window at g_steps_match); returns its length. */
+static int steps_packet(uint8_t *p, uint32_t first, uint32_t last)
 {
-    uint8_t p[1 + 9 + REDUNDANT * ENTRY];
-    uint32_t first = last >= REDUNDANT ? last - REDUNDANT + 1 : 1, s;
-    int count = 0, local = N.pos;
+    uint32_t s;
+    int count = 0, local = N.pos, n, i, acks = 0;
     p[0] = P_STEPS;
     put32(p + 1, N.match);
     put32(p + 5, last);
-    EnterCriticalSection(&g_cs);
-    for (s = first; s <= last; s++) {
+    for (s = first; s <= last && count < RESEND_MAX; s++) {
         uint32_t k = s % RING;
         if (N.in_tag[local][k] == s + 1)
             memcpy(p + 10 + count * ENTRY, N.in[local][k], ENTRY);
@@ -8729,9 +8877,54 @@ static void send_steps(uint32_t last)
             memset(p + 10 + count * ENTRY, 0, ENTRY);
         count++;
     }
-    LeaveCriticalSection(&g_cs);
     p[9] = (uint8_t)count;
-    send_data(p, 10 + count * ENTRY);
+    n = 10 + count * ENTRY;
+    p[n] = ACK_MARK;
+    for (i = 0; i < N.players && i < MAXP; i++) {
+        if (i == local || (N.gone_mask >> i & 1)) continue;
+        p[n + 2 + acks * 5] = (uint8_t)i;
+        put32(p + n + 3 + acks * 5, have_of(i));
+        acks++;
+    }
+    p[n + 1] = (uint8_t)acks;
+    return n + 2 + acks * 5;
+}
+
+static void send_steps(uint32_t last)
+{
+    uint8_t p[1 + 9 + RESEND_MAX * ENTRY + 2 + 5 * MAXP];
+    uint32_t first = last >= REDUNDANT ? last - REDUNDANT + 1 : 1, lo = first, end = last;
+    ULONGLONG now = GetTickCount64();
+    int i, len, behind = -1;
+    EnterCriticalSection(&g_cs);
+    /* build 109: a player whose entries stop before this window and whose count stands still lost some: from
+     * the oldest one it lacks, once every RESEND_GAP_MS */
+    if (now - g_last_resend >= RESEND_GAP_MS)
+        for (i = 0; i < N.players && i < MAXP; i++) {
+            uint32_t h = g_peer_ack[i];
+            if (i == N.pos || (N.gone_mask >> i & 1) || !g_peer_acks[i] || g_peer_ack_match[i] != N.match) continue;
+            if (h + 1 < lo && h < last && g_peer_ack_seen[i] >= g_peer_ack_at[i] + ACK_STUCK_MS &&
+                now - g_peer_ack_seen[i] < ACK_FRESH_MS) { lo = h + 1; behind = i; }
+        }
+    if (lo < first) {
+        static unsigned told;
+        if (last - lo + 1 > RESEND_MAX) end = lo + RESEND_MAX - 1;
+        len = steps_packet(p, lo, end);
+        g_last_resend = now;
+        g_conn.resends++;
+        g_conn.resent += end - lo + 1;
+        LeaveCriticalSection(&g_cs);
+        if (told++ < 40 || told % 100 == 0)
+            fprintf(stderr, "[NETPLAY] resend: player %d has this PC's entries only up to %u (step %u here, still %.1f s): "
+                    "entries %u..%u again (%u resends so far)\n", behind + 1, lo - 1, last,
+                    (now - g_peer_ack_at[behind]) / 1000.0, lo, end, told);
+        send_data(p, len);
+        if (end == last) return;    /* the newest are in it too */
+        EnterCriticalSection(&g_cs);
+    }
+    len = steps_packet(p, first, last);
+    LeaveCriticalSection(&g_cs);
+    send_data(p, len);
 }
 
 /* ---- the crowd, the same on every PC ------------------------------------------------------------
@@ -9530,10 +9723,57 @@ static void step_body(void)
     }
 }
 
+/* Build 109: the notice of a wait mid-fight, while it lasts, and which side the trouble is on as far as this
+ * PC can tell: nothing at all from the relay for SILENT_SELF_MS (pings answered every second): this PC's own
+ * connection; the relay answers but the late player's packets stop: it sends nothing; its packets come and say
+ * it lacks this PC's entries (their count stands still): it does not receive; else a plain wait. The game
+ * draws nothing while it waits here, so the last picture is presented again with the notice over it
+ * (d3d11_translator_present_again, every STALL_PRESENT_MS; RECOMP_NET_STALL_PRESENT=0 leaves it out). */
+#define STALL_NOTICE_MS  1000
+#define STALL_PRESENT_MS 33
+#define SILENT_SELF_MS   1500     /* the relay answers this PC's ping every second */
+extern void d3d11_translator_present_again(void);
+static void stall_notice(int late, ULONGLONG now, ULONGLONG waited, ULONGLONG *last_present)
+{
+    static int present = -1, last_cause = -1;
+    static uint32_t told_match;
+    unsigned secs = (unsigned)((waited + 500) / 1000);
+    ULONGLONG relay_ms = now > N.last_rx ? now - N.last_rx : 0, peer_ms = now > g_steps_at[late] ? now - g_steps_at[late] : 0;
+    int cause;
+    char text[160];
+    if (present < 0) present = !(getenv("RECOMP_NET_STALL_PRESENT") && *getenv("RECOMP_NET_STALL_PRESENT") == '0');
+    EnterCriticalSection(&g_cs);
+    if (relay_ms >= SILENT_SELF_MS) cause = 0;
+    else if (peer_ms >= SILENT_SELF_MS) cause = 1;
+    else if (g_peer_acks[late] && g_peer_ack_match[late] == N.match && g_peer_ack[late] < N.local_last &&
+             g_peer_ack_seen[late] >= g_peer_ack_at[late] + STALL_NOTICE_MS && now - g_peer_ack_seen[late] < ACK_FRESH_MS) cause = 2;
+    else cause = 3;
+    if (cause == 0) snprintf(text, sizeof(text), "Connection problem: you are not receiving any data (%u s)", secs);
+    else if (cause == 1) snprintf(text, sizeof(text), "Connection problem: %s is not sending (%u s)", player_name(late), secs);
+    else if (cause == 2) snprintf(text, sizeof(text), "Connection problem: %s is not receiving your data (%u s)", player_name(late), secs);
+    else snprintf(text, sizeof(text), "Connection problem: waiting for %s... (%u s)", player_name(late), secs);
+    memcpy(N.toast, text, sizeof(N.toast) < sizeof(text) ? sizeof(N.toast) : sizeof(text));
+    N.toast[sizeof(N.toast) - 1] = 0;
+    N.toast_until = now + 1500;
+    LeaveCriticalSection(&g_cs);
+    if (!*last_present) g_conn.stalls++;        /* a new wait (step_run's last_present starts at 0) */
+    if (cause != last_cause || !*last_present || told_match != N.match) {
+        told_match = N.match;
+        last_cause = cause;
+        fprintf(stderr, "[NETPLAY] stall notice (step %u, player %d, %.1f s; relay heard %.1f s ago, player %.1f s ago): %s\n",
+                N.step, late + 1, waited / 1000.0, relay_ms / 1000.0, peer_ms / 1000.0, text);
+    }
+    if (!*last_present) *last_present = 1;
+    if (present && now - *last_present >= STALL_PRESENT_MS) {
+        *last_present = now;
+        d3d11_translator_present_again();
+    }
+}
+
 static void step_run(void)
 {
     uint32_t s, k, need;
-    ULONGLONG waited_since, last_send, last_note;
+    ULONGLONG waited_since, last_send, last_note, last_present = 0;
     recomp_detmath_fenv_guard();    /* round to nearest, no flush-to-zero: whatever a driver or overlay set */
     start_countdown_step(N.resim);
     if (N.lockstep) versus_hold();
@@ -9838,6 +10078,11 @@ static void step_run(void)
             if (late >= 0 && g_steps_match[late] != N.match && now - waited_since >= 1500) last_note = now;
             if (now - last_send >= 50) { if (N.local_last) send_steps(N.local_last); last_send = now; }   /* the others may be waiting for ours */
             gone_send();
+            /* build 109: a wait mid-fight says so on screen while it lasts (stall_notice), not only once it is over */
+            if (late >= 0 && late < MAXP && N.lobby && !N.watching && g_steps_match[late] == N.match &&
+                need > (uint32_t)N.delay + 1 && now - waited_since >= STALL_NOTICE_MS &&
+                !(N.fighting_seen && MEM32(G_MATCH_PHASE) >= 2u))
+                stall_notice(late, now, now - waited_since, &last_present);
             /* The fight decided (KO, time): what follows is the winner's scene and the results, the same
              * on every PC however they part, and a PC that skips ahead stops sending steps. Waiting the
              * mid-fight ten seconds there froze the winner's scene and then said the fight would not
@@ -9951,6 +10196,17 @@ static void step_run(void)
                         continue;
                     }
                 }
+                g_conn.gave = 1;        /* build 109: the give-up's numbers for the "left" report (net_json) */
+                g_conn.gave_need = need;
+                g_conn.gave_late_pos = late >= 0 ? (uint32_t)late : 0;
+                g_conn.gave_relay_ms = now > N.last_rx ? (uint32_t)(now - N.last_rx) : 0;
+                g_conn.gave_peer_ms = late >= 0 && g_steps_at[late] && now > g_steps_at[late] ? (uint32_t)(now - g_steps_at[late]) : 0;
+                fprintf(stderr, "[NETPLAY] connection at the give-up: relay heard %u ms ago, player %d's STEPS %u ms ago "
+                        "(%u this match, the last for step %u); it holds this PC's entries up to %u (%s), this PC up to %u; "
+                        "resends %u (%u entries), entries refilled %u\n", g_conn.gave_relay_ms, late + 1, g_conn.gave_peer_ms,
+                        late >= 0 ? g_conn.rx[late] : 0, late >= 0 ? g_conn.last[late] : 0,
+                        late >= 0 ? g_peer_ack[late] : 0, late >= 0 && g_peer_acks[late] ? "its trailer" : "an older build: unknown",
+                        N.local_last, g_conn.resends, g_conn.resent, g_conn.refilled);
                 fprintf(stderr, "[NETPLAY] gave up at step %u waiting for the entries up to %u (final %u, phase %u, "
                         "predicting %d, rollback %d); player %d has:", s, need, N.final_step, MEM32(G_MATCH_PHASE),
                         N.predicting, N.rb_on, late + 1);

@@ -30,7 +30,14 @@ int netlobby_active_body(uint8_t *out, unsigned idle_s, int max_ping_ms, unsigne
 
 int netlobby_search_line(char *out, int size, int own_max_ms, int search_s, const char *where)
 {
+    return netlobby_search_line_cap(out, size, own_max_ms, search_s, where, 0);
+}
+
+int netlobby_search_line_cap(char *out, int size, int own_max_ms, int search_s, const char *where, int cap_ms)
+{
     int limit = netservers_pool_limit(search_s < 0 ? 0 : search_s), n;
+    if (cap_ms > 0 && (limit <= 0 || cap_ms < limit)) limit = cap_ms;     /* build 109: never past the ceiling */
+    if (cap_ms > 0 && own_max_ms > cap_ms) own_max_ms = cap_ms;
     if (size <= 0) return 0;
     if (!where || !*where) where = "every server";
     if (own_max_ms > 0)     /* the player's own limit: never widened, so that is what the search waits for */

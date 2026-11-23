@@ -43,6 +43,10 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario towersonline [--variant climb|leave|desync|soak] [--floors N]
            [--out D:/DefJam/community/team-tower-online-shots]   (Team Tower Online: two signed-in copies on a local
            account service and relay climb together; FFNY_SERVER_DIR: a server checkout with relay/tower.go)
+    python tools/defjam-mcp/dj.py scenario towersweekly [--twists low_health,glass_jaw] [--out DIR]   (build 108: The
+           Weekly, tower 3, on a local account service from source with its switch off, then on: no card while off;
+           two floors of each twist, checked against the service's floor list and the twist's own effect; the
+           page's Weekly card, rules and this week's board; pictures to D:/DefJam/community/weekly-tower-shots)
     python tools/defjam-mcp/dj.py digest <log> [<log> ...] [--max 60]     (a run log, or logs/bug-reports/*/log.txt)
     python tools/defjam-mcp/dj.py analyze <copy logs...> [--matches N]   (an online result from existing logs)
     python tools/defjam-mcp/dj.py lock status | run -- <command...>      (any other test under the lock)
@@ -103,7 +107,7 @@ def cmd_scenario(a):
                              maintenance=a.maintenance, cpu_level=a.cpu_level, linger=a.linger, reports=a.reports,
                              fighter_rules=a.fighter_rules, max_ping=a.max_ping, room_menu=a.room_menu,
                              results_leave=a.results_leave, hill_pick=a.hill_pick, hill_idle=a.hill_idle,
-                             password=a.password,
+                             password=a.password, drop_downlink=a.drop_downlink,
                              banned_tier=[int(x) for x in a.banned_tier.split(",") if x.strip()] if a.banned_tier is not None else None,
                              **common)
     elif a.kind == "offline":
@@ -147,6 +151,9 @@ def cmd_scenario(a):
         r = scenarios.faction_war(size=a.size, matches=a.matches if a.matches != 3 else (2 if a.size == 1 else 1),
                                   timeout=a.timeout, relay_port=a.relay_port, extra_env=env,
                                   out_dir=a.out or scenarios.FACTION_SHOTS, fast_ko=a.fast_ko, **common)
+    elif a.kind == "towersweekly":
+        r = scenarios.towers_weekly(timeout=a.timeout, extra_env=env, out_dir=a.out,
+                                    twists=[t for t in (a.twists or "").split(",") if t] or None, **common)
     elif a.kind == "towerrewards":
         r = scenarios.tower_rewards(timeout=a.timeout or 150, relay_port=a.relay_port, extra_env=env, out_dir=a.out, **common)
     else:
@@ -255,13 +262,14 @@ def main(argv=None):
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
                                               "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers",
-                                              "towerrewards", "towersteam", "factionwar", "towersonline"])
+                                              "towerrewards", "towersteam", "factionwar", "towersweekly", "towersonline"])
     sc.add_argument("--variant", default="climb", choices=["climb", "leave", "desync", "soak"],
                     help="towersonline: climb (public room, list join, resume, loss, new climb), leave (away and back, "
                          "then the 3-minute save), desync (a forced void), soak (10 floors, unequal loads)")
     sc.add_argument("--floors", type=int, default=0, help="towersonline: floors to climb (default 3; soak 10)")
     sc.add_argument("--size", type=int, default=1, choices=[1, 2], help="factionwar: 1 ON 1 (with the observer, the picker "
                     "and the lock) or 2 ON 2 (four fighters)")
+    sc.add_argument("--twists", help="towersweekly: the twists to climb (comma list; default all six)")
     sc.add_argument("--case", default="kick", help="lobby97 (build 97): kick, quick, quickmax or afk")
     sc.add_argument("--via", default="voice", choices=["voice", "chat"], help="mute: the VOICE CHAT page's call, or the chat window's MUTE IN ROOM")
     sc.add_argument("--off", action="store_true", help="social: the service's switch off, no RECOMP_SOCIAL (nothing may show)")
@@ -278,6 +286,9 @@ def main(argv=None):
                                              "e.g. '1v1 team ffa koth crew ranked'")
     sc.add_argument("--rollback-max-ping", type=int, help="online: the relay's rollback ping limit in ms (-rollback-max-ping; "
                                                           "default none, the game's own 120)")
+    sc.add_argument("--drop-downlink", help="online (build 109): SLOT:STEP:DURATION, the relay cuts every datagram to "
+                    "the copy in relay slot SLOT for DURATION once the fight's STEPS reach STEP (relay -test-drop-downlink, e.g. 1:900:4s); "
+                    "the resend window must close the gap: no copy gives up, the stall notice shows")
     sc.add_argument("--fast-ko", type=int, default=600, help="knockout at this fight step (0: off)")
     sc.add_argument("--ko-winner", help="slot, alt or humans (only the human fighters; default alt; koth 0)")
     sc.add_argument("--cpu-level", choices=["easy", "normal", "hard"],

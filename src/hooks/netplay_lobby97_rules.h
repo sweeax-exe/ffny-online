@@ -30,6 +30,8 @@ extern "C" {
 #define NETLOBBY_KICK_BLOCK_S    300     /* the relay's KickBlockTime */
 #define NETLOBBY_ACTIVE_EVERY_MS 5000
 #define NETLOBBY_ACTIVE_LEN      6       /* ACTIVE's body after the token */
+#define NETLOBBY_ACTIVE_FAR      1       /* build 109: ACTIVE's flags byte (after the body, to a relay that answered
+                                         * CAPS_QUICKCAP): this player allows far opponents (server quick_cap.go) */
 
 /* [online] quick_max_ping's choices (an enum setting): off, 100, 150, 200 ms */
 #define NETLOBBY_MAX_PING_CHOICES 4
@@ -43,6 +45,9 @@ int netlobby_active_body(uint8_t *out, unsigned idle_s, int max_ping_ms, unsigne
  * widening after `search_s` s (under 120 ms, from 20 s under 180 ms, from 45 s anyone), on `where` ("every server"
  * or a list of names). Returns the length written. */
 int netlobby_search_line(char *out, int size, int own_max_ms, int search_s, const char *where);
+/* Build 109: the same with the ping ceiling (ms of ping sum, 0 none): from 45 s the line says "under <cap> ms"
+ * instead of anyone; a ceiling below the player's own limit is the limit that holds. */
+int netlobby_search_line_cap(char *out, int size, int own_max_ms, int search_s, const char *where, int cap_ms);
 
 /* The AFK warning's lines: "STILL THERE?" and "Press any button: you leave the room in 42 s." */
 int netlobby_afk_line(char *out, int size, int left_s);
