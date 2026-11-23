@@ -68,7 +68,8 @@ int community_window(ImDrawList *dl, const Frame &f, const Pad &pad_in, int *sel
         if (mouse_pick(f, x, y, cw, ch)) *sel = i, lit = true;
         if (mouse_click(f, x, y, cw, ch)) choose = i;
         rect(dl, f, x, y, cw, ch, IM_COL32(0, 0, 0, 170), 4);
-        portrait(dl, f, e->template_fe_id, x + 2, y + 2, 48, ch - 4, lit ? IM_COL32_WHITE : IM_COL32(140, 140, 140, 255));
+        // build 110: its own picture (online-art/fighters/<number>.png); without one portrait() draws its template's
+        portrait(dl, f, e->id, x + 2, y + 2, 48, ch - 4, lit ? IM_COL32_WHITE : IM_COL32(140, 140, 140, 255));
         float size = fit_size(f, g_title, 13, e->name, cw - 58);
         text(dl, f, g_title, size, x + 54, y + 18, lit ? WHITE : GREY, e->name, LEFT, 0.8f);
         char num[24];
