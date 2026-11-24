@@ -589,6 +589,66 @@ static void ko_step(void)
     }
 }
 
+/* RECOMP_TEST_WINDOW_STEP=<step>[,<winner slot>] (tests only): from that fight step, the window finish
+ * of Crow's Office as the game makes it when a thrown fighter hits the window (sub_001DA400, match type
+ * 0x11): the loser's defeat word gets 0x20, 0x3B9058 bit 0x40, the decision (sub_001A7140, result code
+ * 0x201) and the match-over flag 0x3B9054 bit 8 at once, without the decided phases 2 and 3. Any venue;
+ * the same step on every PC of a room, so the lockstep stays equal. The winner defaults to slot 0. Armed by
+ * defjam_test_step and made by defjam_test_window_apply, which netplay.c's step_body calls after the
+ * online step: inside the step, as the real throw is, so the online step's own reading at its top does
+ * not see it before the step's body runs. */
+extern void sub_001A7140(void);     /* the decision: records the result, writes the winner slot */
+static int s_window_loser = -1, s_window_winner;
+static void window_step(void)
+{
+    static int parsed, winner;
+    static LONG64 at;
+    int slot, loser = -1;
+    if (!parsed) {
+        const char *v = getenv("RECOMP_TEST_WINDOW_STEP");
+        parsed = 1;
+        at = v ? strtoll(v, NULL, 10) : 0;
+        winner = v && strchr(v, ',') ? atoi(strchr(v, ',') + 1) : 0;
+        if (at > 0) fprintf(stderr, "[TEST-WINDOW] window finish from fight step %lld, winner slot %d\n", (long long)at, winner);
+    }
+    if (at <= 0 || s_step < at || MEM32(G_PHASE) != 1u || (MEM32(0x003B9054u) & 8u)) return;
+    if (winner < 0 || winner >= SLOTS || !active(winner)) return;
+    for (slot = 0; slot < SLOTS; slot++)
+        if (active(slot) && slot != winner) { loser = slot; break; }
+    if (loser < 0) return;
+    s_window_loser = loser;
+    s_window_winner = winner;
+}
+
+void defjam_test_window_apply(void)
+{
+    int loser = s_window_loser, winner = s_window_winner;
+    s_window_loser = -1;
+    if (loser < 0 || MEM32(G_PHASE) != 1u || (MEM32(0x003B9054u) & 8u)) return;
+    {
+        uint32_t eax_ = g_eax, ecx_ = g_ecx, edx_ = g_edx, ebx_ = g_ebx, esi_ = g_esi, edi_ = g_edi,
+                 ebp_ = g_ebp, sp = g_esp;
+        double fp[8];
+        int fp_top = g_fp_top;
+        uint16_t fp_cw = g_fp_control_word;
+        memcpy(fp, g_fp_stack, sizeof(fp));
+        MEM8(record(loser) + F_DEFEAT) |= 0x20u;
+        MEM32(0x003B9058u) |= 0x40u;
+        g_esp = (sp - 0x80u) & ~3u;
+        PUSH32(g_esp, 0u);              /* a return address the lifted ret only pops */
+        sub_001A7140();
+        MEM32(0x003B9054u) |= 8u;
+        g_eax = eax_; g_ecx = ecx_; g_edx = edx_; g_ebx = ebx_; g_esi = esi_; g_edi = edi_; g_ebp = ebp_;
+        g_esp = sp;
+        memcpy(g_fp_stack, fp, sizeof(fp));
+        g_fp_top = fp_top;
+        g_fp_control_word = fp_cw;
+    }
+    fprintf(stderr, "[TEST-WINDOW] match %ld step %lld: slot %d out of the window (winner slot %d), result count %u code %04X\n",
+            (long)s_match, (long long)s_step, loser, winner, MEM32(0x003BE624u),
+            MEM32(0x003BE624u) ? MEM16(0x003BE130u + (MEM32(0x003BE624u) - 1u) * 0x10u + 0xEu) : 0u);
+}
+
 void defjam_test_step(void)
 {
     input_latency_step();
@@ -616,6 +676,7 @@ void defjam_test_step(void)
                 }
     }
     ko_step();
+    window_step();
     if (isolating()) {
         MEM32(SPECTATOR_COUNT) = 0;
         /* The general-purpose generator (G_RNG_UTIL) is also drawn by effects that run once per presented

@@ -8845,6 +8845,8 @@ static void match_start_body(void)
     InterlockedExchange(&R.lost, 0);
     /* every match of a START is reported on its own (the results screen's rematch runs a
      * second match without a new START): the key gets the match's number */
+    if (N.lobby && N.match_live && N.fighting_seen && !N.reported && !N.watching)   /* build 111: say so in the log */
+        fprintf(stderr, "[NETPLAY] the last match (%s) was fought but never reported\n", N.report_key);
     if (N.report_key[0]) {
         char *dash = strchr(N.report_key, '-');
         if (dash && (dash = strchr(dash + 1, '-')) != NULL) *dash = 0;
@@ -9723,6 +9725,7 @@ static void step_body(void)
 {
     g_wait_q0.QuadPart = 0;
     step_run();
+    defjam_test_window_apply();     /* tests: RECOMP_TEST_WINDOW_STEP's window finish, inside the step */
     if (N.lockstep && !N.resim && !N.watching && N.fighting_seen && MEM32(G_MATCH_PHASE) == 1u) {
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
@@ -9899,6 +9902,55 @@ static int resume_stop_pressed(ULONGLONG since, ULONGLONG now)
     return 0;
 }
 
+/* The room match decided (the game's phase word: 1 fighting, 2 decided, 3 finished; see
+ * test_telemetry.c): report its result. Only after this match was seen fighting, as the
+ * phase still holds the last match's value for a moment after a START. Read at the top of each
+ * step (step_run) and, since build 111, at the start of every game update (netplay_on_update): the
+ * window finish of Crow's Office (sub_001DA400: the thrown fighter's defeat word 0x20, the decision,
+ * code 0x201, and the match-over flag at once) ends the fight in the update of its step, and no later
+ * fight step comes, so the step's reading never saw it; with a Rematch the next match's start then
+ * cleared it and the win went unreported (room JNE44R, match 2, 2026-11-24). N.step is the same in
+ * both places: the last step that ran. */
+/* With rollback: the step at which the match was decided, by any ending. Some endings stop the fight steps
+ * at once and skip the phase words 2 and 3 (venue 26, code 0x201): a PC that had predicted a step past
+ * the others' last one never saw it final, so it never reported the result nor switched rollback off, and
+ * the room's next match never started (two-copy run at venue 26, 2026-11-02). The decision counts once
+ * the step it was seen at is final. */
+static void decision_check(void)
+{
+    if (N.lobby && N.match_live && N.rb_on && !N.resim && !N.rb_decided_step && N.rb_fought) {
+        uint32_t phase = MEM32(G_MATCH_PHASE), count = MEM32(G_RESULT_COUNT), code = 0;
+        if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
+        if ((phase >= 2u && phase <= 3u) || ((code & 1u) && ((code & 4u) || (MEM32(G_MATCH_FLAGS) & 8u))))
+            N.rb_decided_step = N.step;
+    }
+    if (N.lobby && N.match_live && !N.reported && !N.resim &&
+        (!N.rb_on || N.step <= N.final_step || (N.rb_decided_step && N.final_step >= N.rb_decided_step))) {
+        /* The game's result record says draws too (a double knockout, a venue taking both out, a
+         * time-up tie): read only through the phase word, those were reported as "slot 0 won", and the
+         * venue endings that skip phases 2 and 3 not at all (docs/research/team-and-special-match-types.md
+         * 10; the same reading as koth_check_result). */
+        uint32_t phase = MEM32(G_MATCH_PHASE), count = MEM32(G_RESULT_COUNT), code = 0;
+        if (phase == 1u && !N.fighting_seen && N.koth_match && !N.watching && N.hill_decided_at) {
+            fprintf(stderr, "[NETPLAY] hill: this fight is under way %.1f s after this PC's last one was decided\n",
+                    (GetTickCount64() - N.hill_decided_at) / 1000.0);
+            N.hill_decided_at = 0;
+        }
+        if (phase == 1u) N.fighting_seen = 1;
+        if (N.fighting_seen && N.match_seen && count && count <= RESULTS_MAX)
+            code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
+        if ((code & 1u) && (code & 4u)) {
+            netplay_on_result(0, 0, 4u);                            /* a decisive draw */
+        } else if (N.fighting_seen && phase != 1u && phase >= 2u && phase <= 3u) {
+            uint32_t w = MEM32(G_MATCH_WINNER);
+            netplay_on_result(winners_of(w), 0, w < MAXP ? 1u : 4u);
+        } else if ((code & 1u) && (MEM32(G_MATCH_FLAGS) & 8u)) {   /* decided, the phase word skipped */
+            uint32_t w = MEM32(G_MATCH_TWIN);
+            netplay_on_result(winners_of(w), 0, w < MAXP ? 1u : 4u);
+        }
+    }
+}
+
 static void step_run(void)
 {
     uint32_t s, k, need;
@@ -9933,45 +9985,7 @@ static void step_run(void)
         if (crowd_off < 0) crowd_off = getenv("RECOMP_ONLINE_CROWD") && !strcmp(getenv("RECOMP_ONLINE_CROWD"), "off");
         if (crowd_off) MEM32(G_CROWD_RECORDS) = 0;
     }
-    /* The room match decided (the game's phase word: 1 fighting, 2 decided, 3 finished; see
-     * test_telemetry.c): report its result. Only after this match was seen fighting, as the
-     * phase still holds the last match's value for a moment after a START. */
-    /* With rollback: the step at which the match was decided, by any ending. Some endings stop the fight steps
-     * at once and skip the phase words 2 and 3 (venue 26, code 0x201): a PC that had predicted a step past
-     * the others' last one never saw it final, so it never reported the result nor switched rollback off, and
-     * the room's next match never started (two-copy run at venue 26, 2026-11-02). The decision counts once
-     * the step it was seen at is final. */
-    if (N.lobby && N.match_live && N.rb_on && !N.resim && !N.rb_decided_step && N.rb_fought) {
-        uint32_t phase = MEM32(G_MATCH_PHASE), count = MEM32(G_RESULT_COUNT), code = 0;
-        if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
-        if ((phase >= 2u && phase <= 3u) || ((code & 1u) && ((code & 4u) || (MEM32(G_MATCH_FLAGS) & 8u))))
-            N.rb_decided_step = N.step;
-    }
-    if (N.lobby && N.match_live && !N.reported && !N.resim &&
-        (!N.rb_on || N.step <= N.final_step || (N.rb_decided_step && N.final_step >= N.rb_decided_step))) {
-        /* The game's result record says draws too (a double knockout, a venue taking both out, a
-         * time-up tie): read only through the phase word, those were reported as "slot 0 won", and the
-         * venue endings that skip phases 2 and 3 not at all (docs/research/team-and-special-match-types.md
-         * 10; the same reading as koth_check_result). */
-        uint32_t phase = MEM32(G_MATCH_PHASE), count = MEM32(G_RESULT_COUNT), code = 0;
-        if (phase == 1u && !N.fighting_seen && N.koth_match && !N.watching && N.hill_decided_at) {
-            fprintf(stderr, "[NETPLAY] hill: this fight is under way %.1f s after this PC's last one was decided\n",
-                    (GetTickCount64() - N.hill_decided_at) / 1000.0);
-            N.hill_decided_at = 0;
-        }
-        if (phase == 1u) N.fighting_seen = 1;
-        if (N.fighting_seen && N.match_seen && count && count <= RESULTS_MAX)
-            code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
-        if ((code & 1u) && (code & 4u)) {
-            netplay_on_result(0, 0, 4u);                            /* a decisive draw */
-        } else if (N.fighting_seen && phase != 1u && phase >= 2u && phase <= 3u) {
-            uint32_t w = MEM32(G_MATCH_WINNER);
-            netplay_on_result(winners_of(w), 0, w < MAXP ? 1u : 4u);
-        } else if ((code & 1u) && (MEM32(G_MATCH_FLAGS) & 8u)) {   /* decided, the phase word skipped */
-            uint32_t w = MEM32(G_MATCH_TWIN);
-            netplay_on_result(winners_of(w), 0, w < MAXP ? 1u : 4u);
-        }
-    }
+    decision_check();
     s = ++N.step;
     if (s == 1) {
         static int crowd_on = -1;   /* RECOMP_ONLINE_CROWD=keep: tests compare without the restart */
@@ -11613,6 +11627,15 @@ void netplay_on_update(void)
     if (!N.resim) towers_on_update();   /* Towers (offline): the results' Rematch prompt answered by itself (towers.c) */
     if (!N.resim) spec_tick();
     if (!N.resim) hill_leave_tick();
+    /* Build 111: the match's decision also between fight steps (decision_check): the window finish and the other
+     * endings that stop the fight steps at once. Then, on the results, a decisive record nobody reported (a ring
+     * out: no decided phase, no match-over flag) by the fighters standing, as back in the menus, so a Rematch,
+     * which starts the next match without the menus, does not drop it. Only once every step is final. */
+    if (!N.resim && N.lockstep && N.lobby && N.match_live && !N.reported && !N.watching) {
+        decision_check();
+        if (!N.reported && N.on_results && N.match_seen && (!N.rb_on || (N.final_step >= N.step && !N.predicting)))
+            report_missed_result();
+    }
     /* A rollback match that went out of sync leaves for the room at once. Its desync can come from a
      * load that put the game's memory back only in part, and the fight then plays on that memory: F9
      * 0b7e16 (build 47) had one rollback in the whole fight (back to step 2861), the desync at step
