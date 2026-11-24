@@ -54,6 +54,12 @@ int netplay_fights_skipped(void) { return 0; }
 void defjam_camera_watch(long long step) { (void)step; }
 /* rollback.c finds the game's heap at run time; the pre-v0.12 block stands in here. */
 void rollback_heap_range(uint32_t *lo, uint32_t *hi) { *lo = 0x80003000u; *hi = 0x82A0D000u; }
+/* towers_online.c (Team Tower Online, build 111): no tower floor in these fixtures. */
+#include <string.h>
+#include "hooks/towers_online.h"
+void towers_online_view(TowersOnlineFloor *out) { memset(out, 0, sizeof *out); }
+/* sub_001A7140: the game's decision, called by the window-finish test hook (build 111); not run here. */
+void sub_001A7140(void) {}
 '''
 
 # recorder.c: test_telemetry.c copies its lines into the play-test recorder's events (upstream v0.10).
