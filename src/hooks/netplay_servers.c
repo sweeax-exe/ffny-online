@@ -1123,10 +1123,12 @@ static int create_decide(void)
     enum NetServerChoice c = netservers_choice();
     char name[40];
     EnterCriticalSection(&g_cs);
-    if (P.rounds <= A.mark && GetTickCount64() - A.since < CREATE_MEASURE_MS) {
+    if (A.kind != 5 || A.measuring != 1 || (P.rounds <= A.mark && GetTickCount64() - A.since < CREATE_MEASURE_MS)) {
+        int done = A.kind != 5 || !A.measuring;
         LeaveCriticalSection(&g_cs);
-        return 0;
+        return done;        /* 0 while measuring, or while another thread decides (the UI's and the tests' ticks) */
     }
+    A.measuring = 2;        /* this thread decides */
     value = A.value;
     snprintf(name, sizeof(name), "%s", A.name);
     LeaveCriticalSection(&g_cs);
