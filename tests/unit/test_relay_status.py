@@ -84,7 +84,8 @@ def test_relays_setting_and_test_switches():
                 '"sa.defjam.online:27777", "216.238.122.210", "RECOMP_NETPLAY_SERVER_SA"',
                 # build 111
                 '"mex.defjam.online:27777", "64.177.95.126",',
-                '"bog.defjam.online:27777", "149.104.107.233",'):
+                '"bog.defjam.online:27777", "149.104.107.233",',
+                '"waw.defjam.online:27777", "70.34.248.151",'):
         assert row in RULES_C, row
     assert 'netservers_def(i)' in SERVERS_C
     # the session's own DNS fallback uses the same table

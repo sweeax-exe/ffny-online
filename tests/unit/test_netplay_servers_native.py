@@ -25,6 +25,7 @@ static const char *const k_texts[] = {
     "sa", "SA", "southamerica", "South America", "brazil", "Brasil", "sao paulo", "sa.defjam.online",
     "sa.defjam.online:27777", "SA.DEFJAM.ONLINE:27777", "na2.defjam.online", "sg2.defjam.online:27777", "Miami", "mia", "nj.defjam.online",
     "mex", "Mexico", "CDMX", "mex.defjam.online", "mex.defjam.online:27777", "bog", "Bogota", "colombia", "bog.defjam.online:27777",
+    "waw", "Warsaw", "Poland", "eastern europe", "waw.defjam.online:27777",
     "all", "All servers", "both", "Both", "both_servers",
     "127.0.0.1:27900", "relay.example.org", "westeros",
 };
@@ -83,13 +84,13 @@ int main(void)
         used = netservers_get_more_pings(two, sizeof(two), 2, got);
         printf("more-read|%d|%d|%d|%d|%d\n", used, got[NETSERVER_SA], got[NETSERVER_COUNT + NETSERVER_SA], got[0],
                got[NETSERVER_COUNT]);
-        {   /* build 111: a relay that knows two relays more than this build's nine: E 8, one room; the last two skipped */
-            unsigned char far[1 + 2 * 8];
+        {   /* build 111: a relay that knows two relays more than this build's ten: E 9, one room; the last two skipped */
+            unsigned char far[1 + 2 * 9];
             int k, far_got[NETSERVER_COUNT] = { 0 };
-            far[0] = 8;
-            for (k = 0; k < 8; k++) { far[1 + 2 * k] = (unsigned char)(10 + k); far[2 + 2 * k] = 0; }
+            far[0] = 9;
+            for (k = 0; k < 9; k++) { far[1 + 2 * k] = (unsigned char)(10 + k); far[2 + 2 * k] = 0; }
             used = netservers_get_more_pings(far, sizeof(far), 1, far_got);
-            printf("more-far|%d|%d|%d|%d\n", used, far_got[NETSERVER_SA], far_got[NETSERVER_MEX], far_got[NETSERVER_BOG]);
+            printf("more-far|%d|%d|%d|%d\n", used, far_got[NETSERVER_SA], far_got[NETSERVER_MEX], far_got[NETSERVER_WAW]);
         }
         printf("more-short|%d|%d|%d\n", netservers_get_more_pings(two, 6, 2, got), netservers_get_more_pings(two, 0, 2, got),
                netservers_get_more_pings(NULL, 5, 2, got));
@@ -277,8 +278,8 @@ int main(void)
 }
 '''
 
-EU, NA, WEST, SA, MIA, DFW, LAX, MEX, BOG = 0, 1, 2, 3, 4, 5, 6, 7, 8
-AUTO, CH_EU, CH_NA, CUSTOM, ALL, CH_WEST, CH_SA, CH_MIA, CH_DFW, CH_LAX, CH_MEX, CH_BOG = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+EU, NA, WEST, SA, MIA, DFW, LAX, MEX, BOG, WAW = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+AUTO, CH_EU, CH_NA, CUSTOM, ALL, CH_WEST, CH_SA, CH_MIA, CH_DFW, CH_LAX, CH_MEX, CH_BOG, CH_WAW = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
 
 @pytest.fixture(scope='module')
@@ -330,6 +331,8 @@ def test_old_and_new_setting_values(rows):
         'mex.defjam.online': (CH_MEX, 'mex', MEX), 'mex.defjam.online:27777': (CH_MEX, 'mex', MEX),
         'bog': (CH_BOG, 'bog', BOG), 'Bogota': (CH_BOG, 'bog', BOG), 'colombia': (CH_BOG, 'bog', BOG),
         'bog.defjam.online:27777': (CH_BOG, 'bog', BOG),
+        'waw': (CH_WAW, 'waw', WAW), 'Warsaw': (CH_WAW, 'waw', WAW), 'Poland': (CH_WAW, 'waw', WAW),
+        'eastern europe': (CH_WAW, 'waw', WAW), 'waw.defjam.online:27777': (CH_WAW, 'waw', WAW),
         # "both" (builds 31..37) is every relay now and is saved again as "all"
         'all': (ALL, 'all', -1), 'All servers': (ALL, 'all', -1), 'both': (ALL, 'all', -1), 'Both': (ALL, 'all', -1),
         'both_servers': (ALL, 'all', -1),
@@ -343,13 +346,15 @@ def test_old_and_new_setting_values(rows):
 def test_relays_and_partners(rows):
     relay = {int(r[0]): (int(r[1]), int(r[2])) for r in by(rows, 'relay')}
     assert relay == {EU: (CH_EU, -1), NA: (CH_NA, -1), WEST: (CH_WEST, -1), SA: (CH_SA, -1), MIA: (CH_MIA, -1),
-                     DFW: (CH_DFW, -1), LAX: (CH_LAX, -1), MEX: (CH_MEX, -1), BOG: (CH_BOG, -1)}
+                     DFW: (CH_DFW, -1), LAX: (CH_LAX, -1), MEX: (CH_MEX, -1), BOG: (CH_BOG, -1),
+                     WAW: (CH_WAW, -1)}
 
 
 def test_the_relay_table(rows):
     """Build 91: one table names every relay, in the wire's order; ids, chat regions and host names find them."""
     defs = {int(r[0]): r[1:] for r in by(rows, 'def')}
-    assert [defs[i][0] for i in sorted(defs)] == ['eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax', 'mex', 'bog']
+    assert [defs[i][0] for i in sorted(defs)] == ['eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax', 'mex', 'bog',
+                                                    'waw']
     assert defs[DFW][2:5] == ['DALLAS', 'dfw.defjam.online:27777', '45.76.237.224']
     assert defs[LAX][2:5] == ['LA', 'lax.defjam.online:27777', '45.32.95.226']
     # build 111: Mexico City and Bogota at the end of the wire's order
@@ -357,6 +362,8 @@ def test_the_relay_table(rows):
                              'RECOMP_NETPLAY_SERVER_MEX', 'mex']
     assert defs[BOG][:7] == ['bog', 'Colombia (Bogota)', 'BOGOTA', 'bog.defjam.online:27777', '149.104.107.233',
                              'RECOMP_NETPLAY_SERVER_BOG', 'bog']
+    assert defs[WAW][:7] == ['waw', 'Eastern Europe (Warsaw)', 'E.EUROPE', 'waw.defjam.online:27777', '70.34.248.151',
+                             'RECOMP_NETPLAY_SERVER_WAW', 'waw']
     assert defs[SA][:7] == ['sa', 'South America', 'S.AMERICA', 'sa.defjam.online:27777', '216.238.122.210',
                             'RECOMP_NETPLAY_SERVER_SA', 'sa']
     assert defs[WEST][6] == 'sg' and defs[NA][6] == 'us-east' and defs[EU][3] == 'play.defjam.online:27777'
@@ -374,15 +381,15 @@ def test_the_relay_table(rows):
 
 def test_pings_trailer(rows):
     """Build 91 (CAPS bit 28): the pings beyond the first three relays as a count and u16 each."""
-    # build 111: nine relays, six after the first three (1 + 2 * 6 bytes)
-    assert by(rows, 'more') == [['13', '6', '186', '0']]
-    assert by(rows, 'more-cap') == [['13', '65535']] and by(rows, 'more-neg') == [['13', '0']]
+    # build 111: ten relays, seven after the first three (1 + 2 * 7 bytes)
+    assert by(rows, 'more') == [['15', '7', '186', '0']]
+    assert by(rows, 'more-cap') == [['15', '65535']] and by(rows, 'more-neg') == [['15', '0']]
     assert by(rows, 'more-three') == [['1', '0']]
     # a relay that knows more relays than this build: the known one is read, the rest skipped
     assert by(rows, 'more-read') == [['13', '186', '77', '0', '0']]
     assert by(rows, 'more-short') == [['-1', '0', '0']]
-    # build 111: pings to relays after Bogota (a newer relay's trailer) are skipped, Mexico and Bogota read
-    assert by(rows, 'more-far') == [['17', '10', '14', '15']]
+    # build 111: pings to relays after Warsaw (a newer relay's trailer) are skipped, Mexico and Warsaw read
+    assert by(rows, 'more-far') == [['19', '10', '14', '16']]
 
 
 def test_south_america_moves(rows):
@@ -434,7 +441,7 @@ def test_pool_matches_everyone_spread_over_six_relays(rows):
     first = {(a, b): (t, r) for t, a, b, r in sim}
     assert any(t == 0 for t, _, _, _ in sim)
     for (a, b), (t, r) in first.items():
-        assert r in (EU, NA, WEST, SA, MIA, DFW, LAX, MEX, BOG)
+        assert r in (EU, NA, WEST, SA, MIA, DFW, LAX, MEX, BOG, WAW)
 
 
 def test_pool_near_relay_and_same_answer_in_any_order(rows):

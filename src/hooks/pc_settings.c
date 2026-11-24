@@ -825,7 +825,7 @@ static int may_run_beside_another(void)
     static const char *const vars[] = { "RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA",
                                         "RECOMP_NETPLAY_SERVER_SG", "RECOMP_NETPLAY_SERVER_SA", "RECOMP_NETPLAY_SERVER_MIA",
                                         "RECOMP_NETPLAY_SERVER_DFW", "RECOMP_NETPLAY_SERVER_LAX", "RECOMP_NETPLAY_SERVER_MEX",
-                                        "RECOMP_NETPLAY_SERVER_BOG", "RECOMP_ACCOUNT_SERVER" };
+                                        "RECOMP_NETPLAY_SERVER_BOG", "RECOMP_NETPLAY_SERVER_WAW", "RECOMP_ACCOUNT_SERVER" };
     const char *settings = getenv("RECOMP_SETTINGS"), *one = getenv("RECOMP_NETPLAY_SERVER");
     int i, test_run = (settings && !_stricmp(settings, "none")) ||
                       (getenv("RECOMP_PAD_SCRIPT") && !getenv("RECOMP_PAD_HOST"));
