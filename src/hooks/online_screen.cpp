@@ -1025,6 +1025,10 @@ struct State {
     bool venue_changed = false;     // ticked, un-ticked or started from a preset since it opened
     int venue_choice = 0;           // this visit to the room settings: 0 VENUES untouched, 1 Custom, 2 a preset
     unsigned long long venue_opened = 0;
+    // build 111: CREATE A ROOM's SERVER row: ROOMSERVER_AUTO or 1 + a relay (netplay_servers_rules.h); -1 not read yet
+    // from online.room_server
+    int room_server = -1;
+    bool room_server_cursor = false;    // the gallery: the next drawing puts the cursor on that row
     unsigned long long last_list = 0, start_seen = 0, opened = 0;
     std::string note;
     unsigned long long note_until = 0;
@@ -2019,6 +2023,51 @@ void switch_server(const char *why)
     int r = netservers_reconnect(hub_name().c_str());
     if (r < 0) S.connect_pending = true;
     if (why && r != 0) say(why);
+}
+
+// ---- build 111: CREATE A ROOM's SERVER row (netservers_room_* in netplay_servers_rules.h) ----
+// Automatic (a fresh ping round when the room opens, then the lowest ping) or one relay of the table; remembered as
+// online.room_server. Quick Match, Ranked, Faction War and Towers stay automatic.
+
+int saved_room_server()
+{
+    char text[64];
+    return netservers_room_parse(recomp_settings_get_text("online", "room_server", text, sizeof(text), "auto"));
+}
+
+// The row's value: "Automatic: Europe, 32 ms" (the lowest ping now; the room opens by a fresh round), "US East, 78 ms"
+std::string room_server_text(int value)
+{
+    NetServerInfo sv[NETSERVER_COUNT];
+    int n = servers(sv), r = netservers_room_relay(value), best = -1;
+    char buf[112];
+    if (r < 0 || r >= n) {
+        for (int i = 0; i < n; i++)
+            if (sv[i].state == NETSERVER_UP && sv[i].ping_ms >= 0 && (best < 0 || sv[i].ping_ms < sv[best].ping_ms)) best = i;
+        if (best < 0) return "Automatic (the lowest ping)";
+        snprintf(buf, sizeof(buf), "Automatic: %s, %d ms", sv[best].name, sv[best].ping_ms);
+        return buf;
+    }
+    if (sv[r].state == NETSERVER_UP && sv[r].ping_ms >= 0) snprintf(buf, sizeof(buf), "%s, %d ms", sv[r].name, sv[r].ping_ms);
+    else snprintf(buf, sizeof(buf), "%s, %s", sv[r].name, sv[r].state == NETSERVER_OFFLINE ? "no answer" : "measuring...");
+    return buf;
+}
+
+// OPEN THE ROOM with the SERVER row: false (the page stays) when the chosen relay does not answer
+bool open_room_on_server(const NetRoomSettings &s)
+{
+    NetServerInfo sv[NETSERVER_COUNT];
+    int n = servers(sv), r = netservers_room_relay(S.room_server), here = connected_server();
+    if (r >= 0 && r < n && sv[r].state == NETSERVER_OFFLINE) {
+        say(std::string("The ") + sv[r].name + " server does not answer right now. Choose another one, or Automatic.", 6000);
+        return false;
+    }
+    if (recomp_settings_set_text("online", "room_server", netservers_room_text(S.room_server)) > 0) pc_settings_save();
+    netservers_create_on(S.room_server, &s, hub_name().c_str());
+    if (r < 0) say("Finding the fastest server for your room...", 6000);
+    else if (r != here) say(std::string("Moving to the ") + sv[r].name + " server for your room...", 6000);
+    else say("Opening the room...");
+    return true;
 }
 
 void open_servers()
@@ -3625,10 +3674,10 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
 {
     // the rows; a King of the Hill room has one more, how each fight's venue is chosen
     enum Row { R_MODE, R_VENUE_CHOICE, R_PLAYERS, R_POOL, R_LISTED, R_OPEN, R_CPU, R_RULES, R_PING, R_CONTENT, R_RTS_TIME,
-               R_RTS_KOS, R_RTS_MODE };
+               R_RTS_KOS, R_RTS_MODE, R_SERVER };
     static const char *const labels[] = { "MODE", "VENUE OF EACH FIGHT", "PLAYERS", "VENUES", "LISTED", "", "CPU LEVEL",
                                           "FIGHTER RULES", "MAX PING", "COMMUNITY CONTENT", "TIME LIMIT", "KO TARGET",
-                                          "ROUND MODE" };
+                                          "ROUND MODE", "SERVER" };
     NetRoomSettings &s = S.settings;
     g_settings_on_pool = false;
     if (S.venue_pick) { draw_venue_pick(dl, f, pad, s); return; }       // build 110: the CUSTOM checklist (its B closes only it)
@@ -3650,6 +3699,13 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     if (rules_offered()) rows_of.insert(rows_of.end() - 2, { R_RULES, R_PING });
     // build 82: community content (new fighters, new venues) on or off for this room, when this PC has some
     if (content_switch_offered() && !rts) rows_of.insert(rows_of.end() - 2, R_CONTENT);
+    // build 111: where a new room opens (not a room's own settings: it stays on its relay; not Run the Streets: its
+    // room is on the relay that runs it; not a custom address)
+    const bool server_row = !S.settings_edit && !rts && server_choice() != NETCHOICE_CUSTOM;
+    if (server_row) rows_of.insert(rows_of.end() - 2, R_SERVER);
+    if (S.room_server < 0) S.room_server = saved_room_server();
+    if (S.room_server_cursor && server_row) S.settings_sel = (int)rows_of.size() - 3;
+    S.room_server_cursor = false;
     const int rows = (int)rows_of.size();
     if (S.settings_sel >= rows) S.settings_sel = rows - 1;
     if (pad.up) S.settings_sel = (S.settings_sel + rows - 1) % rows;
@@ -3732,6 +3788,14 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_RTS_TIME: s.rounds = rts_rules_step(s.rounds, 0, step); break;   // 5, 10, 15 minutes, none
         case R_RTS_KOS: s.rounds = rts_rules_step(s.rounds, 1, step); break;    // first to 5, 10, 20
         case R_RTS_MODE: s.rounds = rts_rules_step(s.rounds, 2, step); break;   // Knockouts, Points
+        case R_SERVER: {    // build 111: Automatic, then the table's relays; one that did not answer is stepped over
+            NetServerInfo sv[NETSERVER_COUNT];
+            int n = servers(sv);
+            unsigned skip = 0;
+            for (int i = 0; i < n; i++) if (sv[i].state == NETSERVER_OFFLINE) skip |= 1u << i;
+            S.room_server = netservers_room_step(S.room_server, step, skip);
+            break;
+        }
         }
     }
     if (rts && !ow_rules_rts_valid(s.rounds)) s.rounds = 0;
@@ -3745,8 +3809,9 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         was_koth = NETPLAY_IS_KOTH(s.mode);
     }
     bool koth = NETPLAY_IS_KOTH(s.mode), rot = NETPLAY_IS_FFAROT(s.mode);
-    float row_step = rows >= 10 ? 29 : rows >= 9 ? 33 : rows >= 7 ? 37 : rows >= 6 ? 46 : 54,
-          row_h = rows >= 10 ? 27 : rows >= 9 ? 31 : rows >= 7 ? 34 : rows >= 6 ? 40 : 44;   // up to 10 rows above the hints
+    // up to 11 rows above the hints (build 111: SERVER makes an 11th for a hill room with every other row)
+    float row_step = rows >= 11 ? 27 : rows >= 10 ? 29 : rows >= 9 ? 33 : rows >= 7 ? 37 : rows >= 6 ? 46 : 54,
+          row_h = rows >= 11 ? 25 : rows >= 10 ? 27 : rows >= 9 ? 31 : rows >= 7 ? 34 : rows >= 6 ? 40 : 44;
 
     page_title(dl, f, S.settings_edit ? "ROOM SETTINGS" : "CREATE A ROOM");
     text(dl, f, g_hand, 15, 54, 66, ORANGE, s.name, LEFT, 0.8f);
@@ -3786,8 +3851,11 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_RTS_TIME: value = rts_time_text(s.rounds); break;
         case R_RTS_KOS: value = rts_kos_text(s.rounds); break;
         case R_RTS_MODE: value = rts_mode_text(s.rounds); break;
+        case R_SERVER: value = room_server_text(S.room_server); break;
         }
-        text(dl, f, g_title, row_h < 30 ? 14 : row_h < 34 ? 15 : 17, x + 12, y + (row_h < 30 ? 12 : row_h < 34 ? 14 : row_h < 40 ? 16 : 19), sel ? WHITE : GREY, value.c_str());
+        float vsize = row_h < 30 ? 14 : row_h < 34 ? 15 : 17;
+        if (row == R_SERVER && value.size() > 22) vsize = std::max(12.0f, vsize - 2);   // "Automatic: Asia (Singapore), 168 ms"
+        text(dl, f, g_title, vsize, x + 12, y + (row_h < 30 ? 12 : row_h < 34 ? 14 : row_h < 40 ? 16 : 19), sel ? WHITE : GREY, value.c_str());
         // a fixed row (a special match's venue and players) has nothing to step through
         bool fixed = (fixed_venue(s.mode) && (row == R_POOL || row == R_PLAYERS)) || (is_team(s.mode) && row == R_PLAYERS) ||
                      (rts && row == R_MODE) || (row == R_RTS_KOS && ow_rules_rts_points(s.rounds));
@@ -3840,6 +3908,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     if (pad.a && rows_of[S.settings_sel] == R_OPEN) {
         remember_venue_choice(s);       // build 110: a Custom room makes the next one start on the checklist
         if (S.settings_edit) { netplay_lobby_settings(&s); S.page = HUB; say("Settings saved; everyone readies again."); }
+        else if (server_row && !gallery_on()) { if (open_room_on_server(s)) S.page = HUB; }    // build 111
         else { netplay_lobby_create(&s); say("Opening the room..."); S.page = HUB; }
     }
     if (pad.b) S.page = rts && !S.settings_edit ? RTS : HUB;      // a new Run the Streets room: back to its page
@@ -6403,6 +6472,8 @@ void gallery_step()
                                          "create-community-maps",
                                          // build 110: VENUES on a CUSTOM list of three, its checklist, the room's tag
                                          "create-custom", "create-venues", "room-custom",
+                                         // build 111: CREATE A ROOM's SERVER row on US East (the hub on Europe)
+                                         "create-server",
                                          "fighters-new", "vote-new", "hub-news", "hill-news", "room-team-news", "room-news",
                                          // build 87: content to come at the next release window ("NEW CONTENT AT 17:00")
                                          "hub-release",
@@ -6900,6 +6971,9 @@ void gallery_step()
             drop_new_venues(S.settings, 0);
             S.settings_sel = rules_offered() ? (content_switch_offered() ? 5 : 4) : 2;
         }
+        // build 111: the SERVER row; create-server: US East chosen (the hub on Europe), the cursor on it
+        S.room_server = p == "create-server" ? 1 + NETSERVER_NA : ROOMSERVER_AUTO;
+        S.room_server_cursor = p == "create-server";
     }
     else if (p == "voice") { S.page = VOICE; S.voice_sel = 1; }
     else if (p == "stats" || p == "stats-1v1") { S.page = STATS; S.stats_page = 0; }
@@ -8295,6 +8369,9 @@ bool draw_pages(ImVec2 display)
             say("Joining...");
         } else if (moved == 3) {
             say("On the set's server: joining the set...");
+        } else if (moved == 5) {     // build 111: the new room's CREATE, on the relay its SERVER row chose
+            int here = connected_server();
+            say(here >= 0 ? std::string("Opening the room on the ") + netservers_name(here) + " server..." : std::string("Opening the room..."));
         } else if (moved == 4) {
             say("Watching... if a match is on, you watch from its next fight.");
         } else if (moved == -4) {

@@ -187,6 +187,30 @@ const char *netservers_known_name(const char *address);
  * typed for a custom one. Returns 1 for one of ours, 0 for a custom address. */
 int netservers_display(const char *address, char *out, int size);
 
+/* ---- CREATE A ROOM's SERVER row (build 111, owner 2026-11-24) ------------------------------------
+ * Where a player's own room opens: Automatic (the default: a fresh ping round when the room opens, then the lowest
+ * ping) or one relay of the table. Quick Match, Ranked, Faction War and Towers stay automatic; joining a room goes to
+ * that room's relay as before. The row's value: ROOMSERVER_AUTO, or 1 + the relay's index. Saved as [online]
+ * room_server: "auto" or the relay's id. */
+#define ROOMSERVER_AUTO         0
+#define ROOMSERVER_MARGIN_MS    10  /* Automatic leaves the relay the hub is on only for one at least this much faster */
+
+/* The saved text's value: a relay's id or any of its words (netservers_parse_choice) is that relay; anything else
+ * (NULL, "", "auto", "all", a custom address, a relay this build does not know) is Automatic. */
+int netservers_room_parse(const char *text);
+/* The text to save: "auto" or the relay's id ("auto" for a value out of range). */
+const char *netservers_room_text(int value);
+/* The relay a value names, -1 for Automatic (and anything out of range). */
+int netservers_room_relay(int value);
+/* One step (step < 0 left, > 0 right) through Automatic and the table's relays, wrapping; a relay whose bit is set in
+ * `skip` (1 << index: no answer to the last round) is stepped over. Returns the new value. */
+int netservers_room_step(int value, int step, unsigned skip);
+/* Where the room opens: the chosen relay; for Automatic, by the fresh pings (ms by relay index, < 0 no answer) the
+ * relay with the lowest ping (a tie: the lower index), but the relay the hub is on (`cur`, -1 none) while its ping is
+ * within ROOMSERVER_MARGIN_MS of that. -1: nothing answered and the hub is on no relay of the table (open it where
+ * the hub is). */
+int netservers_room_target(int value, int cur, const int *pings, int count);
+
 #ifdef __cplusplus
 }
 #endif

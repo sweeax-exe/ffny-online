@@ -365,3 +365,47 @@ int netservers_display(const char *address, char *out, int size)
     else snprintf(out, (size_t)size, "%s", address ? address : "");
     return name != NULL;
 }
+
+/* ---- CREATE A ROOM's SERVER row (build 111) ---- */
+
+int netservers_room_parse(const char *text)
+{
+    int r = netservers_choice_relay(netservers_parse_choice(text));
+    return r >= 0 ? 1 + r : ROOMSERVER_AUTO;
+}
+
+const char *netservers_room_text(int value)
+{
+    int r = netservers_room_relay(value);
+    return r >= 0 ? k_relays[r].id : "auto";
+}
+
+int netservers_room_relay(int value)
+{
+    return value >= 1 && value <= NETSERVER_COUNT ? value - 1 : -1;
+}
+
+int netservers_room_step(int value, int step, unsigned skip)
+{
+    const int n = 1 + NETSERVER_COUNT;      /* Automatic and every relay of the table */
+    int v = value >= 0 && value < n ? value : ROOMSERVER_AUTO, k;
+    if (!step) return v;
+    for (k = 0; k < n; k++) {
+        v = (v + (step > 0 ? 1 : n - 1)) % n;
+        if (v == ROOMSERVER_AUTO || !(skip >> (v - 1) & 1u)) return v;
+    }
+    return ROOMSERVER_AUTO;
+}
+
+int netservers_room_target(int value, int cur, const int *pings, int count)
+{
+    int r = netservers_room_relay(value), best = -1, i;
+    if (r >= 0) return r;
+    if (count > NETSERVER_COUNT) count = NETSERVER_COUNT;
+    if (cur >= count) cur = -1;
+    for (i = 0; pings && i < count; i++)
+        if (pings[i] >= 0 && (best < 0 || pings[i] < pings[best])) best = i;
+    if (best < 0) return cur >= 0 ? cur : -1;
+    if (cur >= 0 && pings[cur] >= 0 && pings[cur] <= pings[best] + ROOMSERVER_MARGIN_MS) return cur;
+    return best;
+}

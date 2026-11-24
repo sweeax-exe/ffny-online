@@ -103,6 +103,11 @@ static RecompSetting g_display_settings[] = {
       "ticked yet. Set in the room settings.", "" },
     { "online", "room_venues_on", RECOMP_SETTING_BOOL, 0, 0, 0, NULL, "RECOMP_ROOM_VENUES_ON", 0,
       "Your next room starts on that Custom list (the last room you opened used it); else on every venue." },
+    /* build 111: CREATE A ROOM's SERVER row (netservers_room_* in netplay_servers_rules.h); RECOMP_ROOM_SERVER for tests */
+    { "online", "room_server", RECOMP_SETTING_STRING, 0, 0, 0, NULL, "RECOMP_ROOM_SERVER", 0,
+      "Where the rooms you create open: auto (the server with the lowest ping, measured when the room opens) or a "
+      "server's id (eu, na, sg, ...). Set with SERVER in CREATE A ROOM; quick and ranked matches always pick by ping.",
+      "auto" },
     /* build 95: up to the fighter numbers (1000 and up, fighter_banks.h): 0..255 saved 1008 as 255, which READY sent
      * and every PC of the match crashed on (builds 93/94, community/crash-hoodiebatman.md) */
     { "online", "fighter", RECOMP_SETTING_INT, 55, 0, 2147483647, NULL, NULL, 0,
