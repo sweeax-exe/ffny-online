@@ -2,8 +2,8 @@
  * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* The online relays and the choice between them (build 30; build 38: three; build 91: the relay table of
  * netplay_servers_rules.c, today Europe (play.defjam.online), US East (na.defjam.online), Asia (Singapore,
- * sg2.defjam.online), South America (Sao Paulo, sa.defjam.online) and US South (Miami, na2.defjam.online), all port
- * 27777; US East is nj.defjam.online).
+ * sg2.defjam.online), South America (Sao Paulo, sa.defjam.online) and US South (Miami, na2.defjam.online), Dallas, Los Angeles and
+ * (build 111) Mexico City (mex.defjam.online) and Bogota (bog.defjam.online), all port 27777; US East is nj.defjam.online).
  *
  * Each relay answers STATUS (docs/netplay-protocol.md, "Relay status") without a session: a
  * background thread asks every relay every 10 s while the online screens or the launcher's settings

@@ -40,6 +40,11 @@ static const NetRelayDef k_relays[] = {
     { "lax", "US West (Los Angeles)", "LA", "lax.defjam.online:27777", "45.32.95.226",
       "RECOMP_NETPLAY_SERVER_LAX", "lax", "los angeles|losangeles|la|california|west|us_west|us west|uswest|"
       "west.defjam.online|west.defjam.online:27777" },
+    /* build 111: Mexico City and Bogota (Colombia), for Mexico, Central America and the north of South America */
+    { "mex", "Mexico (Mexico City)", "MEXICO", "mex.defjam.online:27777", "64.177.95.126",
+      "RECOMP_NETPLAY_SERVER_MEX", "mex", "mexico|mexico city|mexicocity|mexico_city|cdmx|mx" },
+    { "bog", "Colombia (Bogota)", "BOGOTA", "bog.defjam.online:27777", "149.104.107.233",
+      "RECOMP_NETPLAY_SERVER_BOG", "bog", "bogota|colombia|co" },
 };
 
 typedef char netservers_table_matches_count[sizeof(k_relays) / sizeof(k_relays[0]) == NETSERVER_COUNT &&
