@@ -4498,8 +4498,54 @@ def _tower_floors(text):
     return out
 
 
+def _tower_net_checks(texts, floors_played, rollback, start_floor, strict_ai=True):
+    """Build 111: what every Team Tower Online run proves on both copies. checksums: each copy compared checksums
+    in at least as many matches as floors were started, the same matches on both, and no desync; rollback: the
+    floors really rolled back (the [ROLLBACK] match lines' counts); ai: with a start floor of 7 or more, the AI ramp
+    ran on every floor on both copies, and its fight numbers (writes, hold cuts, reads) agree between the copies
+    (strict_ai: in lockstep, where a decision is never seen first on a predicted step)."""
+    import re as _re
+    out, facts = {}, {}
+    ids = []
+    for i in (0, 1):
+        t = texts.get(i, "")
+        ids.append([m for m in _re.findall(r"checksums compared and equal \(match ([0-9A-F]{8})", t)])
+    sets = [list(dict.fromkeys(x)) for x in ids]
+    facts["checksum_matches"] = [len(x) for x in sets]
+    facts["checksum_lines"] = [len(x) for x in ids]
+    out["checksums_every_floor"] = all(len(x) >= floors_played for x in sets) and set(sets[0]) == set(sets[1])
+    out["no_desync"] = not any("[NETPLAY] desync in" in texts.get(i, "") for i in (0, 1))
+    if rollback:
+        rb = []
+        for i in (0, 1):
+            n = [int(x) for x in _re.findall(r"\[ROLLBACK\] match \d+ [^:]*: (\d+) rollbacks", texts.get(i, ""))]
+            rb.append(n)
+        facts["rollbacks_per_match"] = rb
+        out["rolled_back"] = all(sum(x) > 0 and len(x) >= floors_played for x in rb)
+    if start_floor >= 7:
+        fights = []
+        for i in (0, 1):
+            fs = []
+            for l in texts.get(i, "").splitlines():
+                if "[TOWERS-AI] fight {" in l:
+                    try:
+                        fs.append(json.loads(l.split("[TOWERS-AI] fight ", 1)[1]))
+                    except ValueError:
+                        pass
+            fights.append(fs)
+        key = ("floor", "mode", "skill", "writes", "hold_cuts", "adapt", "reads", "read_cuts")
+        facts["ai_fights"] = [[{k: f.get(k) for k in key} for f in fs] for fs in fights]
+        ramp = all(fs and all(f.get("mode") == "ramp" and f.get("writes", 0) > 0 for f in fs) for fs in fights)
+        out["ai_ramp_on"] = ramp and all("AI block at" in texts.get(i, "") for i in (0, 1))
+        if start_floor >= 12:
+            out["ai_counter_on"] = all(fs and all(f.get("adapt") == 1 for f in fs) for fs in fights)
+        if strict_ai:
+            out["ai_numbers_agree"] = facts["ai_fights"][0] == facts["ai_fights"][1]
+    return out, facts
+
+
 def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, lock_timeout=None, log=None, keep_roots=False,
-                  extra_env=None, out_dir=None, fast_ko=600):
+                  extra_env=None, out_dir=None, fast_ko=600, rollback=False, start_floor=0, lag=None, name="towersonline"):
     """Team Tower Online (community/team-tower-online-design.md): a local account service with Towers on and a relay
     that asks it (FFNY_SERVER_DIR: a server checkout with relay/tower.go); two signed-in copies.
 
@@ -4511,20 +4557,31 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
     leave: copy 1 leaves after floor 1 and comes back by the code 20 s later, the climb goes on; after floor 2 it
     leaves for good: 3 minutes later the relay saves the climb (the host's page says so; the service has it saved).
     desync: copy 0's checksum is parted on floor 2's first fight: the floor is void and fought again.
-    soak: `floors` floors (10) with copy 1 setting each floor up 4 s late (unequal loads): no desync, no void."""
+    soak: `floors` floors (10) with copy 1 setting each floor up 4 s late (unequal loads): no desync, no void.
+
+    Build 111 (dj.py towersteam-online): rollback=True: the copies opt in (RECOMP_ROLLBACK=on, the relay -rollback with a
+    300 ms ping limit) and both get RECOMP_NETPLAY_LAG_MS (lag, default "40,20"), so the floors really roll back;
+    start_floor=N: the account service starts every new climb on floor N (-towers-test-team-floor, off the board),
+    so the AI ramp's writes (and from 12 the repeat counter) run. Every variant then also checks _tower_net_checks."""
     t0 = time.time()
     floors = int(floors or (10 if variant == "soak" else 3))
     timeout = timeout or (300 + floors * 120 + (420 if variant in ("climb", "leave") else 0))
-    s = copies.Session("towersonline", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
-    result = {"scenario": "towersonline", "variant": variant, "ok": False}
+    s = copies.Session(name, lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    base_floor = int(start_floor) if start_floor and int(start_floor) > 1 else 1
+    result = {"scenario": name, "variant": variant, "ok": False,
+              "params": {"rollback": bool(rollback), "start_floor": base_floor, "floors": floors, "fast_ko": fast_ko}}
+    tag = ("rb-" if rollback else "ls-") + ("f%d-" % base_floor if base_floor > 1 else "")
+    last = base_floor + floors - 1
     shots, problems = [], []
     out_dir = out_dir or TOWER_ONLINE_SHOTS
     try:
         h = harness()
         acc_port = relay_port + 100
         base = "http://127.0.0.1:%d" % acc_port
-        tokens = s.accounts(acc_port, TOWER_ONLINE_PLAYERS, extra=["-towers", "-social"])
-        s.relay(relay_port, extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)])
+        acc_extra = ["-towers", "-social"] + (["-towers-test-team-floor", str(base_floor)] if base_floor > 1 else [])
+        tokens = s.accounts(acc_port, TOWER_ONLINE_PLAYERS, extra=acc_extra)
+        s.relay(relay_port, rollback=bool(rollback), extra=["-accounts-internal", "http://127.0.0.1:%d" % (acc_port + 1)] +
+                (["-rollback-max-ping", "300"] if rollback else []))
         code_file = os.path.join(s.dir, "tower-code.txt")
         fight = h.FIGHT_TAIL.replace(",b:10.6:1200:0.8:0.15", "")     # no B: on the room page it is SAVE & QUIT
 
@@ -4551,7 +4608,7 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
                 "RECOMP_NETPLAY_CODE_FILE": code_file,
                 "RECOMP_TEST_TOWER_ROLE": role,
                 "RECOMP_TEST_TOWER_PUBLIC": "1" if variant == "climb" else "0",
-                "RECOMP_ROLLBACK": "off",
+                "RECOMP_ROLLBACK": "on" if rollback else "off",
                 "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
                 "RECOMP_PAD_SCRIPT": script,
                 "RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % acc_port,
@@ -4559,6 +4616,8 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
                 "RECOMP_TEST_OPEN_ONLINE": ("towercard" if i == 0 else "rooms") if variant == "climb" else "1",
                 "RECOMP_TEST_KO_STEP": "%d,0" % int(fast_ko or 600),
             })
+            if rollback:                # a path long enough for wrong guesses: the floors roll back
+                env["RECOMP_NETPLAY_LAG_MS"] = lag or "40,20"
             if variant != "soak":       # pictures of the pages, never of a soak
                 env.update({"RECOMP_OVERLAY_SHOT_DIR": shot_dir, "RECOMP_OVERLAY_SHOT_MS": "1500"})
             env.update(more)
@@ -4608,7 +4667,7 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
                     except subprocess.TimeoutExpired:
                         pass
             for i in (0, 1):
-                _tower_online_pngs(dirs[i], "%s-p%d" % (phase, i + 1), out_dir, shots)
+                _tower_online_pngs(dirs[i], "%s%s-p%d" % (tag, phase, i + 1), out_dir, shots)
                 shutil.rmtree(dirs[i], ignore_errors=True)      # the .bmp captures are gigabytes: only the PNGs stay
             return stop, texts, logs
 
@@ -4624,21 +4683,22 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
         phases = {}
         leaving = "[NETPLAY] tests: leaving the Team Tower Online room"
         if variant == "leave":
-            stop, texts, logs = run_phase("leave", {0: {}, 1: {"RECOMP_TEST_TOWER_LEAVE": "1,20", "RECOMP_TEST_TOWER_LEAVE2": "2"}},
+            stop, texts, logs = run_phase("leave", {0: {}, 1: {"RECOMP_TEST_TOWER_LEAVE": "%d,20" % base_floor,
+                                                                 "RECOMP_TEST_TOWER_LEAVE2": str(base_floor + 1)}},
                                           lambda cs: cs[0].watch.count("[NETPLAY] tests: Team Tower Online climb over"), timeout)
             fl = agree(texts, "leave")
             over = [l for l in texts[0].splitlines() if "Team Tower Online climb over" in l]
             phases["leave"] = {"stop": stop, "floors": fl, "over": over[-1][-200:] if over else "", "logs": logs}
             rl = relay_log()
             checks = {"rejoined": "back into the Team Tower Online room" in texts[1],
-                      "climb_went_on": any(f == 2 for f, _ in _tower_floors(texts[0])),
+                      "climb_went_on": any(f == base_floor + 1 for f, _ in _tower_floors(texts[0])),
                       "saved_after_away": bool(over) and "saved" in over[-1] and "did not come back" in over[-1],
                       "relay_saved": "climb over: saved" in rl}
         elif variant in ("desync", "soak"):
-            more0 = {"RECOMP_TEST_TOWER_LEAVE": str(floors)}
-            more1 = {"RECOMP_TEST_TOWER_LEAVE": str(floors)}
+            more0 = {"RECOMP_TEST_TOWER_LEAVE": str(last)}
+            more1 = {"RECOMP_TEST_TOWER_LEAVE": str(last)}
             if variant == "desync":
-                more0["RECOMP_TEST_TOWERS_ONLINE_DESYNC"] = "2"
+                more0["RECOMP_TEST_TOWERS_ONLINE_DESYNC"] = str(base_floor + 1)
                 more0["RECOMP_TEST_TOWER_VOTE_DELAY_S"] = more1["RECOMP_TEST_TOWER_VOTE_DELAY_S"] = "8"   # the summary's pictures
             else:
                 more1["RECOMP_TEST_START_DELAY_MS"] = "4000"
@@ -4652,24 +4712,25 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
             phases[variant] = {"stop": stop, "floors": fl, "voids": voids, "logs": logs,
                                "desyncs": [texts[i].count("[NETPLAY] desync in") for i in (0, 1)]}
             if variant == "desync":
-                checks = {"voided": "floor 2 void" in rl, "replayed": [f for f, _ in fl].count(2) >= 2,
-                          "climbed_on": any(f == floors for f, _ in fl), "void_result": "void: this PC saw the floor desync" in texts[0]}
+                checks = {"voided": "floor %d void" % (base_floor + 1) in rl,
+                          "replayed": [f for f, _ in fl].count(base_floor + 1) >= 2,
+                          "climbed_on": any(f == last for f, _ in fl), "void_result": "void: this PC saw the floor desync" in texts[0]}
             else:
-                checks = {"all_floors": sorted({f for f, _ in fl}) == list(range(1, floors + 1)), "no_desync":
+                checks = {"all_floors": sorted({f for f, _ in fl}) == list(range(base_floor, last + 1)), "no_desync":
                           not any(phases[variant]["desyncs"]), "no_void": voids == 0,
                           "delayed": "sets the match up 4000 ms late" in texts[1]}
         else:
-            stop, texts, logs = run_phase("climb", {0: {"RECOMP_TEST_TOWER_LEAVE": str(floors)},
-                                                    1: {"RECOMP_TEST_TOWER_LEAVE": str(floors), "RECOMP_TEST_TOWER_JOIN_DELAY_S": "40"}},
+            stop, texts, logs = run_phase("climb", {0: {"RECOMP_TEST_TOWER_LEAVE": str(last)},
+                                                    1: {"RECOMP_TEST_TOWER_LEAVE": str(last), "RECOMP_TEST_TOWER_JOIN_DELAY_S": "40"}},
                                           lambda cs: all(c.watch.count(leaving) for c in cs), timeout)
             fl = agree(texts, "climb")
             phases["climb"] = {"stop": stop, "floors": fl, "logs": logs}
             listed = [l for l in texts[1].splitlines() if "joining the listed Team Tower room" in l]
             # session 2: resume with the same pair, a loss, then a new climb
             stop2, texts2, logs2 = run_phase("resume", {
-                0: {"RECOMP_TEST_TOWER_RESUME": "1", "RECOMP_TEST_TOWERS_ONLINE_LOSE": str(floors + 2), "RECOMP_TEST_TOWER_NEW": "1",
-                    "RECOMP_TEST_TOWER_LEAVE": "1"},
-                1: {"RECOMP_TEST_TOWERS_ONLINE_LOSE": str(floors + 2), "RECOMP_TEST_TOWER_LEAVE": "1"}},
+                0: {"RECOMP_TEST_TOWER_RESUME": "1", "RECOMP_TEST_TOWERS_ONLINE_LOSE": str(last + 2), "RECOMP_TEST_TOWER_NEW": "1",
+                    "RECOMP_TEST_TOWER_LEAVE": str(base_floor)},
+                1: {"RECOMP_TEST_TOWERS_ONLINE_LOSE": str(last + 2), "RECOMP_TEST_TOWER_LEAVE": str(base_floor)}},
                 lambda cs: all(c.watch.count(leaving) for c in cs), timeout)
             fl2 = agree(texts2, "resume")
             phases["resume"] = {"stop": stop2, "floors": fl2, "logs": logs2}
@@ -4684,14 +4745,27 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
             seq = [f for f, _ in fl2]
             checks = {
                 "public_listed": bool(listed),
-                "climbed": sorted({f for f, _ in fl}) == list(range(1, floors + 1)),
+                "climbed": sorted({f for f, _ in fl}) == list(range(base_floor, last + 1)),
                 "no_desync": not any("[NETPLAY] desync in" in t for t in list(texts.values()) + list(texts2.values())),
-                "resumed_next_floor": bool(seq) and seq[0] == floors + 1,
+                "resumed_next_floor": bool(seq) and seq[0] == last + 1,
                 "resume_reserved": "W/ Copy 1" in rl or "W/ COPY 1" in rl,
                 "lost_ends": "climb over: loss" in rl,
-                "new_climb_floor_1": 1 in seq[seq.index(floors + 2) + 1:] if (floors + 2) in seq else False,
-                "board_both_names": "Copy 0" in board and "Copy 1" in board,
+                "loss_ends_both": all("Team Tower Online climb over: loss" in texts2[i] for i in (0, 1)),
+                "new_climb_floor_1": base_floor in seq[seq.index(last + 2) + 1:] if (last + 2) in seq else False,
             }
+            if base_floor == 1:         # a test start floor keeps the climb off the board
+                checks["board_both_names"] = "Copy 0" in board and "Copy 1" in board
+        net_facts = {}
+        if variant != "desync":         # (its forced desync is the point there)
+            runs = [(texts, [f for f, _ in _tower_floors(texts[0])])]
+            if variant == "climb":
+                runs.append((texts2, [f for f, _ in _tower_floors(texts2[0])]))
+            for n, (tx, fl_) in enumerate(runs):
+                c, fc = _tower_net_checks(tx, len(fl_), rollback, base_floor, strict_ai=not rollback)
+                for k, v in c.items():
+                    checks["%s%s" % (k, "" if n == 0 else "_session2")] = v
+                net_facts["session%d" % (n + 1)] = fc
+        result["net"] = net_facts
         result["checks"] = checks
         result["phases"] = phases
         result["problems"] = problems
