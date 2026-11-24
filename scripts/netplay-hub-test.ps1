@@ -75,10 +75,10 @@ param([ValidateRange(2, 4)][int]$Players = 2, [int]$Secs = 1200, [string[]]$Extr
       [string[]]$Stage = @(), [int]$FastKo = 0, [string]$FastKoWinner = 'alt', [switch]$Bot,
       [ValidateRange(0, 100)][int]$BotAggression = 60, [int]$RelayPort = 27777, [int]$BaseCore = 2,
       [string]$DataPrefix = '', [int]$NaRelayPort = 0, [int]$WestRelayPort = 0, [int]$SaRelayPort = 0, [int]$SaLagMs = 0, [switch]$PingSum,
-      [ValidateSet('auto', 'eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax', 'all', 'both')][string]$Server = 'auto',
-      [int]$EuLagMs = 0, [int]$NaLagMs = 0, [int]$WestLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax')][string]$SwitchTo = '',
-      [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax', 'all', 'both')][string[]]$Servers = @(),
-      [ValidateSet('', 'auto', 'eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax')][string[]]$SwitchTos = @(),
+      [ValidateSet('auto', 'eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax', 'mex', 'bog', 'waw', 'all', 'both')][string]$Server = 'auto',
+      [int]$EuLagMs = 0, [int]$NaLagMs = 0, [int]$WestLagMs = 0, [ValidateSet('', 'auto', 'eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax', 'mex', 'bog', 'waw')][string]$SwitchTo = '',
+      [int]$SwitchAfterMs = 3000, [ValidateSet('auto', 'eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax', 'mex', 'bog', 'waw', 'all', 'both')][string[]]$Servers = @(),
+      [ValidateSet('', 'auto', 'eu', 'na', 'sg', 'sa', 'mia', 'dfw', 'lax', 'mex', 'bog', 'waw')][string[]]$SwitchTos = @(),
       [int[]]$JoinListed = @(), [int]$JoinListedSecs = 90, [int]$CopyGapSecs = 3, [switch]$NoOverride,
       [string]$Venues = '', [string]$SummaryPresses = '4+3x12', [int]$FightSecs = 1200,
       [switch]$Created, [string[]]$CpRecords = @(), [int]$Mode = -1, [string]$LogName = 'hub-test')
@@ -195,11 +195,17 @@ for ($i = 0; $i -lt $Players; $i++) {
     $serverEnv = if ($NaRelayPort) {
         @('--env', "RECOMP_NETPLAY_SERVER=$choice", '--env', "RECOMP_NETPLAY_SERVER_EU=127.0.0.1:$RelayPort",
           '--env', "RECOMP_NETPLAY_SERVER_NA=127.0.0.1:$NaRelayPort", '--env', "RECOMP_NETPLAY_SERVER_SG=$westAt",
-          '--env', "RECOMP_NETPLAY_SERVER_SA=$saAt", '--env', 'RECOMP_NETPLAY_SERVER_MIA=127.0.0.1:9')
+          '--env', "RECOMP_NETPLAY_SERVER_SA=$saAt", '--env', 'RECOMP_NETPLAY_SERVER_MIA=127.0.0.1:9',
+          '--env', 'RECOMP_NETPLAY_SERVER_DFW=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_LAX=127.0.0.1:9',
+          '--env', 'RECOMP_NETPLAY_SERVER_MEX=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_BOG=127.0.0.1:9',
+          '--env', 'RECOMP_NETPLAY_SERVER_WAW=127.0.0.1:9')
     } else {
         @('--env', "RECOMP_NETPLAY_SERVER=127.0.0.1:$RelayPort", '--env', 'RECOMP_NETPLAY_SERVER_EU=127.0.0.1:9',
           '--env', 'RECOMP_NETPLAY_SERVER_NA=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_SG=127.0.0.1:9',
-          '--env', 'RECOMP_NETPLAY_SERVER_SA=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_MIA=127.0.0.1:9')
+          '--env', 'RECOMP_NETPLAY_SERVER_SA=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_MIA=127.0.0.1:9',
+          '--env', 'RECOMP_NETPLAY_SERVER_DFW=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_LAX=127.0.0.1:9',
+          '--env', 'RECOMP_NETPLAY_SERVER_MEX=127.0.0.1:9', '--env', 'RECOMP_NETPLAY_SERVER_BOG=127.0.0.1:9',
+          '--env', 'RECOMP_NETPLAY_SERVER_WAW=127.0.0.1:9')
     }
     $switch = if ($i -lt $SwitchTos.Count) { $SwitchTos[$i] } else { $SwitchTo }
     if ($NaRelayPort -and $switch) { $serverEnv += @('--env', "RECOMP_TEST_SERVER_SWITCH=$SwitchAfterMs,$switch") }

@@ -24,7 +24,7 @@
 .PARAMETER Server  The ssh hosts (entries in ~/.ssh/config), comma-separated: the project's server,
                    and the first one for as long as older installs ask there.
 .PARAMETER RelayOnly Relays that serve no downloads but need the manifest for their build gate
-                   (the regional relays, ssh aliases ffny-nj, ffny-na2, ffny-sg2, ffny-sa, ffny-dfw, ffny-lax): latest.json and its signature only.
+                   (the regional relays, ssh aliases ffny-nj, ffny-na2, ffny-sg2, ffny-sa, ffny-dfw, ffny-lax, ffny-mex, ffny-bog, ffny-waw): latest.json and its signature only.
 .PARAMETER NoUpload  Fetch (or build), verify and sign only (build/update/).
 .PARAMETER NoGitHub  Upload to the servers but make no GitHub release. With -NoUpload or
                    -NoGitHub nothing is pushed: HEAD must already be on ffny/<Branch>.
@@ -43,7 +43,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Notes,
     [string[]]$Server = @('ffny-online', 'hetzner-sweeax'),
-    [string[]]$RelayOnly = @('ffny-nj', 'ffny-na2', 'ffny-sg2', 'ffny-sa', 'ffny-dfw', 'ffny-lax'),
+    [string[]]$RelayOnly = @('ffny-nj', 'ffny-na2', 'ffny-sg2', 'ffny-sa', 'ffny-dfw', 'ffny-lax', 'ffny-mex', 'ffny-bog', 'ffny-waw'),
     [string]$Key = "$env:USERPROFILE\.defjam\update-signing-key.pem",
     [switch]$NoUpload,
     [switch]$NoGitHub,

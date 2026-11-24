@@ -380,15 +380,19 @@ BASE_ENV = {
     "RECOMP_NETPLAY_SERVER_MIA": "127.0.0.1:9",   # build 91: US South (Miami)
     "RECOMP_NETPLAY_SERVER_DFW": "127.0.0.1:9",   # build 91: Dallas
     "RECOMP_NETPLAY_SERVER_LAX": "127.0.0.1:9",   # build 91: Los Angeles (any relay a test does not name is 127.0.0.1:9 too)
+    "RECOMP_NETPLAY_SERVER_MEX": "127.0.0.1:9",   # build 111: Mexico City
+    "RECOMP_NETPLAY_SERVER_BOG": "127.0.0.1:9",   # build 111: Bogota
+    "RECOMP_NETPLAY_SERVER_WAW": "127.0.0.1:9",   # build 111: Warsaw
     "RECOMP_NO_UPDATE_CHECK": "1",
 }
 
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
 RELAY_VARS = ("RECOMP_NETPLAY_SERVER_EU", "RECOMP_NETPLAY_SERVER_NA", "RECOMP_NETPLAY_SERVER_WEST",
               "RECOMP_NETPLAY_SERVER_SG", "RECOMP_NETPLAY_SERVER_SA", "RECOMP_NETPLAY_SERVER_MIA",
-              "RECOMP_NETPLAY_SERVER_DFW", "RECOMP_NETPLAY_SERVER_LAX")
+              "RECOMP_NETPLAY_SERVER_DFW", "RECOMP_NETPLAY_SERVER_LAX", "RECOMP_NETPLAY_SERVER_MEX",
+              "RECOMP_NETPLAY_SERVER_BOG", "RECOMP_NETPLAY_SERVER_WAW")
 ADDRESS_VARS = ("RECOMP_ACCOUNT_SERVER", "RECOMP_NETPLAY_SERVER") + RELAY_VARS
-SERVER_CHOICES = ("auto", "eu", "na", "west", "sg", "sa", "mia", "dfw", "lax", "all", "both")
+SERVER_CHOICES = ("auto", "eu", "na", "west", "sg", "sa", "mia", "dfw", "lax", "mex", "bog", "waw", "all", "both")
 
 
 def check_env(env):

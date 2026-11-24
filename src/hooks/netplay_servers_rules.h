@@ -23,9 +23,12 @@ extern "C" {
 #define NETSERVER_MIA   4       /* "mia"  US South (Miami), na2.defjam.online (build 91) */
 #define NETSERVER_DFW   5       /* "dfw"  US Central (Dallas), dfw.defjam.online (build 91) */
 #define NETSERVER_LAX   6       /* "lax"  US West (Los Angeles), lax.defjam.online (build 91) */
+#define NETSERVER_MEX   7       /* "mex"  Mexico (Mexico City), mex.defjam.online (build 111) */
+#define NETSERVER_BOG   8       /* "bog"  Colombia (Bogota), bog.defjam.online (build 111) */
+#define NETSERVER_WAW   9       /* "waw"  Eastern Europe (Warsaw), waw.defjam.online (build 111) */
 #define NETSERVER_WEST  NETSERVER_SG    /* the slot's name of builds 38..88 */
-#define NETSERVER_COUNT 7       /* the rows of k_relays (checked there) */
-#define NETSERVER_MAX   8       /* the most the wire's trailers and the picker take */
+#define NETSERVER_COUNT 10      /* the rows of k_relays (checked there) */
+#define NETSERVER_MAX   12      /* the most the wire's trailers and the picker take (8 until build 110) */
 #define NETSERVER_LEGACY 3      /* the relays every build since 38 has in this order: the fixed three pings */
 
 /* One relay of the table. */
@@ -57,11 +60,12 @@ enum NetServerChoice {
     NETCHOICE_AUTO = 0, NETCHOICE_EU, NETCHOICE_NA, NETCHOICE_CUSTOM, NETCHOICE_ALL, NETCHOICE_SG,
     NETCHOICE_RELAY3 = 6, NETCHOICE_SA = NETCHOICE_RELAY3, NETCHOICE_MIA = NETCHOICE_RELAY3 + 1,
     NETCHOICE_DFW = NETCHOICE_RELAY3 + 2, NETCHOICE_LAX = NETCHOICE_RELAY3 + 3,
+    NETCHOICE_MEX = NETCHOICE_RELAY3 + 4, NETCHOICE_BOG = NETCHOICE_RELAY3 + 5, NETCHOICE_WAW = NETCHOICE_RELAY3 + 6,
     NETCHOICE_END = NETCHOICE_RELAY3 + NETSERVER_MAX - NETSERVER_LEGACY,
     NETCHOICE_WEST = NETCHOICE_SG
 };
 
-/* The setting's text: "auto", "all" or a relay's id ("eu", "na", "sg", "sa", "mia", "dfw", "lax"); also each relay's other
+/* The setting's text: "auto", "all" or a relay's id ("eu", "na", "sg", "sa", "mia", "dfw", "lax", "mex", "bog", "waw"); also each relay's other
  * words (names, "brazil"), its host name with or without the port, the old "both" (= all), the old
  * default play.defjam.online (= auto) and US West's words (closed in build 89: auto). Anything else is a
  * custom relay address. */
