@@ -274,9 +274,10 @@ def main(argv=None):
                                               "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers",
                                               "towerrewards", "towersteam", "factionwar", "towersweekly", "towersonline",
                                               "towersteam-online"])
-    sc.add_argument("--variant", default="climb", choices=["climb", "leave", "desync", "soak"],
+    sc.add_argument("--variant", default="climb", choices=["climb", "leave", "desync", "soak", "quit"],
                     help="towersonline: climb (public room, list join, resume, loss, new climb), leave (away and back, "
-                         "then the 3-minute save), desync (a forced void), soak (10 floors, unequal loads)")
+                         "then the 3-minute save), desync (a forced void), soak (10 floors, unequal loads), quit (the partner leaves "
+                         "the room in floor 1's fight: the floor is lost, the climb ends)")
     sc.add_argument("--floors", type=int, default=0, help="towersonline: floors to climb (default 3; soak 10)")
     sc.add_argument("--start-floor", type=int, default=0, help="towersteam-online: the service starts each new climb on this "
                     "floor (-towers-test-team-floor; off the board): 30 runs the AI ramp, its hold cap and repeat counter")

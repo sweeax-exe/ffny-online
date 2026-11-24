@@ -4694,6 +4694,19 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
                       "climb_went_on": any(f == base_floor + 1 for f, _ in _tower_floors(texts[0])),
                       "saved_after_away": bool(over) and "saved" in over[-1] and "did not come back" in over[-1],
                       "relay_saved": "climb over: saved" in rl}
+        elif variant == "quit":
+            # build 111: the partner quits (leaves the room) during the first floor's fight: the floor is lost for the
+            # team (owner rule: a quit in a fight is a loss), the climb ends on both and on the service
+            stop, texts, logs = run_phase("quit", {0: {}, 1: {"RECOMP_TEST_LEAVE_STEP": "400"}},
+                                          lambda cs: cs[0].watch.count("[NETPLAY] tests: Team Tower Online climb over"), timeout)
+            fl = agree(texts, "quit")
+            rl = relay_log()
+            over = [l for l in texts[0].splitlines() if "Team Tower Online climb over" in l]
+            phases["quit"] = {"stop": stop, "floors": fl, "over": over[-1][-200:] if over else "", "logs": logs}
+            checks = {"quit_mid_fight": "leaving the room mid-fight" in texts[1],
+                      "relay_quit_loss": "quit during the fight: the floor is lost" in rl,
+                      "climb_over_loss": "climb over: loss" in rl and bool(over) and "loss" in over[-1],
+                      "one_floor": [f for f, _ in fl] == [base_floor]}
         elif variant in ("desync", "soak"):
             more0 = {"RECOMP_TEST_TOWER_LEAVE": str(last)}
             more1 = {"RECOMP_TEST_TOWER_LEAVE": str(last)}
@@ -4756,7 +4769,7 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
             if base_floor == 1:         # a test start floor keeps the climb off the board
                 checks["board_both_names"] = "Copy 0" in board and "Copy 1" in board
         net_facts = {}
-        if variant != "desync":         # (its forced desync is the point there)
+        if variant not in ("desync", "quit"):     # (a forced desync / a quit fight is the point there)
             runs = [(texts, [f for f, _ in _tower_floors(texts[0])])]
             if variant == "climb":
                 runs.append((texts2, [f for f, _ in _tower_floors(texts2[0])]))
