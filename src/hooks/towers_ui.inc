@@ -39,6 +39,8 @@
 // is player 2's A 4 s after the name shows.
 
 void open_fighters_for(bool towers);       // below: the hub's grid for a tower's climber
+bool tower_online_card(ImDrawList *dl, const Frame &f, const Pad &pad);     // towers_online_ui.inc
+void tower_online_open_card();
 bool G_towers_starting = false;            // the gallery's towers-starting page
 bool g_towers_close = false;               // the start card started a run: the online screens close
 std::atomic<int> g_towers_hub{0};          // the end screen's A: the next opening of the screens shows TOWERS
@@ -975,6 +977,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     }
     // what the chosen tower is
     text(dl, f, g_hand, 11, 320, 394, with_alpha(CREAM, 0.95f), tower_desc(tower).c_str(), CENTER, 0.8f, 560);
+    if (tower_online_card(dl, f, pad)) return;      // Team Tower Online's host / join card (towers_online_ui.inc)
     if (TWU.rules) {
         towers_rules_panel(dl, f, tower);
         if (pad.y || pad.b) TWU.rules = false;
@@ -1079,6 +1082,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
     TWU.card = 0;
     float hx = 54;
     hx += hint(dl, f, hx, 424, "a", have ? "CONTINUE" : "CLIMB");
+    if (tower == TOWER_TEAM) hx += hint(dl, f, hx, 424, "rt", "ONLINE");     // Team Tower Online
     hx += hint(dl, f, hx, 424, "x", "BOARD");
     hx += hint(dl, f, hx, 424, "y", "RULES");
     hint(dl, f, hx, 424, "b", "BACK");
@@ -1086,6 +1090,7 @@ void draw_towers_page(ImDrawList *dl, const Frame &f, const Pad &pad, ImVec2 dis
          signed_now ? "SIGNED IN  -  YOUR CLIMBS GO ON THE BOARD" : "SIGN IN TO PUT YOUR CLIMB ON THE BOARD", RIGHT, 0.8f);
     if (pad.y) { TWU.rules = true; return; }
     if (pad.b) { S.page = HUB; return; }
+    if (pad.rt && tower == TOWER_TEAM) { tower_online_open_card(); return; }
     if (pad.x) {     // build 99: the board as it is now (a climb may have gone on it since)
         TWU.board = true; TWU.board_all = 0;
         if (!gallery_on() && towers_signed_in()) TWB.at[0] = TWB.at[1] = TWB.at[2] = TWB.at[3] = 0;
@@ -1192,9 +1197,11 @@ void towers_scene(ImDrawList *dl, const Frame &f, ImVec2 display, const TowersVi
     if (tower == TOWER_WEEKLY && run.tower == TOWER_WEEKLY)     // build 108: the week's twist under the name
         text(dl, f, g_title, 12, 52, 50, col, (std::string(run.week) + "  -  " + tw_twist_title(run.twist)).c_str(), LEFT, 0.8f);
     char line[96];
-    snprintf(line, sizeof line, "SEED %08X", v.seed);
-    text(dl, f, g_body, 10, 590, 30, with_alpha(GREY, 0.9f), line, RIGHT, 0);
-    if (first) text(dl, f, g_hand, 15, 590, 44, ORANGE, "THE CLIMB BEGINS", RIGHT, 1.0f);
+    if (v.seed) {       // an online climb's seed is the server's: not shown
+        snprintf(line, sizeof line, "SEED %08X", v.seed);
+        text(dl, f, g_body, 10, 590, 30, with_alpha(GREY, 0.9f), line, RIGHT, 0);
+    }
+    if (first && (!v.team || v.seed || v.floor == 1)) text(dl, f, g_hand, 15, 590, 44, ORANGE, "THE CLIMB BEGINS", RIGHT, 1.0f);
     else if (draw) text(dl, f, g_hand, 15, 590, 44, ORANGE, "A DRAW: THIS FLOOR AGAIN", RIGHT, 1.0f);
 
     // the tower's column on the left: nine floors around the climber, the marker climbing one

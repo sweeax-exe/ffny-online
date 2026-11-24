@@ -55,6 +55,11 @@ enum NetplayState {
 #define NETPLAY_MODE_RTS         0x43
 #define NETPLAY_RTS_SLOTS        4
 #define NETPLAY_IS_RTS(mode)     ((mode) == NETPLAY_MODE_RTS)
+/* Team Tower Online (server relay/tower.go, towers_online.h): a private room of two signed-in players who climb Team
+ * Tower 4 together; the relay runs the climb (TOWER, TCHOICE) and each floor is a lockstep Team START whose tower
+ * trailer names the floor's CPUs. No CAPS bit: rooms are per build. */
+#define NETPLAY_MODE_TOWER       0x44
+#define NETPLAY_IS_TOWER(mode)   ((mode) == NETPLAY_MODE_TOWER)
 #define NETPLAY_CAP_RTS          16777216u  /* 1 << 24, both ways (bit 23 is the standard preference, CAPS_ORIGINAL) */
 /* Build 96 (server relay/protocol_who_rooms.go), no CAPS bit: PLAYERS (WHO, sent to games of build 96 and later)
  * and PLAYERLIST (asked with these flags in the word after its build) end with the rooms of the listed players
@@ -317,6 +322,8 @@ typedef struct NetTSet {
 void netplay_lobby_tset_join(unsigned match);
 /* The set of this PC's room; 0 when it is no tournament room (or no TSET came yet). */
 int netplay_lobby_tset(NetTSet *out);
+/* Team Tower Online: the host's choice in a tower room (TOWERNET_CHOICE_RESUME, TOWERNET_CHOICE_NEW). */
+void netplay_lobby_tower_choice(int choice);
 /* The stage pick (only the picker, only one of `choices`; the relay refuses anything else). */
 void netplay_lobby_tset_pick(int venue);
 /* The last TJOIN refusal's sentence (the relay's or the account service's); returns a number that

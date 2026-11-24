@@ -40,6 +40,12 @@ the exit code is 1 on any failure.
            lost, a new climb on floor 1, the community Team Tower; build 108: player 2 signs in on the local
            service's /auth/pair page with the code off the screen, the start records them, the sign-in card's pictures;
            both boards with both names; FFNY_SERVER_DIR: a server checkout with pair.go)
+    python tools/defjam-mcp/dj.py scenario towersteam-online [--variant climb|leave|desync|soak] [--rollback on]
+           [--start-floor 30] [--floors N]   (build 111: towersonline with rollback on a lagged path and a high start
+           floor; checksums compared on every floor on both copies, the AI ramp's numbers agree)
+    python tools/defjam-mcp/dj.py scenario towersonline [--variant climb|leave|desync|soak] [--floors N]
+           [--out D:/DefJam/community/team-tower-online-shots]   (Team Tower Online: two signed-in copies on a local
+           account service and relay climb together; FFNY_SERVER_DIR: a server checkout with relay/tower.go)
     python tools/defjam-mcp/dj.py scenario towersweekly [--twists low_health,glass_jaw] [--out DIR]   (build 108: The
            Weekly, tower 3, on a local account service from source with its switch off, then on: no card while off;
            two floors of each twist, checked against the service's floor list and the twist's own effect; the
@@ -142,6 +148,15 @@ def cmd_scenario(a):
         r = scenarios.towers(timeout=a.timeout, extra_env=env, **common)
     elif a.kind == "towersteam":
         r = scenarios.towers_team(timeout=a.timeout, extra_env=env, out_dir=a.out, **common)
+    elif a.kind in ("towersonline", "towersteam-online"):
+        # towersteam-online (build 111): the same runs, with --rollback on (the floors roll back on a lagged path) and
+        # --start-floor N (the service starts the climb on floor N: the AI ramp's writes), knockouts at step 900
+        online_name = a.kind.replace("-", "_") if a.kind != "towersonline" else "towersonline"
+        r = scenarios.towers_online(variant=a.variant, floors=a.floors, timeout=a.timeout, relay_port=a.relay_port,
+                                    extra_env=env, out_dir=a.out,
+                                    fast_ko=a.fast_ko if (a.kind == "towersonline" or a.fast_ko != 600) else 900,
+                                    rollback=a.rollback == "on", start_floor=a.start_floor, lag=a.lag, name=online_name,
+                                    **common)
     elif a.kind == "factionwar":
         r = scenarios.faction_war(size=a.size, matches=a.matches if a.matches != 3 else (2 if a.size == 1 else 1),
                                   timeout=a.timeout, relay_port=a.relay_port, extra_env=env,
@@ -257,7 +272,16 @@ def main(argv=None):
     sc = sub.add_parser("scenario")
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
                                               "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers",
-                                              "towerrewards", "towersteam", "factionwar", "towersweekly"])
+                                              "towerrewards", "towersteam", "factionwar", "towersweekly", "towersonline",
+                                              "towersteam-online"])
+    sc.add_argument("--variant", default="climb", choices=["climb", "leave", "desync", "soak", "quit"],
+                    help="towersonline: climb (public room, list join, resume, loss, new climb), leave (away and back, "
+                         "then the 3-minute save), desync (a forced void), soak (10 floors, unequal loads), quit (the partner leaves "
+                         "the room in floor 1's fight: the floor is lost, the climb ends)")
+    sc.add_argument("--floors", type=int, default=0, help="towersonline: floors to climb (default 3; soak 10)")
+    sc.add_argument("--start-floor", type=int, default=0, help="towersteam-online: the service starts each new climb on this "
+                    "floor (-towers-test-team-floor; off the board): 30 runs the AI ramp, its hold cap and repeat counter")
+    sc.add_argument("--lag", help="towersteam-online with --rollback on: RECOMP_NETPLAY_LAG_MS on both copies (default 40,20)")
     sc.add_argument("--size", type=int, default=1, choices=[1, 2], help="factionwar: 1 ON 1 (with the observer, the picker "
                     "and the lock) or 2 ON 2 (four fighters)")
     sc.add_argument("--twists", help="towersweekly: the twists to climb (comma list; default all six)")

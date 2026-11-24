@@ -14,6 +14,7 @@
 #include "recomp_settings.h"
 #include "towers.h"
 #include "towers_ai.h"
+#include "towers_online.h"
 #include "guest_call.h"
 #include "towers_partner.h"
 #include "account.h"
@@ -1242,8 +1243,250 @@ static int read_decision(int *winner, int *draw)
     return 1;
 }
 
+/* ---------------------------------------------------------------- Team Tower Online (towers_online.h)
+ * A floor of an online climb is a lockstep Team match the relay started (netplay.c): the players in slots 0 and 1, the
+ * floor's CPUs in 2 and 3 from START's tower trailer. Everything this file writes into the fight is a pure function
+ * of the floor (towers_floor_rules) and of guest state, run once per real step on every PC: the slot levels at the
+ * set-up, the CPUs' start momentum, the damage and health factors, the AI ramp (towers_ai.c, its test switches off).
+ * Its host state goes into the lockstep checksum (towers_online_hash) and, for rollback, into every save state
+ * (towers_online_state_save/load): a re-run of steps runs net_step again from the state the save put back, so each
+ * write and count happens once per step of the final history on every PC (the re-run only logs nothing). Nothing of
+ * the offline run (g_run, the run file, the service reports) is touched: the account service keeps the online run,
+ * the relay reports it. */
+static struct NetFloor {
+    int on;                 /* the running netplay match is a tower floor (set at START, cleared at the next START) */
+    int rules, tower, floor, floors, opp[2];
+    int begun;              /* its match set-up ran */
+    TowerFloorRules r;
+    unsigned step;
+    int momentum_done, decided, winner, draw, end_health, cpu_health;
+    unsigned decided_step;
+} g_net;
+static int g_played_floor[2], g_played_opp[2][2];      /* the last two online floors started here (the summary) */
+static int g_net_desynced_floor;
+static int side_health(uint32_t first, int n);     /* below */    /* tests: RECOMP_TEST_TOWERS_ONLINE_DESYNC parts this floor's checksum once */
+
+void towers_online_floor(int on, int rules, int tower, int floor, int floors, int opp1, int opp2)
+{
+    lock();
+    memset(&g_net, 0, sizeof g_net);
+    g_net.on = on && TOWER_IS_TEAM(tower) && floor >= 1 && floors >= floor;
+    if (g_net.on) {
+        g_net.rules = rules;
+        g_net.tower = tower;
+        g_net.floor = floor;
+        g_net.floors = floors;
+        g_net.opp[0] = opp1;
+        g_net.opp[1] = opp2;
+        g_net.winner = -1;
+        towers_floor_rules(tower, floor, floors, &g_net.r);
+        if (g_played_floor[0] != floor) {
+            g_played_floor[1] = g_played_floor[0];
+            memcpy(g_played_opp[1], g_played_opp[0], sizeof g_played_opp[0]);
+        }
+        g_played_floor[0] = floor;
+        g_played_opp[0][0] = opp1;
+        g_played_opp[0][1] = opp2;
+        fprintf(stderr, "[TOWERS] online floor %d of %d (%s): CPUs %d + %d, level %d, damage x%.2f, health x%.2f, momentum %.0f%%%s"
+                "%s\n", floor, floors, towers_name(tower), opp1, opp2, g_net.r.cpu_level, (double)g_net.r.cpu_damage,
+                (double)g_net.r.cpu_health, (double)g_net.r.cpu_momentum * 100.0, g_net.r.boss ? ", a boss floor" : "",
+                rules != TOWER_RULES_VERSION ? " (rules version differs from this game's: the floor plays this game's)" : "");
+    }
+    towers_ai_set_online(g_net.on);
+    unlock();
+}
+
+int towers_online_match(void) { return g_net.on; }
+
+int towers_online_played(int floor, int opp[2])
+{
+    int k, got = 0;
+    lock();
+    for (k = 0; k < 2 && !got; k++)
+        if (floor > 0 && g_played_floor[k] == floor) { opp[0] = g_played_opp[k][0]; opp[1] = g_played_opp[k][1]; got = 1; }
+    unlock();
+    return got;
+}
+
+int towers_online_cpu(int pos, int *fighter)
+{
+    if (!g_net.on || pos < 2 || pos > 3) return 0;
+    *fighter = g_net.opp[pos - 2];
+    return 1;
+}
+
+void towers_online_view(TowersOnlineFloor *out)
+{
+    memset(out, 0, sizeof *out);
+    lock();
+    out->on = g_net.on;
+    out->tower = g_net.tower;
+    out->floor = g_net.floor;
+    out->floors = g_net.floors;
+    out->opp[0] = g_net.opp[0];
+    out->opp[1] = g_net.opp[1];
+    out->rules = g_net.r;
+    out->fighting = g_net.on && g_net.begun && !g_net.decided;
+    unlock();
+}
+
+static void net_match_start(void)
+{
+    lock();
+    g_net.begun = 1;
+    g_net.step = 0;
+    g_net.momentum_done = g_net.decided = g_net.draw = 0;
+    g_net.winner = -1;
+    towers_ai_set_online(1);
+    towers_ai_boss_all(0);      /* a Weekly BOSS RUSH climb on this PC earlier must not reach an online floor */
+    towers_ai_begin_team(g_net.tower, g_net.floor, g_net.floors);      /* both CPUs, the floor's ramp */
+    MEM32(G_SLOT_LEVEL) = MEM32(G_SLOT_LEVEL + 4u) = PLAYER_LEVEL;
+    MEM32(G_SLOT_LEVEL + 8u) = MEM32(G_SLOT_LEVEL + 12u) = (uint32_t)g_net.r.cpu_level;
+    fprintf(stderr, "[TOWERS] online floor %d set up: slot levels %u %u %u %u\n", g_net.floor, MEM32(G_SLOT_LEVEL),
+            MEM32(G_SLOT_LEVEL + 4u), MEM32(G_SLOT_LEVEL + 8u), MEM32(G_SLOT_LEVEL + 12u));
+    unlock();
+}
+
+/* the decision of a 2 vs 2: the side that won (0 the players), or a draw */
+static int net_decision(int *side, int *draw)
+{
+    uint32_t phase = MEM32(G_PHASE), count = MEM32(G_RESULT_COUNT), code = 0, w = 0xFFFFFFFFu;
+    if (count && count <= RESULTS_MAX) code = MEM16(G_RESULTS + (count - 1u) * 0x10u + 0xEu);
+    *draw = 0;
+    if ((code & 1u) && (code & 4u)) { *draw = 1; *side = -1; return 1; }
+    if (phase == 3u) w = MEM32(G_WINNER);
+    else if (phase == 2u || ((code & 1u) && (MEM32(G_MATCH_FLAGS) & 8u))) w = MEM32(G_WINNER_FIRST);
+    else return 0;
+    if (w > 3u) { *draw = 1; *side = -1; return 1; }
+    *side = (int)(w >> 1);
+    return 1;
+}
+
+static void net_step(void)
+{
+    uint32_t cpu = ACTORS + 2u * STRIDE;
+    int k, rerun = netplay_rerunning();
+    lock();
+    if (!g_net.on || !g_net.begun) { unlock(); return; }
+    g_net.step++;
+    towers_ai_quiet(rerun);
+    towers_ai_step(g_net.step, g_net.decided);
+    if (!g_net.momentum_done && g_net.step <= 60 && MEM32(cpu + F_SLOT) != 0xFFFFFFFFu) {
+        for (k = 0; k < 2; k++) {       /* the real momentum meter, as towers_step (build 108: +0x364, never the stun meter) */
+            uint32_t c = cpu + STRIDE * (uint32_t)k;
+            float want = MOMENTUM_FULL * g_net.r.cpu_momentum, was = MEMF(c + F_METER);
+            if (MEM32(c + F_SLOT) == 0xFFFFFFFFu || !(MEMF(c + F_HEALTH_TOP) > 0.0f)) continue;
+            g_net.momentum_done = 1;
+            if (g_net.r.cpu_momentum > 0.0f && was == was && want > was) MEMF(c + F_METER) = want;
+        }
+    }
+    if (!g_net.decided) {
+        int w, d;
+        if (net_decision(&w, &d)) {
+            g_net.decided = 1;
+            g_net.decided_step = g_net.step;
+            g_net.winner = w;
+            g_net.draw = d;
+            g_net.end_health = side_health(ACTORS, 2);
+            g_net.cpu_health = side_health(ACTORS + 2u * STRIDE, 2);
+            towers_ai_end(d ? -1 : w, g_net.step);
+            if (!rerun)
+                fprintf(stderr, "[TOWERS] online floor %d decided at step %u: %s; the team's health %d%%, the CPUs' %d%%\n",
+                        g_net.floor, g_net.step, d ? "a draw" : w == 0 ? "the team won" : "the CPUs won", g_net.end_health,
+                        g_net.cpu_health);
+        }
+    }
+    towers_ai_quiet(0);
+    unlock();
+}
+
+/* A rollback save state of the floor (netplay.c snap_save / rollback_to): g_net and the AI contexts. Nothing while no
+ * floor runs, and a load puts back only a save of the floor that runs (the same floor and CPUs). */
+typedef struct NetSave { int on; unsigned ai_size; } NetSave;
+void towers_online_state_save(uint8_t out[TOWERS_ONLINE_STATE_BYTES])
+{
+    NetSave h;
+    unsigned ai = towers_ai_state_size();
+    lock();
+    h.on = g_net.on && g_net.begun && sizeof h + sizeof g_net + ai <= TOWERS_ONLINE_STATE_BYTES;
+    h.ai_size = ai;
+    memcpy(out, &h, sizeof h);
+    if (h.on) {
+        memcpy(out + sizeof h, &g_net, sizeof g_net);
+        towers_ai_state_save(out + sizeof h + sizeof g_net);
+    }
+    unlock();
+}
+
+void towers_online_state_load(const uint8_t in[TOWERS_ONLINE_STATE_BYTES])
+{
+    NetSave h;
+    memcpy(&h, in, sizeof h);
+    lock();
+    if (h.on && g_net.on && h.ai_size == towers_ai_state_size()) {
+        struct NetFloor was;
+        memcpy(&was, in + sizeof h, sizeof was);
+        if (was.on && was.floor == g_net.floor && was.opp[0] == g_net.opp[0] && was.opp[1] == g_net.opp[1]) {
+            g_net = was;
+            towers_ai_state_load(in + sizeof h + sizeof g_net);
+        }
+    }
+    unlock();
+}
+
+static void net_health_change(void)
+{
+    uint32_t r = MEM32(g_esp + 4);
+    float delta = MEMF(g_esp + 8);
+    if (!g_net.on || !g_net.begun || delta >= 0.0f) return;
+    if ((r == ACTORS || r == ACTORS + STRIDE) && g_net.r.cpu_damage != 1.0f) MEMF(g_esp + 8) = delta * g_net.r.cpu_damage;
+    else if ((r == ACTORS + 2u * STRIDE || r == ACTORS + 3u * STRIDE) && g_net.r.cpu_health > 1.0f)
+        MEMF(g_esp + 8) = delta / g_net.r.cpu_health;
+    towers_ai_health(r, MEMF(g_esp + 8));
+}
+
+uint32_t towers_online_hash(void)
+{
+    uint32_t h, parts[6];
+    int i;
+    if (!g_net.on || !g_net.begun) return 0;
+    h = towers_ai_hash();
+    parts[0] = g_net.step;
+    parts[1] = (uint32_t)g_net.momentum_done;
+    parts[2] = (uint32_t)g_net.decided;
+    parts[3] = (uint32_t)(g_net.winner + 1);
+    parts[4] = (uint32_t)g_net.floor;
+    parts[5] = (uint32_t)g_net.opp[0] << 16 ^ (uint32_t)g_net.opp[1];
+    for (i = 0; i < 6; i++) h = (h ^ parts[i]) * 16777619u;
+    {   /* tests: RECOMP_TEST_TOWERS_ONLINE_DESYNC=<floor> on one copy parts the checksum 5 s into that floor's first fight */
+        static int floor_test = -2;
+        if (floor_test == -2) floor_test = env_int("RECOMP_TEST_TOWERS_ONLINE_DESYNC", -1);
+        if (floor_test == g_net.floor && g_net.step >= 300 && g_net_desynced_floor != g_net.floor) {
+            if (g_net.step >= 900) g_net_desynced_floor = g_net.floor;    /* once: the replay is clean */
+            else h ^= 0x5EED0BADu;
+        }
+    }
+    return h ? h : 1u;
+}
+
+int towers_online_result(int *side, int *health, int *cpu_health, unsigned *steps)
+{
+    int got;
+    lock();
+    got = g_net.on && g_net.begun && g_net.decided;
+    if (got) {
+        *side = g_net.draw ? -1 : g_net.winner;
+        *health = g_net.end_health;
+        *cpu_health = g_net.cpu_health;
+        *steps = g_net.decided_step;
+    }
+    unlock();
+    return got;
+}
+
 void towers_match_start(void)
 {
+    if (g_net.on) { net_match_start(); return; }
     if (netplay_active()) return;
     lock();
     if (g_state == TOWERS_ARMED || (g_state == TOWERS_FIGHTING && g_decided)) {
@@ -1312,6 +1555,7 @@ void towers_step(void)
 {
     uint32_t me = ACTORS, cpu = ACTORS + STRIDE;
     int team = TOWER_IS_TEAM(g_run.tower);
+    if (g_net.on) { net_step(); return; }      /* Team Tower Online: also in a rollback's re-run (net_step) */
     if (g_state != TOWERS_FIGHTING || netplay_active() || netplay_rerunning()) return;
     lock();
     if (g_state != TOWERS_FIGHTING) { unlock(); return; }
@@ -1432,6 +1676,7 @@ void towers_health_change(void)
 {
     uint32_t r;
     float delta;
+    if (g_net.on) { net_health_change(); return; }
     if (g_state != TOWERS_FIGHTING || netplay_active()) return;
     r = MEM32(g_esp + 4);
     delta = MEMF(g_esp + 8);
@@ -1793,7 +2038,13 @@ void towers_done(void)
 
 int towers_boss_fight(int *opponent)
 {
-    int on = g_state == TOWERS_FIGHTING && g_match_seen && !g_decided && g_rules.boss && !netplay_active();
+    int on;
+    if (g_net.on) {     /* Team Tower Online: the floor's boss pair */
+        on = g_net.begun && !g_net.decided && g_net.r.boss;
+        if (on && opponent) *opponent = g_net.opp[0];
+        return on;
+    }
+    on = g_state == TOWERS_FIGHTING && g_match_seen && !g_decided && g_rules.boss && !netplay_active();
     if (on && opponent) *opponent = towers_opponent(&g_run, g_run.floor);
     return on;
 }

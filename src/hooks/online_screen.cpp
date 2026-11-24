@@ -82,6 +82,7 @@
 #include "pc_launcher_music.h"
 #include "towers.h"
 #include "towers_partner.h"
+#include "towers_online.h"
 #include "input_host.h"     // build 106: the Team Tower's player 2 joins on pad 2 (towers_ui.inc)
 #include "input_map.h"
 #include "hub_grid.h"            // build 98: the tile hub's layout and grid moves
@@ -1683,6 +1684,7 @@ const char *mode_name(int type)
     if (NETPLAY_IS_KOTH(type)) return "King of the Hill";
     if (NETPLAY_IS_FFAROT(type)) return "FFA Rotation";
     if (NETPLAY_IS_RTS(type)) return "Run the Streets";
+    if (NETPLAY_IS_TOWER(type)) return "Team Tower";
     const OnlineMode *m = online_mode(type);
     return m ? m->name : "Match";
 }
@@ -3221,7 +3223,9 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         else
             snprintf(line, sizeof(line), "%s  %d/%d", mode_name(r.mode), r.players, r.max);
         text(dl, f, g_hand, 13, x + 14, y + 26, open ? ORANGE : with_alpha(ORANGE, 0.45f), line, LEFT, 0.8f);
-        if (r.rules >= 0 && standard_only(r.rules))     // build 82: community content off there
+        if (NETPLAY_IS_TOWER(r.mode))       // Team Tower Online: the climb's own label
+            room_tag(dl, f, x + w - 8, y + 5, "TEAM TOWER", 9);
+        else if (r.rules >= 0 && standard_only(r.rules))     // build 82: community content off there
             room_tag(dl, f, x + w - 8, y + 5, "STANDARD", 9);
         if (all && list[i].server >= 0) {      // the server's tag and this PC's ping there, bottom right
             int ms = list[i].ping_ms;
@@ -3246,6 +3250,8 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
             snprintf(where, sizeof(where), "At %s%s ", vn, len && vn[len - 1] == '.' ? "" : ".");
         }
         else if (is_team(r.mode)) snprintf(where, sizeof(where), "Two on two. ");
+        else if (NETPLAY_IS_TOWER(r.mode))
+            snprintf(where, sizeof(where), "Team Tower: climb with the host, 2 vs 2 against the CPU pairs. Signed in only. ");
         else if (NETPLAY_IS_FFAROT(r.mode)) snprintf(where, sizeof(where), "Four fight a Free for All. ");
         snprintf(players, sizeof(players), "%s%d of %d players. %s", where, r.players, r.max,
                  pad_text(NETPLAY_IS_HILL(r.mode) ? (open ? "Winner stays on. Press {a} to join the line." : "Full.") :
@@ -3268,6 +3274,7 @@ void draw_rooms(ImDrawList *dl, const Frame &f, const Pad &pad)
         const NetServerRoom &e = list[S.rooms_sel];
         const NetRoomInfo &r = e.room;
         if (NETPLAY_IS_KOTH(r.mode)) say("King of the Hill rooms are watched from inside the hill.");
+        else if (NETPLAY_IS_TOWER(r.mode)) say("A Team Tower climb is for its two players: it is not watched.");
         else if (NETPLAY_IS_FFAROT(r.mode)) say("FFA rotation rooms are watched from inside the room: join the line.");
         else if (e.server >= 0 && e.server != here) {   // build 96: the hub moves there and watches in one press
             if (!gallery_on()) netservers_spectate_on(e.server, r.code, hub_name().c_str());
@@ -5294,9 +5301,11 @@ bool any_input_now()
     return io.InputQueueCharacters.Size > 0;
 }
 
+void draw_tower_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r);    // towers_online_ui.inc
 void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 {
     if (NETPLAY_IS_HILL(r.settings.mode)) { draw_hill(dl, f, pad, r); return; }
+    if (NETPLAY_IS_TOWER(r.settings.mode) && r.phase != 2) { draw_tower_room(dl, f, pad, r); return; }
     // a tournament match's room: the set page (no room settings, no venue vote: the relay runs the set)
     NetTSet tset;
     bool tour = tset_room(r, &tset);
@@ -6361,6 +6370,7 @@ NetRoom sample_room(int mode, int max, int count)
 #include "milestones_ui.inc"
 #include "music_ui.inc"
 #include "towers_ui.inc"
+#include "towers_online_ui.inc"
 #include "hub_tiles.inc"         // build 98: the tile hub
 #include "faction_ui.inc"        // build 108: FACTION WAR
 
@@ -8106,6 +8116,18 @@ const char *shot_label()
     if (const char *rts = rts_shot_label()) return rts;
     if (const char *tw = towers_shot_label_impl()) return tw;
     if (const char *fw = faction_shot_label()) return fw;
+    {   // Team Tower Online: the room by its state, also while the floor's match is still "connected" (between floors)
+        NetRoom r;
+        lobby_room(&r);
+        if (!gallery_on() && !g_versus_up && r.in_room && NETPLAY_IS_TOWER(r.settings.mode) && r.phase != 2) {
+            TowerNetView tv;
+            static const char *const st[] = { "toweronline-select", "toweronline-starting", "toweronline-playing",
+                                              "toweronline-summary", "toweronline-waiting", "toweronline-over", "toweronline" };
+            bool have = towers_online_view_net(&tv);
+            if (r.player_count < 2) return have && tv.state == TOWERNET_WAITING ? "toweronline-waiting" : "toweronline-wait";
+            return have ? st[tv.state < 7 ? tv.state : 6] : "toweronline";
+        }
+    }
     if (g_fight_chat_up && !gallery_on()) return fight_chat_shot_label();
     if (!gallery_on() && !g_versus_up && net_state() != NETPLAY_CONNECTED) {    // the crew battle screen (stage 3)
         NetRoom r;
@@ -8120,6 +8142,7 @@ const char *shot_label()
         if (S.page == TURF && !r.in_room) return TW.picker ? "turf-claim" : TW.tab == 1 ? "turf-season" : "turf";    // stage 4
         if (S.page == COMPLEX && !r.in_room) return RU.tab == 1 ? "kotr" : "complex";      // F0
         if (S.page == LOCKER && !r.in_room) return LK.sheet ? "towerframes" : "locker";     // build 104: the Towers rewards' captures
+        if (!r.in_room && S.page == ROOMS) return "rooms";
         if (r.in_room && r.phase == 0 && !NETPLAY_IS_HILL(r.settings.mode)) return "room";
     }
     return gallery_on() ? G.page : g_versus_up ? "versus" : nullptr;
@@ -8320,6 +8343,22 @@ bool draw_pages(ImVec2 display)
             once = 1;
             FU.auto_done = true;
             if (!strcmp(v, "factions")) open_factions(); else open_faction_pick(HUB);
+        }
+    }
+    {   // tests (Team Tower Online): RECOMP_TEST_OPEN_ONLINE=rooms shows FIND A ROOM in the lobby, towercard the Team Tower
+        // card's ONLINE; either goes to the room once this copy is in one
+        static int once;
+        const char *v = getenv("RECOMP_TEST_OPEN_ONLINE");
+        NetRoom tr;
+        lobby_room(&tr);
+        if (v && !gallery_on() && (!strcmp(v, "rooms") || !strcmp(v, "towercard"))) {
+            if (!once && tr.in_room) once = 2;     // the tests' own steps were quicker: nothing to show
+            if (!once && net_in_lobby() && !tr.in_room) {
+                once = 1;
+                if (!strcmp(v, "rooms")) { S.page = ROOMS; netplay_lobby_list(0xFF); S.last_list = GetTickCount64(); }
+                else { open_towers(); TWU.sel = 3; TWU.team_comm = false; tower_online_open_card(); }
+            }
+            if (once == 1 && tr.in_room && (S.page == ROOMS || S.page == TOWERS)) { once = 2; TOC.open = false; S.page = HUB; }
         }
     }
     {   // tests: RECOMP_TEST_OPEN_ONLINE=towers opens TOWERS itself, connected or not

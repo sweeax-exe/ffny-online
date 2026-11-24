@@ -38,6 +38,7 @@
 #include "recorder.h"
 #include "test_observations.h"
 #include "rollback.h"
+#include "towers_online.h"
 #include "input_latency.h"
 #include "input_consumption.h"
 
@@ -566,6 +567,13 @@ static void ko_step(void)
      * against 2 and 3) is knocked out, and "alt" alternates the sides (slot 0's, then slot 2's) */
     team = MEM8(0x003B907Eu) == 2u;
     winner = winner_arg >= 0 ? winner_arg : (int)((s_match - 1 + netplay_fights_skipped()) % 2) * (team ? 2 : 1);
+    {   /* Team Tower Online tests: RECOMP_TEST_TOWERS_ONLINE_LOSE=<floor>: the CPUs' side wins that floor (every copy of
+         * the room has the same setting, so the lockstep stays equal) */
+        TowersOnlineFloor tf;
+        const char *lf = getenv("RECOMP_TEST_TOWERS_ONLINE_LOSE");
+        towers_online_view(&tf);
+        if (team && tf.on && lf && *lf && atoi(lf) == tf.floor) winner = 2;
+    }
     if (winner < 0 || winner >= SLOTS || !active(winner)) return;
     for (slot = 0; slot < SLOTS; slot++) {
         uint32_t r = record(slot);
