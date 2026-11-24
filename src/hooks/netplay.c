@@ -312,8 +312,8 @@ void netplay_crowd_update(void) { sub_00081170(); }
                                  *    u8 venue, locks[2], winner, n, choices[n], g, g x {venue, winner, f0, f1, how},
                                  *    str8 round, str8 why */
 #define T_TPICK       0x39      /* -> token 8, u8 venue */
-#define T_TOWER       0x3D      /* <- Team Tower Online: the climb (towers_online.c reads it), after every ROOM of a tower room */
-#define T_TCHOICE     0x3E      /* -> token 8, u8 choice (0 hello, 1 resume, 2 new climb), u8 the Towers rules version */
+#define T_TOWER       0x3F      /* <- Team Tower Online: the climb (towers_online.c reads it), after every ROOM of a tower room */
+#define T_TCHOICE     0x40      /* -> token 8, u8 choice (0 hello, 1 resume, 2 new climb), u8 the Towers rules version */
 #define TOWER_TRAILER 0x54      /* START: after the numbers trailer, the floor (u8 rules, tower, u16 floor, floors, cpu 1, cpu 2) */
 #define TOWER_RESULT  0xF7      /* RESULT: after the winner, u32 steps, u8 the team's health %, the CPUs' */
 #define TSET_RETRY_MS 2000      /* TJOIN again while no answer came (the relay asks the account service) */
@@ -855,6 +855,7 @@ static struct {
         int crowd_gen_on;
         uint32_t seeds[32][2];
         uint8_t ow[OW_STATE_BYTES];     /* Big Arena's scores and respawns (openworld.c) */
+        uint8_t tw[TOWERS_ONLINE_STATE_BYTES];  /* Team Tower Online: the floor's counters and AI ramp (towers.c) */
     } snap[ROLLBACK_SLOTS];
     unsigned rb_count, rb_steps, rb_deepest, rb_failed;
     double rb_ms_max, rb_ms_total;
@@ -964,7 +965,7 @@ static unsigned room_rb_class(void)
         return NETPLAY_RB_RANKED;
     if (NETPLAY_IS_FFAROT(mode)) return NETPLAY_RB_KOTH;    /* one fight per START, as on the hill */
     if (NETPLAY_IS_RTS(mode)) return NETPLAY_RB_FFA;
-    if (NETPLAY_IS_TOWER(mode)) return NETPLAY_RB_TEAM;     /* (its floors never roll back: every_player_rolls_back) */
+    if (NETPLAY_IS_TOWER(mode)) return NETPLAY_RB_TEAM;     /* a Team Tower Online floor: a Team match with two CPUs */
     if (NETPLAY_IS_KOTH(mode))
         return N.crew.battle && !memcmp(N.crew_room, N.roomv.code, 7) ? NETPLAY_RB_CREW : NETPLAY_RB_KOTH;
     if (mode == ONLINE_MODE_TEAM) return NETPLAY_RB_TEAM;
@@ -3422,9 +3423,10 @@ static int every_player_rolls_back(void)
      * depth-8 soak ran clean offline, but no long online rollback run yet. Every PC knows the room's mode from ROOM.
      * Tests: RECOMP_ROLLBACK_RTS=1 on every copy lifts it. */
     if (N.rts_match && !(getenv("RECOMP_ROLLBACK_RTS") && *getenv("RECOMP_ROLLBACK_RTS") == '1')) return 0;
-    /* Team Tower Online stays in lockstep (owner, 2026-11-22: rollback later): its AI ramp's host state is in the
-     * checksum, not yet in the rollback snapshot. Every PC knows it from START's tower trailer. */
-    if (N.tower_match) return 0;
+    /* Team Tower Online (build 111): a floor rolls back as any Team match; its AI ramp's host state is in the checksum
+     * and in every save state (towers_online_state_save). Tests: RECOMP_ROLLBACK_TOWER=0 on every copy keeps it in
+     * lockstep. */
+    if (N.tower_match && getenv("RECOMP_ROLLBACK_TOWER") && *getenv("RECOMP_ROLLBACK_TOWER") == '0') return 0;
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
     if (match_has_created())
         for (i = 0; i < N.players; i++) if (!N.peer_rb_cp[i]) return 0;
@@ -11176,6 +11178,7 @@ static void snap_save(void)
     memcpy(N.snap[slot].crowd_gen, g_crowd_gen, sizeof(g_crowd_gen));
     N.snap[slot].crowd_gen_on = g_crowd_gen_on;
     ow_state_save(N.snap[slot].ow);
+    towers_online_state_save(N.snap[slot].tw);
     EnterCriticalSection(&g_cs);
     memcpy(N.snap[slot].seeds, N.seeds, sizeof(N.snap[slot].seeds));
     LeaveCriticalSection(&g_cs);
@@ -11260,6 +11263,7 @@ static void rollback_to(uint32_t f)
     memcpy(g_crowd_gen, N.snap[slot].crowd_gen, sizeof(g_crowd_gen));
     g_crowd_gen_on = N.snap[slot].crowd_gen_on;
     ow_state_load(N.snap[slot].ow);
+    towers_online_state_load(N.snap[slot].tw);
     EnterCriticalSection(&g_cs);
     memcpy(N.seeds, N.snap[slot].seeds, sizeof(N.snap[slot].seeds));
     LeaveCriticalSection(&g_cs);

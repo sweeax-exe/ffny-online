@@ -76,6 +76,10 @@ static AiCtx g_ctx[2], *A = &g_ctx[0];
 static int g_nctx = 1;
 static int g_online;                    /* Team Tower Online: the test switches are this PC's own, never applied */
 static const char *test_env(const char *name) { return g_online ? NULL : getenv(name); }
+/* Team Tower Online with rollback: a re-run of steps does every write and count again (from the context the save
+ * state put back) but logs nothing (its lines were said on the first pass) */
+static int g_quiet;
+#define LOG(...) do { if (!g_quiet) fprintf(stderr, __VA_ARGS__); } while (0)
 #define g_f (A->f)
 #define g_tower (A->tower)
 #define g_floor (A->floor)
@@ -174,7 +178,7 @@ static void take_own(void)
     if (g_skill_test >= 1 && g_skill_test <= 100 && g_f.on) g_skill = g_skill_test;
     for (k = 0; k < TOWER_AI_TENDENCIES && n < (int)sizeof line - 8; k++)
         n += snprintf(line + n, sizeof line - (size_t)n, "%s%d>%d", k ? " " : "", g_own[0][k], g_want[0][k]);
-    fprintf(stderr, "[TOWERS-AI] floor %d: CPU %d AI block at %08X (brain's pointer %08X): skill %d -> %d, ramp %.2f%s, "
+    LOG("[TOWERS-AI] floor %d: CPU %d AI block at %08X (brain's pointer %08X): skill %d -> %d, ramp %.2f%s, "
             "defence target %d%s; set 0 tendencies %s\n", g_floor, CPU, AI_SLOT_BLOCK(CPU), MEM32(AI_SLOT_PTR(CPU)), g_own_skill,
             g_on ? g_skill : g_own_skill, g_f.t, g_f.boss ? " (boss)" : "", g_f.defence,
             g_mode_off ? ", test: the game's own data" : !g_f.on ? ", the game's own data (below floor 7)" : "", line);
@@ -246,7 +250,7 @@ static void cut_holds(void)
         if (keep != now) {
             MEM32(BRAIN(CPU) + off[i]) = (uint32_t)keep;
             if (++g_hold_cuts <= 3)
-                fprintf(stderr, "[TOWERS-AI] floor %d: the CPU's %s of %d steps cut to %d\n", g_floor, i ? "think wait" : "hold",
+                LOG("[TOWERS-AI] floor %d: the CPU's %s of %d steps cut to %d\n", g_floor, i ? "think wait" : "hold",
                         now, keep);
         }
         g_hold_prev[i] = keep;
@@ -289,7 +293,7 @@ static void ai_step_one(unsigned step, int decided)
     if (!g_on || !MEM32(G_CPU_FLAG(CPU)) || MEM32(G_CPU_FLAG(ME))) return;
     if (began && g_adapt_on && towers_ai_adapt_note(&g_adapt, key, step)) {
         if (++g_reads <= 3)
-            fprintf(stderr, "[TOWERS-AI] floor %d: the climber's attack %08X is read (step %u)\n", g_floor, key, step);
+            LOG("[TOWERS-AI] floor %d: the climber's attack %08X is read (step %u)\n", g_floor, key, step);
         g_boost = 1;
         read_cut();
     }
@@ -314,7 +318,7 @@ static void ai_health_one(uint32_t record, float delta)
 static void ai_end_one(int winner, unsigned steps)
 {
     close_attack();
-    fprintf(stderr, "[TOWERS-AI] fight {\"tower\":%d,\"floor\":%d,\"boss\":%d,\"mode\":\"%s\",\"skill\":%d,\"own_skill\":%d,"
+    LOG("[TOWERS-AI] fight {\"tower\":%d,\"floor\":%d,\"boss\":%d,\"mode\":\"%s\",\"skill\":%d,\"own_skill\":%d,"
             "\"defence\":%d,\"winner\":%d,\"steps\":%u,\"attacks\":%u,\"landed\":%u,\"blocked\":%u,\"countered\":%u,"
             "\"hits_on_cpu\":%u,\"dmg_on_cpu\":%.1f,\"hits_on_me\":%u,\"dmg_on_me\":%.1f,\"cpu_attacks\":%u,"
             "\"cpu_changes_per_s\":%.2f,\"cpu_longest\":%u,\"writes\":%u,\"hold_cap\":%d,\"hold_cuts\":%u,\"adapt\":%d,\"reads\":%u,\"read_writes\":%u,\"read_cuts\":%u}\n",
@@ -368,6 +372,26 @@ void towers_ai_end(int winner, unsigned steps)
 /* ---------------------------------------------------------------- Team Tower Online (lockstep) */
 
 void towers_ai_set_online(int on) { g_online = on != 0; }
+void towers_ai_quiet(int on) { g_quiet = on != 0; }
+
+/* The contexts as a rollback save holds them (towers.c towers_online_state_save): everything a step reads or writes
+ * here, so a re-run from a save does exactly what the first pass did. A is set again by every entry point. */
+typedef struct AiSave { int nctx; AiCtx ctx[2]; } AiSave;
+unsigned towers_ai_state_size(void) { return (unsigned)sizeof(AiSave); }
+void towers_ai_state_save(void *out)
+{
+    AiSave *s = (AiSave *)out;
+    memset(s, 0, sizeof *s);
+    s->nctx = g_nctx;
+    memcpy(s->ctx, g_ctx, sizeof g_ctx);
+}
+void towers_ai_state_load(const void *in)
+{
+    const AiSave *s = (const AiSave *)in;
+    g_nctx = s->nctx == 2 ? 2 : 1;
+    memcpy(g_ctx, s->ctx, sizeof g_ctx);
+    A = &g_ctx[0];
+}
 
 static uint32_t fnv_u32(uint32_t h, uint32_t v)
 {

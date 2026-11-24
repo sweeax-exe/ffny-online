@@ -3,9 +3,10 @@
 /* Team Tower Online (community/team-tower-online-design.md): two signed-in players on two PCs climb Team Tower 4
  * together. The relay runs the climb in a tower room (NETPLAY_MODE_TOWER, server relay/tower.go) and the account
  * service deals every floor; this game only shows the climb (towers_online_ui.inc) and plays each floor as a lockstep
- * Team match (the players in slots 0 and 1, the floor's CPUs in 2 and 3, towers.c's online floor).
+ * Team match, in lockstep or with rollback (the players in slots 0 and 1, the floor's CPUs in 2 and 3, towers.c's
+ * online floor).
  *
- * On the wire (netplay.c): TOWER (0x3D) after every ROOM of a tower room; TCHOICE (0x3E: hello with this game's
+ * On the wire (netplay.c): TOWER (0x3F) after every ROOM of a tower room; TCHOICE (0x40: hello with this game's
  * Towers rules version on entering the room, the host's resume / new climb); START's tower trailer (the floor and its
  * CPUs); RESULT's tower trailer (the steps, the sides' health; winner 0xFE: this PC saw the floor desync). */
 #ifndef DEFJAM_TOWERS_ONLINE_H
@@ -58,6 +59,10 @@ int towers_online_match(void);
 int towers_online_cpu(int pos, int *fighter);
 /* The floor's host state for the lockstep checksum (0 while no tower floor runs). */
 uint32_t towers_online_hash(void);
+/* Rollback: the floor's host state (its counters and the AI contexts) in each save state, and back at a load. */
+#define TOWERS_ONLINE_STATE_BYTES 4096
+void towers_online_state_save(uint8_t out[TOWERS_ONLINE_STATE_BYTES]);
+void towers_online_state_load(const uint8_t in[TOWERS_ONLINE_STATE_BYTES]);
 /* The floor's decision for RESULT: the side that won (0 the players, 1 the CPUs, -1 a draw), the sides' health %,
  * the step it was decided at. 0 while undecided. */
 int towers_online_result(int *side, int *health, int *cpu_health, unsigned *steps);

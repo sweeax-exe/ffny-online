@@ -1248,9 +1248,12 @@ static int read_decision(int *winner, int *draw)
  * floor's CPUs in 2 and 3 from START's tower trailer. Everything this file writes into the fight is a pure function
  * of the floor (towers_floor_rules) and of guest state, run once per real step on every PC: the slot levels at the
  * set-up, the CPUs' start momentum, the damage and health factors, the AI ramp (towers_ai.c, its test switches off).
- * Its host state goes into the lockstep checksum (towers_online_hash). Nothing of the offline run (g_run, the run
- * file, the service reports) is touched: the account service keeps the online run, the relay reports it. */
-static struct {
+ * Its host state goes into the lockstep checksum (towers_online_hash) and, for rollback, into every save state
+ * (towers_online_state_save/load): a re-run of steps runs net_step again from the state the save put back, so each
+ * write and count happens once per step of the final history on every PC (the re-run only logs nothing). Nothing of
+ * the offline run (g_run, the run file, the service reports) is touched: the account service keeps the online run,
+ * the relay reports it. */
+static struct NetFloor {
     int on;                 /* the running netplay match is a tower floor (set at START, cleared at the next START) */
     int rules, tower, floor, floors, opp[2];
     int begun;              /* its match set-up ran */
@@ -1362,10 +1365,11 @@ static int net_decision(int *side, int *draw)
 static void net_step(void)
 {
     uint32_t cpu = ACTORS + 2u * STRIDE;
-    int k;
+    int k, rerun = netplay_rerunning();
     lock();
     if (!g_net.on || !g_net.begun) { unlock(); return; }
     g_net.step++;
+    towers_ai_quiet(rerun);
     towers_ai_step(g_net.step, g_net.decided);
     if (!g_net.momentum_done && g_net.step <= 60 && MEM32(cpu + F_SLOT) != 0xFFFFFFFFu) {
         for (k = 0; k < 2; k++) {       /* the real momentum meter, as towers_step (build 108: +0x364, never the stun meter) */
@@ -1386,9 +1390,45 @@ static void net_step(void)
             g_net.end_health = side_health(ACTORS, 2);
             g_net.cpu_health = side_health(ACTORS + 2u * STRIDE, 2);
             towers_ai_end(d ? -1 : w, g_net.step);
-            fprintf(stderr, "[TOWERS] online floor %d decided at step %u: %s; the team's health %d%%, the CPUs' %d%%\n",
-                    g_net.floor, g_net.step, d ? "a draw" : w == 0 ? "the team won" : "the CPUs won", g_net.end_health,
-                    g_net.cpu_health);
+            if (!rerun)
+                fprintf(stderr, "[TOWERS] online floor %d decided at step %u: %s; the team's health %d%%, the CPUs' %d%%\n",
+                        g_net.floor, g_net.step, d ? "a draw" : w == 0 ? "the team won" : "the CPUs won", g_net.end_health,
+                        g_net.cpu_health);
+        }
+    }
+    towers_ai_quiet(0);
+    unlock();
+}
+
+/* A rollback save state of the floor (netplay.c snap_save / rollback_to): g_net and the AI contexts. Nothing while no
+ * floor runs, and a load puts back only a save of the floor that runs (the same floor and CPUs). */
+typedef struct NetSave { int on; unsigned ai_size; } NetSave;
+void towers_online_state_save(uint8_t out[TOWERS_ONLINE_STATE_BYTES])
+{
+    NetSave h;
+    unsigned ai = towers_ai_state_size();
+    lock();
+    h.on = g_net.on && g_net.begun && sizeof h + sizeof g_net + ai <= TOWERS_ONLINE_STATE_BYTES;
+    h.ai_size = ai;
+    memcpy(out, &h, sizeof h);
+    if (h.on) {
+        memcpy(out + sizeof h, &g_net, sizeof g_net);
+        towers_ai_state_save(out + sizeof h + sizeof g_net);
+    }
+    unlock();
+}
+
+void towers_online_state_load(const uint8_t in[TOWERS_ONLINE_STATE_BYTES])
+{
+    NetSave h;
+    memcpy(&h, in, sizeof h);
+    lock();
+    if (h.on && g_net.on && h.ai_size == towers_ai_state_size()) {
+        struct NetFloor was;
+        memcpy(&was, in + sizeof h, sizeof was);
+        if (was.on && was.floor == g_net.floor && was.opp[0] == g_net.opp[0] && was.opp[1] == g_net.opp[1]) {
+            g_net = was;
+            towers_ai_state_load(in + sizeof h + sizeof g_net);
         }
     }
     unlock();
@@ -1515,7 +1555,7 @@ void towers_step(void)
 {
     uint32_t me = ACTORS, cpu = ACTORS + STRIDE;
     int team = TOWER_IS_TEAM(g_run.tower);
-    if (g_net.on && !netplay_rerunning()) { net_step(); return; }
+    if (g_net.on) { net_step(); return; }      /* Team Tower Online: also in a rollback's re-run (net_step) */
     if (g_state != TOWERS_FIGHTING || netplay_active() || netplay_rerunning()) return;
     lock();
     if (g_state != TOWERS_FIGHTING) { unlock(); return; }

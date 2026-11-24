@@ -31,6 +31,12 @@ void towers_ai_end(int winner, unsigned steps);
  * think alike); the contexts' hash for the lockstep checksum (netplay.c, as ow_state_hash). */
 void towers_ai_set_online(int on);
 uint32_t towers_ai_hash(void);
+/* Team Tower Online with rollback: on during a re-run of steps (no log lines); the contexts for a save state (at most
+ * towers_ai_state_size() bytes). */
+void towers_ai_quiet(int on);
+unsigned towers_ai_state_size(void);
+void towers_ai_state_save(void *out);
+void towers_ai_state_load(const void *in);
 
 #ifdef __cplusplus
 }
