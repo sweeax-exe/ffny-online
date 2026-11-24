@@ -18,6 +18,7 @@ import shutil
 import socket
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 import time
@@ -305,6 +306,10 @@ def validate_install(folder):
     capabilities = ['content-v1']
     if any(isinstance(op, dict) and op.get('op') == 'new-venue' and 'models' in op for op in info.get('ops', [])):
         capabilities.append('venue-models-v1')      # a new venue's breakable objects (launchers from build 83)
+    if info.get('type') == 'clothing':
+        # build 110: new rows and colours keep the profile's item-state layout only with item_ext (game build 110+;
+        # src/hooks/item_ext.h); an older game moved every profile's states (community/clothing-packs-test.md)
+        capabilities.append('items-v1')
     return {'capabilities': capabilities, 'texture_ids': [], 'wide_ids': []}
 
 
@@ -955,6 +960,30 @@ class Manager:
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
+
+    def repair_online_art(self, script=None):
+        """Build 110, at the launcher's start: the online screens' art and fonts (<data>/online-art) an update could
+        not put in place (a virus scanner or another program held a file) are put in place or made again now
+        (scripts/online-art.py --repair; it does nothing when the art is complete). Holds the runtime lock, so never
+        while the game runs. Returns the line for the player, "" when there is nothing to say; never raises: the
+        sync goes on. The outcome is in <data>/online-art-status.ini, which the game logs."""
+        script = Path(script) if script else Path(__file__).resolve().parents[1] / 'scripts/online-art.py'
+        if not script.is_file():
+            return ''
+        try:
+            with file_lock(self.root / 'runtime.lock'):
+                done = subprocess.run([sys.executable, '-B', str(script), '--data', str(self.data), '--repair'],
+                                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      timeout=300, **({'creationflags': subprocess.CREATE_NO_WINDOW}
+                                                      if os.name == 'nt' else {}))
+        except (ModError, OSError, subprocess.SubprocessError):
+            return ''
+        if done.returncode == 3:
+            return 'The menu pictures were incomplete and have been repaired'
+        if done.returncode:
+            return ('The menu pictures (portraits, stages, fonts) are incomplete and could not be repaired: close the '
+                    'game and other programs that use the FFNY folder, then start the launcher again')
+        return ''
 
     def sync(self, url=None):
         """FFNY Online: every pack of the verified catalogue, installed for everyone in catalogue order.
@@ -1645,6 +1674,10 @@ def main():
                 if args.command == 'refresh':
                     manager.refresh()
                 elif args.command == 'sync':
+                    art = manager.repair_online_art()
+                    if art:
+                        manager.progress(art)
+                        manager.notes.append(art)
                     manager.sync()
                 elif args.command == 'compose':
                     # also the player's own packs (FFNY Studio's "Use in my game", a switch on the Content page):

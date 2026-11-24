@@ -141,6 +141,8 @@ The online settings (server, name, voice chat, rollback and the rest) are listed
 
 | Key | Default | Meaning |
 |---|---|---|
+| `run_end_reports` | `ask` | Help us find crashes (build 110): with `on`, the launcher's start tells the FFNY Online server, signed in, how the last run of the game ended (closed, crashed and where in the program, or ended from outside, and whether it stood still), with the build, the compiler version, the time and the account. No logs; kept 30 days. With `ask` the launcher asks once and nothing is kept or sent before a yes; "Not now" asks once more at a later start, then it is `off`. `off` deletes what is pending. |
+| `run_end_asked` | `0` | How often that question was open without an answer. |
 | `perfect_banner` | `true` | Show **PERFECT** on the screen for a few seconds when a round is won without losing any health, against the CPU and online (in a Team match: neither fighter of the winning side lost any). It is a picture over the game; the fight is not changed. Env `RECOMP_PERFECT_BANNER`. |
 | `name_tags` | `true` | In an online fight, show each player's online name on the line over the fighter's name on the HUD (your own in orange), in every mode with 2 to 4 fighters. CPU fighters get no tag, and offline nothing is shown. Env `RECOMP_NAME_TAGS`. |
 

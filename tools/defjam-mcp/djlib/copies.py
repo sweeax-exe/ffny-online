@@ -274,6 +274,18 @@ class Session:
                 return path.strip()
         return self.exe
 
+    @staticmethod
+    def copy_env(i):
+        """DJ_COPY_ENV, for every scenario (those without --copy-env too): "1:RECOMP_ROLLBACK_PREF=off;2:NAME=VALUE",
+        extra variables for one copy only (checked as --env)."""
+        out = {}
+        for item in os.environ.get("DJ_COPY_ENV", "").split(";"):
+            n, _, kv = item.strip().partition(":")
+            k, eq, v = kv.partition("=")
+            if eq and n.strip() == str(i):
+                out[k.strip()] = v
+        return out
+
     def launch(self, i, env=None, root=None, core=None, control_port=None, watch=(), fixture=None):
         """Start copy i on its own data root and CPU. Refuses before starting when anything is missing.
         DJ_COPY_EXE=<path> in env (e.g. --copy-env 1:DJ_COPY_EXE=...) runs that game image for this copy
@@ -293,6 +305,7 @@ class Session:
         if core >= (os.cpu_count() or 4):
             core = (os.cpu_count() or 4) - 1
         extra = dict(env or {})
+        extra.update(self.copy_env(i))
         port = control_port or (4900 + i)
         extra.setdefault("RECOMP_CONTROL_PORT", str(port))
         if i:

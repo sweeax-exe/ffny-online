@@ -61,6 +61,7 @@
 #include "hooks/rollback.h"
 #include "hooks/hang_watch.h"
 #include "hooks/recorder.h"
+#include "hooks/run_end.h"
 #include "hooks/pc_language.h"
 
 /*
@@ -557,6 +558,7 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
                      is_write ? "write" : "read");
             recorder_on_crash_os(rec_what, ep);
         }
+        run_end_crash(ep);
         /* After the report is on disk: a running online match counts for nobody instead of as
          * this player's loss (at most 1.5 s, host memory only; netplay.c). */
         netplay_on_crash();
@@ -580,6 +582,7 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
             crash_native_stack(ep->ContextRecord);
             fflush(stderr);
             recorder_on_crash_os(what, ep);
+            run_end_crash(ep);
             netplay_on_crash();
         }
     }
@@ -608,6 +611,7 @@ void host_crash_report_abort(const char *what)
     crash_native_stack(&ctx);
     fflush(stderr);
     recorder_on_crash_os(what ? what : "abort()", &ep);
+    run_end_crash(&ep);
     netplay_on_crash();
 }
 
@@ -767,6 +771,7 @@ static int host_main(void)
      * reads the environment. See src/hooks/pc_settings.c. */
     if (!pc_settings_init())
         return 1;
+    { extern int updater_local_build(void); run_end_begin(updater_local_build()); }  /* how this run ends (run_end.h) */
     account_init();             /* a saved Discord sign-in is checked in the background */
     netplay_data_print_start(); /* the fight files hashed for online play, in the background */
 

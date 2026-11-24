@@ -56,6 +56,35 @@ def test_stall_notice_and_report():
     assert 'd3d11_translator_present_again();' in NETPLAY
     trans = (ROOT / 'src' / 'hooks' / 'd3d11_translator.c').read_text(encoding='utf-8')
     assert 'void d3d11_translator_present_again(void)' in trans
+    # build 110: the executor's thread owns the D3D11 context; the stall's picture only while it has nothing to run, and
+    # the game's thread never waits for it
+    again = trans.split('void d3d11_translator_present_again(void)\n{', 1)[1].split('\n}\n', 1)[0]
+    assert again.count('executor_idle()') == 2 and again.index('executor_idle()') < again.index('lpVtbl->Present')
+    assert 'Sleep(' not in again and 'while' not in again
+    end = trans.split('void d3d11_translator_frame_end(void)\n{', 1)[1].split('\n}\n', 1)[0]
+    assert end.index('PRESENT_EXECUTOR, PRESENT_FREE') < end.index('capture_backbuffer(dev)')
+    assert end.index('lpVtbl->Present') < end.index('InterlockedExchange(&s_present_owner, PRESENT_FREE)')
     if RELAY:   # the account service keeps the "conn" facts
         facts = (RELAY / 'accounts' / 'netfacts.go').read_text(encoding='utf-8')
         assert 'Conn *NetConn `json:"conn,omitempty"`' in facts
+
+
+def test_the_fight_resumes_wait_is_not_a_hang():
+    """Build 110: the resume waits up to 22 s with its notice up; the hang watch (20 s) must not write a [HANG] block,
+    leave the ".hang" mark or tell the run's end (run_end.c) that the game stood still."""
+    hang = (ROOT / 'src' / 'hooks' / 'hang_watch.c').read_text(encoding='utf-8')
+    loop = hang.split('static DWORD WINAPI hang_thread', 1)[1]
+    assert loop.index('if (netplay_resume_waiting()) last = now;') < loop.index('run_end_note("hung")')
+    notice = NETPLAY.split('static void stall_notice(', 1)[1].split('\n}\n', 1)[0]
+    # only the resume's own notice (a held player, or this PC cut off): a frozen wait of another kind is still reported
+    assert 'if (mode) InterlockedExchange64(&g_resume_shown, (LONGLONG)now);' in notice
+    assert NETPLAY.count('&g_resume_shown') == 2
+
+
+def test_start_stops_the_resumes_wait_only_under_its_notice():
+    """Build 110: the waits of a few milliseconds every online fight has run through resume_wait too; a START pressed in
+    one of them must not end the fight (only once the notice with "START: stop waiting" is up)."""
+    run = NETPLAY.split('static void step_run(void)\n{', 1)[1]
+    call = 'if (rmode == 1 && now - waited_since >= RESUME_NOTICE_MS && resume_stop_pressed(waited_since, now)) rstop = 1;'
+    assert call in run and NETPLAY.count('resume_stop_pressed(') == 2
+    assert 'rmode > 0 && now - waited_since >= RESUME_NOTICE_MS ? rmode : 0, rleft);' in run

@@ -644,6 +644,7 @@ typedef struct NetVersus {
      * -1 not every player's yet) and how the fight plays: 1 rollback, 0 delay-based (lockstep), -1 not known yet;
      * frames: the input delay once agreed (0 before) */
     int path_ms, rollback, frames;
+    int rb_choice_off;          /* build 110: a player of the fight set Rollback: Off (P_RTT byte 14 bit 2): it plays with delay */
 } NetVersus;
 int netplay_versus(NetVersus *out);
 /* Discord's presence (discord_presence.c): the hub room's match as its START set it up, from the

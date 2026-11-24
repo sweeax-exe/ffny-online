@@ -51,6 +51,11 @@ exists to avoid. Slice, and slice again. You lose nothing by it: the log is neve
 - **"Frames stopped".** The log has no clock. A hang without a watchdog is inferred from more than 400
   lines after the last frame report, so a sparse hang can be missed and a verbose normal shutdown can
   look like one. Treat it as a pointer to `--tail`, not as a measurement.
+- **A player's crash report.** Setup compiles the game on the player's PC with Visual Studio 2022's Build Tools
+  (MSVC 14.44) unless the PC has a newer Visual Studio: the addresses fit a build of that release's commit by the same
+  toolset, not this PC's newest one. Since build 110 the log's `[BUILD]` line says which (`cl 194435207` = 19.44.35207).
+  A lifted function's name (`in sub_...`) is the player's own PDB's and is right either way.
+  `scripts/symbolize-host.py LOG --exe <that build's exe>` names them and warns when the exe is another one.
 - **Two faults.** A `[CRASH]` followed by a `[WATCHDOG]` (or a second crash) is read as two events; a
   watchdog is always `partial`.
 - **Counts.** Repeats of one message are collapsed to its first line and a count (numbers are

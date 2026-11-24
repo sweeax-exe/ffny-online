@@ -81,6 +81,7 @@ extern "C" {
 #include "rts.h"
 #include "hd_build.h"
 #include "updater.h"
+#include "run_end.h"
 #include "next_song.h"
 
 #ifndef DEFJAM_VERSION
@@ -263,6 +264,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "name", "Your name"},
         {"online", "input_delay", "Input delay (steps)"},
         {"online", "rollback", "Rollback netcode (beta)"},
+        {"online", "rollback_choice", "Rollback"},
         {"online", "crossplay_android", "Play with Android players"},
         {"online", "p2p_direct", "Direct connection (P2P) in 1v1 fights"},
         {"online", "quick_max_ping", "Quick Match max ping"},
@@ -283,6 +285,7 @@ static const char *friendly(const char *section, const char *key)
         {"online", "voice_auto_level", "Level my microphone"},
         {"online", "discord_status", "Discord status"},
         {"online", "hill_watch", "Watch fights while waiting"},
+        {"online", "run_end_reports", "Help us find crashes"},
         {"online", "perfect_banner", "PERFECT banner"},
         {"online", "name_tags", "Player names in the fight"},
         {"online", "delay_display", "Show the input delay"},
@@ -835,8 +838,12 @@ static bool setting_widget(RecompSetting *s, const char *label = nullptr, bool s
             if (!strcmp(s->key, "button_icons"))
                 return std::string(!strcmp(choice, "auto") ? "Auto (from player 1's controller)" :
                                    !strcmp(choice, "xbox") ? "Xbox" : "PlayStation");
+            if (!strcmp(s->key, "rollback_choice"))     // build 110
+                return std::string(!strcmp(choice, "on") ? "On (default)" : "Off");
             if (!strcmp(s->key, "quick_max_ping"))      // build 97
                 return std::string(!strcmp(choice, "off") ? "Off" : choice) + (strcmp(choice, "off") ? " ms" : "");
+            if (!strcmp(s->key, "run_end_reports"))     // build 110
+                return std::string(!strcmp(choice, "ask") ? "Ask me" : !strcmp(choice, "on") ? "On" : "Off");
             std::string text = choice;
             std::replace(text.begin(), text.end(), '_', ' ');
             return text;
@@ -906,6 +913,14 @@ static void offline_countdown_setting()
     // Build 99: the slow motion of big hits, Blazin moves and knockouts, offline only (recording_mode.h)
     settings_group("gameplay", { "slow_motion" });
     ImGui::TextDisabled("Online matches always have slow motion. Applies from the next fight.");
+}
+
+// Build 110: the player's Rollback: On / Off ([online] rollback_choice, netplay.c rollback_choice_off). Off on either
+// side: that fight plays with input delay; both games decide it from the same START data (P_RTT).
+static void rollback_choice_setting()
+{
+    settings_group("online", { "rollback_choice" });
+    ImGui::TextDisabled("Off: always use input delay: steadier, a bit slower to respond.");
 }
 
 static void crossplay_setting()
@@ -1953,6 +1968,8 @@ static void discord_status_setting()
     ImGui::PopTextWrapPos();
 }
 
+static void run_end_setting();      // pc_launcher_run_end.inc
+
 // Online: the connection settings. The hub itself (quick match, rooms, the venue vote) is in the
 // game, behind the main menu's ONLINE entry (src/hooks/online_screen.cpp).
 static void page_online(UiMode mode)
@@ -1973,9 +1990,11 @@ static void page_online(UiMode mode)
     }
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });
+    rollback_choice_setting();      // build 110
     settings_group("online", { "quick_max_ping", "quick_far" });     // build 97; 109: far opponents
     crossplay_setting();
     p2p_setting();
+    run_end_setting();
     ImGui::Spacing();
     ImGui::PushFont(g_font_bold, ImGui::GetStyle().FontSizeBase * 1.1f);
     ImGui::TextColored(k_gold, "Online play is in the game: choose ONLINE in the main menu.");
@@ -2908,14 +2927,18 @@ static void page_basics()
     ImGui::SeparatorText("Music");
     settings_group("audio", { "next_song_key", "next_song_pad", "prev_song_key", "prev_song_pad" });
     ImGui::TextDisabled("Next or previous song in the menus and in fights. Only you hear it, online too.");
+    {   // RECOMP_LAUNCHER_PAGE=basics-online (screenshots, build 110): the page opens scrolled to its Online part
+        static bool scrolled;
+        const char *want = getenv("RECOMP_LAUNCHER_PAGE");
+        if (!scrolled && want && !strcmp(want, "basics-online")) { ImGui::SetScrollHereY(0.0f); scrolled = true; }
+    }
     ImGui::SeparatorText("Online");
     settings_group("ui", { "button_icons" });
     discord_status_setting();
     settings_group("online", { "hill_watch", "name_tags", "perfect_banner", "delay_display" });
     // build 52: while the server makes rollback mandatory (its last answer, kept) there is no choice to offer
     if (recomp_settings_get("online", "rollback_server", 0) && recomp_settings_get("online", "rollback_modes", 0)) {
-        ImGui::TextUnformatted("Rollback netcode: on in online matches");
-        ImGui::TextDisabled("The server sets it for every match. A match plays without it only when a PC can't keep up.");
+        rollback_choice_setting();      // build 110: the player's own On / Off
     } else {
         settings_group("online", { "rollback" });
         ImGui::TextDisabled("Beta: used only when the other player has it on too. Applies the next time the game starts.");
@@ -2923,6 +2946,7 @@ static void page_basics()
     settings_group("online", { "quick_max_ping", "quick_far" });     // build 97; 109: far opponents
     crossplay_setting();
     p2p_setting();
+    run_end_setting();
     ImGui::SeparatorText("Gameplay");
     offline_countdown_setting();
     rts_settings();
@@ -2941,7 +2965,7 @@ static int initial_page()
 {
     static const char *const names[] = { "display", "textures", "controllers", "pad", "keyboard", "voice", "general" };
     const char *want = getenv("RECOMP_LAUNCHER_PAGE");
-    if (want && !strcmp(want, "basics")) return PAGE_COUNT;
+    if (want && (!strcmp(want, "basics") || !strcmp(want, "basics-online"))) return PAGE_COUNT;
     // names has fewer entries than PAGE_COUNT: an unknown name ("saves", the Saves dialog) read past it
     for (int i = 0; want && i < (int)(sizeof(names) / sizeof(names[0])); i++)
         if (!strcmp(want, names[i])) return i;
@@ -3330,6 +3354,7 @@ static void settings_dialog(ImVec2 o, float w, float h, float s, int &tab, int &
 #include "pc_launcher_password.inc"   // sign in without Discord (username and password)
 #include "pc_launcher_graphics.inc"   // the Graphics card and dialog (Enhanced graphics), the same glass
 #include "pc_launcher_content.inc"    // the Content page (community packs from our signed catalogue)
+#include "pc_launcher_run_end.inc"    // "Help us find crashes?": the question and the setting
 #include "pc_launcher_studio.inc"     // the FFNY Studio card (get, open and update Studio)
 
 #if defined(_WIN32)
@@ -3499,6 +3524,7 @@ static UiResult draw_launcher(float x, float y, float width, float height)
     crash_popup();
     outside_launcher_notice();
     gpu_notice();
+    run_end_question(result);
     // Cloud saves (build 91): once per run, signed in: the saves go up when they changed here, or a question
     // when the cloud has saves this PC does not (pc_launcher_cloud.h). The launcher opens again when the game
     // closes, so this is also the upload after a game.
@@ -4963,6 +4989,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         int answer = g_note.open ? 0 : online_screen::draw_exit_prompt(io.DisplaySize);
         if (answer == 2 && g_window) {
             // the window's own close: the log line, the pads stopped, exit code 0 (d3d11_translator.c)
+            run_end_quit();
             PostMessageW(g_window, WM_CLOSE, 0, 0);
         } else if (answer) {
             close_request = true;
@@ -5044,7 +5071,15 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         ImVec2 at((io.DisplaySize.x - t.x) * 0.5f, io.DisplaySize.y * 0.16f);
         fg->AddRectFilled(ImVec2(at.x - size, at.y - size * 0.5f), ImVec2(at.x + t.x + size, at.y + t.y + size * 0.5f),
                           IM_COL32(0, 0, 0, 200), size * 0.3f);
-        fg->AddText(font, size, at, IM_COL32(255, 168, 26, 255), notice);
+        // each line centred: a notice may have two (build 110, the fight resume's "START: stop waiting")
+        for (const char *line = notice; ; at.y += size) {
+            const char *end = strchr(line, '\n');
+            if (!end) end = line + strlen(line);
+            float w = font->CalcTextSizeA(size, FLT_MAX, 0, line, end).x;
+            fg->AddText(font, size, ImVec2((io.DisplaySize.x - w) * 0.5f, at.y), IM_COL32(255, 168, 26, 255), line, end);
+            if (!*end) break;
+            line = end + 1;
+        }
     }
 
     ImGui::Render();

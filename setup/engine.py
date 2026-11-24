@@ -1145,7 +1145,9 @@ class Engine:
             try:
                 self.run([self.python, self.source / 'scripts' / script, '--data', self.data])
             except SetupError as error:
-                self.event('Could not prepare ' + what + ' (' + str(error) + '); online play stays in the launcher')
+                self.event('Could not prepare ' + what + ' (' + str(error) + '); ' +
+                           ('the launcher tries again at its next start' if script == 'online-art.py' else
+                            'online play stays in the launcher'))
 
     def build_hd_textures(self):
         if not getattr(self.args, 'hd_textures', False):

@@ -46,6 +46,7 @@
 #include "netplay_servers.h"
 #include "netplay_delay_rules.h"
 #include "netplay_lobby97_rules.h"  // build 97: host kick, the quick ping limit, AFK
+#include "netplay_room_venues.h"   // build 110: CUSTOM venues in the room settings
 #include "created_fighter.h"
 #include "voice.h"
 #include "voice_mute.h"
@@ -165,6 +166,33 @@ std::wstring art_root()
         if (!root.empty() && root.back() != L'\\' && root.back() != L'/') root += L'\\';
     }
     return root + L"online-art\\";
+}
+
+// Build 110: the art or the fonts are not there (an update could not put them in place, or a repair failed): the hub
+// says so in one line. The launcher's start repairs them (scripts/online-art.py --repair).
+bool g_art_missing = false;
+
+// <data>/online-art-status.ini (scripts/online-art.py: the last build's or repair's outcome) into the log, so a crash
+// or F9 report says why the art is missing: "[ONLINE] art status: time=... result=failed step=setup detail=..."
+void art_status_log()
+{
+    std::wstring path = art_root();
+    const size_t tail = wcslen(L"online-art\\");
+    path.replace(path.size() - tail, tail, L"online-art-status.ini");
+    FILE *f = _wfopen(path.c_str(), L"r");
+    if (!f) {
+        if (g_art_missing) fprintf(stderr, "[ONLINE] art status: no online-art-status.ini (the art was last made by a build before 110)\n");
+        return;
+    }
+    char line[512], all[1024] = "";
+    int o = 0;
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (strchr(line, '=') && line[0] != ';' && o < (int)sizeof(all) - 1)
+            o += snprintf(all + o, sizeof(all) - (size_t)o, " %s", line);
+    }
+    fclose(f);
+    if (g_art_missing || !strstr(all, "result=ok")) fprintf(stderr, "[ONLINE] art status:%s\n", all);
 }
 
 bool load_png(const std::wstring &path, Tex &t)
@@ -991,6 +1019,13 @@ struct State {
     int stats_page = 0;             // MY STATS: the leaderboard page
     NetRoomSettings settings;
     bool settings_init = false;
+    // build 110: the VENUES checklist over the room settings (CUSTOM): open, its cursor, its first shown row, the
+    // preset LT/RT last started it from (-1 none), when it opened (the A that opened it toggles nothing)
+    bool venue_pick = false;
+    int venue_sel = 0, venue_top = 0, venue_from = -1;
+    bool venue_changed = false;     // ticked, un-ticked or started from a preset since it opened
+    int venue_choice = 0;           // this visit to the room settings: 0 VENUES untouched, 1 Custom, 2 a preset
+    unsigned long long venue_opened = 0;
     unsigned long long last_list = 0, start_seen = 0, opened = 0;
     std::string note;
     unsigned long long note_until = 0;
@@ -1039,6 +1074,7 @@ struct State {
     // FIGHTERS (build 90): the tab (FFNY, COMMUNITY, CREATED; fighter_tabs.h; -1: not read from [online] fighter_tab
     // yet), the style filter (0 All, 1.. online_styles) and each tab's last selected card
     int ftab = -1, fstyle = 0, ftab_sel[FTAB_COUNT] = { -1, -1, -1 };
+    int ftab_click = -1;            // build 110: the tab clicked in the header, opened at the next frame's start
     // build 97: the host's REMOVE PLAYER (LB): choosing a card (kick_mode, kick_sel the room slot), then the prompt
     // (kick_confirm the slot, -1 none; kick_yes: YES has the cursor)
     bool kick_mode = false;
@@ -1362,7 +1398,8 @@ float room_tag(ImDrawList *dl, const Frame &f, float right, float y, const char 
 int content_news(char *names, int size)
 {
     if (gallery_on()) {     // the gallery: only its news pages show it (RECOMP_TEST_CONTENT_NEWS)
-        int n = G.page && !strcmp(G.page, "hub-news") ? pc_content_news(names, size) : 0;
+        size_t pl = G.page ? strlen(G.page) : 0;    // build 110: "hub-news" and the room pages' "<page>-news" (hill-news, room-team-news)
+        int n = pl >= 5 && !strcmp(G.page + pl - 5, "-news") ? pc_content_news(names, size) : 0;
         if (!n && names && size > 0) names[0] = 0;
         return n;
     }
@@ -1607,7 +1644,7 @@ Pad read_pad()
     p.lt = any({ ImGuiKey_GamepadL2, key(ImGuiKey_Z) }, false);     // FIGHTERS (build 90): the previous tab
     p.rt = any({ ImGuiKey_GamepadR2, key(ImGuiKey_C) }, false);     // FIGHTERS: the next tab
     p.keys = true;
-    {   // tests: RECOMP_TEST_OVERLAY_PAD="r,r,a,..." presses these (u d l r a b x y; < > LT RT) one at a time, 0.7 s apart,
+    {   // tests: RECOMP_TEST_OVERLAY_PAD="r,r,a,..." presses these (u d l r a b x y; < > LT RT; [ ] LB RB) one at a time, 0.7 s apart,
         // from 3 s after the first read: the online screens driven like a pad (Run the Streets' menu test)
         static const char *script = (const char *)-1;
         static unsigned long long t0, next;
@@ -1624,6 +1661,7 @@ Pad read_pad()
                     p.up |= c == 'u'; p.down |= c == 'd'; p.left |= c == 'l'; p.right |= c == 'r';
                     p.a |= c == 'a'; p.b |= c == 'b'; p.x |= c == 'x'; p.y |= c == 'y';
                     p.lt |= c == '<'; p.rt |= c == '>';     // build 90: CHOOSE FIGHTER's tabs
+                    p.lb |= c == '['; p.rb |= c == ']';     // build 110: the VENUES checklist's presets
                     fprintf(stderr, "[UI] test pad: %c (page %d)\n", c, (int)S.page);
                 }
             }
@@ -1827,6 +1865,7 @@ int preset_of(const NetRoomSettings &s)
     if (fixed_venue(s.mode)) return -1;
     for (size_t i = 0; i < p.size(); i++) {
         std::vector<int> ids = preset_ids((int)i, s.mode, community_pool(s));
+        if (ids.size() > 32) ids.resize(32);        // as apply_preset cuts it (the wire's pool)
         if ((int)ids.size() != s.pool_count) continue;
         bool same = true;
         for (int k = 0; k < s.pool_count; k++)
@@ -1874,6 +1913,62 @@ void fit_pool(NetRoomSettings &s, int old_mode, int old_preset)
     if (!n) apply_preset(s, 0);
 }
 
+// ---- build 110: CUSTOM venues (a player's wish: "an option to toggle select maps in private lobbies") ----
+// The VENUES row's A opens a checklist of the venues this room may have: every installed one, without the community
+// venues in a STANDARD ONLY room and without the one-on-one ones (and the community ones) in a mode with more than two
+// fighters, as "Every venue" has them (preset_ids). The pool goes out as before (SETTINGS / CREATE carry the feIDs,
+// ROOM brings them to every member), so an older game in the room shows "Custom (n)" and votes on the relay's draw.
+// The checklist is remembered (online.room_venues); a room opened on it makes the next room start on it too
+// (online.room_venues_on). Quick match, ranked, tournament sets and Faction War have pools of their own.
+std::vector<int> room_venue_order(const NetRoomSettings &s) { return preset_ids(0, s.mode, community_pool(s)); }
+
+// The remembered checklist as a room of these settings may have it, into out (NETROOM_VENUES_MAX); 0 none.
+int saved_custom(const NetRoomSettings &s, unsigned char *out)
+{
+    char text[NETROOM_VENUES_SAVED_TEXT];
+    unsigned char ids[NETROOM_VENUES_SAVED];
+    if (fixed_venue(s.mode) || NETPLAY_IS_RTS(s.mode)) return 0;
+    recomp_settings_get_text("online", "room_venues", text, sizeof(text), "");
+    int n = netroom_venues_parse(text, ids, NETROOM_VENUES_SAVED);
+    std::vector<int> order = room_venue_order(s);
+    return netroom_venues_fit(ids, n, order.data(), (int)order.size(), out, NETROOM_VENUES_MAX);
+}
+
+bool apply_saved_custom(NetRoomSettings &s)
+{
+    unsigned char ids[NETROOM_VENUES_MAX];
+    int n = saved_custom(s, ids);
+    if (n <= 0) return false;
+    memcpy(s.pool, ids, (size_t)n);
+    s.pool_count = n;
+    return true;
+}
+
+// The checklist's ticks into the settings file (leaving the checklist changed). The remembered venues this room cannot
+// have (a Team room's one-on-one venues, STANDARD ONLY's community venues) stay remembered.
+void save_custom(const NetRoomSettings &s)
+{
+    char text[NETROOM_VENUES_SAVED_TEXT];
+    unsigned char ids[NETROOM_VENUES_SAVED];
+    if (gallery_on()) return;
+    recomp_settings_get_text("online", "room_venues", text, sizeof(text), "");
+    int n = netroom_venues_parse(text, ids, NETROOM_VENUES_SAVED);
+    std::vector<int> order = room_venue_order(s);
+    n = netroom_venues_merge(ids, n, s.pool, s.pool_count, order.data(), (int)order.size(), NETROOM_VENUES_SAVED);
+    netroom_venues_format(ids, n, text, sizeof(text));
+    if (recomp_settings_set_text("online", "room_venues", text) > 0) pc_settings_save();
+}
+
+// OPEN THE ROOM / SAVE: whether the next room starts on the checklist. Only when the host chose the venues on this
+// visit (S.venue_choice): a room taken over from another host, or a quick room, has a pool that is not theirs.
+void remember_venue_choice(const NetRoomSettings &s)
+{
+    int choice = S.venue_choice;
+    S.venue_choice = 0;
+    if (gallery_on() || !choice || NETPLAY_IS_RTS(s.mode) || fixed_venue(s.mode)) return;
+    if (recomp_settings_set("online", "room_venues_on", choice == 1 ? 1 : 0) > 0) pc_settings_save();
+}
+
 std::string hub_name();
 
 void default_settings(NetRoomSettings &s)
@@ -1885,6 +1980,14 @@ void default_settings(NetRoomSettings &s)
     s.mode = 0;
     s.max = 2;
     apply_preset(s, 0);
+}
+
+// CREATE A ROOM's settings the first time: the defaults, on the remembered CUSTOM checklist when the last room opened
+// was on it (build 110). Only here: Faction War and Run the Streets make their rooms from default_settings.
+void create_page_settings(NetRoomSettings &s)
+{
+    default_settings(s);
+    if (!gallery_on() && recomp_settings_get("online", "room_venues_on", 0)) apply_saved_custom(s);
 }
 
 // The name the hub shows: the Discord name when signed in, else the setting.
@@ -2390,6 +2493,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
         char line[96];
         snprintf(line, sizeof(line), "BUILD %d IS OUT: UPDATE IN THE LAUNCHER TO PLAY ONLINE", newer);
         text(dl, f, g_title, 14, 50, 56, ORANGE, line, LEFT, 1.2f);
+    } else if (g_art_missing && signed_in && news <= 0 && !gallery_on()) {
+        // build 110: names without portraits: what the player can do (signing in and UPDATE NOW keep their line
+        // and their button: the update goes through the launcher, which repairs the art too)
+        const char *line = "MENU PICTURES ARE MISSING: CLOSE THE GAME AND START IT FROM THE LAUNCHER, WHICH REPAIRS THEM";
+        text(dl, f, g_title, fit_size(f, g_title, 14, line, 556), 50, 56, ORANGE, line, LEFT, 1.2f);
     } else if (content_bad && signed_in) {
         // build 83: the last sync failed (e.g. the PC's root store or clock), so this PC may lack packs the others
         // have and see none of their rooms: the reason in plain words, on one line where it fits
@@ -2557,9 +2665,11 @@ void draw_hub(ImDrawList *dl, const Frame &f, const Pad &pad)
             break;
         case 2: S.page = ROOMS; netplay_lobby_list(0xFF); S.last_list = GetTickCount64(); break;
         case 3:
-            if (!S.settings_init) { default_settings(S.settings); S.settings_init = true; }
+            if (!S.settings_init) { create_page_settings(S.settings); S.settings_init = true; }
             S.settings_edit = false;
             S.settings_sel = 0;
+            S.venue_pick = false;     // build 110
+            S.venue_choice = 0;
             S.page = SETTINGS;
             break;
         case 4: S.page = STATS; S.stats_page = 0; account_fetch_stats_page(0); break;
@@ -3398,6 +3508,124 @@ void venue_showcase(ImDrawList *dl, const Frame &f, const NetRoomSettings &s, fl
     text(dl, f, g_title, 12, x + w, sy + 8, GREY, count, RIGHT, 0.8f);
 }
 
+// ---- build 110: the VENUES checklist (CUSTOM), over the room settings ----
+
+bool g_settings_on_pool = false;    // this frame the room settings' cursor is on VENUES (the hints: A CHOOSE VENUES)
+
+// Opens it on the room's pool (a preset's venues ticked, or the custom list).
+void open_venue_pick(const NetRoomSettings &s)
+{
+    std::vector<int> order = room_venue_order(s);
+    S.venue_pick = true;
+    S.venue_sel = 0;
+    for (size_t i = 0; i < order.size(); i++)
+        if (netroom_venues_has(s.pool, s.pool_count, order[i])) { S.venue_sel = (int)i; break; }
+    S.venue_top = -1;       // the first frame scrolls the cursor into view
+    S.venue_from = preset_of(s);
+    S.venue_changed = false;
+    S.venue_opened = GetTickCount64();
+}
+
+// The checklist: a grid of the room's venues, each ticked on or off. A ticks, X all on, Y all off, LT/RT start
+// from a preset (LB/RB, or LT/RT), B done (one venue at least). Returns true while it stays open.
+bool draw_venue_pick(ImDrawList *dl, const Frame &f, const Pad &pad_in, NetRoomSettings &s)
+{
+    static const Pad idle = {};
+    const Pad &pad = GetTickCount64() - S.venue_opened > 200 ? pad_in : idle;
+    std::vector<int> order = room_venue_order(s);
+    const int n = (int)order.size(), cols = 6, shown_rows = 4;
+    if (n <= 0 || fixed_venue(s.mode)) { S.venue_pick = false; return false; }
+    // the pool as the checklist keeps it: the room's venues only, in the list's order
+    s.pool_count = netroom_venues_fit(s.pool, s.pool_count, order.data(), n, s.pool, NETROOM_VENUES_MAX);
+    if (S.venue_sel >= n) S.venue_sel = n - 1;
+    if (S.venue_sel < 0) S.venue_sel = 0;
+    if (pad.left && S.venue_sel % cols > 0) S.venue_sel--;
+    if (pad.right && S.venue_sel % cols < cols - 1 && S.venue_sel + 1 < n) S.venue_sel++;
+    if (pad.up && S.venue_sel >= cols) S.venue_sel -= cols;
+    if (pad.down && S.venue_sel + cols < n) S.venue_sel += cols;
+    else if (pad.down && S.venue_sel / cols < (n - 1) / cols) S.venue_sel = n - 1;     // the short last row
+    int rows_all = (n + cols - 1) / cols, row = S.venue_sel / cols;
+    if (S.venue_top < 0) S.venue_top = std::max(0, std::min(row - shown_rows + 1, rows_all - shown_rows));
+    if (row < S.venue_top) S.venue_top = row;
+    if (row >= S.venue_top + shown_rows) S.venue_top = row - shown_rows + 1;
+    if (S.venue_top > std::max(0, rows_all - shown_rows)) S.venue_top = std::max(0, rows_all - shown_rows);
+
+    auto toggle = [&](int id) {
+        int r = netroom_venues_toggle(s.pool, &s.pool_count, id, order.data(), n, NETROOM_VENUES_MAX);
+        if (r == -1) say("32 venues at most in one room.");
+        else if (r >= 0) S.venue_changed = true;
+        S.venue_from = preset_of(s);
+    };
+    // the page
+    page_title(dl, f, "CHOOSE VENUES");
+    text(dl, f, g_hand, 15, 54, 66, ORANGE, "THE ROOM'S VOTE ONLY OFFERS THE TICKED VENUES", LEFT, 0.8f);
+    char count[48];
+    snprintf(count, sizeof(count), "%d OF %d ON", s.pool_count, n);
+    text(dl, f, g_title, 15, 590, 66, s.pool_count ? CREAM : RED, count, RIGHT);
+    glass(dl, f, 44, 88, 552, 284, 8, IM_COL32(10, 10, 13, 255), 0.62f);
+    const float gx = 52, gy = 94, gap = 6, cw = (536 - gap * (cols - 1)) / cols, ch = 64;
+    for (int i = S.venue_top * cols; i < n && i < (S.venue_top + shown_rows) * cols; i++) {
+        int id = order[i];
+        float x = gx + (i % cols) * (cw + gap), y = gy + (i / cols - S.venue_top) * (ch + gap);
+        bool on = netroom_venues_has(s.pool, s.pool_count, id), sel = i == S.venue_sel;
+        if (mouse_pick(f, x, y, cw, ch)) S.venue_sel = i;
+        if (mouse_click(f, x, y, cw, ch)) toggle(id);
+        rect(dl, f, x, y, cw, ch, sel ? IM_COL32(44, 32, 22, 230) : IM_COL32(0, 0, 0, 120), 6);
+        venue_tile(dl, f, id, x, y + 1, cw, ch - 2, on ? 1.0f : 0.5f, on);
+        // the tick box, top right
+        float bx = x + cw - 17, by = y + 3;
+        rect(dl, f, bx, by, 14, 14, on ? IM_COL32(40, 150, 60, 255) : IM_COL32(20, 20, 24, 230), 3);
+        dl->AddRect(f.p(bx, by), f.p(bx + 14, by + 14), on ? IM_COL32(170, 240, 170, 255) : IM_COL32(150, 150, 150, 255),
+                    3 * f.s(), 0, 1.2f * f.s());
+        if (on) {
+            dl->AddLine(f.p(bx + 3, by + 7.5f), f.p(bx + 6, by + 10.5f), WHITE, 2.0f * f.s());
+            dl->AddLine(f.p(bx + 6, by + 10.5f), f.p(bx + 11.5f, by + 3.5f), WHITE, 2.0f * f.s());
+        }
+        if (sel) selector(dl, f, x, y, cw, ch);
+    }
+    if (rows_all > shown_rows) {    // where in the list: a thin bar at the right edge
+        float th = 276.0f * shown_rows / rows_all, ty = 94 + 276.0f * S.venue_top / rows_all;
+        rect(dl, f, 591, 94, 3, 276, IM_COL32(255, 255, 255, 40), 1);
+        rect(dl, f, 591, ty, 3, th, with_alpha(ORANGE, 0.9f), 1);
+    }
+    // the chosen venue's name and the preset line
+    {
+        int id = order[S.venue_sel];
+        bool on = netroom_venues_has(s.pool, s.pool_count, id);
+        std::string line = upper(online_venue_name(id)) + (on ? "  -  ON" : "  -  OFF");
+        text(dl, f, g_title, 13, 54, 375, on ? CREAM : GREY, line.c_str(), LEFT);
+        std::string from = S.venue_from >= 0 ? std::string("PRESET: ") + upper(presets()[S.venue_from].name) : "CUSTOM";
+        text(dl, f, g_title, 12, 590, 376, ORANGE, from.c_str(), RIGHT, 0.8f);
+    }
+    // the buttons
+    if (pad.a) toggle(order[S.venue_sel]);
+    if (pad.x) {
+        s.pool_count = netroom_venues_all(s.pool, order.data(), n, NETROOM_VENUES_MAX);
+        if (n > NETROOM_VENUES_MAX) say("32 venues at most in one room: the first 32 are on.");
+        S.venue_from = preset_of(s);
+        S.venue_changed = true;
+    }
+    if (pad.y) { s.pool_count = 0; S.venue_from = -1; S.venue_changed = true; }
+    if (pad.lb || pad.rb || pad.lt || pad.rt) {     // start from a preset (one with no venue for this room is skipped)
+        const auto &pl = presets();
+        std::vector<int> usable(pl.size());
+        for (size_t i = 0; i < pl.size(); i++) usable[i] = !preset_ids((int)i, s.mode, community_pool(s)).empty();
+        S.venue_from = netlobby_preset_step(S.venue_from, pad.rb || pad.rt ? 1 : -1, (int)pl.size(), usable.data());
+        apply_preset(s, S.venue_from);
+        S.venue_changed = true;
+    }
+    if (pad.b) {
+        if (s.pool_count <= 0) { say("Tick one venue at least."); return true; }
+        if (S.venue_changed) {      // a preset's own venues are that preset: the remembered list stays
+            S.venue_choice = preset_of(s) < 0 ? 1 : 2;
+            if (S.venue_choice == 1) save_custom(s);
+        }
+        S.venue_pick = false;
+        return false;
+    }
+    return true;
+}
+
 // ---- room settings (new room, or the host's changes) ----
 
 void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &room)
@@ -3409,6 +3637,9 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
                                           "FIGHTER RULES", "MAX PING", "COMMUNITY CONTENT", "TIME LIMIT", "KO TARGET",
                                           "ROUND MODE" };
     NetRoomSettings &s = S.settings;
+    g_settings_on_pool = false;
+    if (S.venue_pick) { draw_venue_pick(dl, f, pad, s); return; }       // build 110: the CUSTOM checklist (its B closes only it)
+    if (s.pool_count <= 0) apply_preset(s, 0);      // left with nothing ticked (the room closed under the checklist)
     bool was_koth = NETPLAY_IS_KOTH(s.mode), was_rot = NETPLAY_IS_FFAROT(s.mode), rts = NETPLAY_IS_RTS(s.mode);
     // the host cannot turn a room into the other kind (the relay refuses it); a Run the Streets room stays one
     std::vector<int> cycle = rts ? std::vector<int>{ NETPLAY_MODE_RTS }
@@ -3460,10 +3691,24 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         case R_PLAYERS: s.max = std::max(least_of(s.mode), std::min(most_of(s.mode), s.max + step)); break;
         case R_POOL:
             if (!fixed_venue(s.mode)) {     // build 97: a preset with no venue for this room is skipped
+                // build 110: after the presets, "Custom": the remembered checklist (when it has a venue for this room)
                 const auto &pl = presets();
-                std::vector<int> usable(pl.size());
+                const int custom = (int)pl.size();
+                unsigned char mine[NETROOM_VENUES_MAX];
+                int mine_n = saved_custom(s, mine), cur = preset_of(s);
+                std::vector<int> usable(pl.size() + 1);
                 for (size_t i = 0; i < pl.size(); i++) usable[i] = !preset_ids((int)i, s.mode, community_pool(s)).empty();
-                apply_preset(s, netlobby_preset_step(preset_of(s), step, (int)pl.size(), usable.data()));
+                usable[custom] = mine_n > 0;
+                if (cur < 0 && mine_n == s.pool_count && !memcmp(mine, s.pool, (size_t)mine_n)) cur = custom;
+                if (usable[custom]) {       // a list this mode cut down to a preset's venues is that preset
+                    NetRoomSettings t = s;
+                    memcpy(t.pool, mine, (size_t)mine_n);
+                    t.pool_count = mine_n;
+                    usable[custom] = preset_of(t) < 0;
+                }
+                int to = netlobby_preset_step(cur, step, custom + 1, usable.data());
+                if (to == custom) { if (apply_saved_custom(s)) S.venue_choice = 1; }
+                else if (to >= 0 && to < custom) { apply_preset(s, to); S.venue_choice = 2; }
             }
             break;
         case R_LISTED: s.is_public = !s.is_public; break;
@@ -3553,6 +3798,7 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
         // a fixed row (a special match's venue and players) has nothing to step through
         bool fixed = (fixed_venue(s.mode) && (row == R_POOL || row == R_PLAYERS)) || (is_team(s.mode) && row == R_PLAYERS) ||
                      (rts && row == R_MODE) || (row == R_RTS_KOS && ow_rules_rts_points(s.rounds));
+        if (row == R_POOL && !fixed && mouse_click(f, x, y, w, h)) const_cast<Pad &>(pad).a = true;     // build 110
         if (sel && !fixed) { text(dl, f, g_title, 17, x + w - 26, y + h / 2 - 10, ORANGE, "<", CENTER); text(dl, f, g_title, 17, x + w - 10, y + h / 2 - 10, ORANGE, ">", CENTER); }
     }
     // the door: the mode's logo (King of the Hill: its rules), then the venues filling the panel
@@ -3596,7 +3842,10 @@ void draw_settings(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom
     }
     if (!rts)       // a Run the Streets room plays the relay's map: no venues to show
         venue_showcase(dl, f, s, 356 + dx, venues_y, 214, (g_game_door ? 438 : DOOR_Y + DOOR_H - 6) - venues_y);
+    g_settings_on_pool = rows_of[S.settings_sel] == R_POOL && !fixed_venue(s.mode);
+    if (pad.a && g_settings_on_pool) { open_venue_pick(s); return; }     // build 110: the CUSTOM checklist
     if (pad.a && rows_of[S.settings_sel] == R_OPEN) {
+        remember_venue_choice(s);       // build 110: a Custom room makes the next one start on the checklist
         if (S.settings_edit) { netplay_lobby_settings(&s); S.page = HUB; say("Settings saved; everyone readies again."); }
         else { netplay_lobby_create(&s); say("Opening the room..."); S.page = HUB; }
     }
@@ -3818,6 +4067,23 @@ float trigger_plate(ImDrawList *dl, const Frame &f, float x, float y, bool right
     return 22;
 }
 
+// RECOMP_TEST_FTAB_CLICK=<tab>,... (tests): clicks on the header's tabs, the first 60 frames after the page opened
+// and one every 30 after that (the gallery takes no mouse).
+bool tab_test_click(int t)
+{
+    static const char *at = getenv("RECOMP_TEST_FTAB_CLICK");
+    static int next = -1;
+    if (!at || !*at) return false;
+    int frame = ImGui::GetFrameCount();
+    if (next < 0) next = frame + 60;
+    if (frame < next || atoi(at) != t) return false;
+    fprintf(stderr, "[FIGHTERS] test click: tab %d\n", t);
+    next = frame + 30;
+    at += strcspn(at, ",");
+    if (*at) at++;
+    return true;
+}
+
 void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chosen, int *fighter)
 {
     // build 85: while the skin window is open the grid takes no input (the window does, below)
@@ -3919,6 +4185,13 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         S.fighter_top = 0;
         if (!gallery_on() && recomp_settings_set("online", "fighter_tab", to) > 0) pc_settings_save();
     };
+    // build 110: a click on the header waits for here, where the cards are not chosen yet. The header is drawn after
+    // the selection became a card of this tab, and go_tab leaves it -1 in a tab not opened before: the rest of that
+    // frame then read list[-1] and gkey[-1] (15 crash reports, builds 96-109, in groups[gkey[-1]]).
+    if (S.ftab_click >= 0) {
+        if (S.ftab_click < FTAB_COUNT && offered[S.ftab_click]) go_tab(S.ftab_click);
+        S.ftab_click = -1;
+    }
     if (pad.lt || pad.rt) {
         int dir = pad.rt ? 1 : -1, to = fighter_tab_step(tab, dir, offered);
         if (to != tab) go_tab(to);
@@ -3988,19 +4261,19 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         float x = gx - 6, y = 54;
         bool can_l = fighter_tab_step(tab, -1, offered) != tab, can_r = fighter_tab_step(tab, 1, offered) != tab;
         x += trigger_plate(dl, f, x, y, false, can_l) + 5;
-        if (mouse_click(f, x - 27, y, 22, 14) && can_l) go_tab(fighter_tab_step(tab, -1, offered));
+        if (mouse_click(f, x - 27, y, 22, 14) && can_l) S.ftab_click = fighter_tab_step(tab, -1, offered);
         for (int t = 0; t < FTAB_COUNT; t++) {
             float tw = text_width(f, g_title, 12, FTAB_NAMES[t]), w = tw + 16;
             bool lit = t == tab && !searching;
             rect(dl, f, x, y - 2, w, 18, lit ? with_alpha(RED, 0.9f) : IM_COL32(0, 0, 0, 150), 4);
             ImU32 col = lit ? WHITE : offered[t] ? with_alpha(CREAM, 0.85f) : with_alpha(GREY, 0.35f);
             text(dl, f, g_title, 12, x + 8, y, col, FTAB_NAMES[t], LEFT, 0.8f);
-            if (mouse_click(f, x, y - 2, w, 18) && offered[t]) go_tab(t);
+            if ((mouse_click(f, x, y - 2, w, 18) || tab_test_click(t)) && offered[t]) S.ftab_click = t;
             x += w + 3;
         }
         x += 2;
         trigger_plate(dl, f, x, y, true, can_r);
-        if (mouse_click(f, x, y, 22, 14) && can_r) go_tab(fighter_tab_step(tab, 1, offered));
+        if (mouse_click(f, x, y, 22, 14) && can_r) S.ftab_click = fighter_tab_step(tab, 1, offered);
         // the filter: "ALL STYLES", or the style on an orange plate
         std::string st = filter ? upper(filter) : std::string("ALL STYLES");
         float right = gx + cols * (cw + 4) - 4, room = right - (x + 30) - 22;
@@ -4162,15 +4435,17 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
             text(dl, f, g_title, 10, gx, sy + 2, GREY, "TAB: SEARCH BY NAME    Z / C: TABS    R: STYLE", LEFT, 0.6f);
         }
     }
+    // build 110: the card chosen now: a click (a tap has no hover before it) may have moved the choice off `cur` above
+    const OnlineFighter &card = list[S.fighter_sel];
     if (pad.a && card_blocked(S.fighter_sel)) {
-        if (ONLINE_NEW_FIGHTER(cur.id) && standard_only(rules_room.settings.fighter_rules))
+        if (ONLINE_NEW_FIGHTER(card.id) && standard_only(rules_room.settings.fighter_rules))
             say("This room is STANDARD ONLY: community fighters are off here. Pick another fighter.");
-        else say("This room's FIGHTER RULES leave " + std::string(cur.name) + " out: pick another fighter.");
+        else say("This room's FIGHTER RULES leave " + std::string(card.name) + " out: pick another fighter.");
         const_cast<Pad &>(pad).a = false;
     }
     if (pad.a) {
         int pick = S.fighter_sel;
-        S.random_pick = cur.id == FIGHTER_RANDOM;
+        S.random_pick = card.id == FIGHTER_RANDOM;
         if (S.random_pick) {    // RANDOM is the last card: one of the others the room's rules allow
             std::vector<int> allowed;      // build 90: of the cards shown (this tab, this style)
             for (int i : searching ? vis : pool)     // build 96: every version of a group, not one card a group
@@ -4813,10 +5088,12 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     page_title(dl, f, r.settings.name);
     NetRingCard ring;
     bool is_ring = ring_room(r, &ring);     // F0: an official ring: its title and the crown banner
-    text(dl, f, g_title, 16, 590, 26, GOLD, is_ring ? ring_title_of(ring.type).c_str() : v.rot ? "FFA ROTATION" : "KING OF THE HILL", RIGHT, 1.2f);
+    // build 110: below the corner notice, as the Towers subtitle (page_subtitle_y); the code follows it
+    float mode_y = page_subtitle_y(26), code_y = mode_y > 26 ? mode_y + 15 : 58;
+    text(dl, f, g_title, 16, 590, mode_y, GOLD, is_ring ? ring_title_of(ring.type).c_str() : v.rot ? "FFA ROTATION" : "KING OF THE HILL", RIGHT, 1.2f);
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
-    text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
+    text(dl, f, g_title, 14, 590, code_y, ORANGE, code, RIGHT);
     if (is_ring) ring_banner(dl, f, ring, 40, 52, 478);
 
     // left: the line, numbered from the top
@@ -4950,6 +5227,8 @@ void draw_hill(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         S.settings = r.settings;
         S.settings_edit = true;
         S.settings_sel = 0;
+        S.venue_pick = false;     // build 110
+        S.venue_choice = 0;
         S.page = SETTINGS;
     }
     if (pad.rb) { S.page = VOICE; S.voice_sel = 0; }
@@ -5061,12 +5340,16 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) kick_x[i] = kick_y[i] = -1;
     if (!kickable) { S.kick_mode = false; S.kick_confirm = -1; }
     page_title(dl, f, r.settings.name);
-    image_fit(dl, f, tex(mode_logo(r.settings.mode)), 360, 22, 220, 30);
+    // build 110: the mode logo and the code sit below the corner notice when there is one (page_subtitle_y)
+    // (one row then: the logo left of the code, the server line below stays clear)
+    float logo_y = page_subtitle_y(22), code_y = logo_y > 22 ? logo_y + 4 : 58;
+    if (logo_y > 22) image_fit(dl, f, tex(mode_logo(r.settings.mode)), 330, logo_y, 150, 22);
+    else image_fit(dl, f, tex(mode_logo(r.settings.mode)), 360, 22, 220, 30);
     if (ranked) ranked_banner(dl, f, r, ri, 50);     // a little higher: the cards' rank patches under it
     else if (tour) tset_banner(dl, f, r, tset, 50);
     char code[32];
     snprintf(code, sizeof(code), "CODE  %s", r.code);
-    text(dl, f, g_title, 14, 590, 58, ORANGE, code, RIGHT);
+    text(dl, f, g_title, 14, 590, code_y, ORANGE, code, RIGHT);
 
     // The server, and a warning when a match here would have a high ping: the path between two
     // players goes through the relay, about half of each one's round trip.
@@ -5112,6 +5395,13 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
             std::string mp = "MAX PING " + upper(max_ping_text(r.settings.max_ping).c_str());
             text(dl, f, g_title, 10, sx, 73, ORANGE, mp.c_str(), RIGHT, 0.6f);
             sx -= text_width(f, g_title, 10, mp.c_str()) + 12;
+        }
+        // build 110: the host's own venue list (CUSTOM): how many the vote draws from
+        if (!fixed_venue(r.settings.mode) && !NETPLAY_IS_RTS(r.settings.mode) && r.settings.pool_count > 0 && preset_of(r.settings) < 0) {
+            char cv[40];
+            snprintf(cv, sizeof(cv), "CUSTOM VENUES (%d)", r.settings.pool_count);
+            text(dl, f, g_title, 10, sx, 73, ORANGE, cv, RIGHT, 0.6f);
+            sx -= text_width(f, g_title, 10, cv) + 12;
         }
         // build 82: community content off in this room
         if (standard_only(r.settings.fighter_rules)) room_tag(dl, f, sx, 72, "STANDARD", 9);
@@ -5510,6 +5800,8 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         S.settings = r.settings;
         S.settings_edit = true;
         S.settings_sel = 0;
+        S.venue_pick = false;     // build 110
+        S.venue_choice = 0;
         S.page = SETTINGS;
     }
     if (pad.rb) { S.page = VOICE; S.voice_sel = 0; }
@@ -5906,7 +6198,9 @@ void versus_page(ImDrawList *dl, ImVec2 display, const NetVersus &v)
         // build 109: the pair's ping and how the fight plays, under it ("PING 95 MS - DELAY")
         if (v.path_ms >= 0 && v.rollback >= 0) {
             char pair[64];
-            snprintf(pair, sizeof(pair), "PING %d MS - %s", v.path_ms, v.rollback ? "ROLLBACK" : "DELAY");
+            // build 110: "DELAY (ROLLBACK OFF)" when a player of the fight set Rollback: Off
+            snprintf(pair, sizeof(pair), "PING %d MS - %s", v.path_ms,
+                     v.rollback ? "ROLLBACK" : v.rb_choice_off ? "DELAY (ROLLBACK OFF)" : "DELAY");
             text(dl, f, g_title, 10, 596, 42, v.rollback ? GREEN : ORANGE, pair, RIGHT, 0.8f);
         }
     }
@@ -6003,8 +6297,9 @@ NetVersus sample_versus(const std::string &page)
         v.ping[i] = v.cpu[i] ? -1 : 38 + 41 * i;
     }
     // build 109: the pair line ("versus-1v1" a delay-based fight, the others rollback)
-    v.path_ms = page == "versus-1v1" ? 95 : 41;
-    v.rollback = page == "versus-1v1" ? 0 : 1;
+    v.path_ms = page == "versus-1v1" ? 95 : page == "versus-rboff" ? 38 : 41;
+    v.rollback = page == "versus-1v1" || page == "versus-rboff" ? 0 : 1;
+    v.rb_choice_off = page == "versus-rboff";     // build 110: a player set Rollback: Off
     if (page == "versus-rot") {     // FFA rotation: Cal won the last one and stays on
         v.room_mode = NETPLAY_MODE_FFAROT;
         v.venue = 11;
@@ -6116,7 +6411,9 @@ void gallery_step()
                                          // build 97: VENUES on "Community maps" (with RECOMP_TEST_EXTRA_VENUES, or a
                                          // content root with community venues)
                                          "create-community-maps",
-                                         "fighters-new", "vote-new", "hub-news",
+                                         // build 110: VENUES on a CUSTOM list of three, its checklist, the room's tag
+                                         "create-custom", "create-venues", "room-custom",
+                                         "fighters-new", "vote-new", "hub-news", "hill-news", "room-team-news", "room-news",
                                          // build 87: content to come at the next release window ("NEW CONTENT AT 17:00")
                                          "hub-release",
                                          // build 86: QUICK MATCH set to original fighters only (One on One, King of the
@@ -6156,6 +6453,7 @@ void gallery_step()
                                          "room-kick", "room-kick-prompt", "room-afk", "room-quick-maxping", "room-quick-stage",
                                          // the versus screen while a match loads
                                          "versus-1v1", "versus-3way", "versus-ffa", "versus-team", "versus-koth",
+                                         "versus-rboff",     // build 110: DELAY (ROLLBACK OFF)
                                          // build 37: created fighters
                                          "grid-created", "room-created", "versus-created",
                                          // several created fighters, the second one picked
@@ -6373,6 +6671,7 @@ void gallery_step()
     G.maint_secs = -1;
     QW.open = QW.gallery = false;
     S.skin_open = false;                // build 85: the skin window only on its own page
+    S.venue_pick = false;              // build 110: the VENUES checklist only on its own page
     S.unl_open = false;                 // build 86: the community window only on its own page
     G.rollback = G.rb_must = false;
     for (int i = 0; i < NETPLAY_ROOM_SLOTS; i++) G.room_rb[i] = -1;
@@ -6380,10 +6679,12 @@ void gallery_step()
     G.my_crew = false;
     G.original = 0;                     // build 86: all fighters unless the page says
     S.ftab = FTAB_FFNY;                 // build 90: the FFNY tab, every style, unless the page says
+    S.ftab_click = -1;
     S.fstyle = 0;
     for (int &k : S.ftab_sel) k = -1;
     G.rts = false;
     std::string p = page;
+    if (p.size() > 5 && p != "hub-news" && p.compare(p.size() - 5, 5, "-news") == 0) p.erase(p.size() - 5);  // the page plus the corner notice
     // the "-long" pages: Ann's first card plays as the widest 16 characters, Ben's as "Brooklyn Bruiser"
     G.cp_long = p.size() > 5 && p.compare(p.size() - 5, 5, "-long") == 0;
     for (auto &o : G.cp_online) o.clear();
@@ -6471,6 +6772,14 @@ void gallery_step()
         S.rooms_sel = p == "rooms-special" ? 5 : p == "rooms-standard" ? 4 : 1;
         for (size_t i = 0; i < G.rooms.size(); i++)     // build 82: Dee's rules and Ann's room switched community content off
             G.rooms[i].rules = p == "rooms-standard" && (i == 0 || i == 4) ? NETPLAY_RULES_STANDARD : -1;
+    }
+    else if (p == "room-custom") {      // build 110: a room on the host's own three venues: CUSTOM VENUES (3) on its line
+        S.page = HUB;
+        G.room = sample_room(0, 2, 2);
+        static const unsigned char three[] = { 4, 14, 21 };
+        memcpy(G.room.settings.pool, three, sizeof(three));
+        G.room.settings.pool_count = (int)sizeof(three);
+        G.room.settings.is_public = 0;
     }
     else if (p == "room-standard") {     // community content off, stock fighters: the line under the room's name
         S.page = HUB;
@@ -6584,6 +6893,17 @@ void gallery_step()
             const auto &pl = presets();
             for (size_t i = 0; i < pl.size(); i++) if (!strcmp(pl[i].name, "Community maps")) apply_preset(S.settings, (int)i);
             S.settings_sel = 2;
+        }
+        if (p == "create-custom" || p == "create-venues") {     // build 110: a CUSTOM list of three on VENUES; -venues:
+            static const unsigned char three[] = { 4, 14, 21 };   // the checklist open, its cursor on an unticked one
+            memcpy(S.settings.pool, three, sizeof(three));
+            S.settings.pool_count = (int)sizeof(three);
+            S.settings_sel = 2;
+            if (p == "create-venues") {
+                open_venue_pick(S.settings);
+                S.venue_sel = 7;
+                S.venue_opened = 0;
+            }
         }
         if (p == "create-standard") {   // community content off; the cursor on its row (before LISTED)
             S.settings.fighter_rules = NETPLAY_RULES_STANDARD;
@@ -7098,8 +7418,10 @@ void prepare(void *device)
             cfg.OversampleH = 2;
             g_numbers = ImGui::GetIO().Fonts->AddFontFromFileTTF(path, 24.0f, &cfg);
         }
+        g_art_missing = !tex("ui/online_poster.png").srv || !g_title;
         fprintf(stderr, "[ONLINE] art %s, fonts %s\n", tex("ui/online_poster.png").srv ? "found" : "missing",
                 g_title ? "found" : "missing");
+        art_status_log();
     }
 }
 
@@ -8218,8 +8540,17 @@ bool draw_pages(ImVec2 display)
     } else if (S.page == SETTINGS) {
         draw_settings(dl, f, pad, room);
         float hx = 54;
-        hx += hint(dl, f, hx, 392, "a", "CHOOSE");
-        hint(dl, f, hx, 392, "b", "BACK");
+        if (S.venue_pick) {         // build 110: the CUSTOM checklist's buttons
+            hx += hint(dl, f, hx, 392, "a", "ON / OFF");
+            hx += hint(dl, f, hx, 392, "x", "ALL ON");
+            hx += hint(dl, f, hx, 392, "y", "ALL OFF");
+            hx += hint(dl, f, hx, 392, "lb", "") - 8;
+            hx += hint(dl, f, hx, 392, "rb", "PRESET");
+            hint(dl, f, hx, 392, "b", "DONE");
+        } else {
+            hx += hint(dl, f, hx, 392, "a", g_settings_on_pool ? "CHOOSE VENUES" : "CHOOSE");
+            hint(dl, f, hx, 392, "b", "BACK");
+        }
     } else if (S.page == PLAYERS && !room.in_room) {
         draw_players(dl, f, pad);
         float hx = 54;
@@ -8343,6 +8674,21 @@ extern "C" void faction_test_tick(void)
     fw_match_tick(r);
 }
 extern "C" int faction_test_seated(void) { return fw_seated() ? 1 : 0; }
+// Tests (build 110, RECOMP_TEST_CREATE_ROOM in netplay.c): the settings CREATE A ROOM starts on (create_page_settings: the
+// remembered CUSTOM checklist when online.room_venues_on), for `mode` and `max`, listed or by code only.
+extern "C" void online_test_room_settings(NetRoomSettings *out, int mode, int max, int is_public)
+{
+    NetRoomSettings s;
+    create_page_settings(s);
+    if (mode != s.mode) {
+        int old_mode = s.mode, old_preset = preset_of(s);
+        s.mode = mode;
+        fit_pool(s, old_mode, old_preset);
+    }
+    s.max = max;
+    s.is_public = is_public ? 1 : 0;
+    *out = s;
+}
 
 #else   // the online screens are drawn on Windows only for now
 
@@ -8396,5 +8742,17 @@ bool test_pad_r3() { return false; }
 extern "C" void faction_test_search(int) {}
 extern "C" void faction_test_tick(void) {}
 extern "C" int faction_test_seated(void) { return 0; }
+extern "C" void online_test_room_settings(NetRoomSettings *out, int mode, int max, int is_public)
+{
+    char text[NETROOM_VENUES_SAVED_TEXT];
+    memset(out, 0, sizeof(*out));
+    snprintf(out->name, sizeof(out->name), "Room");
+    out->mode = mode;
+    out->max = max;
+    out->is_public = is_public ? 1 : 0;
+    recomp_settings_get_text("online", "room_venues", text, sizeof(text), "");
+    out->pool_count = netroom_venues_parse(text, out->pool, NETROOM_VENUES_MAX);
+    if (!out->pool_count) { out->pool[0] = 1; out->pool[1] = 6; out->pool[2] = 11; out->pool_count = 3; }
+}
 
 #endif

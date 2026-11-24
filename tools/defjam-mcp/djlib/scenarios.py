@@ -1813,6 +1813,43 @@ DRAFT_SHOTS = {"[NETPLAY] draft: game 1 step 1 turn": "draft-ban", "[NETPLAY] dr
                "[NETPLAY] draft: game 2 step 4 turn": "draft-venue-ban", "[NETPLAY] draft: game 2 step 7 turn": "draft-counterpick"}
 
 
+def _created_room(s, i, timeout, pad=""):
+    """The code of the room copy i opened (RECOMP_TEST_CREATE_ROOM), once its log names it and its overlay pad script
+    (RECOMP_TEST_OVERLAY_PAD, `pad`) is through: nobody joins while it changes the room's settings."""
+    until = time.time() + timeout
+    while time.time() < until:
+        s.poll()
+        text = logparse.read_text(s.copies[i].log)
+        m = re.search(r"\[NETPLAY\] tests: room (\w{6}) created", text)
+        if m and text.count("[UI] test pad: ") >= len(pad):
+            return m.group(1)
+        if not s.copies[i].alive():
+            break
+        time.sleep(0.5)
+    raise RuntimeError("copy %d opened no room (or did not finish its pad script) within %d s" % (i, timeout))
+
+
+def room_venues_check(logs, relay_log, want, problems):
+    """build 110: a room on a CUSTOM venue list: the votes' candidates (the relay's log) and the venue of every START."""
+    rtext = logparse.read_text(relay_log) if os.path.isfile(relay_log) else ""
+    votes = [[int(v) for v in re.findall(r"\d+", m)] for m in re.findall(r"voting \(\d+ candidates: \[([\d ]*)\]", rtext)]
+    hill = [int(v) for v in re.findall(r"koth: fight venue=(\d+)", rtext)]      # the hill: no vote, the relay draws it
+    out = {"want": want, "candidates": votes, "hill": hill, "venues": {}}
+    if not votes and not hill:
+        problems.append("room venues: no vote in the relay's log")
+    if not set(hill) <= set(want):
+        problems.append("room venues: the hill drew %s, not %s" % (hill, want))
+    for v in votes:
+        if not set(v) <= set(want) or len(v) != min(3, len(want)):
+            problems.append("room venues: a vote offered %s, not %s" % (v, want))
+    for i, path in logs.items():
+        text = logparse.read_text(path)
+        out["venues"][str(i)] = played = [int(v) for v in re.findall(r"\[NETPLAY\] START: [^\n]*?venue (\d+)", text)]
+        if not played or not set(played) <= set(want):
+            problems.append("room venues: copy %d played at %s, not %s" % (i, played, want))
+    return out
+
+
 def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast_ko=600, ko_winner=None,
            bot=None, timeout=None, relay_port=27900, base_core=2, keep_going=False, extra_env=None,
            lock_timeout=None, log=None, require_hits=False, stall=300, keep_roots=False, quick=None,
@@ -1820,8 +1857,14 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
            more_shots=False, spectators=0, copy_env=None, fixtures=None, ranked=None, rollback_modes=None,
            rollback_max_ping=None, leave=None, spectate_after=0, spectate_delay=0, maintenance=0, cpu_level=None,
            linger=None, reports=False, fighter_rules=None, max_ping=None, banned_tier=None, room_menu=None,
-           results_leave=None, hill_pick=None, hill_idle=None, password=False, social=False, drop_downlink=None):
-    """social (build 92): a local account service with -social and test accounts "Copy N" (not ranked): the relay knows the
+           results_leave=None, hill_pick=None, hill_idle=None, password=False, social=False, drop_downlink=None, cut=None,
+           cut_expect="resume", room_venues=None):
+    """room_venues (build 110): "4,14,21": no quick match; copy 0 opens a private room by CREATE A ROOM's own settings on
+    that remembered CUSTOM list (RECOMP_TEST_CREATE_ROOM, RECOMP_ROOM_VENUES) and the other copies, started once it is
+    there, join it by its code. Every vote's candidates (relay log) and every match's venue must be on the list
+    (room_venues_check, the result's `room_venues`). The list is what is expected: with RECOMP_ROOM_VENUES@0= (empty) in
+    the environment and a RECOMP_TEST_OVERLAY_PAD for copy 0, that script makes the choice in the room's own settings.
+    social (build 92): a local account service with -social and test accounts "Copy N" (not ranked): the relay knows the
     copies' accounts (their room chat lines carry them) and the chat window's lists are on; copy_env can drive the chat
     window (RECOMP_TEST_SOCIAL_UI) and the room chat (RECOMP_TEST_ROOM_CHAT). See mute().
     password (sign-in without Discord): a local account service with -password; copy N makes the account PwCopyN
@@ -1927,6 +1970,9 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
     if hill_idle:
         who, _, k = str(hill_idle).partition("@")
         idle_copy = (int(who), int(k or 1))
+    if room_venues:
+        room_venues = [int(v) for v in str(room_venues).split(",") if v.strip()]
+        result["params"]["room_venues"] = room_venues
     if hill_pick or hill_idle:
         result["params"].update({"hill_pick": hill_pick, "hill_idle": hill_idle})
     shots, problems = [], []
@@ -1939,6 +1985,11 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         if drop_downlink:       # build 109: the forced stall, one copy's downlink cut by the relay (stall_check)
             relay_extra += ["-test-drop-downlink", str(drop_downlink)]
             result["params"]["drop_downlink"] = str(drop_downlink)
+        cutter = None
+        if cut:                 # build 110: the fight resume, one copy's connection cut (resume_check)
+            who, _, spec = str(cut).partition("@")
+            cutter = (int(who), spec)
+            result["params"].update({"cut": str(cut), "cut_expect": cut_expect})
         if rollback_max_ping:   # build 54: the relay's rollback ping limit (else the game's default)
             relay_extra += ["-rollback-max-ping", str(int(rollback_max_ping))]
             result["params"]["rollback_max_ping"] = int(rollback_max_ping)
@@ -2079,17 +2130,26 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
             if password:
                 env.update({"RECOMP_ACCOUNT_SERVER": "127.0.0.1:%d" % (relay_port + 100),
                             "RECOMP_TEST_PASSWORD": "%s:PwCopy%d:%s" % ("create" if i == 0 else "signin", i, pw_secrets[i])})
+            if room_venues and i == 0:
+                env.update({"RECOMP_TEST_CREATE_ROOM": "private", "RECOMP_ROOM_VENUES_ON": "1",
+                            "RECOMP_ROOM_VENUES": ",".join(str(v) for v in room_venues)})
+            elif room_venues:
+                env["RECOMP_TEST_JOIN_CODE"] = _created_room(s, 0, 180, pad0)
             for k, v in (extra_env or {}).items():     # NAME@N: only copy N gets it
                 name, _, only = k.partition("@")
                 if not only or (only.isdigit() and int(only) == i):
                     env[name] = v
             env.update((copy_env or {}).get(i, {}))
+            if room_venues and i == 0:
+                pad0 = re.sub(r"[, ]", "", env.get("RECOMP_TEST_OVERLAY_PAD", ""))
             if reports and env.get("RECOMP_TEST_REPORT_NOTE"):
                 note_copies.append(i)
             if maintenance and i == 0:
                 env.update({"RECOMP_OVERLAY_SHOT_DIR": os.path.join(s.dir, "maint"), "RECOMP_OVERLAY_SHOT_MS": "3000",
                             "RECOMP_TEST_OPEN_ONLINE": "1"})     # the online screens up: the room, the vote, the banner
                 os.makedirs(os.path.join(s.dir, "maint"), exist_ok=True)
+            if cutter and i == cutter[0]:
+                env["RECOMP_TEST_NET_CUT"] = cutter[1]
             if leaver and i == leaver[0]:
                 env["RECOMP_TEST_LEAVE_STEP"] = str(leaver[1])
             if menu_copy and i == menu_copy[0]:
@@ -2308,6 +2368,10 @@ def online(matches=3, mode="1v1", players=2, fighters=None, rollback="off", fast
         result["late_spectators"] = late_spectator_check(analyses, players, spectators, problems)
     if drop_downlink:
         result["stall"] = stall_check(logs, rot_relay_log or "", problems)
+    if cut:
+        result["resume"] = resume_check(logs, rot_relay_log or "", cutter, cut_expect, problems)
+    if room_venues:
+        result["room_venues"] = room_venues_check(logs, rot_relay_log or "", room_venues, problems)
     if leaver:
         result["leave"] = leave_check(logs, leaver, players, problems)
         analyses.pop(leaver[0], None)
@@ -2804,6 +2868,72 @@ def stall_check(logs, relay_log, problems):
         problems.append("no copy resent any entries")
     if not notices:
         problems.append("no copy showed the stall notice")
+    return out
+
+
+def resume_check(logs, relay_log, cutter, expect, problems):
+    """A run with a cut connection (--cut, build 110, the fight resume): what the relay held, and how each copy's
+    long waits ended. expect: resume (held, back, the fight goes on in sync, nobody gives up), end (the hold runs out:
+    today's end, the waiting copy reports the cut one left), limit (a cut is not held: "2 holds used"), none (no hold
+    at all), stop (the waiting copy stopped waiting with START)."""
+    import re
+    out = {"copy": cutter[0], "spec": cutter[1], "expect": expect, "copies": {}}
+    try:
+        rl = open(relay_log, encoding="utf-8", errors="replace").read()
+    except OSError:
+        rl = ""
+    rlines = [l.split("resume: ", 1)[-1] for l in rl.splitlines() if "resume: c=" in l]
+    out["relay"] = rlines[:12]
+    held = sum(1 for l in rlines if "its seat is held" in l)
+    back = sum(1 for l in rlines if "came back" in l)
+    ends = sum(1 for l in rlines if " ends: " in l)
+    nohold = sum(1 for l in rlines if "is not held" in l)
+    out.update({"held": held, "back": back, "ended": ends, "not_held": nohold, "moved": rl.count("moved to a new address")})
+    gave_any = stopped = 0
+    for i, p in sorted(logs.items()):
+        text = logparse.read_text(p)
+        lines = text.splitlines()
+        c = {"cuts": text.count("[NETPLAY] tests: the connection is cut now"),
+             "on": "[NETPLAY] resume: on for this fight" in text,
+             "ends": [l.split("resume: ", 1)[-1] for l in lines if "[NETPLAY] resume: a " in l and " wait for " in l][:6],
+             "notices": sorted({l.split("): ", 1)[-1].split(" (")[0] for l in lines
+                                if "[NETPLAY] stall notice" in l})[:6],
+             "sockets": text.count("[NETPLAY] resume: a new socket"),
+             "gave_up": text.count("[NETPLAY] gave up"), "lost": text.count("seat was given up"),
+             "not_in_time": text.count("did not get back in time"), "stopped": text.count("stopped waiting for player"),
+             "hang_blocks": text.count("[HANG] no present"),
+             "desync": text.count("[NETPLAY] desync in"), "left_report": text.count("left the match before it was decided"),
+             "room_left": text.count("[NETPLAY] a player left the match")}
+        out["copies"][i] = c
+        gave_any += c["gave_up"]
+        stopped += c["stopped"]
+        if i == cutter[0] and not c["cuts"]:
+            problems.append("copy %d was never cut" % i)
+        if expect != "none" and not c["on"] and i < 2:     # spectators get no RESUME ON, only the HELD notices
+            problems.append("copy %d never heard RESUME ON" % i)
+        if c["desync"]:
+            problems.append("copy %d went out of sync" % i)
+        if c["hang_blocks"]:    # a held fight stands still up to 22 s with its notice up: no hang (hang_watch.c)
+            problems.append("copy %d: the hang watch took the hold for a hang" % i)
+    if expect == "resume":
+        if not held or back < held:
+            problems.append("the relay held %d and %d came back" % (held, back))
+        if gave_any:
+            problems.append("a copy gave up although the cut one came back")
+    elif expect == "end":
+        if not held or not ends:
+            problems.append("the relay held %d, %d holds ran out (want both)" % (held, ends))
+        if not gave_any and not any(c["left_report"] or c["room_left"] for c in out["copies"].values()):
+            problems.append("no copy ended the fight after the hold")
+    elif expect == "limit":
+        if not nohold:
+            problems.append("no cut went unheld (the limit never hit)")
+    elif expect == "none":
+        if held:
+            problems.append("the relay held a seat (%d) in a run that must not hold" % held)
+    elif expect == "stop":
+        if not stopped:
+            problems.append("no copy stopped waiting with START")
     return out
 
 

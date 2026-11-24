@@ -2,8 +2,8 @@
 // Copyright (c) 2026 sweeax-exe (FFNY Online)
 // ---- community fighters beyond the places (fighter_banks.h): the paged list behind MORE ------------------------
 // The select grid's shelf shows up to 30 of them; its MORE cell opens this window over the game's own select screen
-// (pc_ui.cpp) for the slot that picked it: every one of them, 12 to a page (4 x 3), each with its template's portrait
-// (its own look is in its pack's pictures, which the game's screens show), its name and number. The d-pad moves,
+// (pc_ui.cpp) for the slot that picked it: every one of them, 12 to a page (4 x 3), each with its own hub portrait
+// (build 110; online-art/fighters/<number>.png, without one its template's), its name and number. The d-pad moves,
 // LB / RB turn the page, A takes the fighter for the slot, B keeps the one MORE gave it. Offline only.
 // Included by online_screen.cpp inside its anonymous namespace, after the drawing helpers and read_pad.
 
@@ -68,7 +68,8 @@ int community_window(ImDrawList *dl, const Frame &f, const Pad &pad_in, int *sel
         if (mouse_pick(f, x, y, cw, ch)) *sel = i, lit = true;
         if (mouse_click(f, x, y, cw, ch)) choose = i;
         rect(dl, f, x, y, cw, ch, IM_COL32(0, 0, 0, 170), 4);
-        portrait(dl, f, e->template_fe_id, x + 2, y + 2, 48, ch - 4, lit ? IM_COL32_WHITE : IM_COL32(140, 140, 140, 255));
+        // build 110: its own picture (online-art/fighters/<number>.png); without one portrait() draws its template's
+        portrait(dl, f, e->id, x + 2, y + 2, 48, ch - 4, lit ? IM_COL32_WHITE : IM_COL32(140, 140, 140, 255));
         float size = fit_size(f, g_title, 13, e->name, cw - 58);
         text(dl, f, g_title, size, x + 54, y + 18, lit ? WHITE : GREY, e->name, LEFT, 0.8f);
         char num[24];
