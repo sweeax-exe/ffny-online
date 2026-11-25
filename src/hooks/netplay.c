@@ -9422,6 +9422,14 @@ static void crowd_draw_lists(uint32_t mgr, uint32_t n, int drop, unsigned *entri
         }
 }
 
+/* RECOMP_CROWD_SCALE=keep (tests only): every spectator keeps the size its PC drew at load, as before build 112 */
+static int crowd_scale_on(void)
+{
+    static int on = -1;
+    if (on < 0) on = !(getenv("RECOMP_CROWD_SCALE") && !strcmp(getenv("RECOMP_CROWD_SCALE"), "keep"));
+    return on;
+}
+
 static void crowd_reset(uint32_t arena)
 {
     uint32_t mgr = arena + CROWD_MANAGER, xml, n, i, args[2];
@@ -9511,6 +9519,23 @@ static void crowd_reset(uint32_t arena)
         MEM32(m + 0x68u) = bits;
         MEM8(m + 0xDCu) = 0;
         MEM32(m + 0xD8u) = 0;
+        /* Build 112: the spectator's size (+0x11C, sub_0007D2C0), drawn at load by sub_0007E170 from the host-timed global
+         * generator: (rand() % 10 - 5) * [0x292378] + [0x289478]. The weapon a spectator holds is placed by it (the slot's
+         * hold offset, mgr slot +0x4C, is a constant times this size), so a spectator's weapon lay elsewhere on each PC and
+         * the CPUs' weapon targets (brain +0x08..+0x10) parted with it, in lockstep and rollback alike (towersteam-online
+         * floor 30: the size 0.97 against 0.98, the offset 3.686 against 3.724). Now drawn from the session, as the speed. */
+        if (crowd_scale_on()) {
+            float k = MEMF(0x00292378u), c = MEMF(0x00289478u), scale;
+            int r = (int)(mix32(N.session ^ (0xC20E0000u + i)) % 10u) - 5;
+            scale = (float)((double)r * (double)k + (double)c);
+            if (!(scale > 0.5f && scale < 1.5f)) scale = 1.0f;     /* not the constants this was read from: the plain size */
+            if (i == 0) {
+                static int told;
+                if (!told++) fprintf(stderr, "[NETPLAY] crowd sizes from the session: (r - 5) * %g + %g\n", (double)k, (double)c);
+            }
+            memcpy(&bits, &scale, 4);
+            MEM32(m + 0x11Cu) = bits;
+        }
     }
     /* 4. the records the fighters read, before the step's first update */
     guest_call(sub_0007F030, mgr, 0, NULL);
@@ -10339,14 +10364,15 @@ static void step_run(void)
     N.step_reads[k] = 0;
     N.step_upd[k] = N.updates;
     N.hash_at[k] = fighter_hash(N.hash_parts[k], N.hash_fields[k], N.hash_split[k]);   /* the state as this step starts */
-    {   /* the weapons (tests): FINALLOG prints them; RECOMP_NETPLAY_HASH_WEAPONS=1 also puts them in the checksum, so a
-         * weapon that lies elsewhere on one PC is seen when it parts, not when a fighter picks it up (match 97EDC0C9,
-         * 2026-11-03: the floor weapon's position differed long before fighter 2 walked to it, state 0x69) */
+    {   /* the weapons: the manager's slots and the fight's weapon table. In the checksum since build 112, so a weapon
+         * that lies elsewhere on one PC is seen when it parts, not when a fighter picks it up (match 97EDC0C9,
+         * 2026-11-03: the floor weapon's position differed long before fighter 2 walked to it, state 0x69); FINALLOG
+         * prints them. RECOMP_NETPLAY_HASH_WEAPONS=0 (tests, on every copy): out of the checksum, as before. */
         static int fold = -1;
         uint32_t w = weapon_hash(), a;
         for (a = WEAPON_TABLE; a < WEAPON_TABLE_END; a += 4) w = (w ^ MEM32(a)) * 16777619u;
         N.hash_weapons[k] = w;
-        if (fold < 0) fold = getenv("RECOMP_NETPLAY_HASH_WEAPONS") && *getenv("RECOMP_NETPLAY_HASH_WEAPONS") == '1';
+        if (fold < 0) fold = !(getenv("RECOMP_NETPLAY_HASH_WEAPONS") && *getenv("RECOMP_NETPLAY_HASH_WEAPONS") == '0');
         if (fold) N.hash_at[k] = (N.hash_at[k] ^ w) * 16777619u;
     }
     {   /* Big Arena's scores and respawns (0 and no change while no such fight runs) */
@@ -10981,14 +11007,86 @@ static uint32_t weapon_hash(void)
     return h;
 }
 
+/* Build 112: a weapon a spectator holds follows the spectator's hand (joint 0xA of the member's model: sub_000BAF90 ->
+ * sub_000445C0 -> sub_000261B0 reads the joint matrices of the model's controller at +0x140), and it is placed by the
+ * member's "on screen" byte (animation object +0x42). All of it comes from the crowd's draw: sub_00084B40 tests the camera
+ * (sub_000849C0 writes +0x42) and only for a member on screen samples the pose (sub_000230A0, then sub_000252A0), and
+ * sub_000838E0 then gives the model its size (sub_00024C20, model +0x2E0: one PC still had the load's 1.04 where the
+ * other had crowd_reset's 1.0, floor 32 step 992, both without re-runs). So the
+ * weapon's matrix depended on the frames drawn and on the camera: a rollback re-run draws nothing and read the pose
+ * the last drawn frame left (floor 34, step 957: the first held matrix differed in the third digit after 380 re-run
+ * steps on one PC), and when such a weapon is tossed the fight's weapon entry takes that matrix (sub_000BBF30). In an
+ * online fight every PC now poses each spectator that holds a weapon right before the manager's update, from the clip
+ * time the crowd update set, and the update sees the member on screen; the byte goes back afterwards for the draw.
+ * RECOMP_NETPLAY_CROWD_HOLD=game (tests): as the game. */
+extern void sub_00044210(void);
+extern void sub_000230A0(void);
+extern void sub_000252A0(void);
+extern void sub_00024C20(void);
+#define CROWD_HOLD_MAX 16
+static int crowd_hold_in_step(void)
+{
+    static int on = -1;
+    if (on < 0) on = !(getenv("RECOMP_NETPLAY_CROWD_HOLD") && !strcmp(getenv("RECOMP_NETPLAY_CROWD_HOLD"), "game"));
+    return on;
+}
+
+/* poses the holders; returns how many on-screen bytes it set (their objects and old bytes in anim/was) */
+static int crowd_hold_pose(uint32_t *anim, uint8_t *was)
+{
+    uint32_t eax = g_eax, ecx = g_ecx, edx = g_edx, ebx = g_ebx, esi = g_esi, edi = g_edi, ebp = g_ebp, esp = g_esp;
+    uint32_t recs = MEM32(0x003494E4u), count = MEM32(0x003494E0u), slot, arg;
+    double fp[8];
+    int fp_top = g_fp_top, n = 0, k;
+    uint16_t fp_cw = g_fp_control_word;
+    if (!recs || !count || count > 256u) return 0;
+    memcpy(fp, g_fp_stack, sizeof(fp));
+    for (slot = 0; slot < 16u; slot++) {
+        uint32_t obj = WEAPON_MANAGER + slot * 0xD0u + 0xCu, owner = MEM32(obj + 8u), a, model;
+        if (MEM32(obj + 4u) == 0xFFFFFFFFu || owner < 4u || owner - 4u >= count) continue;  /* empty, or not a spectator's */
+        arg = MEM32(recs + (owner - 4u) * 0x34u + 0x2Cu);     /* the member's index, as sub_000BAF90 reads it */
+        guest_call(sub_00044210, 0, 1, &arg);
+        a = g_eax;
+        if (a < GUEST_WINDOW_LO || a >= GUEST_WINDOW_HI) continue;
+        model = MEM32(a + 0xCu);
+        if (model < GUEST_WINDOW_LO || model >= GUEST_WINDOW_HI) continue;
+        for (k = 0; k < n && anim[k] != a; k++) {}
+        if (k < n) continue;                                  /* two weapons in one hand: posed once */
+        {   /* the size the draw gives the model (sub_000838E0: sub_00024C20 with A+0x3C = member+0x11C, for a member on
+             * screen only), so the hand is where the size crowd_reset set puts it on every PC */
+            uint32_t size[3];
+            size[0] = size[1] = size[2] = MEM32(a + 0x3Cu);
+            guest_call(sub_00024C20, model, 3, size);
+        }
+        guest_call(sub_000230A0, model + 0x140u, 0, NULL);
+        guest_call(sub_000252A0, model, 0, NULL);
+        if (n < CROWD_HOLD_MAX) {
+            anim[n] = a;
+            was[n] = MEM8(a + 0x42u);
+            MEM8(a + 0x42u) = 1;
+            n++;
+        }
+    }
+    g_eax = eax; g_ecx = ecx; g_edx = edx; g_ebx = ebx; g_esi = esi; g_edi = edi; g_ebp = ebp; g_esp = esp;
+    memcpy(g_fp_stack, fp, sizeof(fp));
+    g_fp_top = fp_top;
+    g_fp_control_word = fp_cw;
+    return n;
+}
+
 static void weapon_update(void)
 {
+    uint32_t anim[CROWD_HOLD_MAX];
+    uint8_t was[CROWD_HOLD_MAX];
+    int held = 0, k;
     if (N.lockstep && N.lobby && N.match_live && (!N.match_seen || N.step == 0)) {
         g_weapon_waits++;
         g_esp += 8;                 /* thiscall, ret 4: the dt argument and the return address */
         return;
     }
+    if (N.lockstep && N.match_live && crowd_hold_in_step()) held = crowd_hold_pose(anim, was);
     sub_000BCC50();
+    for (k = 0; k < held; k++) MEM8(anim[k] + 0x42u) = was[k];
 }
 
 /* EAGL's dynamic vertex buffers. A draw command of a render method (the interpreter's cursor,
