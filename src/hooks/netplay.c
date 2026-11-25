@@ -9402,13 +9402,35 @@ static void cp_pose_in_step(void)
  * recomp_lookup_manual hands it out: in a lockstep fight it draws from the crowd's copy of the
  * global generator. */
 extern void sub_00081170(void);
+/* Build 112: in an online room the spectators hand out no weapons in a game update without a fight step (the venue's
+ * intro and loading states, the results): those updates run at each PC's own pace, so a weapon offered there was a
+ * slot one PC had and the other had not, or had elsewhere (Faction War crew, fight 2 at Chop Shop: the weapons
+ * differed at step 1, desync at step 60). The game's own "no interactions" bit (0x3BE0F4 bit 0, which sub_00080A00 and
+ * the offer gate sub_0007EA70 test) is set for such a crowd update and put back after it. RECOMP_NETPLAY_CROWD_OFFERS=all
+ * (tests, every copy): as the game. */
+static int g_stepped;                   /* a fight step ran in this game update (netplay_on_step; weapon_update) */
+#define CROWD_HUSH 0x003BE0F4u
+static int crowd_offers_in_step(void)
+{
+    static int on = -1;
+    if (on < 0) on = !(getenv("RECOMP_NETPLAY_CROWD_OFFERS") && !strcmp(getenv("RECOMP_NETPLAY_CROWD_OFFERS"), "all"));
+    return on;
+}
+
 void netplay_crowd_update(void)
 {
     uint32_t real[6], i;
-    if (!N.lockstep || !g_crowd_gen_on) { sub_00081170(); return; }
-    for (i = 0; i < 6; i++) { real[i] = MEM32(GLOBAL_GEN + 4u * i); MEM32(GLOBAL_GEN + 4u * i) = g_crowd_gen[i]; }
-    sub_00081170();
-    for (i = 0; i < 6; i++) { g_crowd_gen[i] = MEM32(GLOBAL_GEN + 4u * i); MEM32(GLOBAL_GEN + 4u * i) = real[i]; }
+    int hush = N.lobby && !g_stepped && crowd_offers_in_step();
+    uint8_t was = MEM8(CROWD_HUSH);
+    if (hush) MEM8(CROWD_HUSH) = (uint8_t)(was | 1u);
+    if (!N.lockstep || !g_crowd_gen_on) {
+        sub_00081170();
+    } else {
+        for (i = 0; i < 6; i++) { real[i] = MEM32(GLOBAL_GEN + 4u * i); MEM32(GLOBAL_GEN + 4u * i) = g_crowd_gen[i]; }
+        sub_00081170();
+        for (i = 0; i < 6; i++) { g_crowd_gen[i] = MEM32(GLOBAL_GEN + 4u * i); MEM32(GLOBAL_GEN + 4u * i) = real[i]; }
+    }
+    if (hush) MEM8(CROWD_HUSH) = (uint8_t)((MEM8(CROWD_HUSH) & ~1u) | (was & 1u));
 }
 
 /* The spectators' draw lists. Each member's animation object (member + 0xE0) is "shown" by
@@ -9473,6 +9495,7 @@ static int crowd_scale_on(void)
     return on;
 }
 
+extern void sub_000BADA0(void);
 static void crowd_reset(uint32_t arena)
 {
     uint32_t mgr = arena + CROWD_MANAGER, xml, n, i, args[2];
@@ -9579,6 +9602,18 @@ static void crowd_reset(uint32_t arena)
             memcpy(&bits, &scale, 4);
             MEM32(m + 0x11Cu) = bits;
         }
+    }
+    {   /* Build 112: 3. also cleared the records' weapon handles, so a weapon a spectator was holding (made before this
+         * step, at each PC's own pace) belongs to nobody now: such slots go, as the game's round-end reset (sub_000BC060)
+         * takes every slot (sub_000BADA0). RECOMP_NETPLAY_CROWD_OFFERS=all (tests): kept, as before. */
+        uint32_t sl, freed = 0;
+        for (sl = 0; crowd_offers_in_step() && sl < 16u; sl++) {
+            uint32_t obj = 0x00376144u + sl * 0xD0u + 0xCu, owner = MEM32(obj + 8u);
+            if (MEM32(obj + 4u) == 0xFFFFFFFFu || owner < 4u || owner > 0x1000u) continue;
+            guest_call(sub_000BADA0, obj, 0, NULL);
+            freed++;
+        }
+        if (freed) fprintf(stderr, "[NETPLAY] crowd: %u weapon(s) spectators held before the first step taken out\n", freed);
     }
     /* 4. the records the fighters read, before the step's first update */
     guest_call(sub_0007F030, mgr, 0, NULL);
@@ -9790,7 +9825,6 @@ static uint32_t weapon_hash(void);      /* the weapon manager, below with its up
 #define WEAPON_TABLE     0x003BE778u    /* the fight's weapon entries, 16 x 0xA4 (weapon-position-timing.md) */
 #define WEAPON_TABLE_END 0x003BF1B8u
 static unsigned g_weapon_waits;
-static int g_stepped;                   /* build 112: a fight step ran in this game update (weapon_update) */
 static unsigned g_weapon_idle;          /* weapon manager updates left out: no fight step in their game update */
 #define STEPLOG_RING 256
 static const uint32_t k_steplog_ranges[][2] = {
@@ -10360,6 +10394,20 @@ static void step_run(void)
             fprintf(stderr, "[NETPLAY] weapons at the first step: %08X (their update waited %u times; %u updates without a "
                     "fight step since the last match)\n", weapon_hash(), g_weapon_waits, g_weapon_idle);
             g_weapon_waits = g_weapon_idle = 0;
+            {   /* build 112: which slots are taken as the fight starts (type, owner, position), to compare two PCs' logs */
+                uint32_t sl, used = 0;
+                n = 0;
+                line[0] = 0;
+                for (sl = 0; sl < 16u; sl++) {
+                    uint32_t obj = 0x00376144u + sl * 0xD0u + 0xCu;
+                    if (MEM32(obj + 4u) == 0xFFFFFFFFu) continue;
+                    used++;
+                    if (n < (int)sizeof(line) - 40)
+                        n += snprintf(line + n, sizeof(line) - (size_t)n, " %u:%X/%d@%.1f,%.1f", sl, MEM32(obj + 4u),
+                                      (int)MEM32(obj + 8u), (double)MEMF(obj + 0x3Cu), (double)MEMF(obj + 0x44u));
+                }
+                if (used) fprintf(stderr, "[NETPLAY] weapon slots at the first step:%s\n", line);
+            }
         }
     }
     cpus_only_end(s, 0);        /* only CPU fighters left: the fight ends (before the checksum) */
