@@ -284,7 +284,7 @@ def test_wiring():
     """The overlays only read: the hooks, the settings and the report's field are where the docs say."""
     netplay = (ROOT / 'src/hooks/netplay.c').read_text(encoding='utf-8', errors='replace')
     # after netplay's own step work (a rollback done there), on every step, offline too
-    assert re.search(r'void netplay_on_step\(void\)\s*\{\s*step_body\(\);\s*fight_hud_step\(\);\s*\}', netplay)
+    assert re.search(r'void netplay_on_step\(void\)\s*\{\s*(?:g_stepped = 1;\s*)?step_body\(\);\s*fight_hud_step\(\);\s*\}', netplay)
     assert re.search(r'void netplay_on_match_start\(void\)\s*\{\s*match_start_body\(\);\s*fight_hud_match_start\(\);\s*\}', netplay)
     glue = (ROOT / 'src/hooks/fight_hud.c').read_text(encoding='utf-8')
     # no write to guest memory: every MEM access is a read (no assignment, no address taken)
