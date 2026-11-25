@@ -77,6 +77,10 @@ struct FwLive {
     int members[3] = { 0, 0, 0 }, searching[3] = { 0, 0, 0 };
     long long seq = 0, ends = 0, now = 0, last_at = 0;
     int last = FW_NONE;
+    // build 112: crew-only fighters (faction_crew.h): the season is crew-only, from which season, each side's crew
+    bool crew_rule = false;
+    std::string crew_from;
+    std::vector<int> crew[3];
 };
 struct FwMe {
     bool valid = false;
@@ -117,6 +121,12 @@ void fw_parse_live(const std::vector<std::pair<std::string, std::string>> &kv, F
         else if (k == "last_at") l.last_at = n;
         else if (k == "ends") l.ends = n;
         else if (k == "now") l.now = n;
+        else if (k == "crew_rule") l.crew_rule = n != 0;
+        else if (k == "crew_from") l.crew_from = v;
+        else if (k == "crew_dmob" || k == "crew_crow") {
+            int ids[FACTION_CREW_MAX], c = faction_crew_parse(v.c_str(), ids, FACTION_CREW_MAX);
+            l.crew[k == "crew_dmob" ? FW_DMOB : FW_CROW].assign(ids, ids + c);
+        }
     }
 }
 
@@ -212,6 +222,7 @@ struct FactionNet {
     ULONGLONG q_since = 0;
     std::string room_post;          // a /room body waiting for the queue's thread ("" none)
     std::string room_posted_for;    // the match whose room was posted (host code or a joiner's slot)
+    std::string room_code;          // build 112: the faction match's room code, once posted (the crew rule's room)
 } FN;
 
 // ---- the requests (each on its own short thread, as the Towers board) ----
@@ -233,6 +244,10 @@ void fw_fetch_live()
                 if (FN.live.seq != l.seq || !FN.live.valid)
                     fprintf(stderr, "[FACTION] live: season %s, D-Mob %lld, Crow %lld (seq %lld, last %s)\n", l.season.c_str(),
                             l.pts[FW_DMOB], l.pts[FW_CROW], l.seq, fw_id(l.last));
+                if (FN.live.crew_rule != l.crew_rule || !FN.live.valid)
+                    fprintf(stderr, "[FACTION] crew rule %s (crew-only from %s; D-Mob's crew %d fighters, Crow's %d)\n",
+                            l.crew_rule ? "ON" : "off", l.crew_from.empty() ? "-" : l.crew_from.c_str(),
+                            (int)l.crew[FW_DMOB].size(), (int)l.crew[FW_CROW].size());
                 FN.live = l;
             }
             if (status == 404 && FN.live_status != 404) fprintf(stderr, "[FACTION] live: off (HTTP 404)\n");
@@ -407,8 +422,14 @@ void fw_queue_start(int size)
         FN.q_since = GetTickCount64();
         FN.room_post.clear();
         FN.room_posted_for.clear();
+        FN.room_code.clear();
     }
     fprintf(stderr, "[FACTION] search %s\n", size == 2 ? "2 on 2" : "1 on 1");
+    // build 112: the side and the season's crew rule, fresh for the match (the fighters' tests have no hub that asks)
+    FN.live_at = 0;
+    FN.me_at = 0;
+    fw_fetch_live();
+    fw_fetch_me();
     if (!gallery_on()) std::thread(fw_queue_thread, gen).detach();
 }
 
@@ -1189,6 +1210,18 @@ void fw_match_tick(const NetRoom &room)
         std::lock_guard<std::mutex> lock(FN.mu);
         FN.q_net = body;
     }
+    {   // build 112: in the faction match's room the crew rule and this PC's side stay fresh (a season may turn)
+        bool match_room;
+        {
+            std::lock_guard<std::mutex> lock(FN.mu);
+            match_room = room.in_room && !FN.room_code.empty() && FN.room_code == room.code;
+        }
+        if (match_room) {
+            if (!FN.live_at || now - FN.live_at > 30000) fw_fetch_live();
+            if (!FN.me_at || now - FN.me_at > 60000) fw_fetch_me();
+            fw_crew_note(room, fw_crew_side(room));
+        }
+    }
     FwQueue q = fw_queue();
     if (q.match.empty()) return;
     bool on = fw_searching() || q.state == "ready";
@@ -1225,6 +1258,7 @@ void fw_match_tick(const NetRoom &room)
             std::lock_guard<std::mutex> lock(FN.mu);
             FN.room_post = body;
             FN.room_posted_for = q.match;
+            FN.room_code = room.code;
             fprintf(stderr, "[FACTION] match %s: room %s open (slot %d)\n", q.match.c_str(), room.code, room.you);
         }
     } else if (q.state == "join" && !q.code.empty()) {
@@ -1244,9 +1278,60 @@ void fw_match_tick(const NetRoom &room)
             std::lock_guard<std::mutex> lock(FN.mu);
             FN.room_post = body;
             FN.room_posted_for = q.match;
+            FN.room_code = q.code;
             fprintf(stderr, "[FACTION] match %s: in room %s (slot %d)\n", q.match.c_str(), room.code, room.you);
         }
     }
+}
+
+// ---- build 112: crew-only fighters (faction_crew.h; owner-approved 2026-11-25, from the December season) ----
+
+// This PC's side when `r` is its faction match's room and the season is crew-only (the service's crew_rule=1 with
+// both lists); FW_NONE anywhere else, in the November season, or before the service answered.
+int fw_crew_side(const NetRoom &r)
+{
+    if (gallery_on() || !r.in_room || !r.code[0] || r.you == NETPLAY_SLOT_SPECTATOR) return FW_NONE;
+    std::lock_guard<std::mutex> lock(FN.mu);
+    if (!FN.live.valid || !FN.live.crew_rule || !FN.me.valid || FN.room_code != r.code) return FW_NONE;
+    int side = FN.me.faction;
+    if ((side != FW_DMOB && side != FW_CROW) || FN.live.crew[side].empty()) return FW_NONE;
+    return side;
+}
+
+// Whether `side`'s crew has fighter `id` (the service's list; the game carries none of its own). FW_NONE: any fighter.
+bool fw_crew_has(int side, int id)
+{
+    if (side != FW_DMOB && side != FW_CROW) return true;
+    std::lock_guard<std::mutex> lock(FN.mu);
+    const std::vector<int> &c = FN.live.crew[side];
+    return faction_crew_has(c.data(), (int)c.size(), id) != 0;
+}
+
+// The crew line's plate (the select's and the room's): the side's colours; returns its width. right: x is its right edge.
+float fw_crew_plate(ImDrawList *dl, const Frame &f, float x, float y, int side, float size = 11, bool right = false)
+{
+    const char *w = faction_crew_line(side);
+    float tw = text_width(f, g_title, size, w) + 14, h = size + 7;
+    if (right) x -= tw;
+    rect(dl, f, x, y, tw, h, fw_main(side, 0.92f), 4);
+    dl->AddRect(f.p(x, y), f.p(x + tw, y + h), fw_trim(side, 0.9f), 4 * f.s(), 0, 1.0f * f.s());
+    text(dl, f, g_title, size, x + tw / 2, y + 3, side == FW_DMOB ? fw_trim(side) : WHITE, w, CENTER, 0.6f);
+    return tw;
+}
+
+// Once per room: what the select offers there ([FACTION] line for the tests and the logs).
+void fw_crew_note(const NetRoom &r, int side)
+{
+    static std::mutex mu;
+    static std::string told;
+    std::lock_guard<std::mutex> lock(mu);
+    if (!side || told == r.code) return;
+    told = r.code;
+    const OnlineFighter *all = nullptr;
+    int n = online_fighters(&all), offered = 0;
+    for (int i = 0; i < n; i++) offered += fw_crew_has(side, all[i].id) ? 1 : 0;
+    fprintf(stderr, "[FACTION] crew-only room %s: %s's crew, %d fighters in CHOOSE FIGHTER (no community, created or other "
+                    "crew's fighters)\n", r.code, side == FW_DMOB ? "D-Mob" : "Crow", offered);
 }
 
 // ---- the hub: the tile, and the picker the first time ----
@@ -1302,5 +1387,10 @@ const char *faction_shot_label()
 {
     if (S.page == FACTION_PICK) return FU.slam ? "faction-picked" : FU.confirm ? "faction-confirm" : "faction-pick";
     if (S.page == FACTIONS) return FU.board ? "faction-board" : fw_searching() ? "faction-search" : "faction-war";
+    if (!gallery_on()) {     // build 112: the crew-only select and room
+        NetRoom r;
+        lobby_room(&r);
+        if (r.phase == 0 && fw_crew_side(r)) return S.page == FIGHTERS ? "faction-crew-fighters" : "faction-crew-room";
+    }
     return nullptr;
 }
