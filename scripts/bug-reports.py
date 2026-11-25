@@ -10,11 +10,18 @@ POST /api/report/note), shown here as "note (after the match)".
     python scripts/bug-reports.py list [--last 20]     # newest last: time, id, kind, build, player, note
     python scripts/bug-reports.py get ID [ID ...]      # copies them to logs/bug-reports/<folder>/
     python scripts/bug-reports.py new                  # fetches every report not fetched yet
+    python scripts/bug-reports.py triage [--days 14]   # the reports grouped by signature (start of a session)
+
+triage reads the account service's GET /internal/reports/triage (server/relay/accounts/triage.go) over ssh: each
+signature (the crash's guest function+offset or native place, F9 reports by mode), its status (new, known,
+fixed-in-build-N, regressed, ignored), reports in the span, players, builds, mode, examples and notes. Mark one
+with the bot's /report-fixed <sig> <build> or /report-mark, or in <reports>/triage-marks.json on the server.
 
 Needs ssh access to the server (host alias ffny-online, --host to change). The reports hold
 players' logs: they stay under logs/, which is never committed.
 """
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -45,6 +52,48 @@ def remote_list(host):
     return reports
 
 
+TRIAGE_URL = "http://127.0.0.1:8091/internal/reports/triage?days=%d"   # the service's internal listener
+
+
+def triage(host, days, show_all, raw):
+    out = subprocess.run(["ssh", host, "curl -fsS '%s'" % (TRIAGE_URL % days)], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
+    if out.returncode != 0:
+        sys.exit("ssh %s failed: %s" % (host, (out.stderr or out.stdout).strip()))
+    data = json.loads(out.stdout)
+    if raw:
+        print(json.dumps(data, indent=1))
+        return
+    sigs = data.get("signatures") or []
+    print("%d report(s) in %d days, %d signature(s) (generated %s)" % (data.get("reports", 0), data.get("days", 0),
+                                                                         len(sigs), data.get("generated", "?")))
+    for v in sigs:
+        if not show_all and v.get("class") in ("f9", "studio-report") and not v.get("notes"):
+            continue
+        builds = v.get("builds") or ["?"]
+        span = builds[0] if len(builds) == 1 else "%s..%s" % (builds[0], builds[-1])
+        print("%s %-18s %4d in span (%d ever, %d players)  build %-14s %-12s %s" % (
+            v["id"], v.get("status", "?"), v.get("in_window", 0), v.get("count", 0), v.get("players", 0), span,
+            v.get("class", "?"), v.get("where", "?")))
+        extra = []
+        if v.get("modes"):
+            extra.append("mode " + ", ".join(v["modes"]))
+        if v.get("faults"):
+            extra.append("fault " + ", ".join(v["faults"]))
+        if v.get("examples"):
+            extra.append("e.g. " + " ".join(v["examples"][-2:]))
+        if extra:
+            print("    " + "; ".join(extra))
+        for n in (v.get("notes") or [])[:2]:
+            print("    note %s (build %s): %s" % (n.get("id"), n.get("build"), n.get("note")))
+    events = data.get("events") or []
+    if events:
+        print("latest events:")
+        for e in events[-8:]:
+            print("  #%d %s %s %s report %s build %s: %s" % (e["seq"], e.get("time", "")[:16], e["type"], e["sig"],
+                                                            e.get("report"), e.get("build"), e.get("why")))
+
+
 def fetch(host, folder):
     dest = os.path.join(LOCAL, folder)
     os.makedirs(dest, exist_ok=True)
@@ -67,7 +116,15 @@ def main():
     get = sub.add_parser("get")
     get.add_argument("ids", nargs="+")
     sub.add_parser("new")
+    tr = sub.add_parser("triage")
+    tr.add_argument("--days", type=int, default=14)
+    tr.add_argument("--all", action="store_true", help="also F9 and Studio groups without notes")
+    tr.add_argument("--json", action="store_true", help="the service's JSON as it is")
     a = ap.parse_args()
+
+    if a.cmd == "triage":
+        triage(a.host, a.days, a.all, a.json)
+        return
 
     reports = remote_list(a.host)
     if a.cmd == "list":
