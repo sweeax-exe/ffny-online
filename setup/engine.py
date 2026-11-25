@@ -63,6 +63,78 @@ def cmake_version(text):
     return (int(match.group(1)), int(match.group(2))) if match else None
 
 
+# The game builds its C as C11 (CMAKE_C_STANDARD 11: cl /std:c11), and Microsoft names Windows SDK 10.0.20348.0
+# (version 2104) as the first whose headers support MSVC's C11 (its conformant preprocessor); with 10.0.19041.0
+# winbase.h already warns (C5105), older ones are not fit for it. A player's setup took SDK 10.0.16299.0 (2017),
+# the only one installed, and stopped mid-build. CI (windows-latest) builds with the runner's newest SDK.
+WINDOWS_SDK_MINIMUM = (10, 0, 20348)
+
+
+def sdk_version(text):
+    """(10, 0, build) from a Windows SDK version ("10.0.22621.0", VsDevCmd's "10.0.16299.0\\"), or None."""
+    match = re.fullmatch(r'\s*(\d+)\.(\d+)\.(\d+)(?:\.\d+)?\\?\s*', text or '')
+    return tuple(int(match.group(k)) for k in (1, 2, 3)) if match else None
+
+
+def windows_kits_root():
+    """The Windows 10/11 SDK folder (Windows Kits\\10) from the registry, else its usual place; None if absent."""
+    if IS_WINDOWS:
+        import winreg
+        for view in (winreg.KEY_WOW64_32KEY, winreg.KEY_WOW64_64KEY):
+            with contextlib.suppress(OSError):
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Microsoft SDKs\Windows\v10.0',
+                                    0, winreg.KEY_READ | view) as key:
+                    folder = Path(winreg.QueryValueEx(key, 'InstallationFolder')[0])
+                    if folder.is_dir():
+                        return folder
+    folder = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Windows Kits/10'
+    return folder if folder.is_dir() else None
+
+
+def complete_windows_sdks(kits):
+    """[((10, 0, build), "10.0.build.0"), ...], oldest first: the SDKs in `kits` with the headers and x64
+    libraries a build needs (the Windows and C runtime parts). An SDK that lost its Universal CRT part
+    (a player's, "stdio.h missing") is left out."""
+    found = []
+    include, lib = Path(kits) / 'Include', Path(kits) / 'Lib'
+    for folder in include.iterdir() if include.is_dir() else ():
+        version = sdk_version(folder.name)
+        if version and re.fullmatch(r'[\d.]+', folder.name) and all(p.is_file() for p in (
+                folder / 'um/Windows.h', folder / 'ucrt/stdio.h', folder / 'shared/sdkddkver.h',
+                lib / folder.name / 'um/x64/kernel32.lib', lib / folder.name / 'ucrt/x64/ucrt.lib')):
+            found.append((version, folder.name))
+    return sorted(found)
+
+
+MEDIA_FEATURE_PACK_MESSAGE = ('Your Windows is an N edition without media components. Install the Media Feature '
+                              'Pack: Settings > Apps > Optional features > Add a feature > Media Feature Pack, '
+                              'then restart.')
+
+
+def media_foundation_present(names=('MFPlat.dll', 'MFReadWrite.dll')):
+    """Whether Windows' Media Foundation loads from System32 (Windows N and KN editions lack it, ticket #193).
+    True off Windows."""
+    if not IS_WINDOWS:
+        return True
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+    kernel32.LoadLibraryExW.argtypes = (ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint32)
+    kernel32.FreeLibrary.argtypes = (ctypes.c_void_p,)
+    for name in names:
+        module = kernel32.LoadLibraryExW(name, None, 0x00000800)    # LOAD_LIBRARY_SEARCH_SYSTEM32
+        if not module:
+            return False
+        kernel32.FreeLibrary(module)
+    return True
+
+
+def windows_sdk_too_old(have):
+    need = '.'.join(map(str, WINDOWS_SDK_MINIMUM)) + '.0'
+    return (f'Your newest Windows SDK is {have}; the game needs {need} or newer. Open Visual Studio Installer, '
+            'choose Modify on your Visual Studio or Build Tools, open "Individual components", search for "Windows 11 SDK", '
+            'tick the newest one (10.0.22621.0 or later), choose Modify and wait for it to finish, then run setup again.')
+
+
 def stale_compiler_cache(cache_file, compiler):
     """True when a CMakeCache.txt names a C++ compiler other than `compiler` (paths compared
     case-insensitively and normalised); False when there is no cache or it names none."""
@@ -893,11 +965,24 @@ class Engine:
                 return self.toolchain(provisioned=True)
             raise SetupError('C++ Build Tools workload missing', 3)
         vs = Path(installation[0])
+        # The Windows SDK: the newest complete one, and new enough for the build's C11 (see WINDOWS_SDK_MINIMUM).
+        # VsDevCmd on its own takes the newest folder with a winsdkver.h, complete or not.
+        kits = windows_kits_root()
+        sdks = complete_windows_sdks(kits) if kits else []
+        if self.log:
+            self.log.write('Windows SDKs: ' + (', '.join(name for _, name in sdks) or 'none found complete') +
+                           (' in ' + str(kits) if kits else '') + '\n')
+        if sdks and sdks[-1][0] < WINDOWS_SDK_MINIMUM:
+            raise SetupError(windows_sdk_too_old(sdks[-1][1]), 3)
+        if sdks:        # digits and dots only (complete_windows_sdks): safe inside the batch line
+            self.env['DEFJAM_SETUP_WINSDK'] = ' -winsdk=' + sdks[-1][1]
+        else:           # undefined: a batch file expands it to nothing, and VsDevCmd picks as before
+            self.env.pop('DEFJAM_SETUP_WINSDK', None)
         # Import VsDevCmd through a fixed script with an environment-supplied path.
         devcmd = vs / 'Common7/Tools/VsDevCmd.bat'
         self.env['DEFJAM_SETUP_VSDEVCMD'] = str(devcmd)
         batch = self.version_root / 'toolchain.cmd'
-        batch.write_text('@echo off\ncall "%DEFJAM_SETUP_VSDEVCMD%" -arch=amd64 -host_arch=amd64 -no_logo\nif errorlevel 1 exit /b %errorlevel%\nset\n', encoding='utf-8')
+        batch.write_text('@echo off\ncall "%DEFJAM_SETUP_VSDEVCMD%" -arch=amd64 -host_arch=amd64 -no_logo%DEFJAM_SETUP_WINSDK%\nif errorlevel 1 exit /b %errorlevel%\nset\n', encoding='utf-8')
         # CMD does not understand list2cmdline's backslash-escaped inner quotes.
         # Expand one quoted environment value after parsing a constant command;
         # omit CALL, whose second expansion would reinterpret percent characters.
@@ -911,6 +996,11 @@ class Engine:
             key, equal, value = line.partition('=')
             if equal and key and not key.startswith('='):
                 self.env[key] = value
+        chosen = sdk_version(self.env.get('WindowsSDKVersion', ''))
+        if self.log:
+            self.log.write('Windows SDK in use: ' + (self.env.get('WindowsSDKVersion', '').strip('\\') or 'unknown') + '\n')
+        if chosen and chosen < WINDOWS_SDK_MINIMUM:
+            raise SetupError(windows_sdk_too_old(self.env['WindowsSDKVersion'].strip('\\')), 3)
         includes = [d for d in self.env.get('INCLUDE', '').split(';') if d]
         if not any((Path(d) / 'stdio.h').is_file() for d in includes):
             # A player's Windows SDK lost its Universal CRT part: every C file failed on stdio.h.
@@ -1365,6 +1455,17 @@ class Engine:
                 self.event('Setup ' + json.dumps({k: self.manifest[k] for k in ('version', 'source_commit', 'toolkit_commit')}))
                 self.check_install_destination()
                 self.check_existing_install()
+                if IS_WINDOWS and not media_foundation_present():
+                    # Not a stop: the build needs no Media Foundation, and the pack can come later; the
+                    # launcher and the game say the same at start until it is there (ticket #193).
+                    self.event('Note: ' + MEDIA_FEATURE_PACK_MESSAGE)
+                if IS_WINDOWS and not getattr(self.args, 'install_prerequisites', False):
+                    # A Windows SDK too old for the build: say so now, not after the extraction (the toolchain
+                    # stage checks again, with what VsDevCmd chose)
+                    kits = windows_kits_root()
+                    sdks = complete_windows_sdks(kits) if kits else []
+                    if sdks and sdks[-1][0] < WINDOWS_SDK_MINIMUM:
+                        raise SetupError(windows_sdk_too_old(sdks[-1][1]), 3)
                 if self.dump is None:
                     dump_size = 0       # an update reuses the extracted files already on the data drive
                 elif not self.dump.exists():

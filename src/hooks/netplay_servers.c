@@ -52,6 +52,8 @@ const char *netservers_short(int index)
 #define LATE_MS       1500      /* after the last probe: how long to wait for answers */
 #define ROUND_EVERY   10000     /* a new round when asked and the last one is this old */
 #define DECIDE_MS     2500      /* Automatic decides with what it has after this */
+#define QUICK_PROBES  2         /* build 111: CREATE A ROOM's fresh round (Automatic): two probes ... */
+#define QUICK_LATE_MS 800       /* ... and this long for late answers: about 1.1 s at most */
 
 static CRITICAL_SECTION g_cs;
 static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
@@ -65,6 +67,7 @@ static struct {
     int pick;                       /* Automatic's choice for this session, -1 not yet */
     int override;                   /* a switch made this session, -1 none */
     ULONGLONG first_ask;            /* Automatic was first asked for its choice */
+    volatile LONG short_round;      /* build 111: the next round is CREATE A ROOM's fresh one (QUICK_PROBES, QUICK_LATE_MS) */
 } P;
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
@@ -154,6 +157,8 @@ static void run_round(void)
     SOCKET s;
     u_long nonblocking = 1;
     uint8_t print[8];
+    int quick = InterlockedExchange(&P.short_round, 0) != 0;
+    int probes = quick ? QUICK_PROBES : PROBES, late = quick ? QUICK_LATE_MS : LATE_MS;
     netplay_build_fingerprint(print);
     EnterCriticalSection(&g_cs);
     for (i = 0; i < NETSERVER_COUNT; i++) memcpy(address[i], P.s[i].address, sizeof(address[i]));
@@ -168,9 +173,9 @@ static void run_round(void)
     ioctlsocket(s, FIONBIO, &nonblocking);
     base = (uint32_t)GetTickCount() * 2654435761u ^ (uint32_t)GetCurrentProcessId() << 8;
     base &= ~0xFFu;
-    for (k = 0; k <= PROBES; k++) {
+    for (k = 0; k <= probes; k++) {
         double until;
-        if (k < PROBES) {
+        if (k < probes) {
             for (i = 0; i < NETSERVER_COUNT; i++) {
                 uint8_t b[STATUS_LEN];
                 uint32_t nonce = base | (uint32_t)(i << 4 | k);
@@ -184,7 +189,7 @@ static void run_round(void)
             }
             until = last_send + PROBE_GAP_MS;
         } else {
-            until = last_send + LATE_MS;
+            until = last_send + late;
         }
         while (now_ms() < until) {
             fd_set rd;
@@ -197,7 +202,7 @@ static void run_round(void)
             if (n >= STATUS_LEN && !memcmp(b, "DJNP", 4) && b[4] == 1 && b[5] == STATUS_TYPE) {
                 uint32_t nonce = rd32(b + 6);
                 int who = (int)((nonce >> 4) & 0xF), probe = (int)(nonce & 0xF);
-                if ((nonce & ~0xFFu) == base && who < NETSERVER_COUNT && probe < PROBES && probe <= k) {
+                if ((nonce & ~0xFFu) == base && who < NETSERVER_COUNT && probe < probes && probe <= k) {
                     int rtt = (int)(now_ms() - sent[who][probe] + 0.5);
                     answers[who]++;
                     if (best[who] < 0 || rtt < best[who]) best[who] = rtt;
@@ -215,8 +220,8 @@ static void run_round(void)
                     LeaveCriticalSection(&g_cs);
                 }
             }
-            if (k < PROBES) continue;
-            for (i = 0; i < NETSERVER_COUNT; i++) if (have[i] && answers[i] < PROBES) done = 0;
+            if (k < probes) continue;
+            for (i = 0; i < NETSERVER_COUNT; i++) if (have[i] && answers[i] < probes) done = 0;
             if (done) break;
         }
     }
@@ -227,6 +232,12 @@ static void run_round(void)
     }
     P.rounds++;
     P.round_done = GetTickCount64();
+    if (quick) {    /* build 111: CREATE A ROOM's fresh round, logged for the tests */
+        fprintf(stderr, "[SERVERS] fresh round:");
+        for (i = 0; i < NETSERVER_COUNT; i++)
+            if (have[i] && P.s[i].state == NETSERVER_UP) fprintf(stderr, " %s %d ms", P.s[i].short_name, P.s[i].ping_ms);
+        fprintf(stderr, "\n");
+    }
     if (P.rounds == 1) {
         fprintf(stderr, "[SERVERS]");
         for (i = 0; i < NETSERVER_COUNT; i++)
@@ -273,6 +284,25 @@ void netservers_probe(void)
         SetEvent(P.wake);
     }
     LeaveCriticalSection(&g_cs);
+}
+
+/* Build 111: a short round now, however old the last one is (a round already under way counts: its answers are
+ * seconds old at most). Returns the count of finished rounds before it: the fresh pings are in once P.rounds is
+ * beyond that. */
+static int probe_fresh(void)
+{
+    int mark;
+    init();
+    EnterCriticalSection(&g_cs);
+    mark = P.rounds;
+    if (!P.thread) P.thread = CreateThread(NULL, 0, probe_thread, NULL, 0, NULL);
+    if (P.thread && !InterlockedExchange(&P.running, 1)) {
+        InterlockedExchange(&P.short_round, 1);
+        P.round_started = GetTickCount64();
+        SetEvent(P.wake);
+    }
+    LeaveCriticalSection(&g_cs);
+    return mark;
 }
 
 int netservers_probing(void)
@@ -502,11 +532,19 @@ static struct {
 static void rings_round(void);
 
 static struct {         /* a join or quick match waiting for the hub to reach its relay */
-    int kind;           /* 0 none, 1 join, 2 quick, 3 ranked (a MOVE's reservation in code), 4 watch (spectate) */
+    int kind;           /* 0 none, 1 join, 2 quick, 3 ranked (a MOVE's reservation in code), 4 watch (spectate),
+                         * 5 build 111: CREATE A ROOM (settings) */
     int server, mode, max;
     char code[7];
     ULONGLONG since;
+    /* build 111: the room to open, and Automatic's fresh round */
+    NetRoomSettings settings;
+    int value;          /* ROOMSERVER_AUTO or 1 + the relay */
+    int measuring;      /* waiting for the fresh round (rounds beyond `mark`, or CREATE_MEASURE_MS) */
+    int mark;
+    char name[40];
 } A;
+#define CREATE_MEASURE_MS 3000  /* Automatic decides with the pings at hand after this */
 
 /* A join or watch by a typed code (ticket #200): a private room shows in no relay's list, and players of the two
  * coasts sit on different relays, so the relay the hub is on answers "no room". The other relays are asked in turn
@@ -1075,6 +1113,81 @@ void netservers_code_end(void)
     LeaveCriticalSection(&g_cs);
 }
 
+/* Build 111: CREATE A ROOM, once Automatic's fresh round is in (or CREATE_MEASURE_MS passed; a fixed relay at once):
+ * the relay the room opens on (netservers_room_target), and the hub moves there when it is elsewhere. 0 while the
+ * round still runs, 1 decided. */
+static int create_decide(void)
+{
+    NetServerInfo info[NETSERVER_COUNT];
+    int pings[NETSERVER_COUNT], n, i, cur, target, value;
+    enum NetServerChoice c = netservers_choice();
+    char name[40];
+    EnterCriticalSection(&g_cs);
+    if (A.kind != 5 || A.measuring != 1 || (P.rounds <= A.mark && GetTickCount64() - A.since < CREATE_MEASURE_MS)) {
+        int done = A.kind != 5 || !A.measuring;
+        LeaveCriticalSection(&g_cs);
+        return done;        /* 0 while measuring, or while another thread decides (the UI's and the tests' ticks) */
+    }
+    A.measuring = 2;        /* this thread decides */
+    value = A.value;
+    snprintf(name, sizeof(name), "%s", A.name);
+    LeaveCriticalSection(&g_cs);
+    n = netservers_get(info, NETSERVER_COUNT);
+    for (i = 0; i < NETSERVER_COUNT; i++) pings[i] = i < n && info[i].state == NETSERVER_UP ? info[i].ping_ms : -1;
+    cur = netservers_connected();
+    /* a custom address (tests, a private relay): the room opens where the hub is */
+    target = c == NETCHOICE_CUSTOM ? -1 : netservers_room_target(value, cur, pings, n);
+    if (value == ROOMSERVER_AUTO) {
+        fprintf(stderr, "[SERVERS] room: automatic: %s (", target >= 0 ? P.s[target].name : "where the hub is");
+        for (i = 0; i < n; i++) fprintf(stderr, "%s%s %d ms", i ? ", " : "", P.s[i].short_name, pings[i]);
+        fprintf(stderr, "; the hub on %s)\n", netservers_name(cur));
+    } else {
+        fprintf(stderr, "[SERVERS] room: chosen: %s (the hub on %s)\n", netservers_name(target), netservers_name(cur));
+    }
+    if (target < 0) target = cur;
+    EnterCriticalSection(&g_cs);
+    A.measuring = 0;
+    A.server = target;
+    A.since = GetTickCount64();
+    /* Automatic stays automatic: the pick is made again with the fresh pings; a chosen relay is this session's switch,
+     * as a join on another relay is */
+    if (target >= 0 && value == ROOMSERVER_AUTO && (c == NETCHOICE_AUTO || c == NETCHOICE_ALL)) {
+        P.override = -1;
+        P.pick = target;
+    }
+    LeaveCriticalSection(&g_cs);
+    if (target >= 0 && !(value == ROOMSERVER_AUTO && (c == NETCHOICE_AUTO || c == NETCHOICE_ALL))) netservers_use(target);
+    if (target >= 0 && cur != target) {
+        fprintf(stderr, "[SERVERS] move: moving the hub to %s for a new room\n", P.s[target].name);
+        netservers_reconnect(name);
+    }
+    return 1;
+}
+
+void netservers_create_on(int value, const NetRoomSettings *s, const char *name)
+{
+    int fixed = netservers_room_relay(value), mark;
+    init();
+    /* a fixed relay decides at once (mark -1); Automatic waits for the fresh round */
+    mark = fixed >= 0 ? -1 : probe_fresh();
+    EnterCriticalSection(&g_cs);
+    A.kind = 5;
+    A.settings = *s;
+    A.value = fixed >= 0 ? value : ROOMSERVER_AUTO;
+    A.mode = s->mode;
+    A.max = s->max;
+    A.code[0] = 0;
+    A.server = -1;
+    A.mark = mark;
+    A.measuring = 1;
+    A.since = GetTickCount64();
+    snprintf(A.name, sizeof(A.name), "%s", name && *name ? name : "Player");
+    LeaveCriticalSection(&g_cs);
+    fprintf(stderr, "[SERVERS] room: CREATE A ROOM on %s\n", fixed >= 0 ? P.s[fixed].name : "Automatic (a fresh ping round)");
+}
+
+int netservers_measuring(void) { return A.kind == 5 && A.measuring; }
+
 /* Sends the pending join or quick match when the hub is in its relay's lobby. */
 int netservers_tick(int *mode)
 {
@@ -1083,12 +1196,14 @@ int netservers_tick(int *mode)
     if (CS_.miss) code_search_step();
     if (!A.kind) return 0;
     init();
+    if (A.kind == 5 && A.measuring && !create_decide()) return 0;
     cur = netservers_connected();
     EnterCriticalSection(&g_cs);
     kind = A.kind;
     if (kind && GetTickCount64() - A.since > MOVE_WAIT) {
         fprintf(stderr, "[SERVERS] move: the move to %s did not reach its lobby; the %s is dropped\n",
-                P.s[A.server].name, kind == 1 ? "join" : kind == 4 ? "watch" : kind == 3 ? "ranked set" : "quick match");
+                netservers_name(A.server), kind == 1 ? "join" : kind == 4 ? "watch" : kind == 3 ? "ranked set" :
+                kind == 5 ? "new room" : "quick match");
         A.kind = 0;
         LeaveCriticalSection(&g_cs);
         return -1;
@@ -1118,6 +1233,9 @@ int netservers_tick(int *mode)
     } else if (kind == 4) {
         fprintf(stderr, "[SERVERS] move: watching room %s on %s\n", A.code, P.s[A.server].name);
         netplay_lobby_spectate(A.code);
+    } else if (kind == 5) {
+        fprintf(stderr, "[SERVERS] room: opening the room on %s\n", netservers_name(A.server));
+        netplay_lobby_create(&A.settings);
     }
     if (mode) *mode = A.mode;
     return kind;
@@ -1530,6 +1648,8 @@ int netservers_rooms(NetServerRoom *out, int max, unsigned *version) { (void)out
 void netservers_join_on(int server, const char *code, int mode, const char *name) { (void)server; (void)code; (void)mode; (void)name; }
 void netservers_quick_on(int server, int mode, int max, const char *name) { (void)server; (void)mode; (void)max; (void)name; }
 int netservers_tick(int *mode) { (void)mode; return 0; }
+void netservers_create_on(int value, const NetRoomSettings *s, const char *name) { (void)value; (void)name; netplay_lobby_create(s); }
+int netservers_measuring(void) { return 0; }
 int netservers_ranked_move(const char *name) { (void)name; return 0; }
 int netservers_moving(void) { return 0; }
 void netservers_code_begin(int kind, const char *code, const char *name) { (void)kind; (void)code; (void)name; }

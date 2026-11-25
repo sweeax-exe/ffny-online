@@ -54,10 +54,20 @@
 #include <string.h>
 #include <math.h>
 
+#if defined(_WIN32)
+/* Laptops with two graphics chips (ticket #220, build 112): the NVIDIA Optimus and AMD switchable-graphics
+ * drivers look for these exports in the .exe and give it the dedicated chip; without them the game (and the
+ * launcher, which is this same .exe) started on the Intel one. Windows' own per-app choice is no help here: the
+ * versioned install path changes with every update. C names, as the drivers look them up (this is a C file). */
+__declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+#endif
+
 /* xboxrecomp runtime headers */
 #include <xbox/xboxrecomp.h>
 #include "nv2a/nv2a_pgraph_d3d11.h"
 #include "hooks/save_compat.h"
+#include "hooks/media_check.h"
 #include "hooks/rollback.h"
 #include "hooks/hang_watch.h"
 #include "hooks/recorder.h"
@@ -746,6 +756,9 @@ static int host_main(void)
     (void)hPrevInstance;
     (void)lpCmdLine;
     (void)nCmdShow;
+    /* Windows N without Media Foundation (media_check.h): the message, before anything could reach it */
+    if (!media_check_startup())
+        return 3;
     pc_settings_capture_start();    /* the start-up environment, for the game's own process */
     hold_guest_range();             /* before the launcher: see hold_guest_range */
 #endif

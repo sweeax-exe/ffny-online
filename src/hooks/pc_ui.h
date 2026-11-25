@@ -63,6 +63,12 @@ int pc_ui_window_message(HWND window, UINT msg, WPARAM wp, LPARAM lp);
 
 int pc_ui_overlay_open(void);
 
+/* Tests (test_control.c, build 112): press the overlay key as F1 does; and what the overlay shows, as a word:
+ * "" shut, "settings" the panel alone, a screen's name ("online", "exit", "milestones", ...), or that name with
+ * "+settings" while the panel is over it. */
+void pc_ui_test_overlay_key(void);
+void pc_ui_overlay_describe(char *out, size_t size);
+
 /* Read the overlay's hotkeys and size again after a setting changed. */
 void pc_ui_apply_settings(void);
 

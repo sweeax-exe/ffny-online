@@ -286,6 +286,11 @@ if(DEFJAM_BUILD_GAME)
         # violation). The setup builds from scratch, so an incremental link has nothing to reuse.
         target_link_options(${PROJECT_NAME} PRIVATE /DEBUG /INCREMENTAL:NO /MAP:${CMAKE_BINARY_DIR}/defjam_recomp.map
                             /DYNAMICBASE:NO /OPT:NOICF)
+        # Windows N editions have no Media Foundation (ticket #193): the runtime's movie player and WMA decoder
+        # import it, and a missing DLL stopped the .exe before its first line. Loaded late instead, so WinMain's
+        # check (src/hooks/media_check.h) can tell the player to install the Media Feature Pack.
+        target_link_options(${PROJECT_NAME} PRIVATE /DELAYLOAD:MFPlat.dll /DELAYLOAD:MFReadWrite.dll)
+        target_link_libraries(${PROJECT_NAME} PRIVATE delayimp)
     endif()
     # Debug-only diagnostics (toggle from the preset or command line)
     option(DEFJAM_ICALL_TRACE "Trace indirect calls (slow, verbose)" OFF)

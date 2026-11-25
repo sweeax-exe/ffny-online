@@ -3268,6 +3268,103 @@ def lobby97(case="kick", timeout=None, relay_port=27900, lock_timeout=None, log=
     return result
 
 
+# ---- build 112 (#227): the overlay key over an online room --------------------------------------------
+# Pad presses while the settings panel is over the room: every one of them would move the game's main menu
+# (Online.Focus) or open one of its screens if it reached the game. A is left out: on the panel it would change
+# whichever setting has the focus.
+OVERLAY_ROOM_PRESSES = ["dpad_down", "dpad_down", "dpad_right", "dpad_left", "dpad_up", "x", "y", "start", "back"]
+
+
+def overlay_room(timeout=150, relay_port=27900, lock_timeout=None, log=None, keep_roots=False, extra_env=None):
+    """One copy opens its own room (RECOMP_TEST_CREATE_ROOM, nobody joins) with the online screens up
+    (RECOMP_TEST_OPEN_ONLINE), then through the control channel: the overlay key (as F1) opens the settings
+    over the room and B goes back to the room; the key again, pad presses on the panel, and the key goes back
+    to the room. Checks: the overlay says online+settings / online at each step (the room is never
+    shut), and the game's own front end shows no new screen and no cursor move (GetScreenInfo, Online.Focus)
+    from the first key on. Overlay pictures every second in <session>/shots."""
+    t0 = time.time()
+    s = copies.Session("overlayroom", lock_timeout=lock_timeout, log=log, keep_roots=keep_roots).open()
+    result = {"scenario": "overlayroom", "ok": False}
+    try:
+        s.relay(relay_port)
+        shots = os.path.join(s.dir, "shots")
+        os.makedirs(shots, exist_ok=True)
+        env = dict(VIRTUAL_PAD_ENV)
+        env.update({"RECOMP_INPUT_VIRTUAL_PADS": "1",
+                    "RECOMP_NETPLAY": "quick", "RECOMP_NETPLAY_SERVER": "127.0.0.1:%d" % relay_port,
+                    "RECOMP_NETPLAY_QUICK": "0,2", "RECOMP_NETPLAY_NAME": "Copy 0", "RECOMP_TEST_READY_PLAYERS": "3",
+                    "RECOMP_TEST_CREATE_ROOM": "private", "RECOMP_TEST_OPEN_ONLINE": "1",
+                    "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
+                    "RECOMP_OVERLAY_SHOT_DIR": shots, "RECOMP_OVERLAY_SHOT_MS": "1000"})
+        env.update(extra_env or {})
+        c = s.launch(0, env=env, watch=WATCH)
+        steps = []
+
+        def overlay_now():
+            st = s.control(0, "state")
+            return st.get("overlay") if "error" not in st else None
+
+        def step(name, want):
+            time.sleep(1.5)
+            got = overlay_now()
+            steps.append({"step": name, "overlay": got, "want": want, "ok": got == want})
+
+        deadline = time.time() + timeout
+        ready = False
+        result["to_menu"] = nav.to_menu(s.control, 0, timeout=max(30, timeout - 30))     # the title's START and A
+        while time.time() < deadline and c.alive():
+            s.poll()
+            text = logparse.read_text(c.log)
+            if "[NETPLAY] tests: room " in text and " created (" in text and overlay_now() == "online":
+                ready = True
+                break
+            time.sleep(1.0)
+        checks = {"room_up": ready}
+        if ready:
+            time.sleep(3)
+            mark = len(logparse.read_text(c.log))
+            s.control(0, "overlay")
+            step("key: settings over the room", "online+settings")
+            s.control(0, "press 0 b 150")
+            step("B: back to the room", "online")
+            s.control(0, "overlay")
+            step("key: settings again", "online+settings")
+            for ctl in OVERLAY_ROOM_PRESSES:
+                s.control(0, "press 0 %s 150" % ctl)
+                time.sleep(0.6)
+            step("pad presses on the panel", "online+settings")
+            s.control(0, "overlay")
+            step("key again: back to the room", "online")
+            time.sleep(1.0)
+            s.poll()
+            after = logparse.read_text(c.log)[mark:]
+            game_calls = [l for l in after.splitlines()
+                          if "Control.GetScreenInfo(" in l or "Online.Focus(" in l or "Game.FEScreenLoaded(" in l]
+            st = s.control(0, "state")
+            checks.update({
+                "overlay_steps": all(x["ok"] for x in steps),
+                "game_menu_unchanged": not game_calls,
+                "never_shut": "[UI] overlay closed" not in after,
+                "settings_over_room": after.count("[UI] settings opened over the online screen") == 2,
+            })
+            result.update({"steps": steps, "game_calls": game_calls[:10], "screen": st.get("screen"),
+                           "online_status": (st.get("online") or {}).get("status")})
+        text = logparse.read_text(c.log)
+        faults = _faults(text)
+        try:
+            from PIL import Image
+            for b in sorted(glob.glob(os.path.join(shots, "*.bmp"))):
+                Image.open(b).convert("RGB").save(b[:-4] + ".png")
+                os.remove(b)
+        except ImportError:
+            pass
+        result.update({"ok": all(checks.values()) and not faults, "checks": checks, "faults": faults,
+                       "log": _relpath(c.log), "shots": _relpath(shots)})
+    finally:
+        _finish(s, result, t0)
+    return result
+
+
 # ---- towers (T0) -----------------------------------------------------------------------------------
 
 TOWERS_WATCH = ["[CRASH]", "[WATCHDOG]", "[TOWERS] window:", "decided at step", "[SOCIAL-UI] locker=", "[SOCIAL-UI] hub", "[TOWERS] run saved", " won (", " lost: the run",
