@@ -9746,6 +9746,8 @@ static uint32_t weapon_hash(void);      /* the weapon manager, below with its up
 #define WEAPON_TABLE     0x003BE778u    /* the fight's weapon entries, 16 x 0xA4 (weapon-position-timing.md) */
 #define WEAPON_TABLE_END 0x003BF1B8u
 static unsigned g_weapon_waits;
+static int g_stepped;                   /* build 112: a fight step ran in this game update (weapon_update) */
+static unsigned g_weapon_idle;          /* weapon manager updates left out: no fight step in their game update */
 #define STEPLOG_RING 256
 static const uint32_t k_steplog_ranges[][2] = {
     { ACTORS, ACTORS + 4u * STRIDE }, { 0x003B8F28u, 0x003B9074u }, { 0x003BE778u, 0x003BF1B8u },
@@ -10013,6 +10015,7 @@ static LARGE_INTEGER g_wait_q0;        /* step_body's wait for the others' entri
 
 void netplay_on_step(void)
 {
+    g_stepped = 1;
     step_body();
     fight_hud_step();
 }
@@ -10310,9 +10313,9 @@ static void step_run(void)
             }
             fprintf(stderr, "[NETPLAY] fight setup: type %d, mode mask %02X, arena kind %u;%s\n", N.report_m.type,
                     MEM8(0x003B907Eu), MEM32(0x003B9084u), line);
-            fprintf(stderr, "[NETPLAY] weapons at the first step: %08X (their update waited %u times)\n", weapon_hash(),
-                    g_weapon_waits);
-            g_weapon_waits = 0;
+            fprintf(stderr, "[NETPLAY] weapons at the first step: %08X (their update waited %u times; %u updates without a "
+                    "fight step since the last match)\n", weapon_hash(), g_weapon_waits, g_weapon_idle);
+            g_weapon_waits = g_weapon_idle = 0;
         }
     }
     cpus_only_end(s, 0);        /* only CPU fighters left: the fight ends (before the checksum) */
@@ -11073,6 +11076,13 @@ static int crowd_hold_pose(uint32_t *anim, uint8_t *was)
     return n;
 }
 
+static int weapon_steps_only(void)
+{
+    static int on = -1;
+    if (on < 0) on = !(getenv("RECOMP_NETPLAY_WEAPON_UPDATES") && !strcmp(getenv("RECOMP_NETPLAY_WEAPON_UPDATES"), "all"));
+    return on;
+}
+
 static void weapon_update(void)
 {
     uint32_t anim[CROWD_HOLD_MAX];
@@ -11081,6 +11091,15 @@ static void weapon_update(void)
     if (N.lockstep && N.lobby && N.match_live && (!N.match_seen || N.step == 0)) {
         g_weapon_waits++;
         g_esp += 8;                 /* thiscall, ret 4: the dt argument and the return address */
+        return;
+    }
+    /* Build 112: in a room's match the manager moves the weapons only in a game update that ran a fight step, so once
+     * per step on every PC. The updates without one ran at each PC's own pace: the results after a fight (a floor's
+     * weapons went into the next Team Tower floor apart: step 1 of floor 31 differed after a clean floor 30, desync at
+     * step 60) and the fight's own pauses. RECOMP_NETPLAY_WEAPON_UPDATES=all (tests, every copy): every update. */
+    if (N.lobby && !g_stepped && weapon_steps_only()) {
+        g_weapon_idle++;
+        g_esp += 8;
         return;
     }
     if (N.lockstep && N.match_live && crowd_hold_in_step()) held = crowd_hold_pose(anim, was);
@@ -11386,6 +11405,7 @@ static void rollback_to(uint32_t f)
         /* not the save gone back to: an update without a fight step at the start of the re-run would
          * save it again, one update later (equivalent, but every later load of it then starts there) */
         if (j && N.step + 1 != f && !s_soak_wrong) snap_save();     /* tests: the wrong pass keeps none */
+        g_stepped = 0;
         guest_call(sub_000DD930, input, 1, &dt);
         guest_call(sub_00077040, machine, 1, &dt);
         if (g_eax & 0xFFu) {
@@ -12002,6 +12022,7 @@ void netplay_on_update(void)
 {
     uint32_t t, f = 0;
     int i, rb_stays;
+    g_stepped = 0;          /* weapon_update: until this update's fight step runs */
     rollback_check_tables(N.resim ? "a re-run update starts" : "an update starts");
     if (!N.resim) towers_on_update();   /* Towers (offline): the results' Rematch prompt answered by itself (towers.c) */
     if (!N.resim) spec_tick();

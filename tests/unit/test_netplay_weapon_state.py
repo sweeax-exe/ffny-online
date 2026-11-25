@@ -44,6 +44,17 @@ def test_weapon_update_poses_the_holding_spectators_first():
     assert "RECOMP_NETPLAY_CROWD_HOLD" in src
 
 
+def test_the_weapon_manager_moves_only_in_updates_with_a_fight_step():
+    src = netplay()
+    upd = body(src, 'static void weapon_update(void)')
+    gate = upd.index('if (N.lobby && !g_stepped && weapon_steps_only())')
+    assert gate < upd.index('sub_000BCC50();')
+    assert 'g_stepped = 1;' in body(src, 'void netplay_on_step(void)\n{')
+    assert 'g_stepped = 0;' in body(src, 'void netplay_on_update(void)\n{')
+    assert 'g_stepped = 0;\n        guest_call(sub_000DD930, input, 1, &dt);' in src    # every update a rollback runs again
+    assert 'RECOMP_NETPLAY_WEAPON_UPDATES' in src
+
+
 def test_weapons_are_in_the_checksum_by_default():
     src = netplay()
     m = re.search(r'fold = !\(getenv\("RECOMP_NETPLAY_HASH_WEAPONS"\) && \*getenv\("RECOMP_NETPLAY_HASH_WEAPONS"\) == \'0\'\);', src)
