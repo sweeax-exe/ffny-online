@@ -4560,7 +4560,8 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
     soak: `floors` floors (10) with copy 1 setting each floor up 4 s late (unequal loads): no desync, no void.
 
     Build 111 (dj.py towersteam-online): rollback=True: the copies opt in (RECOMP_ROLLBACK=on, the relay -rollback with a
-    300 ms ping limit) and both get RECOMP_NETPLAY_LAG_MS (lag, default "40,20"), so the floors really roll back;
+    300 ms ping limit) and both get RECOMP_NETPLAY_LAG_MS (lag, default "40,20"), so the floors really roll back
+    (RECOMP_ROLLBACK_TOWER=1: build 111 plays tower floors in lockstep only, the tests lift that);
     start_floor=N: the account service starts every new climb on floor N (-towers-test-team-floor, off the board),
     so the AI ramp's writes (and from 12 the repeat counter) run. Every variant then also checks _tower_net_checks."""
     t0 = time.time()
@@ -4618,6 +4619,7 @@ def towers_online(variant="climb", floors=3, timeout=None, relay_port=27900, loc
             })
             if rollback:                # a path long enough for wrong guesses: the floors roll back
                 env["RECOMP_NETPLAY_LAG_MS"] = lag or "40,20"
+                env["RECOMP_ROLLBACK_TOWER"] = "1"      # build 111 plays tower floors in lockstep; tests lift it
             if variant != "soak":       # pictures of the pages, never of a soak
                 env.update({"RECOMP_OVERLAY_SHOT_DIR": shot_dir, "RECOMP_OVERLAY_SHOT_MS": "1500"})
             env.update(more)

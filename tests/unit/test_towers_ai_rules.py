@@ -44,6 +44,13 @@ int main(void)
                     printf("t|%d|%d|%d|%d\n", floors[i], k, own, towers_ai_tendency(&a, k, own));
         }
     }
+    {   /* build 111: a Team Tower Online floor at the top of the ramp */
+        TowerAiFloor a;
+        towers_ai_floor(TOWER_UPTOWN, 40, 72, &a);
+        a.online = 1;
+        for (k = 0; k < TOWER_AI_TENDENCIES; k++)
+            for (own = 1; own <= 5; own++) printf("o|%d|%d|%d\n", k, own, towers_ai_tendency(&a, k, own));
+    }
     printf("defence|%d\n", TOWER_AI_DEFENCE_BEST);
     {   /* the fixed bosses */
         static TowerRun r, plain;
@@ -169,6 +176,18 @@ def test_tendencies_move_toward_their_strongest_values(out):
                 assert lo <= t[(20, k, own)] <= hi              # on the way, between own and the target
             else:
                 assert t[(40, k, own)] == own                   # style tendencies stay the fighter's own
+
+
+def test_online_floors_keep_the_weapon_and_environment_tendencies(out):
+    # build 111: Team Tower Online keeps walls, objects and weapons (10, 11, 12, 22) at the fighter's own value;
+    # the other ramped tendencies still move as offline
+    off = {(int(r[1]), int(r[2])): int(r[3]) for r in rows(out, 't') if r[0] == '40'}
+    on = {(int(r[0]), int(r[1])): int(r[2]) for r in rows(out, 'o')}
+    for k in range(24):
+        for own in range(1, 6):
+            assert on[(k, own)] == (own if k in (10, 11, 12, 22) else off[(k, own)]), (k, own, on[(k, own)], off[(k, own)])
+    towers = (HOOKS / 'towers_ai.c').read_text(encoding='utf-8')
+    assert 'g_f.online = g_online;' in towers
 
 
 def test_the_ai_is_gated_on_a_live_offline_tower_fight_and_the_cpu_slot():

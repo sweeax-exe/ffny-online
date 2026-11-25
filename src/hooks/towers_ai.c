@@ -128,6 +128,7 @@ static void ai_begin_one(int tower, int floor, int floors)
     g_tower = tower;
     g_floor = floor;
     towers_ai_floor_ex(tower, floor, floors, g_boss_all, &g_f);
+    g_f.online = g_online;     /* build 111: no weapon or environment ramp online (towers_ai_rules.c target_of) */
     g_mode_off = test && !strcmp(test, "off");
     g_skill_test = 0;
     if (test && !strncmp(test, "def=", 4)) g_f.defence = atoi(test + 4) < 1 ? 1 : atoi(test + 4) > 5 ? 5 : atoi(test + 4);

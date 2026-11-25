@@ -46,6 +46,7 @@ typedef struct TowerAiFloor {
     int boss;
     int defence;        /* the defence proficiencies' target (TOWER_AI_DEFENCE_BEST; tests may set another) */
     int hold_cap;       /* a fresh output hold of TOWER_AI_LONG_HOLD steps or more is cut to this (0: none) */
+    int online;         /* build 111: a Team Tower Online floor: the weapon and environment tendencies stay the fighter's own */
 } TowerAiFloor;
 
 /* The floor's settings: tower and floors only for the boss floors (towers_is_boss). */
