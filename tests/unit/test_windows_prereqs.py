@@ -1,5 +1,5 @@
 """Build 112's Windows start-up and setup checks: the hybrid-GPU exports (#220), Windows N's missing Media
-Foundation (#193)."""
+Foundation (#193) and the setup's minimum Windows SDK, with synthetic folders only."""
 import importlib.util
 import os
 from pathlib import Path
@@ -18,6 +18,68 @@ def load(name, path):
 
 
 engine = load('setup_engine_prereqs', ROOT / 'setup/engine.py')
+
+
+def test_sdk_version_reads_vsdevcmd_and_folder_names():
+    assert engine.sdk_version('10.0.16299.0\\') == (10, 0, 16299)
+    assert engine.sdk_version('10.0.26100.0') == (10, 0, 26100)
+    assert engine.sdk_version('10.0.20348') == (10, 0, 20348)
+    assert engine.sdk_version('') is None and engine.sdk_version('wdf') is None
+
+
+def test_minimum_sdk_is_the_c11_one():
+    # cl /std:c11 (CMAKE_C_STANDARD 11) needs the SDK headers from 10.0.20348.0 (version 2104) on
+    assert 'CMAKE_C_STANDARD 11' in (ROOT / 'CMakeLists.txt').read_text(encoding='utf-8')
+    assert engine.WINDOWS_SDK_MINIMUM == (10, 0, 20348)
+    assert engine.sdk_version('10.0.16299.0\\') < engine.WINDOWS_SDK_MINIMUM
+    assert engine.sdk_version('10.0.19041.0') < engine.WINDOWS_SDK_MINIMUM
+    assert engine.sdk_version('10.0.22621.0') >= engine.WINDOWS_SDK_MINIMUM
+
+
+def make_sdk(kits, version, ucrt=True, libs=True):
+    inc, lib = kits / 'Include' / version, kits / 'Lib' / version
+    files = [inc / 'um/Windows.h', inc / 'shared/sdkddkver.h']
+    if ucrt:
+        files.append(inc / 'ucrt/stdio.h')
+    if libs:
+        files += [lib / 'um/x64/kernel32.lib'] + ([lib / 'ucrt/x64/ucrt.lib'] if ucrt else [])
+    for f in files:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text('')
+
+
+def test_complete_sdks_newest_last_and_incomplete_ones_left_out(tmp_path):
+    make_sdk(tmp_path, '10.0.16299.0')
+    make_sdk(tmp_path, '10.0.22621.0')
+    make_sdk(tmp_path, '10.0.26100.0', ucrt=False)        # lost its Universal CRT part
+    make_sdk(tmp_path, '10.0.19041.0', libs=False)        # headers only
+    (tmp_path / 'Include/wdf').mkdir(parents=True)
+    found = engine.complete_windows_sdks(tmp_path)
+    assert [name for _, name in found] == ['10.0.16299.0', '10.0.22621.0']
+    assert found[-1][0] == (10, 0, 22621)
+
+
+def test_only_old_sdks_and_none(tmp_path):
+    make_sdk(tmp_path, '10.0.16299.0')
+    found = engine.complete_windows_sdks(tmp_path)
+    assert found[-1][0] < engine.WINDOWS_SDK_MINIMUM
+    message = engine.windows_sdk_too_old(found[-1][1])
+    assert '10.0.16299.0' in message and '10.0.20348.0' in message
+    for step in ('Visual Studio Installer', 'Modify', 'Individual components', 'Windows 11 SDK', 'run setup again'):
+        assert step in message
+    assert engine.complete_windows_sdks(tmp_path / 'missing') == []
+
+
+def test_toolchain_batch_passes_the_chosen_sdk():
+    text = (ROOT / 'setup/engine.py').read_text(encoding='utf-8')
+    assert '-no_logo%DEFJAM_SETUP_WINSDK%' in text
+    assert "' -winsdk=' + sdks[-1][1]" in text
+
+def test_old_sdk_stops_before_the_extraction():
+    text = (ROOT / 'setup/engine.py').read_text(encoding='utf-8')
+    execute = text.index('    def execute(self):')
+    early = text.index('raise SetupError(windows_sdk_too_old(sdks[-1][1]), 3)', execute)
+    assert early < text.index('self.prepare_source()', execute) < text.index('self.extract()', execute)
 
 
 def c_string(text, name):
