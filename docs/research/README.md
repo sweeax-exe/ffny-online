@@ -69,6 +69,7 @@ cite other development notes, logs and captures that are not published.
 - [Match-end state](match-end-state.md)
 - [Combat telemetry](combat-telemetry.md)
 - [Combo log](combo-log.md): `RECOMP_COMBO_LOG=1`, one line per hit and per victim state change, for replaying legal and illegal combos
+- [Illegal-tech detection](illegal-tech.md): the community's five tournament rules detected in the fight from the fighter records, deterministic under rollback, reported with ranked and tournament match reports (stage 1, facts only)
 - [Unlocking everything for playtests](unlock-everything.md): the unlock routine the retail image still carries, and the switch that calls it
 - [Why a scripted fight does not replay identically](fight-determinism.md)
 - [Why fight pictures do not repeat](crowd-nondeterminism.md)

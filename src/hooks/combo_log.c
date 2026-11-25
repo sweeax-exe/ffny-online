@@ -24,6 +24,7 @@
 #include "recomp/gen/recomp_types.h"
 #include "combo_log.h"
 #include "netplay.h"
+#include "illegal_tech.h"
 
 #define ACTORS      0x003B92E0u
 #define STRIDE      0x12E8u
@@ -160,6 +161,8 @@ void combo_log_hit(uint32_t attacker, uint32_t defender, uint32_t flags)
 {
     int a = slot_of(attacker), v = slot_of(defender);
     struct victim *c;
+    illegal_tech_hit(attacker, defender, flags);
+    if (!combo_log_enabled()) return;
     if (a < 0 || v < 0 || a == v || netplay_rerunning()) return;
     if ((MEM16(defender + 0x91Eu) >> 8) & 0xEu) return;     /* the body returns at once: no hit */
     c = &V[v];
@@ -203,7 +206,8 @@ static int grab_target(int a)
 void combo_log_step(void)
 {
     int i;
-    if (!combo_log_on() || netplay_rerunning()) return;
+    illegal_tech_step();
+    if (!combo_log_enabled() || netplay_rerunning()) return;
     s_step++;
     for (i = 0; i < 4; i++) flush(i);
     for (i = 0; i < 4; i++) {
@@ -261,7 +265,8 @@ void combo_log_step(void)
 void combo_log_match_start(void)
 {
     int i;
-    if (!combo_log_on()) return;
+    illegal_tech_match_start();
+    if (!combo_log_enabled()) return;
     for (i = 0; i < 4; i++) {
         V[i].pending = 0;
         close_combo(i, "match");

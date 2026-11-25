@@ -70,6 +70,7 @@
 #include "detmath/detmath.h"
 #include "towers.h"
 #include "towers_online.h"
+#include "illegal_tech.h"
 
 #define G_MATCH_PHASE   0x003B8F30u     /* test_telemetry.c G_PHASE */
 #define G_MATCH_WINNER  0x003B8F40u     /* test_telemetry.c G_WINNER: the winner's fighter slot */
@@ -856,6 +857,7 @@ static struct {
         uint32_t seeds[32][2];
         uint8_t ow[OW_STATE_BYTES];     /* Big Arena's scores and respawns (openworld.c) */
         uint8_t tw[TOWERS_ONLINE_STATE_BYTES];  /* Team Tower Online: the floor's counters and AI ramp (towers.c) */
+        uint8_t it[ILLEGAL_TECH_STATE_BYTES];   /* the illegal-tech detector's combos and detections (illegal_tech.c) */
     } snap[ROLLBACK_SLOTS];
     unsigned rb_count, rb_steps, rb_deepest, rb_failed;
     double rb_ms_max, rb_ms_total;
@@ -4922,6 +4924,9 @@ static void on_start_as(const uint8_t *b, int len, int watching)
         N.set_match = 1;
         N.set_game = tower_floor;
     }
+    /* build 112: a ranked or tournament set game reports its illegal-tech detections (illegal_tech.c; the detector
+     * itself runs in every fight alike) */
+    illegal_tech_set_reported(N.set_match && !N.tower_match);
     N.koth_fights = N.roomv.hill.fights;
     N.koth_winner = -1;
     N.tower_res_on = 0;
@@ -7353,6 +7358,9 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
         n += snprintf(json + n, (size_t)(size - n), "}");
         n = ac_json(json, size - 2, n);
         n = net_json(json, size - 2, n);
+        /* build 112: the illegal-tech detections of a ranked or tournament set game (illegal_tech.c; stage 1: facts for
+         * the team, no penalty) */
+        n = illegal_tech_json(json, size - 2, n);
     }
     n += snprintf(json + n, (size_t)(size - n), "}");
     return n < size ? n : 0;
@@ -7360,7 +7368,7 @@ static int report_json(const char *event, uint32_t winners, uint32_t left, int d
 
 static void report_event(const char *event, uint32_t winners, uint32_t left, int draw)
 {
-    char json[3072];
+    char json[6144];        /* build 112: 3072 before the illegal-tech list (up to 16 detections) */
     static int show = -1;   /* RECOMP_NETPLAY_REPORT_LOG=1 (tests): every report as it is made */
     if (!report_json(event, winners, left, draw, json, (int)sizeof(json))) return;
     if (show < 0) show = getenv("RECOMP_NETPLAY_REPORT_LOG") != NULL;
@@ -10357,6 +10365,9 @@ static void step_run(void)
         uint32_t tw = towers_online_hash();
         if (tw) N.hash_at[k] = (N.hash_at[k] ^ tw) * 16777619u;
     }
+    /* build 112: the illegal-tech detector (illegal_tech.c), in every online fight: its combos and detections are the
+     * same on both PCs of a match, so a verdict one PC reached and the other did not shows as a desync */
+    N.hash_at[k] = (N.hash_at[k] ^ illegal_tech_hash()) * 16777619u;
     {   /* the x87 control word the step starts with (its precision bits round every result): a
          * change is logged, at most 12 a match, to compare the PCs of a desynced match */
         static uint16_t last_cw;
@@ -11195,6 +11206,7 @@ static void snap_save(void)
     N.snap[slot].crowd_gen_on = g_crowd_gen_on;
     ow_state_save(N.snap[slot].ow);
     towers_online_state_save(N.snap[slot].tw);
+    illegal_tech_state_save(N.snap[slot].it);
     EnterCriticalSection(&g_cs);
     memcpy(N.snap[slot].seeds, N.seeds, sizeof(N.snap[slot].seeds));
     LeaveCriticalSection(&g_cs);
@@ -11280,6 +11292,7 @@ static void rollback_to(uint32_t f)
     g_crowd_gen_on = N.snap[slot].crowd_gen_on;
     ow_state_load(N.snap[slot].ow);
     towers_online_state_load(N.snap[slot].tw);
+    illegal_tech_state_load(N.snap[slot].it);
     EnterCriticalSection(&g_cs);
     memcpy(N.seeds, N.snap[slot].seeds, sizeof(N.snap[slot].seeds));
     LeaveCriticalSection(&g_cs);
