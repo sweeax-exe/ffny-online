@@ -3296,6 +3296,11 @@ def overlay_room(timeout=150, relay_port=27900, lock_timeout=None, log=None, kee
                     "RECOMP_TEST_CREATE_ROOM": "private", "RECOMP_TEST_OPEN_ONLINE": "1",
                     "RECOMP_SCRIPT_ANCHOR": TITLE_ANCHOR,
                     "RECOMP_OVERLAY_SHOT_DIR": shots, "RECOMP_OVERLAY_SHOT_MS": "1000"})
+        # No pad script here: every press comes from the control channel. With RECOMP_PAD_SCRIPT_VIRTUAL the
+        # empty script still writes "nothing held" to the virtual pad at each of the game's pad reads
+        # (usb_gamepad.c pad_script_apply), so a control press was often released before the input thread
+        # sampled it, and B on the settings panel was never seen (3 of 4 runs).
+        env.pop("RECOMP_PAD_SCRIPT_VIRTUAL", None)
         env.update(extra_env or {})
         c = s.launch(0, env=env, watch=WATCH)
         steps = []
@@ -3304,10 +3309,17 @@ def overlay_room(timeout=150, relay_port=27900, lock_timeout=None, log=None, kee
             st = s.control(0, "state")
             return st.get("overlay") if "error" not in st else None
 
-        def step(name, want):
+        def step(name, want, wait=8.0):
+            # 1.5 s to settle, then up to `wait` more for the wanted state: a frame standstill of a few
+            # seconds (no overlay frames, so no key taken) must not send the next press before this one landed
             time.sleep(1.5)
+            t1 = time.time()
             got = overlay_now()
-            steps.append({"step": name, "overlay": got, "want": want, "ok": got == want})
+            while got != want and time.time() - t1 < wait:
+                time.sleep(0.25)
+                got = overlay_now()
+            steps.append({"step": name, "overlay": got, "want": want, "ok": got == want,
+                          "waited_s": round(time.time() - t1, 1)})
 
         deadline = time.time() + timeout
         ready = False
