@@ -3985,7 +3985,8 @@ const std::vector<OnlineFighter> &grid_fighters()
     NetRoom r;
     lobby_room(&r);
     // build 86: a room for original fighters only (STANDARD ONLY) shows no community fighters at all
-    if (r.in_room && standard_only(r.settings.fighter_rules))
+    // build 112 (Bearish): a Team Tower Online room too (the climb takes standard fighters only; the relay sets NO CREATED)
+    if (r.in_room && (standard_only(r.settings.fighter_rules) || NETPLAY_IS_TOWER(r.settings.mode)))
         list.erase(std::remove_if(list.begin(), list.end(), [](const OnlineFighter &o) { return ONLINE_NEW_FIGHTER(o.id) != 0; }),
                    list.end());
     g_grid_cp.assign(list.size(), -1);

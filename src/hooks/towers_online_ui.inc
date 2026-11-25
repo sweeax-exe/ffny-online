@@ -258,16 +258,17 @@ void draw_tower_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRo
         text(dl, f, g_hand, ls, 320, 354, ORANGE, line.c_str(), CENTER, 0.8f);
     }
     float hx = 54, hy = 392;
-    if (can_ready && !ready) hx += hint(dl, f, hx, hy, "a", "READY");
-    if (can_ready && !ready) hx += hint(dl, f, hx, hy, "y", "CHOOSE FIGHTER");
+    if (can_ready) hx += hint(dl, f, hx, hy, "a", ready ? "NOT READY" : "READY");
+    if (can_ready) hx += hint(dl, f, hx, hy, "y", "CHOOSE FIGHTER");
     if (can_ready && host && have && (t.flags & TOWERNET_FLAG_SAVED) && !ready)
         hx += hint(dl, f, hx, hy, "x", (t.flags & TOWERNET_FLAG_RESUME) ? "NEW CLIMB" : "RESUME");
     if (have && t.state == TOWERNET_OVER && host) hx += hint(dl, f, hx, hy, "x", "NEW CLIMB");
     hx += hint(dl, f, hx, hy, "rb", "VOICE");
     hint(dl, f, hx, hy, "b", "LEAVE ROOM");
-    if (pad.a && can_ready && !ready) netplay_lobby_ready(1, fighter);
+    if (pad.a && can_ready) netplay_lobby_ready(ready ? 0 : 1, fighter);   /* build 112 (Bearish): A again un-readies */
     if (pad.x && have && t.state == TOWERNET_OVER && host) netplay_lobby_tower_choice(TOWERNET_CHOICE_NEW);
-    if (pad.y && can_ready && !ready) {
+    if (pad.y && can_ready) {           /* build 112: a ready player may still swap: un-ready, then the select */
+        if (ready) netplay_lobby_ready(0, fighter);
         S.page = FIGHTERS;
         S.fighter_sel = grid_pos(grid_fighters(), fighter);
     }
