@@ -69,6 +69,18 @@ int main(int argc, char **argv)
     printf("has|%d|%d|%d|%d\n", faction_crew_has(dmob, nd, 59), faction_crew_has(dmob, nd, 58), faction_crew_has(crow, nc, 58),
            faction_crew_has(crow, nc, 99));
     printf("line|%s|%s|%s\n", faction_crew_line(1), faction_crew_line(2), faction_crew_line(0));
+    {   /* build 112, the variety rule's lines: crew_locked (fighter:fights left), crew_versions (version:character) */
+        int a[FACTION_CREW_MAX], b[FACTION_CREW_MAX], k;
+        n = faction_crew_pairs("59:3,83:3,84:3,55:2", a, b, FACTION_CREW_MAX);
+        printf("pairs|%d|", n);
+        for (k = 0; k < n; k++) printf("%d=%d,", a[k], b[k]);
+        printf("\n");
+        n = faction_crew_pairs(" 80:57, x:1,1000:2,5:,7:7777,81:56", a, b, FACTION_CREW_MAX);
+        printf("badpairs|%d|", n);
+        for (k = 0; k < n; k++) printf("%d=%d,", a[k], b[k]);
+        printf("\n");
+        printf("nopairs|%d|%d\n", faction_crew_pairs(NULL, a, b, 4), faction_crew_pairs("", a, b, 4));
+    }
     return 0;
 }
 '''
@@ -122,6 +134,30 @@ def test_random_stays_within_the_crew(rows):
 def test_has_and_line(rows):
     assert rows['has'] == ['1', '0', '1', '0']
     assert rows['line'] == ["FACTION WAR: D-MOB'S CREW ONLY", "FACTION WAR: CROW'S CREW ONLY", '']
+
+
+def test_pairs(rows):
+    assert rows['pairs'] == ['4', '59=3,83=3,84=3,55=2,']
+    assert rows['badpairs'] == ['2', '80=57,81=56,']
+    assert rows['nopairs'] == ['0', '0']
+
+
+def test_variety_lock_wiring():
+    ui = (HOOKS / 'faction_ui.inc').read_text(encoding='utf-8')
+    screen = (HOOKS / 'online_screen.cpp').read_text(encoding='utf-8')
+    # the service's locks, moved on by the fights started here that /me does not count yet
+    assert 'k == "crew_locked"' in ui and 'k == "crew_versions"' in ui and 'k == "crew_progress"' in ui
+    left = ui[ui.index('int fw_crew_locked_left(int id)'):]
+    left = left[:left.index('\n}\n')]
+    assert 'FN.me.crew_locked' in left and 'FN.pending' in left and 'FN.live.crew_lock' in left
+    assert 'fw_crew_started(room.players[i].fighter)' in ui and 'm.fights > p.fights' in ui
+    # a locked fighter is blocked (greyed, RANDOM skips it, the READY check), with its note
+    blocked = screen[screen.index('bool fighter_blocked('):]
+    blocked = blocked[:blocked.index('\n}\n')]
+    assert 'fw_crew_locked_left(id) > 0' in blocked
+    assert '"LOCKED: " + std::to_string(rest)' in screen and 'rest > 0 ? "LOCKED"' in screen
+    # the page's progress
+    assert '"%d OF %d CREW"' in ui
 
 
 def test_screens_use_the_service_rule():

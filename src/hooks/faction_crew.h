@@ -25,6 +25,10 @@ extern "C" {
  * Battle-mode ID (0..255; no created fighter 99, no community number) is skipped, as are repeats; NULL or "": 0. */
 int faction_crew_parse(const char *list, int *out, int max);
 
+/* The pairs of a line "59:3,83:3" (crew_locked: fighter:fights left; crew_versions: version:character): a[] and b[]
+ * (at most max), the count. Entries that are not two numbers 0..255 / 0..999 are skipped; NULL or "": 0. */
+int faction_crew_pairs(const char *list, int *a, int *b, int max);
+
 /* 1 when `id` is one of the n IDs. */
 int faction_crew_has(const int *ids, int n, int id);
 

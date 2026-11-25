@@ -8073,6 +8073,9 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         const char *tv = getenv("RECOMP_NETPLAY_TEST_VOTE");
         int vote_random = tv && !_stricmp(tv, "random");
         int ready_players = rp && *rp ? atoi(rp) : 0, told_wait = 0;
+        /* build 112: a faction room's tests rest RECOMP_NETPLAY_READY_DELAY_MS after each fight too (its select is shown) */
+        int faction_played = 0;
+        ULONGLONG faction_back = 0;
         /* RECOMP_TEST_READY_SPECTATORS=<n> (spectator tests): ready only while n spectators watch the room */
         const char *rs = getenv("RECOMP_TEST_READY_SPECTATORS");
         int ready_spectators = rs && *rs ? atoi(rs) : 0, told_spec = 0;
@@ -8644,6 +8647,10 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 int me, mine = !readied;
                 for (me = 0; me < r.player_count; me++)
                     if (r.players[me].slot == r.you) { mine = !r.players[me].ready; break; }
+                if (mine && !readied && faction_played && ready_delay > 0 && !strcmp(mode, "faction")) {
+                    if (!faction_back) faction_back = GetTickCount64();
+                    if (GetTickCount64() - faction_back < (ULONGLONG)ready_delay) mine = 0;     /* not yet */
+                }
                 if (mine && !readied) {
                     if (f && !_stricmp(f, "random") && r.blocked_count > 0) {
                         /* build 68: the room's FIGHTER RULES block some fighters: RANDOM draws among the others,
@@ -8668,7 +8675,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     if (r.players[me].slot == r.you && r.players[me].voted < 0) { netplay_lobby_vote(test_vote(&r, vote_random)); break; }
                 voted_in = r.version;
             }
-            if (r.phase == 2) readied = 0;
+            if (r.phase == 2) { readied = 0; faction_played = 1; faction_back = 0; }
             Sleep(100);
         }
         return 0;

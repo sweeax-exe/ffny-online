@@ -28,6 +28,25 @@ int faction_crew_parse(const char *list, int *out, int max)
     return n;
 }
 
+int faction_crew_pairs(const char *list, int *a, int *b, int max)
+{
+    int n = 0;
+    const char *p = list;
+    while (p && *p && n < max) {
+        int x = 0, y = 0, dx = 0, dy = 0;
+        while (*p == ' ') p++;
+        while (*p >= '0' && *p <= '9' && dx < 4) { x = x * 10 + (*p - '0'); p++; dx++; }
+        if (dx && *p == ':') {
+            p++;
+            while (*p >= '0' && *p <= '9' && dy < 4) { y = y * 10 + (*p - '0'); p++; dy++; }
+            if (dy && (*p == ',' || *p == ' ' || !*p) && x <= 255 && y <= 999) { a[n] = x; b[n] = y; n++; }
+        }
+        while (*p && *p != ',') p++;
+        if (*p == ',') p++;
+    }
+    return n;
+}
+
 int faction_crew_filter(const int *crew, int n_crew, const int *offered, int n_offered, int *out, int max)
 {
     int i, n = 0;

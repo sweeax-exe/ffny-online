@@ -4461,10 +4461,12 @@ def faction_crew(matches=1, timeout=None, relay_port=27900, lock_timeout=None, l
     (FFNY_SERVER_DIR: a server checkout with relay/accounts/faction_crews.go). Two fighters search 1 ON 1
     (RECOMP_NETPLAY=faction), Copy 1 of D-Mob's Team, Copy 2 of Crow's.
 
-    Phase 1 (scored): Copy 1 plays Doc (55, D-Mob's crew), Copy 2 RANDOM, which must draw within Crow's crew. Both
-    run the online screens with RECOMP_TEST_OPEN_ONLINE=faction-fighters: once seated in the crew-only room each
-    opens CHOOSE FIGHTER (its own crew only, the line FACTION WAR: ...'S CREW ONLY) and is pictured before the test
-    readies it. `matches` fights; the board must gain 4 points each.
+    Phase 1 (scored, then locked): Copy 1 plays Doc (55, D-Mob's crew), Copy 2 RANDOM, which must draw within Crow's
+    crew. Both run the online screens with RECOMP_TEST_OPEN_ONLINE=faction-fighters: once seated in the crew-only room
+    each opens CHOOSE FIGHTER (its own crew only, the line FACTION WAR: ...'S CREW ONLY) and is pictured before the test
+    readies it. The first fight scores with the variety bonus on both sides (3+1 and 1+1: 6 points). Back in the room
+    each opens the select again: the fighter it just played is greyed out, LOCKED with "3 MORE FIGHTS". The tests
+    play it again anyway (as a changed game could): the service refuses that fight ("a locked fighter").
     Phase 2 (refused): both start again and search again, Copy 2 now on D-Mob (59), a fighter of the other crew (as a
     changed game could send it): the fight counts as a casual match, the service logs it "not scored: a fighter
     outside its crew" and the board stays. The pictures go to out_dir as PNG."""
@@ -4519,12 +4521,12 @@ def faction_crew(matches=1, timeout=None, relay_port=27900, lock_timeout=None, l
                     "RECOMP_NETPLAY": "faction", "RECOMP_TEST_FACTION_SIZE": "1",
                     "RECOMP_NETPLAY_FIGHTER": str(fighters[k]),
                     "RECOMP_PAD_SCRIPT": h.build_pad_script(["getscreeninfo(intmain/mainmenu=lt@0.5"],
-                                                            online_tail(matches if phase == "scored" else 1, 2, k % 2 == 1)),
+                                                            online_tail(2 if phase == "scored" else 1, 2, k % 2 == 1)),
                     "RECOMP_TEST_READY_PLAYERS": "2",
                     "RECOMP_OVERLAY_SHOT_DIR": dirs[i], "RECOMP_OVERLAY_SHOT_MS": "1500",
                 })
                 if phase == "scored":     # the pictured select, then the room: the search waits for the main menu
-                    env.update({"RECOMP_TEST_OPEN_ONLINE": "faction-fighters", "RECOMP_NETPLAY_READY_DELAY_MS": "10000",
+                    env.update({"RECOMP_TEST_OPEN_ONLINE": "faction-fighters", "RECOMP_NETPLAY_READY_DELAY_MS": "12000",
                                 "RECOMP_TEST_FACTION_AFTER_MENU": "1", "RECOMP_OVERLAY_SHOT_FAST": "700:faction-crew"})
                 if fast_ko:
                     env["RECOMP_TEST_KO_STEP"] = "%d,0" % int(fast_ko)
@@ -4565,15 +4567,20 @@ def faction_crew(matches=1, timeout=None, relay_port=27900, lock_timeout=None, l
                         pass
             return stop, texts, dirs
 
-        deadline = time.time() + (timeout or 1200)
-        want = 4 * matches
-        stop1, texts1, dirs1 = run_phase("scored", ["55", "random"], lambda: board_points() >= want,
-                                         max(120, deadline - time.time() - 300))
+        deadline = time.time() + (timeout or 1500)
+        want = 6        # one scored fight: 3 + 1 the winner, 1 + 1 the loser (the variety bonus, both a first character)
+        stop1, texts1, dirs1 = run_phase("scored", ["55", "random"],
+                                         lambda: len(acc_lines("not scored: a locked fighter")) > 0,
+                                         max(180, deadline - time.time() - 300))
         time.sleep(55)      # every fight the room played settles (the report window, 45 s), then the board
         points1 = board_points()
+        _, me_body = _fw_http(acc_port, "GET", "/api/factions/me?format=text", tokens["Copy 1"])
+        me1 = _fw_kv(me_body)
+        result["copy1_me"] = {k: me1.get(k) for k in ("points", "crew_used", "crew_locked", "crew_progress", "crew_total",
+                                                       "crew_bonus")}
         scored_n = len([l for l in acc_lines("faction war: match") if " scored (fighters" in l])
         refused0 = len(acc_lines("not scored: a fighter outside its crew"))
-        stop2, texts2, dirs2 = run_phase("refused", ["55", "59"],
+        stop2, texts2, dirs2 = run_phase("refused", ["47", "59"],
                                          lambda: len(acc_lines("not scored: a fighter outside its crew")) > refused0,
                                          max(120, deadline - time.time()))
         time.sleep(55)
@@ -4595,15 +4602,20 @@ def faction_crew(matches=1, timeout=None, relay_port=27900, lock_timeout=None, l
             "crew_select_dmob": any("D-Mob's crew" in l for l in crew_notes.get(1, [])) and bool(chose.get(1)),
             "crew_select_crow": any("Crow's crew" in l for l in crew_notes.get(2, [])) and bool(chose.get(2)),
             "random_within_crew": rnd_id in crow_ids,
-            "board_scored": points1 >= want and points1 == 4 * scored_n,     # 3 the win, 1 the loss, each fight
-            "scored_line": scored_n >= matches and all("1:55" in l for l in scored_lines),
+            "board_scored_with_bonus": points1 == want and scored_n == 1,
+            "scored_line": scored_n >= 1 and all("1:55" in l for l in scored_lines),
+            "bonus_on_me": me1.get("crew_bonus") == "1" and me1.get("crew_used") == "55" and me1.get("crew_progress") == "1",
+            "locked_on_me": (me1.get("crew_locked") or "").startswith("55:3"),
+            "locked_select_shown": any("CHOOSE FIGHTER again" in l for t in texts1.values() for l in t.splitlines()),
+            "locked_refused": any("played fighter 55, locked for" in l for l in acc_lines("not scored: a locked fighter")),
             "refused_phase_done": stop2 == "done",
             "refused_logged": len(refused_lines) > refused0 and any("played fighter 59" in l for l in refused_lines),
             "board_unchanged": points2 == points1 and len(scored_lines) == scored_n,
         }
         result["crew_notes"] = crew_notes
         result["random"] = rnd[-1:] if rnd else []
-        result["service"] = {"scored": scored_lines[-3:], "refused": refused_lines[-2:]}
+        result["service"] = {"scored": scored_lines[-3:], "refused": refused_lines[-2:],
+                             "locked": acc_lines("not scored: a locked fighter")[-2:]}
         result["board_points"] = {"after_scored": points1, "after_refused": points2}
         for texts in (texts1, texts2):
             for i, t in texts.items():
@@ -4621,13 +4633,14 @@ def faction_crew(matches=1, timeout=None, relay_port=27900, lock_timeout=None, l
                 os.makedirs(t, exist_ok=True)
             for i, d in dirs1.items():
                 side = "dmob" if i == 1 else "crow"
-                for label in ("faction-crew-fighters", "faction-crew-room"):
+                for label in ("faction-crew-fighters", "faction-crew-locked", "faction-crew-room"):
                     files = sorted(glob.glob(os.path.join(d, "*-%s.bmp" % label)))
                     if not files:
                         continue
-                    name = "%s-%s.png" % (side, "select" if label.endswith("fighters") else "room")
+                    name = "%s-%s.png" % (side, {"faction-crew-fighters": "select", "faction-crew-locked": "locked",
+                                                 "faction-crew-room": "room"}[label])
                     # the select's middle picture; the room's last (back from the select, before the fight)
-                    im = Image.open(files[len(files) // 2] if label.endswith("fighters") else files[-1]).convert("RGB")
+                    im = Image.open(files[-1] if label.endswith("room") else files[len(files) // 2]).convert("RGB")
                     for t in targets:
                         im.save(os.path.join(t, name))
                     picked.append(os.path.join(targets[-1], name))
