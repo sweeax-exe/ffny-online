@@ -10362,6 +10362,14 @@ static void step_run(void)
                         n += snprintf(line + n, sizeof(line) - (size_t)n, " %u:%X/%d@%.1f,%.1f", sl, MEM32(obj + 4u),
                                       (int)MEM32(obj + 8u), (double)MEMF(obj + 0x3Cu), (double)MEMF(obj + 0x44u));
                 }
+                for (sl = 0; sl < 16u; sl++) {     /* and the fight's weapon entries in use */
+                    uint32_t e = WEAPON_TABLE + sl * 0xA4u;
+                    if (MEM32(e) == 0xFFFFFFFFu) continue;
+                    used++;
+                    if (n < (int)sizeof(line) - 40)
+                        n += snprintf(line + n, sizeof(line) - (size_t)n, " e%u:%X/%d@%.1f,%.1f", sl, MEM32(e + 4u),
+                                      (int)MEM32(e + 0xCu), (double)MEMF(e + 0x64u), (double)MEMF(e + 0x6Cu));
+                }
                 if (used) fprintf(stderr, "[NETPLAY] weapon slots at the first step:%s\n", line);
             }
         }
@@ -10420,7 +10428,11 @@ static void step_run(void)
          * prints them. RECOMP_NETPLAY_HASH_WEAPONS=0 (tests, on every copy): out of the checksum, as before. */
         static int fold = -1;
         uint32_t w = weapon_hash(), a;
-        for (a = WEAPON_TABLE; a < WEAPON_TABLE_END; a += 4) w = (w ^ MEM32(a)) * 16777619u;
+        for (a = WEAPON_TABLE; a < WEAPON_TABLE_END; a += 0xA4u) {     /* build 112: the entries in use only */
+            uint32_t b;
+            if (MEM32(a) == 0xFFFFFFFFu) continue;
+            for (b = 0; b < 0xA4u; b += 4) w = (w ^ MEM32(a + b)) * 16777619u;
+        }
         N.hash_weapons[k] = w;
         if (fold < 0) fold = !(getenv("RECOMP_NETPLAY_HASH_WEAPONS") && *getenv("RECOMP_NETPLAY_HASH_WEAPONS") == '0');
         if (fold) N.hash_at[k] = (N.hash_at[k] ^ w) * 16777619u;
@@ -11049,11 +11061,18 @@ extern void sub_000BCC50(void);
 #define WEAPON_MANAGER 0x00376144u
 static unsigned g_weapon_waits;
 
+/* Build 112: the slots in use only (type +4 not -1). A slot the game gave back keeps the words of its last weapon (the
+ * round-end reset sub_000BC060 frees, it does not clear), and a rematch, which does not load the venue again, starts
+ * with them: the two PCs' left-over words differed while every slot was free (online --matches 3 --rematch, m2
+ * desync at step 60, release/112 20261125-222841). Nothing reads a free slot's words; a new weapon sets them. */
 static uint32_t weapon_hash(void)
 {
     uint32_t h = 2166136261u, slot, k;
-    for (slot = 0; slot < 16; slot++)
-        for (k = 0; k < 16; k++) h = (h ^ MEM32(WEAPON_MANAGER + slot * 0xD0u + 0xCu + 4u * k)) * 16777619u;
+    for (slot = 0; slot < 16; slot++) {
+        uint32_t obj = WEAPON_MANAGER + slot * 0xD0u + 0xCu;
+        if (MEM32(obj + 4u) == 0xFFFFFFFFu) continue;
+        for (k = 0; k < 16; k++) h = (h ^ MEM32(obj + 4u * k)) * 16777619u;
+    }
     return h;
 }
 
