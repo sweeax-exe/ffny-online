@@ -7830,6 +7830,8 @@ static int test_vote(const NetRoom *r, int want_random)
 void faction_test_search(int size);
 void faction_test_tick(void);
 int faction_test_seated(void);
+int faction_test_crew_random(void);    /* build 112: RANDOM within the crew in a crew-only faction room, else -1 */
+int online_test_menu_seen(void);       /* build 112: the main menu has been up once (online_screen.cpp) */
 /* build 110: CREATE A ROOM's settings for tests (online_screen.cpp) */
 void online_test_room_settings(NetRoomSettings *out, int mode, int max, int is_public);
 
@@ -8070,6 +8072,9 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
         const char *tv = getenv("RECOMP_NETPLAY_TEST_VOTE");
         int vote_random = tv && !_stricmp(tv, "random");
         int ready_players = rp && *rp ? atoi(rp) : 0, told_wait = 0;
+        /* build 112: a faction room's tests rest RECOMP_NETPLAY_READY_DELAY_MS after each fight too (its select is shown) */
+        int faction_played = 0;
+        ULONGLONG faction_back = 0;
         /* RECOMP_TEST_READY_SPECTATORS=<n> (spectator tests): ready only while n spectators watch the room */
         const char *rs = getenv("RECOMP_TEST_READY_SPECTATORS");
         int ready_spectators = rs && *rs ? atoi(rs) : 0, told_spec = 0;
@@ -8230,6 +8235,13 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
              * until this copy sits in the match's room, up to 5 minutes; then the room as any other */
             const char *fs = getenv("RECOMP_TEST_FACTION_SIZE");
             NetRoom fr;
+            if (getenv("RECOMP_TEST_FACTION_AFTER_MENU")) {
+                /* build 112: search once the main menu was up (and 3 s more), so the online screens are open in the
+                 * room (RECOMP_TEST_OPEN_ONLINE opens them at the first main menu) */
+                for (i = 0; i < 1800 && !N.stop && !online_test_menu_seen(); i++) Sleep(100);
+                Sleep(3000);
+                fprintf(stderr, "[NETPLAY] tests: faction search after the main menu\n");
+            }
             faction_test_search(fs && *fs == '2' ? 2 : 1);
             for (i = 0; i < 3000 && !N.stop; i++) {
                 netservers_tick(NULL);
@@ -8239,6 +8251,21 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 Sleep(100);
             }
             fprintf(stderr, "[NETPLAY] tests: faction match: %s\n", fr.in_room ? fr.code : "no room");
+            if (fr.in_room && f && !_stricmp(f, "random")) {
+                /* build 112: the crew rule and this side come with the service's answers: up to 10 s for them */
+                int crew = -1;
+                for (i = 0; i < 100 && !N.stop && (crew = faction_test_crew_random()) < 0; i++) {
+                    faction_test_tick();
+                    Sleep(100);
+                }
+                if (crew >= 0) {
+                    fighter = crew;
+                    fprintf(stderr, "[NETPLAY] tests: RANDOM fighter within the crew: %d (%s)\n", fighter, online_fighter_name(fighter));
+                }
+            }
+            if (fr.in_room && ready_delay > 0) {    /* build 112: the room (and its select) a while before READY */
+                for (i = 0; i < ready_delay / 100 && !N.stop; i++) { faction_test_tick(); Sleep(100); }
+            }
         } else if (!strcmp(mode, "ranked")) {
             /* RECOMP_TEST_RANKED_MODES="open" or "classic,open": the modes, the first the primary
              * (default Classic); the found set is accepted (RECOMP_TEST_RANKED_ACCEPT=0 declines) */
@@ -8624,6 +8651,10 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                 int me, mine = !readied;
                 for (me = 0; me < r.player_count; me++)
                     if (r.players[me].slot == r.you) { mine = !r.players[me].ready; break; }
+                if (mine && !readied && faction_played && ready_delay > 0 && !strcmp(mode, "faction")) {
+                    if (!faction_back) faction_back = GetTickCount64();
+                    if (GetTickCount64() - faction_back < (ULONGLONG)ready_delay) mine = 0;     /* not yet */
+                }
                 if (mine && !readied) {
                     if (f && !_stricmp(f, "random") && r.blocked_count > 0) {
                         /* build 68: the room's FIGHTER RULES block some fighters: RANDOM draws among the others,
@@ -8648,7 +8679,7 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
                     if (r.players[me].slot == r.you && r.players[me].voted < 0) { netplay_lobby_vote(test_vote(&r, vote_random)); break; }
                 voted_in = r.version;
             }
-            if (r.phase == 2) readied = 0;
+            if (r.phase == 2) { readied = 0; faction_played = 1; faction_back = 0; }
             Sleep(100);
         }
         return 0;

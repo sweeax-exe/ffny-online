@@ -70,6 +70,7 @@
 #include "start_countdown.h"
 #include "milestones.h"
 #include "season_search.h"
+#include "faction_crew.h"        // build 112: Faction War crew-only fighters
 #include "fighter_tabs.h"
 #include "fighter_skins.h"
 #include "fighter_banks.h"
@@ -108,6 +109,10 @@ long long now_ms()
 
 } // namespace
 
+static std::atomic<int> g_menu_seen{0};   // the main menu came up once (tests, build 112)
+// Tests (build 112, netplay.c RECOMP_TEST_FACTION_AFTER_MENU): the game's main menu has been up once.
+extern "C" int online_test_menu_seen(void) { return g_menu_seen.load(); }
+
 extern "C" void online_menu_on_funccall(const char *text)
 {
     milestones_on_funccall(text);
@@ -126,6 +131,7 @@ extern "C" void online_menu_on_funccall(const char *text)
             if (up && !once && getenv("RECOMP_TEST_OPEN_ONLINE")) { once = 1; g_open_req = 1; }
         }
         g_menu_up = up;
+        if (up) g_menu_seen = 1;
         g_focus = -1;
         g_menu_ticks = 0;
     } else if (!strncmp(text, "Online.Focus(", 13)) {
@@ -1467,11 +1473,19 @@ bool content_split_shown()
     int same = 0, other = other_content_players(&same);
     return other >= 3 && other > same;
 }
+int fw_crew_side(const NetRoom &r);     // faction_ui.inc (build 112): this PC's side in a crew-only faction match room
+bool fw_crew_has(int side, int id);
+void fw_crew_note(const NetRoom &r, int side);
+int fw_crew_locked_left(int id);       // build 112: the variety rule's lock (0 free)
+void fw_crew_started(int fighter);
+float fw_crew_plate(ImDrawList *dl, const Frame &f, float x, float y, int side, float size, bool right);
 // A fighter this room's FIGHTER RULES leave out (the relay names them in ROOM; NETPLAY_CREATED_FIGHTER for
-// created fighters). Out of a room, none.
+// created fighters). Out of a room, none. Build 112: in a crew-only Faction War room every fighter outside this
+// player's crew (created and community fighters too).
 bool fighter_blocked(const NetRoom &r, int id)
 {
     if (!r.in_room) return false;
+    if (int side = fw_crew_side(r)) if (!fw_crew_has(side, id) || fw_crew_locked_left(id) > 0) return true;
     for (int i = 0; i < r.blocked_count && i < NETPLAY_MAX_BLOCKED; i++) if (r.blocked[i] == id) return true;
     return false;
 }
@@ -4042,6 +4056,20 @@ const std::vector<OnlineFighter> &grid_fighters()
             g_grid_cp.push_back(-1);
         }
     }
+    // build 112: a crew-only Faction War room shows this player's crew only (no created, community or other fighters;
+    // the COMMUNITY and CREATED tabs then have no cards and are not offered; RANDOM draws among the crew)
+    if (int side = fw_crew_side(r)) {
+        std::vector<OnlineFighter> crew;
+        std::vector<int> crew_cp;
+        for (size_t i = 0; i < list.size(); i++)
+            if (g_grid_cp[i] < 0 && list[i].id != FB_MORE_ID && fw_crew_has(side, list[i].id)) {
+                crew.push_back(list[i]);
+                crew_cp.push_back(-1);
+            }
+        list.swap(crew);
+        g_grid_cp.swap(crew_cp);
+        fw_crew_note(r, side);
+    }
     if (list.size() > 1) {
         OnlineFighter rnd{};
         rnd.id = FIGHTER_RANDOM;
@@ -4186,6 +4214,12 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     NetRoom rules_room;
     lobby_room(&rules_room);
     auto blocked = [&](int i) { return list[i].id != FIGHTER_RANDOM && fighter_blocked(rules_room, list[i].id); };
+    const int crew_side = fw_crew_side(rules_room);     // build 112: a crew-only Faction War room (grid_fighters)
+    auto crew_plate = [&]() {       // over the big portrait, left of the tabs
+        if (!crew_side) return;
+        const char *line = faction_crew_line(crew_side);
+        fw_crew_plate(dl, f, 36, 52, crew_side, std::min(11.0f, fit_size(f, g_title, 11, line, 164)), false);
+    };
     // build 96: character groups (char_groups_ui.inc): the group each card stands for ("" none), for groups of two or
     // more versions here; the group's first card is the one shown, the others are hidden (RANDOM still draws them)
     bool numbers_here = community_numbers_here(rules_room);
@@ -4359,6 +4393,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     if (!vn) {      // build 90: no card of this style in the tab: the tab, the box says so
         page_title(dl, f, "CHOOSE FIGHTER");
         header();
+        crew_plate();
         glass(dl, f, gx - 8, gy - 8, cols * (cw + 4) + 12, rows * (ch + 6) + 26);
         std::string msg = "NO " + (filter ? upper(filter) : std::string()) + " FIGHTER IN " + FTAB_NAMES[tab];
         text(dl, f, g_title, 15, gx + cols * (cw + 4) / 2, gy + 130, CREAM, msg.c_str(), CENTER, 1.0f);
@@ -4389,6 +4424,7 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
 
     page_title(dl, f, "CHOOSE FIGHTER");
     header();
+    crew_plate();
     const OnlineFighter &cur = list[S.fighter_sel];
     int cur_cp = S.fighter_sel < (int)g_grid_cp.size() ? g_grid_cp[S.fighter_sel] : -1;
     // the chosen fighter, large, with name and style
@@ -4424,7 +4460,10 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     }
     if (card_blocked(S.fighter_sel)) {   // on the big portrait's foot
         rect(dl, f, 46, 300, 160, 22, with_alpha(RED, 0.9f), 4);
-        text(dl, f, g_title, 11, 126, 304, WHITE, "NOT ALLOWED IN THIS ROOM", CENTER, 0.6f);
+        int rest = crew_side && cur.id != FIGHTER_RANDOM ? fw_crew_locked_left(cur.id) : 0;
+        std::string why = rest > 0 ? "LOCKED: " + std::to_string(rest) + (rest == 1 ? " MORE FIGHT" : " MORE FIGHTS")
+                                   : crew_side ? "NOT IN YOUR CREW" : "NOT ALLOWED IN THIS ROOM";
+        text(dl, f, g_title, 11, 126, 304, WHITE, why.c_str(), CENTER, 0.6f);
     }
     text(dl, f, g_title, 13, 126, 356, cur_key.empty() ? WHITE : ORANGE, cur_style, CENTER, 0, 170);
     // the grid
@@ -4481,7 +4520,14 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
                 bool off = ONLINE_NEW_FIGHTER(list[i].id) && standard_only(rules_room.settings.fighter_rules);
                 rect(dl, f, x + 1, y + 1, cw - 2, ch - 2, IM_COL32(0, 0, 0, 170), 3);
                 rect(dl, f, x + 1, y + ch / 2 - 7, cw - 2, 14, with_alpha(off ? GREY : RED, 0.85f));
-                text(dl, f, g_title, 8, x + cw / 2, y + ch / 2 - 5, WHITE, off ? "STANDARD" : "BANNED", CENTER, 0.6f);
+                int rest = crew_side ? fw_crew_locked_left(list[i].id) : 0;
+                text(dl, f, g_title, 8, x + cw / 2, y + ch / 2 - 5, WHITE, off ? "STANDARD" : rest > 0 ? "LOCKED" : crew_side ? "OTHER CREW" : "BANNED",
+                     CENTER, 0.6f);
+                if (rest > 0) {     // build 112: the variety rule's rest, a small note under the band
+                    std::string more = std::to_string(rest) + (rest == 1 ? " MORE FIGHT" : " MORE FIGHTS");
+                    text(dl, f, g_title, std::min(7.0f, fit_size(f, g_title, 7, more.c_str(), cw - 4)), x + cw / 2, y + ch / 2 + 10,
+                         with_alpha(CREAM, 0.9f), more.c_str(), CENTER, 0.5f);
+                }
             } else if (ONLINE_NEW_FIGHTER(list[i].id) && pc_content_new_fighter(list[i].id)) {
                 new_badge(dl, f, x + 3, y + 3, 8);      // build 82: new from the community
             }
@@ -4507,7 +4553,13 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
     // build 110: the card chosen now: a click (a tap has no hover before it) may have moved the choice off `cur` above
     const OnlineFighter &card = list[S.fighter_sel];
     if (pad.a && card_blocked(S.fighter_sel)) {
-        if (ONLINE_NEW_FIGHTER(card.id) && standard_only(rules_room.settings.fighter_rules))
+        if (crew_side && fw_crew_locked_left(card.id) > 0)
+            say(std::string(card.name) + " is locked for " + std::to_string(fw_crew_locked_left(card.id)) +
+                " more Faction War fights: pick another fighter of your crew.");
+        else if (crew_side)
+            say(std::string("Faction War: ") + (crew_side == 1 ? "D-Mob's" : "Crow's") + " crew only. " + card.name +
+                " is not in it: pick another fighter.");
+        else if (ONLINE_NEW_FIGHTER(card.id) && standard_only(rules_room.settings.fighter_rules))
             say("This room is STANDARD ONLY: community fighters are off here. Pick another fighter.");
         else say("This room's FIGHTER RULES leave " + std::string(card.name) + " out: pick another fighter.");
         const_cast<Pad &>(pad).a = false;
@@ -4526,7 +4578,8 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         S.pick_skin = 0;
         // build 86: no skins in a room for original fighters only, nor in a ranked search for them
         bool no_skins = (rules_room.in_room && standard_only(rules_room.settings.fighter_rules)) ||
-                        (S.ranked_pick && search_original(NETPLAY_ORIGINAL_RANKED));
+                        (S.ranked_pick && search_original(NETPLAY_ORIGINAL_RANKED)) ||
+                        crew_side;      // build 112: Faction War's crews play their own looks (no community content)
         if (!S.random_pick && !gkey[pick].empty()) {
             // build 96: a character group: the version window, on the version picked last of it (a search: the
             // first version whose name matches)
@@ -4600,7 +4653,8 @@ void draw_fighters(ImDrawList *dl, const Frame &f, const Pad &pad_in, bool *chos
         if (r == 1) {
             const CharGroupFighter *m = g.members[S.grp_sel];
             if (fighter_blocked(rules_room, m->fe_id)) {
-                say("This room's FIGHTER RULES leave " + std::string(char_group_label(m)) + " out: pick another version.");
+                say(crew_side ? std::string("Faction War: crew only. That version is not in your crew: pick another.")
+                              : "This room's FIGHTER RULES leave " + std::string(char_group_label(m)) + " out: pick another version.");
                 r = 0;
             } else {
                 *chosen = true;
@@ -5474,6 +5528,8 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
         }
         // build 82: community content off in this room
         if (standard_only(r.settings.fighter_rules)) room_tag(dl, f, sx, 72, "STANDARD", 9);
+        // build 112: a crew-only Faction War room: which crew this player picks from
+        if (int side = fw_crew_side(r)) fw_crew_plate(dl, f, 48, 52, side, 10, false);
     }
     if (worst > 150) {
         char warn[96];
@@ -5855,7 +5911,12 @@ void draw_room(ImDrawList *dl, const Frame &f, const Pad &pad, const NetRoom &r)
 
     if (pad.a && !ready && fighter_blocked(r, fighter)) {
         // build 68: this player's fighter is left out by the room's FIGHTER RULES: choose another first
-        say("This room's FIGHTER RULES leave " + fighter_label(fighter) + " out: choose another fighter.");
+        if (int side = fw_crew_side(r))     // build 112: a crew-only Faction War room
+            say(fw_crew_locked_left(fighter) > 0
+                    ? "Faction War: " + fighter_label(fighter) + " is locked for " + std::to_string(fw_crew_locked_left(fighter)) +
+                          " more fights. Choose another fighter of your crew."
+                    : std::string("Faction War: ") + (side == 1 ? "D-Mob's" : "Crow's") + " crew only. Choose a fighter of your crew.");
+        else say("This room's FIGHTER RULES leave " + fighter_label(fighter) + " out: choose another fighter.");
         S.page = FIGHTERS;
         S.fighter_sel = grid_pos(grid_fighters(), fighter);
         return;
@@ -8422,6 +8483,39 @@ bool draw_pages(ImVec2 display)
             if (!strcmp(v, "factions")) open_factions(); else open_faction_pick(HUB);
         }
     }
+    {   // tests (build 112): RECOMP_TEST_OPEN_ONLINE=faction-fighters opens CHOOSE FIGHTER once this copy sits in a
+        // crew-only Faction War room (the fighters' tests seat it with RECOMP_NETPLAY=faction; nothing is picked here)
+        static int once;
+        static ULONGLONG opened;
+        const char *v = getenv("RECOMP_TEST_OPEN_ONLINE");
+        if ((once == 1 || once == 3) && GetTickCount64() - opened > 4500) {     // then back to the room (its line), nothing picked
+            once++;
+            if (S.page == FIGHTERS) S.page = HUB;
+            fprintf(stderr, "[FACTION] test: back to the room\n");
+        }
+        if (once == 2 && room.in_room && room.phase == 0) {     // after a fight: the select again, with its rested fighter
+            int side = fw_crew_side(room), locked = 0;
+            if (side)
+                for (const OnlineFighter &o : grid_fighters()) locked += o.id >= 0 && fw_crew_locked_left(o.id) > 0;
+            if (locked) {
+                once = 3;
+                opened = GetTickCount64();
+                S.page = FIGHTERS;
+                S.fighter_sel = grid_pos(grid_fighters(), saved_fighter());
+                fprintf(stderr, "[FACTION] test: CHOOSE FIGHTER again in room %s, %d locked\n", room.code, locked);
+            }
+        }
+        if (!once && v && !strcmp(v, "faction-fighters") && !gallery_on() && room.in_room && room.phase == 0) {
+            if (int side = fw_crew_side(room)) {
+                once = 1;
+                opened = GetTickCount64();
+                S.page = FIGHTERS;
+                S.fighter_sel = grid_pos(grid_fighters(), saved_fighter());
+                fprintf(stderr, "[FACTION] test: CHOOSE FIGHTER in crew-only room %s (%s's crew, %d cards)\n", room.code,
+                        side == 1 ? "D-Mob" : "Crow", (int)grid_fighters().size());
+            }
+        }
+    }
     {   // tests (Team Tower Online): RECOMP_TEST_OPEN_ONLINE=rooms shows FIND A ROOM in the lobby, towercard the Team Tower
         // card's ONLINE; either goes to the room once this copy is in one
         static int once;
@@ -8751,6 +8845,24 @@ extern "C" void faction_test_tick(void)
     fw_match_tick(r);
 }
 extern "C" int faction_test_seated(void) { return fw_seated() ? 1 : 0; }
+// Tests (build 112): RECOMP_NETPLAY_FIGHTER=random in a crew-only faction room draws within this player's crew, as the
+// select's RANDOM card does there; -1 outside one (the copy keeps its own pick).
+extern "C" int faction_test_crew_random(void)
+{
+    NetRoom r;
+    netplay_lobby_room(&r);
+    int side = fw_crew_side(r);
+    if (!side) return -1;
+    const OnlineFighter *all = nullptr;
+    int n = online_fighters(&all);
+    std::vector<int> offered, crew;
+    for (int i = 0; i < n; i++) {
+        offered.push_back(all[i].id);
+        if (fw_crew_has(side, all[i].id) && fw_crew_locked_left(all[i].id) == 0) crew.push_back(all[i].id);
+    }
+    return faction_crew_random(crew.data(), (int)crew.size(), offered.data(), (int)offered.size(),
+                               (unsigned)online_random_below(1 << 20));
+}
 // Tests (build 110, RECOMP_TEST_CREATE_ROOM in netplay.c): the settings CREATE A ROOM starts on (create_page_settings: the
 // remembered CUSTOM checklist when online.room_venues_on), for `mode` and `max`, listed or by code only.
 extern "C" void online_test_room_settings(NetRoomSettings *out, int mode, int max, int is_public)
@@ -8819,6 +8931,7 @@ bool test_pad_r3() { return false; }
 extern "C" void faction_test_search(int) {}
 extern "C" void faction_test_tick(void) {}
 extern "C" int faction_test_seated(void) { return 0; }
+extern "C" int faction_test_crew_random(void) { return -1; }
 extern "C" void online_test_room_settings(NetRoomSettings *out, int mode, int max, int is_public)
 {
     char text[NETROOM_VENUES_SAVED_TEXT];

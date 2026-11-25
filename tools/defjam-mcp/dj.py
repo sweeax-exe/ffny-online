@@ -35,6 +35,9 @@ the exit code is 1 on any failure.
     python tools/defjam-mcp/dj.py scenario factionwar [--size 1|2] [--matches N] [--out D:/DefJam/community/faction-war-shots]
            (build 108: Faction War on a local account service with -factions: the first-time picker with Crow closed by
            the balance rule, the FACTION WAR page's live totals, 1 ON 1 (or 2 ON 2 with four copies) and the board)
+    python tools/defjam-mcp/dj.py scenario factionwar --crew [--crew-from 2026-11] [--out D:/DefJam/community/faction-crew-shots]
+           (build 112: crew-only fighters, the December rule forced for this season: both fighters' CHOOSE FIGHTER shows
+           only their crew, RANDOM stays in it, the fight scores; then a fighter of the other crew: not scored)
     python tools/defjam-mcp/dj.py scenario towersteam [--out D:/DefJam/community/team-tower-shots]   (build 106: the
            Team Tower, 2 vs 2 with two pads, signed in on a local account service: 3 floors won and saved, resumed and
            lost, a new climb on floor 1, the community Team Tower; build 108: player 2 signs in on the local
@@ -159,6 +162,10 @@ def cmd_scenario(a):
                                     fast_ko=a.fast_ko if (a.kind == "towersonline" or a.fast_ko != 600) else 900,
                                     rollback=a.rollback == "on", start_floor=a.start_floor, lag=a.lag, name=online_name,
                                     **common)
+    elif a.kind == "factionwar" and a.crew:
+        r = scenarios.faction_crew(matches=a.matches if a.matches != 3 else 1, timeout=a.timeout, relay_port=a.relay_port,
+                                   extra_env=env, out_dir=a.out or scenarios.FACTION_CREW_SHOTS, fast_ko=a.fast_ko,
+                                   crew_from=a.crew_from, **common)
     elif a.kind == "factionwar":
         r = scenarios.faction_war(size=a.size, matches=a.matches if a.matches != 3 else (2 if a.size == 1 else 1),
                                   timeout=a.timeout, relay_port=a.relay_port, extra_env=env,
@@ -286,6 +293,9 @@ def main(argv=None):
     sc.add_argument("--lag", help="towersteam-online with --rollback on: RECOMP_NETPLAY_LAG_MS on both copies (default 40,20)")
     sc.add_argument("--size", type=int, default=1, choices=[1, 2], help="factionwar: 1 ON 1 (with the observer, the picker "
                     "and the lock) or 2 ON 2 (four fighters)")
+    sc.add_argument("--crew", action="store_true", help="factionwar (build 112): crew-only fighters with the December rule "
+                    "forced (-faction-crew-from): the restricted CHOOSE FIGHTER, a scored fight, a refused one")
+    sc.add_argument("--crew-from", default="2026-11", help="factionwar --crew: the service's first crew-only season")
     sc.add_argument("--twists", help="towersweekly: the twists to climb (comma list; default all six)")
     sc.add_argument("--case", default="kick", help="lobby97 (build 97): kick, quick, quickmax or afk")
     sc.add_argument("--via", default="voice", choices=["voice", "chat"], help="mute: the VOICE CHAT page's call, or the chat window's MUTE IN ROOM")
