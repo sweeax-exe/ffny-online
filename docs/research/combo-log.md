@@ -51,7 +51,10 @@ blocks (2, 3), strikes or grabs on its own (0x45..0x4B, 0x6C..0x70, 0x1E), is kn
 fighter hits it, or the match is set up again. Hits on a knocked-down victim (0x15 > 0x0F) stay in the
 combo.
 
-### Reading the illegal-tech rules from it (for a later detector)
+### Reading the illegal-tech rules from it
+
+The detector built from this (build 112) is `src/hooks/illegal_tech*.c`, described in
+[illegal-tech.md](illegal-tech.md); it rides the same three hooks and runs whether the log is on or not.
 
 | Rule | What to look for |
 |---|---|

@@ -40,6 +40,7 @@ typedef char it_state_fits[sizeof(ItState) <= ILLEGAL_TECH_STATE_BYTES ? 1 : -1]
 typedef char it_state_words[sizeof(ItState) % 4 == 0 ? 1 : -1];
 
 static ItState S;
+static uint32_t s_setup_fighter[IT_SLOTS];     /* the set-up's fighter bytes at the match's set-up (host only) */
 static int s_reset_done;
 static int s_reported;
 static int s_switch = -1;      /* 0 normal, 1 test (report in casual too), 2 off (report nothing) */
@@ -82,6 +83,9 @@ static void observe(int slot, ItObs *o)
     o->state = MEM32(r + F_STATE);
     o->phase = MEM32(r + F_PHASE);
     o->stun = (MEM8(r + F_FLAGS_927) & 4u) ? 1u : 0u;
+    /* the fighter byte goes into the state (and so the checksum) only once the slot is seen fighting: an unused
+     * slot's byte is whatever the PC's last set-up left there */
+    if (S.fighter[slot] == 0xFFFFFFFFu) S.fighter[slot] = s_setup_fighter[slot];
     o->character = S.fighter[slot];
     o->rehit = MEM32(r + F_REHIT);
     o->move = MEM32(r + F_MOVE);
@@ -106,12 +110,12 @@ void illegal_tech_match_start(void)
     int i;
     it_reset(&S);
     S.sensitive = illegal_tech_test_switch() == 3;
-    for (i = 0; i < IT_SLOTS; i++) S.fighter[i] = gd ? MEM8(gd + GD_FIGHTER + 5u * (uint32_t)i) : 0xFFFFFFFFu;
+    for (i = 0; i < IT_SLOTS; i++) s_setup_fighter[i] = gd ? MEM8(gd + GD_FIGHTER + 5u * (uint32_t)i) : 0xFFFFFFFEu;
     s_reset_done = 1;
     memset(s_trace_state, 0xFF, sizeof(s_trace_state));
     if (trace_on())
-        fprintf(stderr, "[ITRACE] match fighters %d %d %d %d\n", (int)S.fighter[0], (int)S.fighter[1], (int)S.fighter[2],
-                (int)S.fighter[3]);
+        fprintf(stderr, "[ITRACE] match fighters %d %d %d %d\n", (int)s_setup_fighter[0], (int)s_setup_fighter[1],
+                (int)s_setup_fighter[2], (int)s_setup_fighter[3]);
 }
 
 void illegal_tech_hit(uint32_t attacker, uint32_t defender, uint32_t flags)

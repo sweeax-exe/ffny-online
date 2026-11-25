@@ -10,10 +10,10 @@ set) comes behind its own switch once the mods have checked the false-positive r
 | # | Rule (id in the reports) | Detected when |
 |---|---|---|
 | 1 | infinite (`infinite`) | a second block cancel in one combo. A block cancel: the attacker blocks (state 2) while its combo on the victim is open and the victim still reels standing (0x0E, 0x10..0x12), then its next hit lands within 40 steps. Ice-T's cancels on a victim's back (bearing bits 0xC0) do not count (his back submission loop is allowed). |
-| 2 | wall redaze (`wall_redaze`) | the victim came off a wall in this combo, was seen in the long dizzy since, and a hit leaves it in the dizzy again |
-| 3 | grab off the wall (`wall_grab`) | the victim came off a wall in this combo (not down, not pinned again, within 150 steps) and the attacker's grab catches it (0x20) |
-| 4 | chain stun reuse (`chain_stun`) | the victim is stunned a second time in one combo by the same move of the attacker. Blaze (56, 81, 82) and Comp (46) are exempt. |
-| 5 | two resticks (`restick`) | the victim is pinned against a wall (0x37, 0x14, 0x1B, 0x60) for the third time in one combo (the first stick and one restick are fine). Strikes on a pinned victim keep it pinned and are no restick. |
+| 2 | wall redaze (`wall_redaze`) | the victim came off a wall in this combo in the long dizzy (the stun bit), and a hit leaves it standing in the dizzy (not down, not back on the wall) |
+| 3 | grab off the wall (`wall_grab`) | the victim came off a wall in this combo (not down, not on the wall again; within 150 steps, or longer while it is dizzy) and the attacker's grab catches it (0x20, 0x35, 0x22, 0x33, or a wall grab 0x68 / 0x62 entered from off the wall). A grab of a victim still pinned (0x37 > 0x68) is legal. |
+| 4 | chain stun reuse (`chain_stun`) | the stun bit rises a second time in one combo with the same cause: the attacker's last grapple or heavy-hit move (`+0xF50` 0x27xx; the strike strings 0x36..0x6C are no chain stuns). Not while coming off a wall (rule 2's ground). Blaze (56, 81, 82) and Comp (46) are exempt. |
+| 5 | two resticks (`restick`) | the victim is pinned against a wall (0x37, 0x14, 0x1B, 0x60) for the third time in one combo (the first stick and one restick are fine). Strikes on a pinned victim keep it pinned and are no restick; a grab on the wall (0x68, 0x62) is still on it. |
 
 A combo (ours; the game keeps none) opens on a hit that is not blocked, or when the victim is caught by a grab,
 and closes when the victim is back in a free stance (1), blocks (2, 3), strikes or grabs on its own, is knocked
@@ -34,8 +34,9 @@ listed at most once per combo.
 ## Determinism
 
 The detector runs in every fight (offline too), in every run of a step, also the steps rollback runs again. It
-reads only the records of fighters in the match (`+0x28` names the slot) and the set-up's fighter byte (game data
-`+0x1AAA + 5 * slot`), at the step's start and at each hit. Its whole state (`ItState`, 32-bit words only) goes
+reads only the records of fighters in the match (`+0x28` names the slot) and, for those slots only, the set-up's
+fighter byte (game data `+0x1AAA + 5 * slot`; an unused slot's byte is whatever that PC's last set-up left, 157 in
+the tests), at the step's start and at each hit. Its whole state (`ItState`, 32-bit words only) goes
 into every rollback save and comes back with every load, and its FNV hash is folded into the lockstep checksum
 of every online fight, so a verdict one PC reached and the other did not would show as a desync at the next
 checksum. Whether a match's detections are reported does not change what the detector does.
@@ -73,5 +74,34 @@ set-up's fighter byte (game data `+0x1AAA + 5 * slot`: 55, 22).
 | bearing `+0x918` | 0x13 / 0x15 (side), 0x83 (from behind, a victim on the ground) |
 
 Not seen in bot fights (the bots do not play these on purpose): a block cancel, a second wall stick in one combo,
-a grab of a victim coming off the wall, a stun by a grapple, state 0x16 with the stun bit set. The scripted
-session below covers what it could.
+a grab of a victim coming off the wall, a stun by a grapple, state 0x16 with the stun bit set.
+
+Scripted session (`logs/dj/20261125-191609-offline`: Doc against an idle Magic in the cage, pad bits injected
+per step through the control port, `RECOMP_CONTROL_PORT`, `inject 0 <rel> <steps> <bits>`):
+
+- Doc's string: punch (0x80) hits land 7 steps after the press, moves 0x36, 0x39, 0x3B; the third hit sends the
+  victim into the big stagger (0x10). One hit's flinch (0x0E) lasts 24 steps.
+- Block cancel: block (0x2000) pressed 7 steps after the string's second hit takes the attacker 0x45 > 0x02 (the
+  attack's recovery is cut), 0x02 > 0x01 seven steps later, then the next punch (0x45). In one try the next hit
+  landed in the step the victim recovered (its `vst` at the hit was 0x01, while every step start still saw 0x0E):
+  the detector counted it as a block cancel (`bc=1`), as the combo log's `bcancel` did. A second cancel in one
+  combo needs tighter timing than the scripted 60-steps-a-second presses reached; it stays covered by the unit
+  test, not by a live run.
+- The combo log's `bcancel` also fired for a block while the victim lay on the ground (then a hit on it): the
+  detector does not count that one (the victim must still reel standing when the attacker blocks).
+- A knocked-down human slot without input stays down (0x15) until a face button is pressed.
+
+## Stage 2 (enforcement, not built yet)
+
+Behind a switch file on the relay and the account service (`illegal-tech-enforce`, default off), ranked and
+tournament sets only, once the mods have checked stage 1's false-positive rate:
+
+1. Relay: the switch's state goes to both games with the set game's START (one value for both PCs; never
+   from a later message), and a RESULT "void" (no winner) neither counts nor advances the set's in-room score:
+   the same game is played again.
+2. Game: with enforcement on for the match, the first detection ends the fight at the step it is found (both
+   PCs find it at the same step), with no winner, and the result report says why (`"it_void"`).
+3. Account service (`illegaltech.go`): a detection both games listed (or the offender's own game listed)
+   counts as an offence of the attacker's account in that set: the first voids the game (no stats, no set
+   game), a second offence in the set, or a leave after an offence, forfeits the set (`forfeitSet`). A
+   detection only the victim's game listed pauses the set for the team (a patched game could hide its own).
