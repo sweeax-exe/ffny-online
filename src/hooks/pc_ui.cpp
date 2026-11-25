@@ -3831,6 +3831,11 @@ bool g_ms = false;                  // the overlay shows MILESTONES (the user-ID
 bool g_community = false;           // the overlay shows the community window (MORE on a select screen)
 bool g_skin = false;                // build 85: the overlay shows the skin window over a select screen
 bool g_towers = false;              // Towers: the overlay shows the climb window between floors (towers_ui.inc)
+// Build 112 (#227): the overlay key over one of the overlay's own screens (an online page, a room, the windows
+// above) opens the settings panel over that screen, which stays drawn behind it and keeps running (a match that
+// starts still closes it all); the key again, ESC, B or the panel's Close goes back to that screen. Before, the key
+// shut the screen itself: the game's own menus showed behind the panel, and they took the input once it closed.
+bool g_settings_over = false;
 std::atomic<bool> g_ms_req{false};      // a click on the MILESTONES chip (window thread)
 std::atomic<int> g_menu_eats_back{0};   // the title reads no BACK (VIEW) on the main menu (game thread)
 bool g_exit_view_down = true;       // the pad's VIEW was held last frame (true: a held one never opens it)
@@ -3992,7 +3997,7 @@ void set_open(bool open)
     if (g_open.load() == open) return;
     g_open = open;
     g_just_opened = open;
-    if (!open) g_online = g_exit = g_ms = g_skin = g_cupd = g_community = g_towers = false;
+    if (!open) g_online = g_exit = g_ms = g_skin = g_cupd = g_community = g_towers = g_settings_over = false;
     if (open) { g_hold_input = false; xbox_HostInputSetUiActive(1); }
     else g_hold_input = true;           // released in release_input_when_idle
 #if !defined(_WIN32)
@@ -4001,6 +4006,100 @@ void set_open(bool open)
     fprintf(stderr, "[UI] overlay %s\n", open ? "opened" : "closed");
     fflush(stderr);
     recorder_event("overlay", open ? "\"open\":true" : "\"open\":false");
+}
+
+// One of the overlay's own screens is up (not the settings panel alone).
+bool screen_up() { return g_online || g_exit || g_ms || g_skin || g_cupd || g_community || g_towers; }
+
+const char *screen_name()
+{
+    return g_online ? "online" : g_exit ? "exit" : g_ms ? "milestones" : g_skin ? "skins" : g_cupd ? "update" :
+           g_community ? "community" : g_towers ? "towers" : "";
+}
+
+// The settings panel over a screen, or back to that screen. The game's input stays held throughout.
+void settings_over(bool on)
+{
+    if (g_settings_over == on) return;
+    g_settings_over = on;
+    if (on) g_just_opened = true;       // the panel takes the focus, as when the overlay opens
+    fprintf(stderr, "[UI] settings %s the %s screen\n", on ? "opened over" : "closed: back to", screen_name());
+    fflush(stderr);
+    recorder_event("overlay", on ? "\"settings\":true" : "\"settings\":false");
+}
+
+// The overlay key (F1, the pad chord, the tests' control channel): the settings over a screen and back, else the
+// overlay itself opens or shuts.
+void overlay_key()
+{
+    if (g_settings_over) settings_over(false);
+    else if (g_open.load() && screen_up()) settings_over(true);
+    else set_open(!g_open.load());
+}
+
+// While the settings panel is over a screen, that screen still runs each frame (a room's match, a hub move) but
+// sees no input: the panel has it. Everything ImGui answers input questions from is put aside for the screen's
+// call and given back for the panel's.
+struct InputHidden {
+    ImGuiKeyData keys[ImGuiKey_NamedKey_COUNT];
+    bool down[5], clicked[5], dbl[5], released[5];
+    ImU16 count[5];
+    float dur[5], dur_prev[5];
+    ImVec2 pos, delta;
+    float wheel, wheel_h;
+    bool ctrl, shift, alt, super;
+    ImGuiKeyChord mods;
+    ImVector<ImWchar> chars;
+    explicit InputHidden(ImGuiIO &io) : io_(io)
+    {
+        memcpy(keys, io.KeysData, sizeof(keys));
+        for (ImGuiKeyData &k : io.KeysData) { k.Down = false; k.DownDuration = k.DownDurationPrev = -1.0f; k.AnalogValue = 0; }
+        for (int b = 0; b < 5; b++) {
+            down[b] = io.MouseDown[b]; clicked[b] = io.MouseClicked[b]; dbl[b] = io.MouseDoubleClicked[b];
+            released[b] = io.MouseReleased[b]; count[b] = io.MouseClickedCount[b];
+            dur[b] = io.MouseDownDuration[b]; dur_prev[b] = io.MouseDownDurationPrev[b];
+            io.MouseDown[b] = io.MouseClicked[b] = io.MouseDoubleClicked[b] = io.MouseReleased[b] = false;
+            io.MouseClickedCount[b] = 0;
+            io.MouseDownDuration[b] = io.MouseDownDurationPrev[b] = -1.0f;
+        }
+        pos = io.MousePos; delta = io.MouseDelta; wheel = io.MouseWheel; wheel_h = io.MouseWheelH;
+        io.MousePos = ImVec2(-FLT_MAX, -FLT_MAX); io.MouseDelta = ImVec2(0, 0); io.MouseWheel = io.MouseWheelH = 0;
+        ctrl = io.KeyCtrl; shift = io.KeyShift; alt = io.KeyAlt; super = io.KeySuper; mods = io.KeyMods;
+        io.KeyCtrl = io.KeyShift = io.KeyAlt = io.KeySuper = false; io.KeyMods = 0;
+        chars.swap(io.InputQueueCharacters);
+    }
+    ~InputHidden()
+    {
+        ImGuiIO &io = io_;
+        memcpy(io.KeysData, keys, sizeof(keys));
+        for (int b = 0; b < 5; b++) {
+            io.MouseDown[b] = down[b]; io.MouseClicked[b] = clicked[b]; io.MouseDoubleClicked[b] = dbl[b];
+            io.MouseReleased[b] = released[b]; io.MouseClickedCount[b] = count[b];
+            io.MouseDownDuration[b] = dur[b]; io.MouseDownDurationPrev[b] = dur_prev[b];
+        }
+        io.MousePos = pos; io.MouseDelta = delta; io.MouseWheel = wheel; io.MouseWheelH = wheel_h;
+        io.KeyCtrl = ctrl; io.KeyShift = shift; io.KeyAlt = alt; io.KeySuper = super; io.KeyMods = mods;
+        io.InputQueueCharacters.swap(chars);
+    }
+    InputHidden(const InputHidden &) = delete;
+    InputHidden &operator=(const InputHidden &) = delete;
+private:
+    ImGuiIO &io_;
+};
+
+// The screens draw on the foreground list, which ImGui puts over every window. Under the settings panel what they
+// drew this frame (on a dark backdrop, so the game's own menus never show through) becomes the background list:
+// behind the panel, and under the panel's own dimming.
+void screen_under_begin(ImVec2 display)
+{
+    ImGui::GetBackgroundDrawList();     // both lists live this frame, so the swap moves two current ones
+    ImGui::GetForegroundDrawList()->AddRectFilled(ImVec2(0, 0), display, IM_COL32(8, 8, 10, 255));
+}
+
+void screen_under_end()
+{
+    ImGuiViewportP *vp = (ImGuiViewportP *)ImGui::GetMainViewport();
+    std::swap(vp->BgFgDrawLists[0], vp->BgFgDrawLists[1]);
 }
 
 } // namespace
@@ -4588,6 +4687,21 @@ extern "C" void pc_ui_menu_back_pressed(void) { g_exit_view_latch.store(true); }
 
 extern "C" int pc_ui_overlay_open(void) { return g_open.load() || g_note_shown.load() ? 1 : 0; }
 
+#if defined(_WIN32)
+extern "C" void pc_ui_test_overlay_key(void) { g_toggle = true; }
+
+extern "C" void pc_ui_overlay_describe(char *out, size_t size)
+{
+    if (!out || !size) return;
+    ui_lock();
+    const char *screen = screen_name();
+    if (!g_open.load()) snprintf(out, size, "%s", "");
+    else if (!screen_up()) snprintf(out, size, "%s", "settings");
+    else snprintf(out, size, "%s%s", screen, g_settings_over ? "+settings" : "");
+    ui_unlock();
+}
+#endif
+
 extern "C" void pc_ui_apply_settings(void)
 {
     ui_lock();
@@ -4793,7 +4907,7 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     pad_mark_poll();
     next_song_pad_poll();
     if (!ui_capturing() && !g_chords.empty() && pad_toggle_pressed()) toggled = true;
-    if (toggled && !g_note.open) set_open(!g_open.load());
+    if (toggled && !g_note.open) overlay_key();
     release_input_when_idle();
     content_update_frame(g_online ? 1 : 0);      // build 86: the content check in any menu; UPDATE NOW taken
     if (online_screen::take_open_request()) {      // ONLINE chosen in the game's main menu
@@ -4955,6 +5069,15 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     ImGuiIO &io = ImGui::GetIO();
     bool close_request = false;
     if (g_note.open || g_note.swallow) note_input(io);      // first: the screens under it read no input
+    // Build 112 (#227): the settings panel over a screen: the screen is drawn and runs behind it, with no input
+    bool under = g_settings_over && g_open.load() && !versus && !decor && screen_up();
+    bool settings_close = false;
+    {
+    std::unique_ptr<InputHidden> hidden;
+    if (under) {
+        hidden.reset(new InputHidden(io));
+        screen_under_begin(io.DisplaySize);
+    }
     if (versus || decor) {
         // the versus card and the room's decor draw names with looks: an exception skips that frame's
         // picture instead of ending the game (online_screen::draw and the fight chat guard themselves)
@@ -4994,8 +5117,11 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
         } else if (answer) {
             close_request = true;
         }
-    } else if (g_open.load()) {
-    // Dim the game and put the settings in a panel in the middle.
+    }
+    if (under) screen_under_end();
+    }   // the input is back for the panel
+    if (g_open.load() && !versus && !decor && (under || !screen_up())) {
+    // Dim the game (or the screen under the panel) and put the settings in a panel in the middle.
     if (g_just_opened) {
         g_just_opened = false;
         ImGui::SetNextWindowFocus();
@@ -5008,12 +5134,15 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
     {
         ImGui::SetNextWindowBgAlpha(0.96f);
         UiResult r = ui_draw(UI_OVERLAY, (io.DisplaySize.x - pw) / 2, (io.DisplaySize.y - ph) / 2, pw, ph);
-        close_request = r.leave;
+        bool leave = r.leave;
+        // Escape or the pad's cancel button closes the overlay, unless a popup or a capture is open.
+        if (!ui_capturing() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
+            (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
+            leave = true;
+        // over a screen: back to that screen (its own close, a match starting, still shuts everything)
+        if (leave && under) settings_close = true;
+        else if (leave) close_request = true;
     }
-    // Escape or the pad's cancel button closes the overlay, unless a popup or a capture is open.
-    if (!ui_capturing() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
-        (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
-        close_request = true;
     }
     if (fighthud) {
         try {
@@ -5105,6 +5234,8 @@ extern "C" void pc_ui_overlay(void *device, void *context, void *window_rtv, uns
             xbox_HostInputSetUiActive(0);
             fprintf(stderr, "[UI] closed for the match: game input back at once\n");
         }
+    } else if (settings_close) {
+        settings_over(false);
     }
     ui_unlock();
 }

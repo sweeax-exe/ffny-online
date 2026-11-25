@@ -139,6 +139,8 @@ def cmd_scenario(a):
                            rollback=a.rollback, rollback_modes=a.rollback_modes, **common)
     elif a.kind == "lobby97":
         r = scenarios.lobby97(case=a.case, timeout=a.timeout, relay_port=a.relay_port, extra_env=env, **common)
+    elif a.kind == "overlayroom":
+        r = scenarios.overlay_room(timeout=a.timeout or 150, relay_port=a.relay_port, extra_env=env, **common)
     elif a.kind == "socialonline":
         r = scenarios.social_online(timeout=a.timeout or 200, relay_port=a.relay_port, extra_env=env, out_dir=a.out, **common)
     elif a.kind == "social":
@@ -273,7 +275,7 @@ def main(argv=None):
     sc.add_argument("kind", choices=["online", "offline", "boot", "gallery", "social", "roomchat",
                                               "crewbattle", "turf", "tset", "socialonline", "mute", "lobby97", "towers",
                                               "towerrewards", "towersteam", "factionwar", "towersweekly", "towersonline",
-                                              "towersteam-online"])
+                                              "towersteam-online", "overlayroom"])
     sc.add_argument("--variant", default="climb", choices=["climb", "leave", "desync", "soak", "quit"],
                     help="towersonline: climb (public room, list join, resume, loss, new climb), leave (away and back, "
                          "then the 3-minute save), desync (a forced void), soak (10 floors, unequal loads), quit (the partner leaves "

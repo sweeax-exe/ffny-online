@@ -8,7 +8,9 @@
  *   hold <slot> <control>[+...]            hold until release
  *   release <slot> [<control>[+...]|all]
  *   state                                  screen, the last front-end calls, the match (phase,
- *                                          clock, type, fighters with health), the online status
+ *                                          clock, type, fighters with health), the online status,
+ *                                          what the overlay shows (pc_ui_overlay_describe)
+ *   overlay                                the overlay key, as F1 (build 112)
  *
  * Controls are the settings names (a, b, x, y, start, back, dpad_up, left_stick_left, ...). The
  * pads are the virtual ones (RECOMP_INPUT_VIRTUAL_PADS=n with RECOMP_INPUT_NO_PADS=1), pressed
@@ -29,6 +31,7 @@
 #include <ws2tcpip.h>
 #include "input_host.h"
 #include "input_map.h"
+#include "pc_ui.h"
 #pragma comment(lib, "ws2_32.lib")
 
 #define ACTORS      0x003B92E0u
@@ -140,7 +143,13 @@ static void state(char *out, size_t size)
     json_str(out, size, &len, status);
     PUT(",\"lockstep\":");
     if (len < size) len += (size_t)netplay_debug_json(out + len, (int)(size - len));
-    PUT("}}");
+    PUT("},\"overlay\":");
+    {
+        char ov[64];
+        pc_ui_overlay_describe(ov, sizeof(ov));
+        json_str(out, size, &len, ov);
+    }
+    PUT("}");
 }
 
 static void release_due(void)
@@ -164,6 +173,7 @@ static void command(char *line, char *out, size_t size)
     sscanf(line, "%15s %127s %31s", verb, a1, a2);
     if (!strcmp(verb, "ping")) { snprintf(out, size, "{\"ok\":true}"); return; }
     if (!strcmp(verb, "state")) { state(out, size); return; }
+    if (!strcmp(verb, "overlay")) { pc_ui_test_overlay_key(); snprintf(out, size, "{\"ok\":true}"); return; }
     if (!strcmp(verb, "press") || !strcmp(verb, "hold") || !strcmp(verb, "release")) {
         char spec[128] = "";
         int ms = 120;
