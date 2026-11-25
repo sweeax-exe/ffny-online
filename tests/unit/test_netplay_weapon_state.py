@@ -70,3 +70,16 @@ def test_tower_floors_roll_back_again():
     rules = (HOOKS / 'towers_ai_rules.c').read_text(encoding='utf-8')
     assert 'f->online' not in rules                                        # the weapon/environment ramp online too
     assert 'int online;' not in (HOOKS / 'towers_ai_rules.h').read_text(encoding='utf-8')
+
+
+def test_spectators_hand_out_no_weapons_outside_the_fight_steps():
+    src = netplay()
+    crowd = body(src, 'void netplay_crowd_update(void)\n{')
+    assert 'int hush = N.lobby && !g_stepped && crowd_offers_in_step();' in crowd
+    assert crowd.index('MEM8(CROWD_HUSH) = (uint8_t)(was | 1u);') < crowd.index('sub_00081170();')
+    assert '#define CROWD_HUSH 0x003BE0F4u' in src
+    assert src.index('static int g_stepped;') < src.index('void netplay_crowd_update(void)\n{')
+    reset = body(src, 'static void crowd_reset(uint32_t arena)')
+    assert 'guest_call(sub_000BADA0, obj, 0, NULL);' in reset                  # an orphaned spectator weapon goes
+    assert 'owner < 4u' in reset
+    assert 'RECOMP_NETPLAY_CROWD_OFFERS' in src
