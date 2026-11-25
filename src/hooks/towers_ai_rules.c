@@ -27,7 +27,6 @@ void towers_ai_floor_ex(int tower, int floor, int floors, int force_boss, TowerA
     out->boss = force_boss || towers_is_boss(tower, floor, floors);
     out->defence = TOWER_AI_DEFENCE_BEST;
     out->hold_cap = 0;
-    out->online = 0;
     if (floor < TOWER_AI_FIRST_FLOOR && !force_boss) return;
     t = floor < TOWER_AI_FIRST_FLOOR ? 0.0f : (float)(floor - TOWER_AI_FIRST_FLOOR) / (float)(TOWER_AI_RAMP_TOP - TOWER_AI_FIRST_FLOOR);
     if (t > 1.0f) t = 1.0f;
@@ -64,12 +63,9 @@ static int target_of(const TowerAiFloor *f, int k)
     switch (k) {
     case TAI_COUNTER_ATTEMPT: case TAI_COUNTER_USE:     /* counters over plain blocks, and often */
     case TAI_COMBO: case TAI_BLAZIN:                    /* strings and Blazin moves */
+    case TAI_ENV_GRAPPLE: case TAI_ENV_ATTACK: case TAI_WEAPON: case TAI_ENVIRONMENT:   /* walls, objects, weapons */
     case TAI_DISTANCE_USE:
         return 5;
-    case TAI_ENV_GRAPPLE: case TAI_ENV_ATTACK: case TAI_WEAPON: case TAI_ENVIRONMENT:   /* walls, objects, weapons */
-        /* Team Tower Online (build 111): the fighter's own. A CPU drawn to weapons drives the weapon state, which is not
-         * yet deterministic between two PCs (a floor-30 desync, release/111 tests); build 112 fixes the weapon state. */
-        return f->online ? 0 : 5;
     case TAI_GRAPPLE_DEFENCE: case TAI_STRIKE_DEFENCE:
         return f->defence;
     case TAI_APPEAL:                                    /* taunts: the fewest */

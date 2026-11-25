@@ -1507,7 +1507,6 @@ void towers_match_start(void)
         g_glass_done = g_hits_scaled = g_momentum_refills = 0;
         g_fighting_steps = 0;
         towers_ai_boss_all(g_run.tower == TOWER_WEEKLY && g_run.twist == TOWER_TWIST_ALL_BOSSES);  /* build 108: BOSS RUSH */
-        towers_ai_set_online(0);   /* build 111: an offline climb after an online one ramps weapons again */
         if (TOWER_IS_TEAM(g_run.tower)) towers_ai_begin_team(g_run.tower, g_run.floor, g_run.floors);  /* both CPUs */
         else towers_ai_begin(g_run.tower, g_run.floor, g_run.floors);     /* the CPU past Hard (towers_ai.c) */
         ac_start();

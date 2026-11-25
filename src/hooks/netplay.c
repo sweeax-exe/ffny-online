@@ -3423,12 +3423,11 @@ static int every_player_rolls_back(void)
      * depth-8 soak ran clean offline, but no long online rollback run yet. Every PC knows the room's mode from ROOM.
      * Tests: RECOMP_ROLLBACK_RTS=1 on every copy lifts it. */
     if (N.rts_match && !(getenv("RECOMP_ROLLBACK_RTS") && *getenv("RECOMP_ROLLBACK_RTS") == '1')) return 0;
-    /* Team Tower Online (build 111): a floor plays in LOCKSTEP only (owner, 2026-11-25). Its AI ramp's host state is in
-     * the checksum and in every save state (towers_online_state_save), but the CPU brain's weapon targets drive the
-     * weapon state, which is not rollback-deterministic yet (2 of 3 floor-30 rollback runs desynced, release/111
-     * tests); the real fix (weapon_update once per final step) comes in build 112. Every PC of a tower room knows the
-     * room's mode from ROOM, so the delay agrees. Tests: RECOMP_ROLLBACK_TOWER=1 on every copy lifts it. */
-    if (N.tower_match && !(getenv("RECOMP_ROLLBACK_TOWER") && *getenv("RECOMP_ROLLBACK_TOWER") == '1')) return 0;
+    /* Team Tower Online: a floor rolls back as any Team match; its AI ramp's host state is in the checksum and in every
+     * save state (towers_online_state_save). Build 111 played the floors in lockstep only, as the weapons parted between
+     * the PCs; build 112 found that a spectator's size (crowd_reset) placed the weapon it holds, and puts the weapons in
+     * the checksum. Tests: RECOMP_ROLLBACK_TOWER=0 on every copy keeps it in lockstep. */
+    if (N.tower_match && getenv("RECOMP_ROLLBACK_TOWER") && *getenv("RECOMP_ROLLBACK_TOWER") == '0') return 0;
     for (i = 0; i < N.players; i++) if (!N.peer_rb[i]) return 0;
     if (match_has_created())
         for (i = 0; i < N.players; i++) if (!N.peer_rb_cp[i]) return 0;
