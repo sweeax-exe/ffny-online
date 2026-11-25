@@ -34,7 +34,7 @@ void illegal_tech_set_reported(int ranked_set);
 int illegal_tech_reported(void);
 /* RECOMP_ILLEGAL_TECH=test: report in casual online matches too (tests); =off: report nothing (never the
  * detection itself, which every PC of a match runs alike); =sensitive (tests, on every PC of the match: it changes
- * the detector's state): as test, and the first block cancel, restick and chain stun of a combo already count.
+ * the detector's state): as test, and the first block cancel, any wall stick and any stun already count.
  * Returns 0 normal, 1 test, 2 off, 3 sensitive. */
 int illegal_tech_test_switch(void);
 /* Appends ,"it":{...} to a match report at n when this match's detections are reported; returns the new length. */

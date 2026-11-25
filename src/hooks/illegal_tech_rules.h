@@ -101,8 +101,8 @@ typedef struct ItState {
     uint32_t det_n;         /* detections kept (at most IT_DET_MAX) */
     uint32_t det_total;     /* detections in all */
     uint32_t fighter[IT_SLOTS];     /* each slot's fighter (the set-up's fighter byte; 0xFFFFFFFF none) */
-    uint32_t sensitive;     /* tests (RECOMP_ILLEGAL_TECH=sensitive on every PC): the first block cancel, restick and
-                             * chain stun already count, so ordinary bot fights produce detections to compare */
+    uint32_t sensitive;     /* tests (RECOMP_ILLEGAL_TECH=sensitive on every PC): the first block cancel, any wall stick and
+                             * any stun already count, so ordinary bot fights produce detections to compare */
     ItVictim v[IT_SLOTS];
     ItFighterMem f[IT_SLOTS];
     ItDet det[IT_DET_MAX];

@@ -45,7 +45,7 @@ checksum. Whether a match's detections are reported does not change what the det
 
 - `RECOMP_ILLEGAL_TECH=test`: report the detections in every online match, casual too.
 - `RECOMP_ILLEGAL_TECH=sensitive` (every PC of the match: it changes the detector's state): as `test`, and the
-  first block cancel, restick and chain stun already count, so bot fights produce detections to compare.
+  first block cancel, any wall stick and any stun already count, so bot fights produce detections to compare.
 - `RECOMP_ILLEGAL_TECH=off`: report nothing.
 - `RECOMP_ILLEGAL_TECH_TRACE=1`: `[ITRACE]` lines, every hit and every change of a fighter's state, phase or stun
   flag, with the fields the rules read. `[ILLEGAL-TECH]` lines name each detection (first runs of a step).

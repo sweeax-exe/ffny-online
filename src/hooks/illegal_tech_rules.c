@@ -206,7 +206,7 @@ int it_step(ItState *s, const ItObs obs[IT_SLOTS])
             if (it_is_pinned(st) && !it_is_on_wall(was)) {
                 c->sticks++;
                 c->offwall = c->dizzy_offwall = 0;
-                if (c->sticks >= 3u - (s->sensitive ? 1u : 0u))
+                if (c->sticks >= (s->sensitive ? 1u : 3u))
                     found += detect(s, IT_RULE_RESTICK, a, i, obs, c->cause_move, c->sticks - 1);
             } else if (!it_is_on_wall(st) && it_is_on_wall(was) && !it_is_down(st)) {
                 c->offwall = 1;
@@ -219,7 +219,7 @@ int it_step(ItState *s, const ItObs obs[IT_SLOTS])
             }
             /* the long dizzy begins (the stun bit rises) */
             if (is_dizzy(o) && !f->stun && !c->offwall) {
-                if (c->cause_move >= IT_MOVE_SPECIAL) {
+                if (c->cause_move >= IT_MOVE_SPECIAL || s->sensitive) {
                     /* rule 4: stunned by a move that stunned it before in this combo (a grapple or a heavy hit:
                      * the strike strings' moves, 0x36..0x6C, are no chain stuns) */
                     uint32_t mv = c->cause_move, k;

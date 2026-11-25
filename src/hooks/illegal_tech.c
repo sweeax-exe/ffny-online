@@ -54,7 +54,7 @@ int illegal_tech_test_switch(void)
         s_switch = v && !strcmp(v, "test") ? 1 : v && !strcmp(v, "off") ? 2 : v && !strcmp(v, "sensitive") ? 3 : 0;
         if (s_switch == 1 || s_switch == 3)
             fprintf(stderr, "[ILLEGAL-TECH] test switch: detections are reported in every online match%s\n",
-                    s_switch == 3 ? "; sensitive: the first block cancel, restick and chain stun count (every PC of the "
+                    s_switch == 3 ? "; sensitive: the first block cancel, any wall stick and any stun count (every PC of the "
                     "match must have it)" : "");
     }
     return s_switch;
