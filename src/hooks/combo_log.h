@@ -2,7 +2,7 @@
  * Copyright (c) 2026 sweeax-exe (FFNY Online) */
 /* Per-hit combo log for tests and mods, RECOMP_COMBO_LOG=1 (src/hooks/combo_log.c,
  * docs/research/combo-log.md). Read-only: it writes [COMBO] lines to the run log and
- * changes nothing in the game. Off by default; when off each hook is one test of a flag. */
+ * changes nothing in the game. Off by default. The same hooks drive the illegal-tech detector (illegal_tech.h). */
 #ifndef DEFJAM_COMBO_LOG_H
 #define DEFJAM_COMBO_LOG_H
 #include <stdint.h>
@@ -17,8 +17,16 @@ void combo_log_step(void);
 /* sub_001A4D90_enter: a match is set up */
 void combo_log_match_start(void);
 
-static inline int combo_log_on(void)
+/* The log's own switch (RECOMP_COMBO_LOG=1) */
+static inline int combo_log_enabled(void)
 {
     return g_combo_log_on > 0 || (g_combo_log_on < 0 && combo_log_init());
+}
+/* The gate of the three hooks in src/recomp_manual.c. The illegal-tech detector (illegal_tech.c) rides the same
+ * hooks and runs in every fight, so the gate is always open and each function checks the log's own switch;
+ * this keeps src/recomp_manual.c (an input of the lift) unchanged. */
+static inline int combo_log_on(void)
+{
+    return 1;
 }
 #endif
