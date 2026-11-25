@@ -113,7 +113,24 @@ bool runningUnderWine() {
     return ntdll && GetProcAddress(ntdll, "wine_get_version") != nullptr;
 }
 
+// Windows N editions have no Media Foundation (ticket #193): the game would stop at once with Windows' own
+// "MFPlat.DLL was not found". Say what to install instead (the game says the same when started directly,
+// src/hooks/media_check.h). FFNY_TEST_NO_MEDIA_FOUNDATION=1 (test hook): as if both were missing.
+static void requireMediaFoundation() {
+    wchar_t hook[8];
+    bool forced = GetEnvironmentVariableW(L"FFNY_TEST_NO_MEDIA_FOUNDATION", hook, 8) > 0 && hook[0] != L'0';
+    for (auto dll : {L"MFPlat.dll", L"MFReadWrite.dll"}) {
+        HMODULE module = forced ? nullptr : LoadLibraryExW(dll, nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!module)
+            throw std::runtime_error("Your Windows is an N edition without media components. Install the Media "
+                                     "Feature Pack: Settings > Apps > Optional features > Add a feature > Media "
+                                     "Feature Pack, then restart.");
+        FreeLibrary(module);
+    }
+}
+
 static void launchInstalled() {
+    requireMediaFoundation();
     wchar_t self[32768], source[32768], data[32768], exe[32768];
     GetModuleFileNameW(nullptr, self, 32768);
     auto root = fs::path(self).parent_path();

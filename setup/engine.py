@@ -63,6 +63,28 @@ def cmake_version(text):
     return (int(match.group(1)), int(match.group(2))) if match else None
 
 
+MEDIA_FEATURE_PACK_MESSAGE = ('Your Windows is an N edition without media components. Install the Media Feature '
+                              'Pack: Settings > Apps > Optional features > Add a feature > Media Feature Pack, '
+                              'then restart.')
+
+
+def media_foundation_present(names=('MFPlat.dll', 'MFReadWrite.dll')):
+    """Whether Windows' Media Foundation loads from System32 (Windows N and KN editions lack it, ticket #193).
+    True off Windows."""
+    if not IS_WINDOWS:
+        return True
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+    kernel32.LoadLibraryExW.argtypes = (ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint32)
+    kernel32.FreeLibrary.argtypes = (ctypes.c_void_p,)
+    for name in names:
+        module = kernel32.LoadLibraryExW(name, None, 0x00000800)    # LOAD_LIBRARY_SEARCH_SYSTEM32
+        if not module:
+            return False
+        kernel32.FreeLibrary(module)
+    return True
+
+
 def stale_compiler_cache(cache_file, compiler):
     """True when a CMakeCache.txt names a C++ compiler other than `compiler` (paths compared
     case-insensitively and normalised); False when there is no cache or it names none."""
@@ -1365,6 +1387,10 @@ class Engine:
                 self.event('Setup ' + json.dumps({k: self.manifest[k] for k in ('version', 'source_commit', 'toolkit_commit')}))
                 self.check_install_destination()
                 self.check_existing_install()
+                if IS_WINDOWS and not media_foundation_present():
+                    # Not a stop: the build needs no Media Foundation, and the pack can come later; the
+                    # launcher and the game say the same at start until it is there (ticket #193).
+                    self.event('Note: ' + MEDIA_FEATURE_PACK_MESSAGE)
                 if self.dump is None:
                     dump_size = 0       # an update reuses the extracted files already on the data drive
                 elif not self.dump.exists():

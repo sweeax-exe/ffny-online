@@ -67,6 +67,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #include <xbox/xboxrecomp.h>
 #include "nv2a/nv2a_pgraph_d3d11.h"
 #include "hooks/save_compat.h"
+#include "hooks/media_check.h"
 #include "hooks/rollback.h"
 #include "hooks/hang_watch.h"
 #include "hooks/recorder.h"
@@ -755,6 +756,9 @@ static int host_main(void)
     (void)hPrevInstance;
     (void)lpCmdLine;
     (void)nCmdShow;
+    /* Windows N without Media Foundation (media_check.h): the message, before anything could reach it */
+    if (!media_check_startup())
+        return 3;
     pc_settings_capture_start();    /* the start-up environment, for the game's own process */
     hold_guest_range();             /* before the launcher: see hold_guest_range */
 #endif
