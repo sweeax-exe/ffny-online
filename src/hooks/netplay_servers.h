@@ -151,9 +151,18 @@ void netservers_quick_on(int server, int mode, int max, const char *name);
 /* Watch room `code` on relay `server` (spectator mode): as netservers_join_on, the SPECTATE goes out once
  * the hub is in that relay's lobby (netservers_tick returns 4). */
 void netservers_spectate_on(int server, const char *code, const char *name);
+/* Build 111, CREATE A ROOM's SERVER row (netservers_room_* in netplay_servers_rules.h): opens room `s` on the relay
+ * `value` names (ROOMSERVER_AUTO or 1 + a relay). Automatic first runs a fresh short ping round to every relay (about
+ * a second, at most 3 s) and takes the lowest ping (netservers_room_target), so a slow first answer at Online start no
+ * longer keeps the room on a far relay. When the hub is elsewhere it moves there (the old session ends, as for a join
+ * on another relay) and the CREATE goes out once it is in that lobby (netservers_tick returns 5). A custom address
+ * opens it where the hub is. netservers_measuring: 1 while the fresh round runs. */
+void netservers_create_on(int value, const NetRoomSettings *s, const char *name);
+int netservers_measuring(void);
 /* Carries out a pending join or quick match once the hub is in the right lobby (call it often: every
  * frame of the online screens, the test thread). Returns 0 nothing happened, 1 the JOIN went out,
- * 2 the QUICK went out (*mode: its match type), 3 the ranked set's queue, 4 the SPECTATE, -4 the relay takes no spectators, -1 the move failed (no lobby within 15 s). */
+ * 2 the QUICK went out (*mode: its match type), 3 the ranked set's queue, 4 the SPECTATE, 5 the new room's CREATE,
+ * -4 the relay takes no spectators, -1 the move failed (no lobby within 15 s). */
 int netservers_tick(int *mode);
 /* Ranked: the queue said MOVE (QUEUE 6): the hub moves to the host relay and queues there again with
  * the reservation code (netplay_lobby_ranked_again). Call it every frame of the online screens and the

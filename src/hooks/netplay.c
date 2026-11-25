@@ -8147,16 +8147,21 @@ static DWORD WINAPI autostart_thread(LPVOID unused)
              * that page starts on (RECOMP_ROOM_VENUES, RECOMP_ROOM_VENUES_ON=1: the remembered venue list) */
             NetRoomSettings rs;
             NetRoom made;
+            /* RECOMP_TEST_ROOM_SERVER=auto|<relay id> (build 111): the SERVER row's choice, through netservers_create_on
+             * as OPEN THE ROOM does (Automatic: a fresh ping round, then the lowest ping; the hub moves when needed) */
+            const char *rsv = getenv("RECOMP_TEST_ROOM_SERVER");
             online_test_room_settings(&rs, qmode, qmax, strcmp(cr, "private") != 0);
-            netplay_lobby_create(&rs);
+            if (rsv && *rsv) netservers_create_on(netservers_room_parse(rsv), &rs, who);
+            else netplay_lobby_create(&rs);
             moves = 6;                  /* no quick search: it waits here */
-            for (i = 0, made.in_room = 0; i < 100 && !N.stop; i++) {
+            for (i = 0, made.in_room = 0; i < (rsv && *rsv ? 300 : 100) && !N.stop; i++) {
+                if (rsv && *rsv) netservers_tick(NULL);
                 netplay_lobby_room(&made);
                 if (made.in_room) break;
                 Sleep(100);
             }
-            fprintf(stderr, "[NETPLAY] tests: room %s created (%s, %d venues)\n", made.in_room ? made.code : "NONE", cr,
-                    made.in_room ? made.settings.pool_count : 0);
+            fprintf(stderr, "[NETPLAY] tests: room %s created (%s, %d venues) on %s\n", made.in_room ? made.code : "NONE", cr,
+                    made.in_room ? made.settings.pool_count : 0, netservers_short(netservers_connected()));
         } else if (getenv("RECOMP_TEST_JOIN_CODE") && *getenv("RECOMP_TEST_JOIN_CODE")) {
             /* RECOMP_TEST_JOIN_CODE=<code> (tests, ticket #200): JOIN BY CODE as the hub's page does it; a relay that does
              * not know the room is followed by the others (netservers_code_begin / netservers_tick) */
